@@ -85,6 +85,57 @@ impl DisplayGate {
     }
 }
 
+/// Local GPU authority for a small standby target. This is never a grant of
+/// native input, world presentation, or a session FrameReady acknowledgment.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PreviewAuthority {
+    pub binding: aurora_session::Binding,
+    pub lease_epoch: u64,
+    pub device_epoch: u64,
+    pub fence: aurora_render::SessionCompletion,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PreviewScope {
+    binding: aurora_session::Binding,
+    lease_epoch: u64,
+    device_epoch: u64,
+}
+
+#[derive(Default)]
+struct PreviewFences {
+    completed: Option<PreviewAuthority>,
+    pending: Option<(PreviewScope, u64)>,
+}
+
+impl PreviewFences {
+    fn clear(&mut self) -> Option<u64> {
+        self.completed = None;
+        self.pending.take().map(|(_, ticket)| ticket)
+    }
+
+    fn remember(&mut self, scope: PreviewScope, fence: aurora_render::SessionCompletion) {
+        self.completed = Some(PreviewAuthority {
+            binding: scope.binding,
+            lease_epoch: scope.lease_epoch,
+            device_epoch: scope.device_epoch,
+            fence,
+        });
+        self.pending = None;
+    }
+
+    fn authority(&self, scope: PreviewScope) -> Option<PreviewAuthority> {
+        self.completed.filter(|proof| {
+            proof.binding == scope.binding
+                && proof.lease_epoch == scope.lease_epoch
+                && proof.device_epoch == scope.device_epoch
+                && proof.fence.ticket != 0
+                && proof.fence.surface_epoch != 0
+                && self.pending.is_none()
+        })
+    }
+}
+
 pub(crate) struct WorkerBridge {
     config: WorkerConfig,
     io: WorkerIo,
@@ -105,6 +156,7 @@ pub(crate) struct WorkerBridge {
     last_frame: Option<aurora_session::FrameProof>,
     last_receipt: Option<Instant>,
     chat: Option<super::chat_io::WorkerChannel>,
+    preview_fences: PreviewFences,
 }
 
 impl WorkerBridge {
@@ -146,6 +198,7 @@ impl WorkerBridge {
             last_frame: None,
             last_receipt: None,
             chat,
+            preview_fences: PreviewFences::default(),
         }))
     }
 
@@ -283,6 +336,77 @@ impl WorkerBridge {
         self.chat.as_ref().ok_or(super::chat_transport::LaneError::NotReady)?.send(packet)
     }
 
+    /// Exact online identity for authenticated telemetry. It does not imply
+    /// standby, vision permission, a fresh GPU sample, or render admission.
+    pub(crate) fn preview_identity(&self) -> Option<(aurora_session::Binding, u64, u64)> {
+        self.bound_session()
+            .filter(|_| self.supported && !self.status.blocked)
+            .map(|(binding, lease_epoch)| (binding, lease_epoch, self.device_epoch))
+    }
+
+    fn preview_scope(&self) -> Option<PreviewScope> {
+        self.preview_identity()
+            .filter(|_| preview_parked(self.guard.mode(), self.gate, self.admitted))
+            .map(|(binding, lease_epoch, device_epoch)| PreviewScope {
+                binding,
+                lease_epoch,
+                device_epoch,
+            })
+    }
+
+    pub(crate) fn preview_authority(&self) -> Option<PreviewAuthority> {
+        self.preview_fences.authority(self.preview_scope()?)
+    }
+
+    /// Re-arm only a parked worker, using the same monotonic ticket namespace
+    /// as handoff fences. M1 commands cancel this request before their fence.
+    pub(crate) fn rearm_preview_fence(&mut self, renderer: &mut aurora_render::Renderer) -> Result<(), aurora_render::SessionFenceError> {
+        let scope = self.preview_scope().ok_or(aurora_render::SessionFenceError::Unsupported)?;
+        self.cancel_preview(renderer);
+        self.next_ticket = self
+            .next_ticket
+            .checked_add(1)
+            .ok_or(aurora_render::SessionFenceError::StaleTicket)?;
+        renderer.request_session_fence(self.next_ticket)?;
+        self.preview_fences.pending = Some((scope, self.next_ticket));
+        Ok(())
+    }
+
+    pub(crate) fn poll_preview_fence(&mut self, renderer: &mut aurora_render::Renderer) -> Result<bool, aurora_render::SessionFenceError> {
+        let Some(scope) = self.preview_scope() else {
+            self.cancel_preview(renderer);
+            return Err(aurora_render::SessionFenceError::Unsupported);
+        };
+        let Some((requested, ticket)) = self.preview_fences.pending else {
+            return Ok(self.preview_fences.authority(scope).is_some());
+        };
+        if requested != scope {
+            self.cancel_preview(renderer);
+            return Err(aurora_render::SessionFenceError::StaleTicket);
+        }
+        let proof = match renderer.poll_session_fence(ticket) {
+            Ok(Some(proof)) => proof,
+            Ok(None) => return Ok(false),
+            Err(error) => {
+                self.cancel_preview(renderer);
+                return Err(error);
+            }
+        };
+        let boundary = match renderer.session_boundary() {
+            Ok(boundary) => boundary,
+            Err(error) => {
+                self.cancel_preview(renderer);
+                return Err(error);
+            }
+        };
+        if proof.surface_epoch != boundary.surface_epoch {
+            self.cancel_preview(renderer);
+            return Err(aurora_render::SessionFenceError::StaleTicket);
+        }
+        self.preview_fences.remember(scope, proof);
+        Ok(true)
+    }
+
     pub fn world_allowed(&self) -> bool {
         self.detached || !self.supported || self.gate.allows_world()
     }
@@ -336,7 +460,15 @@ impl WorkerBridge {
         }
     }
 
-    fn cancel_fence(&self, renderer: &mut aurora_render::Renderer) {
+    fn cancel_preview(&mut self, renderer: &mut aurora_render::Renderer) {
+        if let Some(ticket) = self.preview_fences.clear() {
+            renderer.cancel_session_fence(ticket);
+        }
+        renderer.cancel_session_preview();
+    }
+
+    fn cancel_fence(&mut self, renderer: &mut aurora_render::Renderer) {
+        self.cancel_preview(renderer);
         if let DisplayGate::Draining { ticket, .. } | DisplayGate::FrameFence { ticket, .. } = self.gate {
             renderer.cancel_session_fence(ticket);
         }
@@ -357,8 +489,11 @@ impl WorkerBridge {
     /// thread. No device poll, file operation or GPU wait occurs on this path.
     pub fn pump_display(&mut self, effects: WorkerEffects, window: &winit::window::Window, renderer: &mut aurora_render::Renderer) -> bool {
         let previously_supported = self.supported;
-        self.supported = cfg!(windows) && renderer.session_boundary().is_ok()
-            || (cfg!(windows) && matches!(self.gate, DisplayGate::Draining { .. } | DisplayGate::FrameFence { .. }));
+        let boundary = renderer.session_boundary();
+        self.supported = cfg!(windows) && boundary.is_ok()
+            || (cfg!(windows)
+                && (matches!(self.gate, DisplayGate::Draining { .. } | DisplayGate::FrameFence { .. })
+                    || preview_fence_busy(self.preview_fences.pending.is_some(), boundary.err())));
         let current = native_window(window);
         let changed = self.window != 0 && current != self.window;
         self.window = current;
@@ -417,6 +552,9 @@ impl WorkerBridge {
         window: &winit::window::Window,
         renderer: &mut aurora_render::Renderer,
     ) -> anyhow::Result<()> {
+        if effects.quiesce || effects.prepare || effects.grant_input || effects.restore_window {
+            self.cancel_preview(renderer);
+        }
         if effects.restore_window {
             self.presentation.restore(window);
         }
@@ -483,7 +621,7 @@ impl WorkerBridge {
         }
         match self.gate {
             DisplayGate::Draining { ticket, reply_to, through } => {
-                if renderer.poll_session_fence(ticket)?.is_some() {
+                if let Some(proof) = renderer.poll_session_fence(ticket)? {
                     if reply_to != 0 {
                         let progress = aurora_session::GpuProgress {
                             device_epoch: self.device_epoch,
@@ -501,6 +639,9 @@ impl WorkerBridge {
                     }
                     self.admitted = true;
                     self.gate = DisplayGate::Standby;
+                    if let Some(scope) = self.preview_scope() {
+                        self.preview_fences.remember(scope, proof);
+                    }
                     self.presentation.hide(window);
                 }
             }
@@ -648,6 +789,14 @@ fn receipt_is_current(received: Option<Instant>, now: Instant) -> bool {
     received
         .and_then(|received| now.checked_duration_since(received))
         .is_some_and(|age| age < std::time::Duration::from_millis(aurora_session::LEASE_MILLIS))
+}
+
+fn preview_parked(mode: WorkerMode, gate: DisplayGate, admitted: bool) -> bool {
+    admitted && mode == WorkerMode::Standby && matches!(gate, DisplayGate::Standby)
+}
+
+fn preview_fence_busy(pending: bool, error: Option<aurora_render::SessionFenceError>) -> bool {
+    pending && error == Some(aurora_render::SessionFenceError::Busy)
 }
 
 fn final_display_effects(mut effects: WorkerEffects, mode: WorkerMode) -> WorkerEffects {
@@ -974,6 +1123,79 @@ mod tests {
             }),
         };
         (guard, envelope)
+    }
+
+    #[test]
+    fn preview_authority_cannot_survive_session_device_lease_or_handoff_changes() {
+        let (guard, _) = guard_and_command();
+        let scope = PreviewScope {
+            binding: guard.binding(),
+            lease_epoch: 7,
+            device_epoch: 11,
+        };
+        let proof = aurora_render::SessionCompletion {
+            ticket: 13,
+            frame: Some(17),
+            surface_epoch: 19,
+        };
+        let mut fences = PreviewFences::default();
+        assert!(fences.authority(scope).is_none(), "online alone is no GPU proof");
+        fences.remember(scope, proof);
+        assert_eq!(fences.authority(scope).unwrap().fence, proof);
+        assert!(fences.authority(PreviewScope { lease_epoch: 8, ..scope }).is_none());
+        assert!(fences.authority(PreviewScope { device_epoch: 12, ..scope }).is_none());
+        let mut next_session = scope;
+        next_session.binding.session.as_mut().unwrap().generation += 1;
+        assert!(fences.authority(next_session).is_none());
+
+        // Re-arming with the shared monotonic ticket removes the earlier
+        // consumed proof until this exact scope's newer callback completes.
+        assert_eq!(fences.clear(), None);
+        fences.pending = Some((scope, 23));
+        assert!(fences.authority(scope).is_none());
+        assert_eq!(fences.clear(), Some(23), "an M1 command must cancel the preview ticket first");
+        assert!(fences.pending.is_none() && fences.authority(scope).is_none());
+        fences.remember(scope, aurora_render::SessionCompletion { ticket: 0, ..proof });
+        assert!(fences.authority(scope).is_none());
+    }
+
+    #[test]
+    fn preview_requires_both_logical_and_native_standby_after_acknowledged_admission() {
+        assert!(preview_parked(WorkerMode::Standby, DisplayGate::Standby, true));
+        assert!(!preview_parked(WorkerMode::Standby, DisplayGate::Standby, false));
+        for gate in [
+            DisplayGate::Login,
+            DisplayGate::Draining {
+                ticket: 1,
+                reply_to: 1,
+                through: 3,
+            },
+            DisplayGate::Settling { reply_to: 2, stable: 0 },
+            DisplayGate::Prepared,
+            DisplayGate::Active,
+            DisplayGate::Detached,
+        ] {
+            assert!(!preview_parked(WorkerMode::Standby, gate, true));
+        }
+        for mode in [
+            WorkerMode::Detached,
+            WorkerMode::Revoking,
+            WorkerMode::Preparing,
+            WorkerMode::Active,
+        ] {
+            assert!(!preview_parked(mode, DisplayGate::Standby, true));
+        }
+    }
+
+    #[test]
+    fn a_preview_wait_never_masks_renderer_contract_loss() {
+        use aurora_render::SessionFenceError as Error;
+        assert!(preview_fence_busy(true, Some(Error::Busy)));
+        assert!(!preview_fence_busy(false, Some(Error::Busy)));
+        for error in [Error::Unsupported, Error::RendererFailed, Error::StaleTicket] {
+            assert!(!preview_fence_busy(true, Some(error)));
+        }
+        assert!(!preview_fence_busy(true, None));
     }
 
     #[test]
