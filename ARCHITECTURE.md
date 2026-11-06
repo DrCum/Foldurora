@@ -1,5 +1,13 @@
 # Aurora Viewer architecture
 
+The Foldurora preview keeps one world and one network session per viewer process.
+Its native character controls discover matching local viewer instances and focus
+an existing window or open the same executable at a selected saved account's
+ordinary login screen. No simulator state moves between renderers. The display-
+spanning workspace composes the world in a separate rectangle while egui floaters
+use the whole native window; render dimensions, camera, HUD and pointer conversion
+must share that rectangle. See `docs/FOLDURORA.md` for scope and acceptance.
+
 `ui/inventory.rs::TabFilters` keeps each window's finder state per tab, including
 advanced searches and the temporary filters of Find links / Find similar.
 Both layouts use `set_tab` to swap that state. `InventoryPreferences` retains

@@ -4,6 +4,10 @@
 
 # Aurora Viewer
 
+The Foldurora preview branch adds a multi-monitor workspace and native character
+switching. See the [feature inventory and morning test guide](docs/FOLDURORA.md)
+for the implementation boundaries and remaining Windows/grid acceptance.
+
 **A modern Second Life viewer, written in Rust.**<br>
 A Vulkan renderer, a clean interface, and the Second Life you already know.
 
