@@ -77,7 +77,10 @@ impl CharactersUi {
                         ui.push_id(&id, |ui| {
                             ui.horizontal_wrapped(|ui| {
                                 widgets::glyph(ui, "user-filled", p.violet_pale, 21.0);
-                                let details_width = (ui.available_width() - button_width - ui.spacing().item_spacing.x).max(100.0);
+                                // A wrapping row's available_width includes a fresh row;
+                                // budget only the space remaining after this glyph.
+                                let details_width =
+                                    (ui.available_size_before_wrap().x - button_width - ui.spacing().item_spacing.x - 1.0).max(100.0);
                                 ui.vertical(|ui| {
                                     // Reserve the action column before laying out long names.
                                     // A narrow floater wraps the action onto the next line.
