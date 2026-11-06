@@ -17,6 +17,7 @@ pub const INPUT_MAX_AGE: Duration = Duration::from_millis(250);
 #[cfg(any(target_os = "linux", test))]
 pub fn pointer_reply(request: (u64, Instant), reply: (u64, Instant, Option<bool>), now: Instant) -> Option<bool> {
     if request.0 != reply.0
+        || now.checked_duration_since(request.1)? > INPUT_MAX_AGE
         || reply.1.checked_duration_since(request.1)? > INPUT_MAX_AGE
         || now.checked_duration_since(reply.1)? > INPUT_MAX_AGE
     {
@@ -380,6 +381,12 @@ mod tests {
         assert_eq!(pointer_reply((4, t), (4, sampled, None), sampled), None);
         let slow = t + INPUT_MAX_AGE + Duration::from_millis(1);
         assert_eq!(pointer_reply((4, t), (4, slow, Some(false)), slow), None);
+        let delayed = t + Duration::from_millis(200);
+        assert_eq!(
+            pointer_reply((4, t), (4, delayed, Some(false)), delayed + Duration::from_millis(200)),
+            None
+        );
+        assert_eq!(pointer_reply((4, t), (4, sampled, Some(false)), t + INPUT_MAX_AGE), Some(false));
         assert_eq!(
             pointer_reply(
                 (4, t),
