@@ -1554,6 +1554,11 @@ pub(crate) struct Backend {
     /// Destroyed by hand in `Drop`, unless the device is lost.
     surface: std::mem::ManuallyDrop<Arc<wgpu::Surface<'static>>>,
     config: wgpu::SurfaceConfiguration,
+    session_surface_epoch: u64,
+    /// Set only after queue.present issued a surface presentation, never from
+    /// a queued frame's statistics or an external capture/XR target.
+    session_presented: Option<(u64, u64)>,
+    session_fences: crate::session_fence::GpuFences,
     external: bool,
     #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
     vr: Arc<crate::vr_control::Control>,
@@ -3278,6 +3283,9 @@ impl Backend {
             prev_view_proj: None,
             prev_motion_view: None,
             frame_index: 0,
+            session_surface_epoch: 1,
+            session_presented: None,
+            session_fences: crate::session_fence::GpuFences::default(),
             anim_clock,
             anim_now: [0; 4],
             shadow_path: crate::shadow_cull::path::NEW,
@@ -4890,6 +4898,7 @@ impl Backend {
 
     /// Follow the window: size and vsync wanted for the frame being drawn.
     fn apply_surface(&mut self, s: SurfaceState) {
+        self.session_surface_epoch = s.epoch;
         self.set_vsync(s.vsync);
         if (s.width, s.height) != (self.config.width, self.config.height) {
             self.resize(s.width, s.height);
@@ -8818,6 +8827,7 @@ impl Backend {
         let encode_ms = t0.elapsed().as_secs_f32() * 1000.0;
         if let FrameTarget::Surface(t) = surface_tex {
             self.queue.present(t);
+            self.session_presented = Some((index, surface.epoch));
             stats.presented = true;
             stats.input_ms = input_at.map(|at| at.elapsed().as_secs_f32() * 1000.0);
         }
@@ -8951,6 +8961,41 @@ impl Backend {
             }
         }
         self.gpu_frames.finished_through(last);
+    }
+
+    /// Only called as an ordered render-thread job. Register behind all prior
+    /// frame submissions, and run callbacks with a nonblocking poll even when
+    /// ordinary frame pacing is disabled.
+    pub fn session_fence(&mut self, ticket: u64) -> crate::session_fence::Reply {
+        use crate::session_fence::{Reply, SessionCompletion, SessionFenceError};
+        if self.external {
+            return Reply::Failed(ticket, SessionFenceError::Unsupported);
+        }
+        #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+        if self.vr.state().engaged() {
+            return Reply::Failed(ticket, SessionFenceError::Unsupported);
+        }
+        self.lost.poll(&self.device);
+        if self.lost.get() {
+            return Reply::Failed(ticket, SessionFenceError::RendererFailed);
+        }
+        let proof = SessionCompletion {
+            ticket,
+            frame: self.session_presented.map(|(frame, _)| frame),
+            surface_epoch: self.session_presented.map_or(self.session_surface_epoch, |(_, epoch)| epoch),
+        };
+        match self.session_fences.begin(proof) {
+            Ok(Some(completed)) => {
+                self.queue.on_submitted_work_done(move || completed.store(true, Ordering::Release));
+            }
+            Ok(None) => {}
+            Err(error) => return Reply::Failed(ticket, error),
+        }
+        self.lost.poll(&self.device);
+        if self.lost.get() {
+            return Reply::Failed(ticket, SessionFenceError::RendererFailed);
+        }
+        self.session_fences.poll(ticket)
     }
 
     /// Run the callbacks of the GPU work already finished, without waiting:

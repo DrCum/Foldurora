@@ -164,7 +164,7 @@ fn caption_text(text: &str, limit: usize) -> String {
     result
 }
 
-fn caption_grid(uri: &str, grids: &[crate::grids::Grid]) -> String {
+pub(super) fn caption_grid(uri: &str, grids: &[crate::grids::Grid]) -> String {
     const LIMIT: usize = 48;
     match crate::login_accounts::grid(uri) {
         crate::settings::GridChoice::SecondLife => aurora_i18n::tr!("character-window-main-grid").into(),

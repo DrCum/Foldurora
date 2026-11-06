@@ -126,6 +126,29 @@ impl<J, R> Owner<J, R> {
         Ok(Submitted { previous, waited })
     }
 
+    /// Hand over only when the worker is already free. Neither a busy job nor
+    /// a contended state lock makes the caller wait; retry on a later tick.
+    /// The previous result is returned exactly as with [`Self::submit`].
+    pub fn try_submit(&self, job: J) -> Result<Option<Submitted<R>>, WorkerGone> {
+        let Some(mut s) = self.0.state.try_lock() else {
+            return Ok(None);
+        };
+        if s.worker_gone || s.closed {
+            return Err(WorkerGone);
+        }
+        if s.busy || s.job.is_some() {
+            return Ok(None);
+        }
+        let previous = s.result.take();
+        s.job = Some(job);
+        s.handed = Some(Instant::now());
+        self.0.to_worker.notify_one();
+        Ok(Some(Submitted {
+            previous,
+            waited: Duration::ZERO,
+        }))
+    }
+
     /// Wait for the job handed over to be done; its result unless already
     /// taken (None also when nothing was submitted).
     pub fn finish(&self) -> Result<Option<R>, WorkerGone> {
@@ -172,6 +195,21 @@ impl<J, R> Owner<J, R> {
     pub fn take_ready(&self) -> Result<Option<R>, WorkerGone> {
         let mut s = self.0.state.lock();
         if s.worker_gone {
+            return Err(WorkerGone);
+        }
+        if s.busy || s.job.is_some() {
+            return Ok(None);
+        }
+        Ok(s.result.take())
+    }
+
+    /// Session polling also avoids waiting for the short state lock. Unlike
+    /// `take_ready`, a contended lock is simply retried on a later main tick.
+    pub fn try_take_ready(&self) -> Result<Option<R>, WorkerGone> {
+        let Some(mut s) = self.0.state.try_lock() else {
+            return Ok(None);
+        };
+        if s.worker_gone || s.closed {
             return Err(WorkerGone);
         }
         if s.busy || s.job.is_some() {
@@ -248,6 +286,9 @@ impl<J, R> Drop for Worker<J, R> {
 /// What the render thread is asked to do.
 pub(crate) enum Job {
     Frame(Box<FramePacket>),
+    /// Ordered after preceding frame packets. Every poll stays on the queue's
+    /// owning render thread, including when ordinary frame pacing is disabled.
+    SessionFence(u64),
     /// Depth under a pixel of the last frame drawn, waiting for the GPU
     /// (clicks). Handed over like a frame, so it runs after the frame in
     /// flight: the depth and the camera are those of the last frame built.
@@ -259,6 +300,7 @@ pub(crate) enum Job {
 
 pub(crate) enum Done {
     Frame(Box<FrameResult>),
+    SessionFence(crate::session_fence::Reply),
     Pick(Option<Vec3>),
 }
 
@@ -401,6 +443,7 @@ fn run(mut backend: Backend, worker: Worker<Job, Done>) -> Backend {
                 Done::Frame(Box::new(result))
             }
             Job::Pick { x, y } => Done::Pick(backend.pick_world(x, y)),
+            Job::SessionFence(ticket) => Done::SessionFence(backend.session_fence(ticket)),
         };
         worker.complete(done);
         // frame pacing (pacing.rs): the frame is handed back; the main
@@ -462,6 +505,44 @@ mod tests {
         assert_eq!(owner.submit(4).map(|s| s.previous), Ok(None));
         drop(owner);
         t.join().expect("worker");
+    }
+
+    #[test]
+    fn nonblocking_handoff_cannot_overtake_a_pending_or_running_frame() {
+        let (owner, worker) = handoff::<&str, &str>();
+        assert_eq!(owner.try_submit("frame").expect("worker alive").map(|s| s.previous), Some(None));
+        assert_eq!(owner.try_submit("fence"), Ok(None), "frame has not been taken");
+        assert_eq!(worker.next().map(|(job, _)| job), Some("frame"));
+        assert_eq!(owner.try_submit("fence"), Ok(None), "frame is still executing");
+        assert_eq!(owner.try_take_ready(), Ok(None));
+        worker.complete("frame result");
+        let fence = owner.try_submit("fence").expect("worker alive").expect("frame finished");
+        assert_eq!(
+            fence.previous,
+            Some("frame result"),
+            "the frame result must be applied before proof is consumed"
+        );
+        assert_eq!(fence.waited, Duration::ZERO);
+        assert_eq!(worker.next().map(|(job, _)| job), Some("fence"));
+        worker.complete("GPU pending");
+        assert_eq!(owner.try_take_ready(), Ok(Some("GPU pending")));
+        assert_eq!(owner.try_take_ready(), Ok(None));
+        assert_eq!(owner.try_submit("poll").expect("worker alive").map(|s| s.previous), Some(None));
+        assert_eq!(worker.next().map(|(job, _)| job), Some("poll"));
+        worker.complete("GPU completed");
+        assert_eq!(owner.try_take_ready(), Ok(Some("GPU completed")));
+    }
+
+    #[test]
+    fn nonblocking_handoff_retries_contended_state_and_rejects_a_gone_worker() {
+        let (owner, worker) = handoff::<u32, u32>();
+        let state = owner.0.state.lock();
+        assert_eq!(owner.try_submit(1), Ok(None));
+        assert_eq!(owner.try_take_ready(), Ok(None));
+        drop(state);
+        drop(worker);
+        assert_eq!(owner.try_submit(1), Err(WorkerGone));
+        assert_eq!(owner.try_take_ready(), Err(WorkerGone));
     }
 
     #[test]

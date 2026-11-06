@@ -24,6 +24,11 @@ pub struct Cli {
     /// Select an exact saved account/grid on the login screen. This opaque
     /// catalogue identity carries no credential and never submits a login.
     pub saved_account: Option<String>,
+    /// Opt-in CPU-rendered controller; it never initializes a world renderer.
+    pub session_host: bool,
+    /// Internal, private worker configuration. It carries identities only;
+    /// workers always use the ordinary manual login form.
+    pub host_worker_config: Option<std::path::PathBuf>,
     /// The startup SLURL (CmdLineLoginLocation): `--url <slurl>`, `-url`
     /// (the form the system's `secondlife:` handler passes) or a bare
     /// argument. Like the Legacy Viewer's `last_option`, nothing after it is
@@ -77,24 +82,44 @@ pub fn get() -> &'static Cli {
     CLI.get_or_init(|| {
         let cli = parse(std::env::args().skip(1));
         aurora_i18n::select("default", cli.language.as_deref());
-        if cli.help {
+        if cli.output_request() == Some(OutputRequest::Help) {
             let languages = aurora_i18n::available_languages()
                 .map(|(code, _)| code)
                 .collect::<Vec<_>>()
                 .join(", ");
             println!(
-                "{}\n{}",
+                "{}\n{}\n{}",
                 aurora_i18n::tr!("cli-help", languages = languages),
-                aurora_i18n::tr!("character-switch-cli-help")
+                aurora_i18n::tr!("character-switch-cli-help"),
+                aurora_i18n::tr!("host-cli-help")
             );
             std::process::exit(0);
         }
-        if cli.version {
+        if cli.output_request() == Some(OutputRequest::Version) {
             println!("{}", aurora_i18n::tr!("common-aurora-viewer", value0 = aurora_version::version()));
             std::process::exit(0);
         }
         cli
     })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OutputRequest {
+    Help,
+    Version,
+}
+
+impl Cli {
+    /// Evaluated by get() before it returns to any host/viewer startup route.
+    fn output_request(&self) -> Option<OutputRequest> {
+        if self.help {
+            Some(OutputRequest::Help)
+        } else if self.version {
+            Some(OutputRequest::Version)
+        } else {
+            None
+        }
+    }
 }
 
 fn parse(args: impl Iterator<Item = String>) -> Cli {
@@ -117,6 +142,16 @@ fn parse(args: impl Iterator<Item = String>) -> Cli {
             cli.title = args.next();
         } else if a == "--vr" {
             cli.vr = true;
+        } else if a == "--session-host" {
+            cli.session_host = true;
+        } else if let Some(value) = a.strip_prefix("--host-worker-config=") {
+            cli.host_worker_config = Some(value.into());
+        } else if a == "--host-worker-config" {
+            cli.host_worker_config = Some(if args.peek().is_some_and(|value| !value.starts_with('-')) {
+                args.next().unwrap_or_default().into()
+            } else {
+                std::path::PathBuf::new()
+            });
         } else if let Some(value) = a.strip_prefix("--saved-account=") {
             cli.saved_account = Some(value.to_owned());
         } else if a == "--saved-account" {
@@ -166,7 +201,7 @@ fn parse(args: impl Iterator<Item = String>) -> Cli {
     cli.title = cli.title.map(|t| t.trim().to_owned()).filter(|t| !t.is_empty());
     cli.language = cli.language.map(|value| value.trim().to_owned()).filter(|value| !value.is_empty());
     cli.url = cli.url.map(|u| u.trim().to_owned()).filter(|u| !u.is_empty());
-    if cli.saved_account.is_some() {
+    if cli.saved_account.is_some() || cli.host_worker_config.is_some() || cli.session_host {
         // A character window opens a manual login form even if another
         // argument also supplied the older automatic-login option.
         cli.login = Mutex::new(None);
@@ -390,6 +425,64 @@ mod tests {
         assert!(cli.login.lock().expect("login").is_none());
         assert_eq!(cli.grid, None);
         assert_eq!(args(&["-url", "  "]).url, None);
+    }
+
+    #[test]
+    fn help_and_version_exit_before_host_console_or_viewer_initialization() {
+        for arguments in [
+            vec!["--session-host", "--help"],
+            vec!["--help", "--session-host"],
+            vec!["--session-host", "--version", "--help"],
+        ] {
+            assert_eq!(args(&arguments).output_request(), Some(OutputRequest::Help));
+        }
+        assert_eq!(
+            args(&["--session-host", "--version"]).output_request(),
+            Some(OutputRequest::Version)
+        );
+        assert_eq!(
+            args(&["--host-worker-config", "/synthetic/bootstrap.json", "--version"]).output_request(),
+            Some(OutputRequest::Version)
+        );
+        assert_eq!(args(&["--session-host"]).output_request(), None);
+        assert_eq!(args(&[]).output_request(), None, "ordinary startup remains an ordinary viewer");
+    }
+
+    #[test]
+    fn session_host_worker_arguments_are_explicit_and_never_auto_login() {
+        let host = args(&["--session-host"]);
+        assert!(host.session_host);
+        assert!(host.host_worker_config.is_none());
+        for form in [
+            vec!["--host-worker-config", "/synthetic/config.json"],
+            vec!["--host-worker-config=/synthetic/config.json"],
+        ] {
+            let worker = args(&form);
+            assert_eq!(
+                worker.host_worker_config.as_deref(),
+                Some(std::path::Path::new("/synthetic/config.json"))
+            );
+        }
+        assert!(
+            args(&["--host-worker-config"])
+                .host_worker_config
+                .is_some_and(|path| path.as_os_str().is_empty())
+        );
+        assert!(!args(&["-url", "secondlife://synthetic/1/2/3", "--session-host"]).session_host);
+        assert!(
+            args(&[
+                "--host-worker-config",
+                "/synthetic/config.json",
+                "--login",
+                "Synthetic",
+                "Resident",
+                "fixture"
+            ])
+            .login
+            .lock()
+            .expect("synthetic login")
+            .is_none()
+        );
     }
 
     #[test]

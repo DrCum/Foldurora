@@ -13217,6 +13217,44 @@ mm-margin-top = 上の余白
 mm-margin-bottom = 下の余白
 mm-margin-help = パネル用の余白をウィンドウ全体の割合で指定します。向かい合う余白は、ワールド用に少なくとも 5% が残るように調整されます。
 
+# Session host controller
+host-title = セッションホスト
+host-cli-help = 実験的なネイティブセッションホストを開きます。各ビューアーの別ウィンドウで手動ログインしてください。
+host-manual-login-help = ビューアーを開き、そのウィンドウで手動ログインしてください。
+host-search = キャラクターやグリッドを検索
+host-open-login = ログイン画面を開く
+host-running-sessions = セッション
+host-saved-characters = 保存したキャラクター
+host-no-sessions = 一致するセッションウィンドウはありません。
+host-no-saved-characters = ビューアーで保存したアカウントがここに表示されます。
+host-unnamed-session = ビューアーのセッション
+host-starting = ビューアーを起動中…
+host-login = 手動ログイン待ち
+host-connecting = 接続中…
+host-online = オンライン
+host-disconnected = 切断済み
+host-unreachable = ビューアーが応答していません
+host-worker-blocked = ビューアーのダイアログを完了してください
+host-hosted = ホスト表示中
+host-switching = 切り替え中…
+host-keyboard-focus = キーボードフォーカス
+host-activate = アクティブにする
+host-detach = 切り離す
+host-detach-help = このセッションを独立したビューアーウィンドウで実行し続けます。
+host-opening = ログイン画面を開いています…
+host-no-hosted-session = ホスト表示中のセッションはありません
+host-activate-help = ログイン後、セッションを選択してアクティブにしてください。
+host-platform-help = ホスト表示は Windows で利用できます。このプラットフォームでは、独立したビューアーウィンドウを使用します。
+host-unavailable-help = このビルドではホスト表示を利用できません。セッションは独立したビューアーウィンドウで実行されます。
+host-request-queued = リクエストを受け付けました。
+host-busy = 現在のリクエストが完了するまでお待ちください。
+host-stopped = ホストとの接続が終了しました。ビューアーウィンドウを使用するか、ホストを開き直してください。
+host-close = ホストを閉じる
+host-close-question = セッションホストを閉じますか？
+host-close-help = セッションは独立したビューアーウィンドウで実行を続けます。
+host-close-confirm = セッションを切り離して閉じる
+host-closing = ビューアーウィンドウを復元中…
+
 # Native window captions retain the viewer version and build profile.
 character-window-title = { $account }・{ $grid } — { $phase } — { $viewer }
 character-window-login-title = { $phase } — { $viewer }
@@ -13252,3 +13290,17 @@ character-switch-missing = この保存済みキャラクターは利用でき�
 character-switch-cli-help = --saved-account <id>  保存済みキャラクターの手動ログイン画面を選択
 character-switch-other-grid = このアバターは別のグリッドでウィンドウを起動しています。アカウントデータを共有するため、そちらを閉じてからログイン画面を開いてください。
 character-switch-busy = 別のキャラクターの起動を確認しています。少し待ってからもう一度お試しください。
+
+# コントローラーのコンソールを切り離した後も起動エラーを表示します。
+host-start-error-title = セッションホスト
+host-start-log-failed = セッションホストの診断ログを開けませんでした。
+    { $error }
+host-start-console-failed = 追加のコンソールウィンドウを表示せずにセッションホストを起動できませんでした。
+    { $error }
+    診断ログ: { $path }
+host-start-run-failed = エラーのためセッションホストが停止しました。
+    { $error }
+    診断ログ: { $path }
+host-start-flush-failed = セッションホストの診断ログへの書き込みを完了できませんでした。
+    { $error }
+    診断ログ: { $path }

@@ -13244,6 +13244,44 @@ mm-margin-top = Top margin
 mm-margin-bottom = Bottom margin
 mm-margin-help = Percentage of the full viewer window reserved for panels. Opposite margins scale together to leave at least 5% for the world.
 
+# Session host controller
+host-title = Session host
+host-cli-help = Open the experimental native session host; log in manually in separate viewer windows.
+host-manual-login-help = Open a viewer and log in there manually.
+host-search = Find a character or grid
+host-open-login = Open login
+host-running-sessions = Sessions
+host-saved-characters = Saved characters
+host-no-sessions = No matching session windows.
+host-no-saved-characters = Accounts saved in the viewer appear here.
+host-unnamed-session = Viewer session
+host-starting = Starting viewer…
+host-login = Waiting for manual login
+host-connecting = Connecting…
+host-online = Online
+host-disconnected = Disconnected
+host-unreachable = Viewer is not responding
+host-worker-blocked = Finish the dialog in the viewer
+host-hosted = Hosted
+host-switching = Switching…
+host-keyboard-focus = Keyboard focus
+host-activate = Activate
+host-detach = Detach
+host-detach-help = Keep this session running in its own viewer window.
+host-opening = Opening login window…
+host-no-hosted-session = No hosted session
+host-activate-help = Select a session and activate it after logging in.
+host-platform-help = Hosted presentation is available on Windows. Sessions on this platform use separate viewer windows.
+host-unavailable-help = Hosted presentation is not available in this build. Sessions remain in separate viewer windows.
+host-request-queued = Request queued.
+host-busy = Please wait for the current request to finish.
+host-stopped = The controller connection ended. Use the viewer windows or reopen the host.
+host-close = Close host
+host-close-question = Close the session host?
+host-close-help = Your sessions will keep running in separate viewer windows.
+host-close-confirm = Detach sessions and close
+host-closing = Restoring viewer windows…
+
 # Native window captions retain the viewer version and build profile.
 character-window-title = { $account } · { $grid } — { $phase } — { $viewer }
 character-window-login-title = { $phase } — { $viewer }
@@ -13279,3 +13317,17 @@ character-switch-missing = That saved character is unavailable. Select an accoun
 character-switch-cli-help = --saved-account <id>  Select an exact saved character on a manual login screen
 character-switch-other-grid = This avatar has a window open on another grid. Close it before opening this login; its account data is shared across grids.
 character-switch-busy = Another character launch is being checked. Try again shortly.
+
+# Controller-only startup errors stay visible even after its console detaches.
+host-start-error-title = Session host
+host-start-log-failed = The session host could not start its diagnostic log.
+    { $error }
+host-start-console-failed = The session host could not start without an extra console window.
+    { $error }
+    Diagnostic log: { $path }
+host-start-run-failed = The session host stopped because of an error.
+    { $error }
+    Diagnostic log: { $path }
+host-start-flush-failed = The session host could not finish writing its diagnostic log.
+    { $error }
+    Diagnostic log: { $path }

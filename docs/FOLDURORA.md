@@ -28,7 +28,7 @@ drafts while that validation is pending, as authorized for this preview.
 | Inventory explorer, filters and outfit gallery | Already present, including independent tab filters and outfit JSON backup | Retain native behavior; compare only remaining differences |
 | Gesture boards and shared posing | Native gesture manager, poser and IK tools | Later feature-specific work; collaborative posing is a separate protocol |
 | Settings migration | Different typed settings and account stores | Map selected compatible values explicitly in a later opt-in importer |
-| Hosted character view, combined chat and inactive-character monitors | Separate process windows in this preview | Later work; no hosted world or combined chat in this pass |
+| Hosted character view, combined chat and inactive-character monitors | Separate process windows in the tested mitigation path | Opt-in controller work is tracked in [the host guide](SESSION_HOST.md); active hosting, previews and inactive chat are not accepted yet |
 
 The existing OpenGL performance patches are not applicable to Aurora's Vulkan
 renderer. The port follows user-visible behavior and uses Aurora's render

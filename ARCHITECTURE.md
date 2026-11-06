@@ -1,5 +1,41 @@
 # Aurora Viewer architecture
 
+The opt-in session controller starts before the ordinary viewer App/EventLoop.
+`session_host/{mod,software,ui}.rs` uses egui and the existing softbuffer CPU
+painter; it never initializes `aurora-render::Renderer`. `session_host/transport.rs`
+owns child launches and bounded private-file IO on background threads. Typed V1
+identities and ownership transitions live in the pure `aurora-session` crate.
+See `docs/SESSION_HOST.md` for the checkpoint's explicit limitations.
+
+`session_host/startup.rs` initializes and syncs a distinct controller diagnostic
+log before detaching only its own Windows console. Help/version output exits
+before that route. Controller-launched Windows workers use `CREATE_NO_WINDOW`;
+ordinary viewer startup, console behavior and log names remain unchanged.
+Startup/log failures remain visible through a controller-owned error dialog.
+
+Worker bootstrap validates the exact installation/host/worker nonce and a
+single-use private configuration before settings or cache initialization.
+`session_host/profile.rs` locks private per-launch/session-generation config,
+account and cache directories; these are not persistent per-character profiles.
+Shared saved-account metadata remains separate. Private worker cache keys do not
+read or replace the ordinary OS cache-key entry. No credentials or simulator
+session tokens are transported by the controller.
+
+`aurora-render::Renderer` exposes an opt-in ordered session fence. Its render
+thread receives the fence behind prior packets, registers a queue-completion
+callback independently of frame pacing, and reports the frozen surface epoch
+and presented-packet index without blocking the UI thread. The proof means GPU
+completion and an issued present, not compositor scanout. `aurora-session`
+requires exact revoke/quiescence, a post-Prepare frame on the requested
+device/surface boundary, then grant. Stale replies do not renew leases or advance
+receive sequences. Controller failure restores reachable independent workers;
+it does not force a grid logout. The Windows adapter changes only its worker's
+native styles and geometry; the controller reveals that unowned non-topmost
+window through an exact acknowledged viewport cutout. Resize repeats the fenced
+handoff, and pending actions keep the cutout closed until their request receipt.
+Other platforms leave unsupported presentation disabled. Integrated native
+runtime acceptance remains pending.
+
 `app/busy_pause.rs` chooses shared-viewer background pause before the packet's
 world resolution and draw lists. A live peer from the same or an unknown GPU
 counts even at the login screen or with zero reported memory. The existing

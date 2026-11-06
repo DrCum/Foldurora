@@ -51,6 +51,8 @@ mod render_thread;
 mod renderer;
 mod rlva;
 mod selection;
+mod session_fence;
+pub use session_fence::{SessionBoundary, SessionCompletion, SessionFenceError};
 pub mod shadow_cull;
 mod shadow_merge;
 #[cfg(test)]

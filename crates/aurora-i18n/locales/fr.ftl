@@ -13240,6 +13240,44 @@ mm-margin-top = Marge supérieure
 mm-margin-bottom = Marge inférieure
 mm-margin-help = Pourcentage de la fenêtre réservé aux panneaux. Les marges opposées sont réduites ensemble pour conserver au moins 5 % pour le monde.
 
+# Session host controller
+host-title = Hôte de sessions
+host-cli-help = Ouvrir l’hôte de sessions natif expérimental ; connexion manuelle dans des fenêtres de visualisation distinctes.
+host-manual-login-help = Ouvrez un viewer et connectez-vous manuellement dans sa fenêtre.
+host-search = Rechercher un personnage ou une grille
+host-open-login = Ouvrir la connexion
+host-running-sessions = Sessions
+host-saved-characters = Personnages enregistrés
+host-no-sessions = Aucune fenêtre de session correspondante.
+host-no-saved-characters = Les comptes enregistrés dans le viewer apparaissent ici.
+host-unnamed-session = Session du viewer
+host-starting = Démarrage du viewer…
+host-login = En attente de connexion manuelle
+host-connecting = Connexion…
+host-online = En ligne
+host-disconnected = Déconnecté
+host-unreachable = Le viewer ne répond pas
+host-worker-blocked = Terminez le dialogue dans le viewer
+host-hosted = Hébergée
+host-switching = Basculement…
+host-keyboard-focus = Focus clavier
+host-activate = Activer
+host-detach = Détacher
+host-detach-help = Garder cette session active dans sa propre fenêtre de viewer.
+host-opening = Ouverture de la fenêtre de connexion…
+host-no-hosted-session = Aucune session hébergée
+host-activate-help = Sélectionnez une session puis activez-la après vous être connecté.
+host-platform-help = L’affichage hébergé est disponible sous Windows. Sur cette plateforme, les sessions utilisent des fenêtres de viewer séparées.
+host-unavailable-help = L’affichage hébergé n’est pas disponible dans cette version. Les sessions restent dans des fenêtres de viewer séparées.
+host-request-queued = Demande mise en attente.
+host-busy = Attendez la fin de la demande en cours.
+host-stopped = La connexion à l’hôte est terminée. Utilisez les fenêtres du viewer ou rouvrez l’hôte.
+host-close = Fermer l’hôte
+host-close-question = Fermer l’hôte de sessions ?
+host-close-help = Vos sessions continueront dans des fenêtres de viewer séparées.
+host-close-confirm = Détacher les sessions et fermer
+host-closing = Restauration des fenêtres du viewer…
+
 # Native window captions retain the viewer version and build profile.
 character-window-title = { $account } · { $grid } — { $phase } — { $viewer }
 character-window-login-title = { $phase } — { $viewer }
@@ -13275,3 +13313,17 @@ character-switch-missing = Ce personnage enregistré est indisponible. Sélectio
 character-switch-cli-help = --saved-account <id>  Sélectionner un personnage enregistré sur un écran de connexion manuel
 character-switch-other-grid = Cet avatar a une fenêtre ouverte sur une autre grille. Fermez-la avant cette connexion ; ses données de compte sont partagées entre les grilles.
 character-switch-busy = Une autre ouverture de personnage est en cours de vérification. Réessayez dans un instant.
+
+# Les erreurs du contrôleur restent visibles après le détachement de sa console.
+host-start-error-title = Hôte de sessions
+host-start-log-failed = L’hôte de sessions n’a pas pu ouvrir son journal de diagnostic.
+    { $error }
+host-start-console-failed = L’hôte de sessions n’a pas pu démarrer sans fenêtre de console supplémentaire.
+    { $error }
+    Journal de diagnostic : { $path }
+host-start-run-failed = L’hôte de sessions s’est arrêté à cause d’une erreur.
+    { $error }
+    Journal de diagnostic : { $path }
+host-start-flush-failed = L’hôte de sessions n’a pas pu terminer l’écriture de son journal de diagnostic.
+    { $error }
+    Journal de diagnostic : { $path }

@@ -10,8 +10,11 @@ world viewport, or leave the full window available for panels.
 See the [feature inventory and morning test guide](docs/FOLDURORA.md)
 for the implementation boundaries and remaining Windows/grid acceptance.
 Live testing confirmed the world viewport and exposed a background GPU loss
-with several characters. The follow-up adds preventive shared-GPU pause;
-native coexistence acceptance is still required.
+with several characters. The preventive shared-GPU pause replacement passed the
+user's subsequent live switching test; longer stress and shutdown checks remain.
+The opt-in [session host](docs/SESSION_HOST.md) is a Windows-first prototype
+under validation. Its native presentation and failure handling still need
+offline runtime and human acceptance; previews and inactive chat are separate stages.
 
 **A modern Second Life viewer, written in Rust.**<br>
 A Vulkan renderer, a clean interface, and the Second Life you already know.
@@ -1149,6 +1152,7 @@ exe before publishing; the local build also writes it to `version.txt`.
 | `--grid <name>` | Selects the login grid: `agni`, `aditi`, a saved grid name/nickname or a login URI (`--loginuri <uri>` too) |
 | `--login <first> <last> <password>` | Logs in with this account as soon as the login screen opens |
 | `--saved-account <id>` | Preselects the exact saved account/grid by its local identity hash; leaves login manual |
+| `--session-host` | Opens the opt-in CPU session controller; see its current limitations in [the host guide](docs/SESSION_HOST.md) |
 | `<slurl>`, `--url <slurl>` | Starts at this place, or hands it to the viewer already running; must come last |
 | `-h`, `--help` | Shows the help |
 | `-V`, `--version` | Prints the built version then exits, with no window, log or network |
@@ -1159,6 +1163,9 @@ exe before publishing; the local build also writes it to `version.txt`.
   The 64-hex-character identifier selects a local saved-account record; it is
   not a credential. Missing or invalid targets leave a blank login with an
   error. The option does not submit a login or pass a password to the child.
+- `--session-host`: a separate controller mode, with ordinary viewer workers for
+  manual login. It does not load a world renderer in the host. The internal
+  worker bootstrap is not an account-import or automatic-login interface.
 - `--fps-limit`: applies an extra limit to this process, including captures
   and online sessions; a lower user preference remains effective.
 - `--vr`: what the VR button's "Restart in VR" passes when the headset was
