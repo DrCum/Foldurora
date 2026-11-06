@@ -4,7 +4,7 @@
 //! backed by the owning bridge's actual ordered GPU completion may become Ack.
 //! IO cancellation, image/frame progress, grants and timeouts are not proofs.
 
-use super::preview_protocol::PreviewSource;
+use super::preview_protocol::{MAX_SUSPEND_CHALLENGE, PreviewSource};
 use aurora_session::MAX_WORKERS;
 use std::time::{Duration, Instant};
 
@@ -143,11 +143,17 @@ impl Barrier {
             return Err(Error::InvalidIntent);
         }
         validate(participants)?;
-        if self.next_challenge == 0 {
+        if self.next_challenge == 0 || self.next_challenge > MAX_SUSPEND_CHALLENGE {
+            self.next_challenge = 0;
             return Err(Error::Exhausted);
         }
         let deadline = now.checked_add(TIMEOUT).ok_or(Error::Timeout)?;
-        if !participants.is_empty() && self.next_challenge.checked_add(participants.len() as u64 - 1).is_none() {
+        if !participants.is_empty()
+            && self
+                .next_challenge
+                .checked_add(participants.len() as u64 - 1)
+                .is_none_or(|last| last > MAX_SUSPEND_CHALLENGE)
+        {
             self.next_challenge = 0;
             return Err(Error::Exhausted);
         }
@@ -158,7 +164,11 @@ impl Barrier {
                 participant: *participant,
                 challenge: self.next_challenge,
             };
-            self.next_challenge = self.next_challenge.checked_add(1).unwrap_or(0);
+            self.next_challenge = self
+                .next_challenge
+                .checked_add(1)
+                .filter(|next| *next <= MAX_SUSPEND_CHALLENGE)
+                .unwrap_or(0);
             pending.push(Pending { request, proof: None });
             requests.push(request);
         }
@@ -575,7 +585,7 @@ mod tests {
     fn preview_barrier_challenge_exhaustion_is_atomic_and_sticky_across_cancel_retry() {
         let now = Instant::now();
         let mut barrier = Barrier {
-            next_challenge: u64::MAX - 1,
+            next_challenge: MAX_SUSPEND_CHALLENGE - 1,
             ..Barrier::default()
         };
         let requests = barrier
@@ -583,7 +593,7 @@ mod tests {
             .expect("last two unique challenges");
         assert_eq!(
             requests.iter().map(|request| request.challenge).collect::<Vec<_>>(),
-            [u64::MAX - 1, u64::MAX]
+            [MAX_SUSPEND_CHALLENGE - 1, MAX_SUSPEND_CHALLENGE]
         );
         assert!(barrier.cancel(18));
         assert_eq!(barrier.begin(18, &[participant(3)], now), Err(Error::Exhausted));
@@ -592,7 +602,7 @@ mod tests {
         assert!(!barrier.ready(18, now) && !barrier.ready(19, now));
 
         let mut barrier = Barrier {
-            next_challenge: u64::MAX,
+            next_challenge: MAX_SUSPEND_CHALLENGE,
             ..Barrier::default()
         };
         assert_eq!(barrier.begin(20, &[participant(3), participant(4)], now), Err(Error::Exhausted));

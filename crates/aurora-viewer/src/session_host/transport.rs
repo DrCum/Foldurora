@@ -220,9 +220,14 @@ impl HostController {
     }
 
     pub fn set_preview(&self, source: PreviewSource, config: Option<PreviewConfig>) -> Result<u64, HostError> {
+        if source.validate().is_err() {
+            return Err(HostError::Unavailable);
+        }
+        if config.is_none() {
+            return self.send(HostIntent::Preview { source, config });
+        }
         let snapshot = self.snapshot();
-        let known = snapshot.preview_sources.contains(&source)
-            || (config.is_none() && snapshot.previews.iter().any(|preview| preview.source == source));
+        let known = snapshot.preview_sources.contains(&source);
         if !snapshot.can_preview || !known {
             return Err(HostError::Unavailable);
         }
@@ -1236,6 +1241,16 @@ impl Broker {
                 child.chat.send(key, policy_revision, text, ticket, Instant::now())?;
             }
             HostIntent::Preview { source, config } => {
+                if config.is_none() {
+                    if let Some(child) = self
+                        .children
+                        .iter_mut()
+                        .find(|child| child.config.identity == source.worker && child.config.lease_epoch == source.lease_epoch)
+                    {
+                        child.preview.retire_request(source, ticket, Instant::now());
+                    }
+                    return Ok(());
+                }
                 anyhow::ensure!(PREVIEW_CAPABLE, HostError::Unavailable);
                 let child = self
                     .children
@@ -2072,6 +2087,33 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn exact_preview_disable_queues_when_opening_is_disabled_or_its_source_has_disappeared() {
+        let (sender, receiver) = bounded(2);
+        let controller = HostController {
+            requests: Mutex::new(RequestSender { sender, next: 1 }),
+            snapshot: Arc::new(Mutex::new(Arc::new(HostSnapshot::default()))),
+            stop: Arc::new(AtomicBool::new(false)),
+            stopped: Arc::new(AtomicBool::new(false)),
+            foreground: Arc::new(AtomicBool::new(false)),
+        };
+        let source = super::super::preview_protocol::fixture_source(3);
+        assert_eq!(controller.set_preview(source, None), Ok(1));
+        let request = receiver.try_recv().unwrap();
+        assert!(matches!(request.intent,HostIntent::Preview {source:captured,config:None} if captured==source));
+        assert_eq!(
+            controller.set_preview(
+                source,
+                Some(PreviewConfig {
+                    size: aurora_session::PreviewSize::Small,
+                    rate: aurora_session::PreviewRate::Half,
+                    visible: true
+                })
+            ),
+            Err(HostError::Unavailable)
+        );
     }
 
     fn status(config: &WorkerConfig) -> Envelope {

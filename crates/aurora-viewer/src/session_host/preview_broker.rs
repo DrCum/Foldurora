@@ -262,6 +262,21 @@ impl Peer {
         self.publish(now);
         Ok(())
     }
+    /// Removal cannot depend on opening eligibility or fresh metadata. It
+    /// stops this exact source's demand immediately but never frees uncertain
+    /// policy reservations or supplies a GPU drain acknowledgment.
+    pub fn retire_request(&mut self, source: PreviewSource, revision: u64, now: Instant) {
+        if self.source != Some(source) {
+            return;
+        }
+        let _ = self.configure(source, None, revision, now);
+        self.image = None;
+        self.config = None;
+        self.cache = None;
+        self.snapshot = None;
+        self.budget_request = None;
+    }
+
     fn disconnect(&mut self) {
         self.control = None;
         self.image = None;
@@ -665,5 +680,27 @@ mod tests {
             Some(9),
             "source changes do not reuse authentication-adjacent challenges"
         );
+    }
+
+    #[test]
+    fn preview_retirement_does_not_retarget_a_new_source_or_free_uncertain_authority() {
+        let now = Instant::now();
+        let original = source();
+        let mut next = original;
+        next.session.generation += 1;
+        let config = PreviewConfig {
+            size: aurora_session::PreviewSize::Small,
+            rate: aurora_session::PreviewRate::Half,
+            visible: true,
+        };
+        let mut peer = Peer::new(original.worker, original.lease_epoch, 101);
+        peer.set_control(Some(next), true, true, now);
+        peer.config = Some((4, config));
+        peer.ever_authorized = true;
+        peer.retire_request(original, 5, now);
+        assert_eq!(peer.config, Some((4, config)), "the old popup cannot hide the new login's preview");
+        peer.retire_request(next, 6, now);
+        assert!(peer.config.is_none() && peer.snapshot().is_none());
+        assert!(peer.has_authority(), "removal/socket loss is never an actual GPU drain proof");
     }
 }
