@@ -1,0 +1,24 @@
+{
+  "repository": "DrCum/Foldurora",
+  "pr": 9,
+  "url": "https://github.com/DrCum/Foldurora/pull/9",
+  "head": "fix/viewport-toolbars-integration",
+  "head_sha": "c5076565a3777d27c436fe59d9713907533be0e8",
+  "base": "feat/viewport-ui-integration",
+  "base_sha": "f504342231006423d392224f1225bc08e9e32fb5",
+  "mergeable": true,
+  "draft": true,
+  "merged": false,
+  "macOS": {
+    "workflow": 42283409986,
+    "aggregate_job": 128118138003,
+    "needed": false,
+    "compiler_tests_demo": "skipped"
+  },
+  "Windows": {
+    "workflow": 42283399557,
+    "job": 128117987512,
+    "status": "in_progress_full_workspace_tests",
+    "final_raw_outcomes_and_artifact": "unverified_pending"
+  }
+}

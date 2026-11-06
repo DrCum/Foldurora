@@ -1,0 +1,17 @@
+## feat/session-preview-worker
+ M crates/aurora-i18n/locales/en.ftl
+ M crates/aurora-i18n/locales/fr.ftl
+ M crates/aurora-i18n/locales/ja.ftl
+ M crates/aurora-viewer/src/app.rs
+ M crates/aurora-viewer/src/app/busy_pause.rs
+ M crates/aurora-viewer/src/instances.rs
+ M crates/aurora-viewer/src/scene/anchors.rs
+ M crates/aurora-viewer/src/scene/anim.rs
+ M crates/aurora-viewer/src/scene/foot_support.rs
+ M crates/aurora-viewer/src/scene/impostors.rs
+ M crates/aurora-viewer/src/scene/mod.rs
+ M crates/aurora-viewer/src/session_host/mod.rs
+ M crates/aurora-viewer/src/session_host/ui.rs
+?? crates/aurora-viewer/src/app/host_preview.rs
+?? crates/aurora-viewer/src/scene/host_preview.rs
+?? crates/aurora-viewer/src/session_host/preview_window.rs

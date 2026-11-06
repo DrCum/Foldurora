@@ -1,0 +1,143 @@
+{
+  "source": "c5076565a3777d27c436fe59d9713907533be0e8",
+  "normal_binary": {
+    "source": "c5076565a3777d27c436fe59d9713907533be0e8",
+    "tree": "1cd494773098a76f8112d2db1468ec51e60acde3",
+    "version": "Aurora Viewer 0.9.3-beta.20261106.1+47.gc5076565a",
+    "sha256": "1431dee080a77f4918c3a4e8d0548dbd81c05255278fb681124b3fa2f12b4b5d",
+    "bytes": 660991336,
+    "profile": "default dev",
+    "platform": "Linux",
+    "build_exit": 0
+  },
+  "selected_runs": 4,
+  "selected_runs_exit": 0,
+  "inspected_images": 8,
+  "environment": "Linux Xvfb, Vulkan software rendering; isolated XDG directories; no grid/native physical input",
+  "findings": "Ordinary windows retain full workspace and stable geometry across toggles; controls/chrome follow option; offset mouselook rendering and reticle retained. All-open floaters overlap; geometry/input regressions separately validate scoped control bounds.",
+  "not_run": [
+    {
+      "scenario": "ui-tools-inset",
+      "language": "en",
+      "status": "not_run",
+      "reason": "Bound final native captures to English right/toggle/mouselook and French 125% inset/classic; full workspace language parity and both-layout geometry checks already completed."
+    },
+    {
+      "scenario": "ui-tools-right",
+      "language": "ja",
+      "status": "not_run",
+      "reason": "Bound final native captures to English right/toggle/mouselook and French 125% inset/classic; full workspace language parity and both-layout geometry checks already completed."
+    }
+  ],
+  "cases": [
+    {
+      "case": "hotfix-ui-tools-right-en-1-islands",
+      "exit": 0,
+      "errors": 0,
+      "device_loss_or_panic_log_matches": 0,
+      "console_sha256": "53d2a8b92fe2cfd4490f3ddb55ca974eb75b2c5a77f85317e3cd4885cdac2ba7",
+      "images": [
+        {
+          "name": "right-tools-c507.png",
+          "sha256": "76449c8eebe2ec27f396dba1cb1446dc07477e43c9fbe12b54e6f4fa1fa93d22",
+          "size": [
+            1600,
+            1000
+          ],
+          "inspected": true
+        }
+      ]
+    },
+    {
+      "case": "hotfix-ui-tools-inset-fr-1.25-legacy",
+      "exit": 0,
+      "errors": 0,
+      "device_loss_or_panic_log_matches": 0,
+      "console_sha256": "761f7b2b97abc85e3b0c2b6a3132c8cf75edd10fd7440c922050f84858420795",
+      "images": [
+        {
+          "name": "inset-classic-fr125-c507.png",
+          "sha256": "9f94489fcfedda70613252d8af71784f5dbb0d73a1c6cd072b5c5e0c373a96ca",
+          "size": [
+            1600,
+            1000
+          ],
+          "inspected": true
+        }
+      ]
+    },
+    {
+      "case": "hotfix-ui-tools-toggle-en-1-islands",
+      "exit": 0,
+      "errors": 0,
+      "device_loss_or_panic_log_matches": 0,
+      "console_sha256": "adbdca1bc38a658180d6398a37d77d94454364e46f58ea3493bc9ace9609f582",
+      "images": [
+        {
+          "name": "toggle-on-c507.png",
+          "sha256": "6b9d286685b5c41269abfff0d778be313369686e71b5e1cb5469b2c60ef48514",
+          "size": [
+            1600,
+            1000
+          ],
+          "inspected": true
+        },
+        {
+          "name": "toggle-off-c507.png",
+          "sha256": "22c4c218a0208750ac76b72cc4d4da3bf88aec1a0082d5273a1ed31cae611679",
+          "size": [
+            1600,
+            1000
+          ],
+          "inspected": true
+        },
+        {
+          "name": "toggle-restored-c507.png",
+          "sha256": "a1ce8fc3250ff48fea973742e71f83932db75998b4799b6bc971154322a37999",
+          "size": [
+            1600,
+            1000
+          ],
+          "inspected": true
+        }
+      ]
+    },
+    {
+      "case": "hotfix-mouselook-en-1-islands",
+      "exit": 0,
+      "errors": 0,
+      "device_loss_or_panic_log_matches": 0,
+      "console_sha256": "8a186938195c0e224a1ba6f4d4385275947964f0618ed3285821ed0bf6bc1759",
+      "images": [
+        {
+          "name": "mouselook-before-c507.png",
+          "sha256": "17f8ebcc34337c8fa1e98150c0b47aa365481581f65e652b6568d01698b4467d",
+          "size": [
+            1600,
+            1000
+          ],
+          "inspected": true
+        },
+        {
+          "name": "mouselook-active-c507.png",
+          "sha256": "43b035d75bf159ba868a9cf171c4a532b20a77950c44d16884a9d87f06d7ab5b",
+          "size": [
+            1600,
+            1000
+          ],
+          "inspected": true
+        },
+        {
+          "name": "mouselook-return-c507.png",
+          "sha256": "85a62882ec68255dad83a78346a880b3fc8ab9f8039bc5d2da54ceee2273d901",
+          "size": [
+            1600,
+            1000
+          ],
+          "inspected": true
+        }
+      ]
+    }
+  ],
+  "owned_viewer_processes_remaining": []
+}

@@ -33,7 +33,7 @@ Branches are stacked; merging every PR independently into main would be wrong.
 | [#6](https://github.com/DrCum/Foldurora/pull/6), 9 upstream candidates | `sync/upstream-safe-20261106` | `5cf34c58778651cd2cb8e942aa88ddab4000a48b` |
 | [#7](https://github.com/DrCum/Foldurora/pull/7), 13 upstream candidates | `sync/upstream-safe-b962b2a7` | `8fbb2f6878bbc571f1c5e9619f17407190c93178` |
 | [#8](https://github.com/DrCum/Foldurora/pull/8), host M1 | `feat/session-host-integration` | `d87d11df89ec15ff0688cf3605f8f70d5e98b391` |
-| [#9](https://github.com/DrCum/Foldurora/pull/9), viewport/cursor correction | `fix/viewport-toolbars-integration` | `989a08f3fca3719230f397beeb6da710ab4a80e2` |
+| [#9](https://github.com/DrCum/Foldurora/pull/9), viewport/cursor correction | `fix/viewport-toolbars-integration` | `c5076565a3777d27c436fe59d9713907533be0e8` |
 | M2 exact Windows checkpoint | `feat/session-host-chat-integration` remote | `480176d037eb576119775e8d67aa2df065aa86ae` |
 | M2 final Linux guard correction | `handoff/session-host-chat-20261106` remote | `32b298392c7d40afd2d8cc96d0658041b69be985` |
 | 16 upstream candidates, no PR yet | `sync/upstream-safe-7afa101c` | `a17185fd9b5d9eee1706d5634eba371a894d7711` |
@@ -65,15 +65,36 @@ on an unmoved Settings window. Desktop mouselook retains configured physical
 viewport geometry, including drag-to-mouselook and viewport edits while held.
 Alt, focus loss, ordinary camera dragging and VR retain their existing paths.
 
-Formatting and strict Linux workspace/all-target Clippy passed at `989a08f3`
-with the existing platform dead-code allowance. Focused regressions are
-running. [Exact Windows run 42280773023](https://github.com/DrCum/Foldurora/actions/runs/42280773023)
-is running; no final artifact or native acceptance is claimed yet.
+Final `c5076565` formatting and strict Linux workspace/all-target Clippy passed
+with the existing platform dead-code allowance. The full Linux workspace
+(`--no-fail-fast`) finished with **7,597 passed, 1 failed, 47 ignored**. The
+failure is the unchanged terrain GPU precision assertion documented below.
+All viewport, cursor, actual camera and snapshot regressions passed. The
+normal development build passed. Four selected offline Vulkan/Xvfb runs exited
+0; all eight captures were inspected: English right-half controls, French 125%
+inset/classic, toggle on/off/on, and mouselook before/during/return. Ordinary
+windows stay on the full canvas; chrome/control scope follows the switch, and
+mouselook keeps the inset world/reticle. These all-open floaters overlap;
+geometry/input regressions separately check scoped control bounds. No physical
+input or hardware-performance acceptance is claimed.
+[Visual evidence](handoff/viewport-visual-evidence.json),
+[published captures](https://github.com/DrCum/Foldurora/tree/317ae1b5d99da3e3d6211090fdcd21943589e23a/pr-9).
+Binary
+`0.9.3-beta.20261106.1+47.gc5076565a`, SHA-256
+`1431dee080a77f4918c3a4e8d0548dbd81c05255278fb681124b3fa2f12b4b5d`.
+[Source-bound Linux test/build evidence](handoff/viewport-linux-tests.json) and
+[full raw workspace log](handoff/viewport-linux-workspace.log.gz) are preserved.
 
-At 19:44 UTC, Linux test-binary compilation was still active. Focused test
-execution, the full suite, the normal build and offline viewport captures have
-not completed for this source. Prepared scenarios and source review do not
-substitute for those checks or human native acceptance.
+The initial unrestricted camera fixture assumed fully closed native edges;
+`c5076565` instead places unrestricted controls at a normal user-selected native
+position, preserving the existing OPEN-edge runtime policy. No runtime code
+changed after `989a08f3`. [Exact Windows run 42283399557](https://github.com/DrCum/Foldurora/actions/runs/42283399557)
+is in full-workspace tests at this handoff. Its final raw outcomes and package
+identity still need verification. Earlier run `42280773023` belongs to the superseded
+`989a08f3` source and does not validate this head. No final Windows artifact or physical
+native acceptance is claimed yet. The PR #9 macOS aggregate log explicitly says
+this change did not require macOS; its compiler/demo/test jobs were skipped.
+A green aggregate is not Mac compilation evidence.
 
 ### Host and chat boundaries
 
@@ -213,7 +234,7 @@ the workspace inventory. No conflict was silently resolved.
 
 | Cloud path | Contents and state |
 | --- | --- |
-| `/workspace/work/overnight-integration` | Root default development target; current viewport correction. Only one heavy Cargo owner. Logs under `.scratch/viewport-hotfix-*`; M2 captures `.scratch/chat-popout-32b29839-{en,fr,ja}` and provenance `.scratch/host-chat-visual-summary-32b29839.json`; M2 gzip `.scratch/checkpoints/32b298392c7d/aurora-viewer.gz`. |
+| `/workspace/work/overnight-integration` | Root default development target; current viewport correction. All root Cargo and selected capture runs are stopped. Logs under `.scratch/viewport-hotfix-*`; M2 captures `.scratch/chat-popout-32b29839-{en,fr,ja}` and provenance `.scratch/host-chat-visual-summary-32b29839.json`; M2 gzip `.scratch/checkpoints/32b298392c7d/aurora-viewer.gz`. |
 | `/workspace/work/viewport-toolbar-fix` | Clean UI source `a03cf5df`, branch `fix/viewport-toolbars-only`; already integrated by aliases above. |
 | `/workspace/work/viewport-mouselook-cursor` | Clean cursor source `b79199f3`; already integrated. |
 | `/workspace/work/session-host-worker` | Clean worker `213d8e49`; disabled preview. Detailed handoff copied into this document set. |
@@ -225,7 +246,7 @@ the workspace inventory. No conflict was silently resolved.
 
 Use these next tasks independently; the user now chooses who resumes them:
 
-1. Finish exact-source Windows/offline and physical viewport acceptance first.
+1. Verify the pending exact-source Windows build and physical viewport acceptance first.
    Verify ordinary windows can be moved/resized outside the world viewport;
    toolbars, camera/photo controls and their menus remain inside. Exercise
    both toolbar styles, option on/off, nonzero X/Y, fractional DPI, toggle/restart
