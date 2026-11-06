@@ -14,7 +14,7 @@ mod preview;
 mod protocol;
 mod worker;
 
-pub use coordinator::{Coordinator, Effect, HostNotice, RosterEntry};
+pub use coordinator::{Coordinator, Effect, HostNotice, RosterEntry, STARTUP_MILLIS};
 pub use identity::{
     AccountKey, Binding, ConversationId, GridKey, HostId, InstallationId, SessionId, SessionIdentity, WorkerId, WorkerIdentity,
 };

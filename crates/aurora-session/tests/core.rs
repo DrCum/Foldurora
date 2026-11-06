@@ -711,6 +711,62 @@ fn active_viewport_change_repeats_fence_prepare_and_grant_on_the_same_worker() {
 }
 
 #[test]
+fn cold_worker_first_status_has_bounded_startup_grace_then_the_ordinary_receipt_lease() {
+    let mut peer = Peer::new(3);
+    let identity = identity(3);
+    let mut host = Coordinator::new(identity.installation, identity.host);
+    host.register(worker_id(3), 1, 0).unwrap();
+    assert_eq!(
+        host.activate(worker_id(3), None, 60_000),
+        Err(Error::Unavailable),
+        "registration cannot grant activation before an online status"
+    );
+    assert!(!host.tick(60_000).contains(&Effect::Notice(HostNotice::Expired(worker_id(3)))));
+    host.observe(&peer.status(), 60_000).unwrap();
+    assert!(
+        !host
+            .tick(60_000 + LEASE_MILLIS - 1)
+            .contains(&Effect::Notice(HostNotice::Expired(worker_id(3))))
+    );
+    assert!(
+        host.tick(60_000 + LEASE_MILLIS)
+            .contains(&Effect::Notice(HostNotice::Expired(worker_id(3))))
+    );
+    assert!(host.observe(&peer.status(), 60_000 + LEASE_MILLIS).is_err());
+}
+
+#[test]
+fn never_observed_startup_deadline_is_not_extended_by_heartbeats_or_invalid_status() {
+    let mut peer = Peer::new(3);
+    let identity = identity(3);
+    let mut host = Coordinator::new(identity.installation, identity.host);
+    host.register(worker_id(3), 1, 0).unwrap();
+    for now in [1000, 60_000, STARTUP_MILLIS - 1] {
+        assert!(!host.tick(now).contains(&Effect::Notice(HostNotice::Expired(worker_id(3)))));
+        let mut wrong = peer.status();
+        wrong.binding.worker.host = HostId::from_bytes([9; 16]).unwrap();
+        assert_eq!(host.observe(&wrong, now), Err(Error::Binding));
+    }
+    assert_eq!(host.observe(&peer.status(), STARTUP_MILLIS), Err(Error::Stale));
+    assert!(
+        host.tick(STARTUP_MILLIS)
+            .contains(&Effect::Notice(HostNotice::Expired(worker_id(3))))
+    );
+    assert!(host.workers().all(|entry| !entry.live));
+
+    let mut host = Coordinator::new(identity.installation, identity.host);
+    host.register(worker_id(3), 1, 0).unwrap();
+    let detached = message(host.detach(worker_id(3)).unwrap());
+    assert!(matches!(detached.message, Message::Command(Command::Detach)));
+    assert!(
+        host.observe(&peer.status(), 1).is_err(),
+        "startup grace never delays explicit detachment"
+    );
+    assert!(host.remove(worker_id(3)).is_empty());
+    assert_eq!(host.workers().count(), 0);
+}
+
+#[test]
 fn preview_admission_reserves_pending_rates_and_never_renders_a_promoted_or_stale_source() {
     let demand = PreviewDemand {
         requested: Some(PreviewRate::Five),

@@ -6,6 +6,9 @@ use std::collections::BTreeMap;
 
 const STEP_MILLIS: u64 = 12_000;
 const HEARTBEAT_MILLIS: u64 = 1000;
+/// Fixed allowance for native/GPU initialization before the first valid
+/// status. Outbound heartbeats do not renew it or authorize activation.
+pub const STARTUP_MILLIS: u64 = 300_000;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RosterEntry {
@@ -42,6 +45,11 @@ struct Entry {
     generation: u64,
     last_seen: u64,
     last_heartbeat: Option<u64>,
+}
+impl Entry {
+    fn receipt_timeout(&self) -> u64 {
+        if self.received == 0 { STARTUP_MILLIS } else { LEASE_MILLIS }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -339,7 +347,7 @@ impl Coordinator {
         if !entry.roster.live || envelope.sequence <= entry.received {
             return Err(Error::Stale);
         }
-        if self.now.saturating_sub(entry.last_seen) >= LEASE_MILLIS {
+        if self.now.saturating_sub(entry.last_seen) >= entry.receipt_timeout() {
             return Err(Error::Stale);
         }
         if envelope.reply_to > entry.sent {
@@ -532,7 +540,7 @@ impl Coordinator {
         let expired: Vec<_> = self
             .entries
             .iter()
-            .filter(|(_, entry)| entry.roster.live && self.now.saturating_sub(entry.last_seen) >= LEASE_MILLIS)
+            .filter(|(_, entry)| entry.roster.live && self.now.saturating_sub(entry.last_seen) >= entry.receipt_timeout())
             .map(|(worker, _)| *worker)
             .collect();
         let mut effects = Vec::new();
