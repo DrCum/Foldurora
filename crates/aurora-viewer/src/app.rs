@@ -99,6 +99,7 @@ mod inventory_hover;
 mod inventory_thumbnail;
 mod joystick;
 mod land_moderation;
+mod land_rights;
 mod link_health;
 mod login_favorites;
 mod marketplace_listings;
