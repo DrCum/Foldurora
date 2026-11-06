@@ -1,12 +1,12 @@
 name: Windows test build
 
-# A portable test package for the isolated overnight branch. This workflow
+# Portable test packages for isolated preview branches. This workflow
 # never creates a tag or release and does not need a pull request. A build
 # remains downloadable when a check fails; its manifest and the failed job
 # retain that result for the human who will test it.
 on:
   push:
-    branches: [feat/overnight-integration]
+    branches: [feat/overnight-integration, feat/workspace-followup]
   workflow_dispatch:
 
 permissions:
@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   windows:
-    if: github.ref == 'refs/heads/feat/overnight-integration'
+    if: github.ref == 'refs/heads/feat/overnight-integration' || github.ref == 'refs/heads/feat/workspace-followup'
     runs-on: windows-latest
     timeout-minutes: 90
     defaults:
