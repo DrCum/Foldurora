@@ -5965,6 +5965,11 @@ impl App {
         if self.capture.is_some() || forced_window_size().is_some() {
             return;
         }
+        // User-controlled fullscreen becomes an ordinary-window operation.
+        // Restore first so the fitted host pane is never saved as geometry.
+        if self.host_fitted() {
+            self.invalidate_host_display();
+        }
         let Some(window) = self.gfx.as_ref().map(|g| g.window.clone()) else {
             return;
         };
