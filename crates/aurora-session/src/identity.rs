@@ -69,6 +69,7 @@ opaque_id!(WorkerId, 16);
 opaque_id!(SessionId, 16);
 opaque_id!(AccountKey, 32);
 opaque_id!(GridKey, 32);
+opaque_id!(ConversationId, 16);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
