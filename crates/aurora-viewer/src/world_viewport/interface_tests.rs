@@ -101,6 +101,7 @@ struct Interface {
     dpi: f32,
     frame: usize,
     full_frame: bool,
+    world_bars: bool,
     classic_room: bool,
     aspect: Option<(f32, egui::Vec2)>,
     kind: Kind,
@@ -130,6 +131,7 @@ impl Interface {
             dpi,
             frame: 0,
             full_frame: false,
+            world_bars: true,
             classic_room: false,
             aspect: None,
             kind,
@@ -203,23 +205,30 @@ impl Interface {
             }
             layout::begin_canvas(&ctx, restricted);
             assert_eq!(ctx.input(|input| input.viewport().inner_rect), Some(desktop_rect));
-            self.top = egui::Panel::top("viewport_interface_top")
-                .exact_size(24.0)
-                .show(ui, |ui| ui.label("Menu"))
-                .response
-                .rect;
-            self.bottom = egui::Panel::bottom("viewport_interface_bottom")
-                .exact_size(32.0)
-                .show(ui, |ui| ui.label("Toolbar and chat"))
-                .response
-                .rect;
-            if self.classic_room {
-                let room = ctx.content_rect().shrink2(vec2(40.0, 30.0));
+            if self.world_bars {
+                self.top = egui::Panel::top("viewport_interface_top")
+                    .exact_size(24.0)
+                    .show(ui, |ui| ui.label("Menu"))
+                    .response
+                    .rect;
+                self.bottom = egui::Panel::bottom("viewport_interface_bottom")
+                    .exact_size(32.0)
+                    .show(ui, |ui| ui.label("Toolbar and chat"))
+                    .response
+                    .rect;
+                let room = if self.classic_room {
+                    ctx.content_rect().shrink2(vec2(40.0, 30.0))
+                } else {
+                    ui.available_rect_before_wrap()
+                };
+                // Production bars report both rooms every World frame: the
+                // islands allow movement across the full canvas, while the
+                // classic skin keeps windows between its bars.
                 layout::set_work_area(&ctx, room);
-                layout::set_move_area(&ctx, room);
+                layout::set_move_area(&ctx, if self.classic_room { room } else { ctx.content_rect() });
+                layout::set_window_edges(&ctx, layout::Edges::OPEN);
+                layout::frame(&ctx, &p, false);
             }
-            layout::set_window_edges(&ctx, layout::Edges::OPEN);
-            layout::frame(&ctx, &p, false);
             let body = |ui: &mut egui::Ui| {
                 let button = ui.button("Activate");
                 self.button = button.rect;
@@ -376,6 +385,23 @@ fn interface_egui_toggling_and_temporary_full_frames_keep_saved_window_anchors()
     f.frames(5);
     close_rect(f.window(), wide, 1.0);
     assert_eq!(layout::edges_for(&f.ctx, Id::unique(WINDOW)), layout::Edges::OPEN);
+}
+
+#[test]
+fn interface_login_floaters_without_a_bars_pass_keep_their_original_canvas_insets() {
+    let mut f = Interface::with_kind(1.0, 1.0, Kind::Floater, vec2(2600.0, 900.0));
+    // Login has neither World's bar geometry reporting nor layout::frame.
+    // Start with fresh egui memory so its initial room is the default one.
+    f.ctx = egui::Context::default();
+    f.world_bars = false;
+    f.frames(4);
+    let wide = f.window();
+    f.settings.restrict_ui = true;
+    f.frames(5);
+    assert!(f.ctx.content_rect().expand(1.0).contains_rect(f.window()));
+    f.settings.restrict_ui = false;
+    f.frames(5);
+    close_rect(f.window(), wide, 1.0);
 }
 
 #[test]

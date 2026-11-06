@@ -239,8 +239,12 @@ pub(crate) fn begin_canvas(ctx: &egui::Context, restricted: bool) -> bool {
         // just moved to the other monitor. Keyboard focus remains intact.
         ctx.stop_dragging();
         ctx.input_mut(|input| input.pointer = Default::default());
-        set_work_area(ctx, default_work_area(screen));
-        set_move_area(ctx, screen);
+        let room = default_work_area(screen);
+        set_work_area(ctx, room);
+        // Login/loading floaters have no bars pass to report movement room.
+        // Keep their existing default inset; World and photo mode replace
+        // these defaults with their own bar/view geometry.
+        set_move_area(ctx, room);
     }
     changed
 }

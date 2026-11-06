@@ -18,7 +18,7 @@
   chat, dialogs and floaters, retaining absolute native pointer/world geometry.
   Preserve anchors and automatically reduced expanded sizes; fall back to the
   native UI below 640 × 400 logical units so Preferences remains reachable.
-  Sixteen offline geometry/egui regressions and `ui-*` demo modes are prepared;
+  Seventeen offline geometry/egui regressions and `ui-*` demo modes are prepared;
   integrated automated checks, captures and human UI acceptance are pending.
   This follow-up must include the separate multi-viewer GPU contention mitigation.
 
