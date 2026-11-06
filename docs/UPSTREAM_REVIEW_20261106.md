@@ -1,6 +1,8 @@
 # Upstream review — 6 November 2026
 
-Latest reviewed upstream: [`b962b2a759b2`](https://github.com/Aurora-Viewer/Aurora-Viewer/commit/b962b2a759b24856c2c12b75e98a50e463f888e5). A second isolated branch, `sync/upstream-safe-b962b2a7`, adds four intact commits to the original nine-candidate checkpoint `5cf34c58`; all thirteen still require integrated validation. The original branch and its running Windows checks are preserved.
+Newest reviewed upstream: [`7afa101cdc6e`](https://github.com/Aurora-Viewer/Aurora-Viewer/commit/7afa101cdc6e0e83b15612e0e4bde57d9c638d9f). A third isolated branch, `sync/upstream-safe-7afa101c`, adds three intact commits to the thirteen-candidate checkpoint `8fbb2f68`. This gives sixteen candidates and seventeen deferrals across the three snapshots. Earlier branches and test receipts remain unchanged; the new sixteen-candidate combination is not yet validated.
+
+Second reviewed upstream: [`b962b2a759b2`](https://github.com/Aurora-Viewer/Aurora-Viewer/commit/b962b2a759b24856c2c12b75e98a50e463f888e5). A second isolated branch, `sync/upstream-safe-b962b2a7`, adds four intact commits to the original nine-candidate checkpoint `5cf34c58`. All thirteen passed exact-source Windows checks; Linux and runtime acceptance remain pending. Both earlier branches and their receipts are preserved.
 
 Upstream: [`Aurora-Viewer/Aurora-Viewer` at `fccd1629a67c`](https://github.com/Aurora-Viewer/Aurora-Viewer/commit/fccd1629a67c5ea091c05a881761ccd152a1c20f).
 Fork baseline: `f504342231006423d392224f1225bc08e9e32fb5`. The nine candidate commits below were cherry-picked intact with `-x` onto `sync/upstream-safe-20261106`; resulting code checkpoint: `9c853ef0c3c961b6cceb461b373882831bb8d0e5`.
@@ -36,6 +38,20 @@ The following commits were cherry-picked intact with `-x`, without conflicts, in
 
 The fourteen deferrals below remain deferred. Their recorded textual paths describe the original nine-candidate simulation; no deferred patch was manually combined or partially extracted to create this later batch. New or naturally disappearing textual conflicts do not approve semantic overlap.
 
+## Third snapshot: three additional candidates
+
+All six commits after `b962b2a7` were reviewed. The three candidates below were cherry-picked intact with `-x`, without conflicts or partial extraction, onto `8fbb2f6878bbc571f1c5e9619f17407190c93178`. Code checkpoint: `2dc9d0dc`. Its exact tree, `d5d665af4224f927986d0d1ce30f437906e8e3bc`, matches the independently simulated candidate sequence.
+
+| Upstream commit | Change | Dependency / overlap review |
+|---|---|---|
+| [`85d488a95e23`](https://github.com/Aurora-Viewer/Aurora-Viewer/commit/85d488a95e236dfbbfaa82960365a5c807cb8cc5) | Intel empty Vulkan descriptor-pool fix through a pinned wgpu fork | All eleven wgpu-family packages use the same pinned revision. Versions and dependency lists stay unchanged; the fork is the v30.0.1 source plus eleven Vulkan allocation-fallback lines. No API, ownership, queue or fence change found. Native driver/startup and low-settings preview validation remain required. |
+| [`113afd8062db`](https://github.com/Aurora-Viewer/Aurora-Viewer/commit/113afd8062dbd5c41a5b3822580bb805718f1c1e) | Explain asset-fetch ceilings and backoff | Documentation comment only; constants and runtime behavior are unchanged. |
+| [`7afa101cdc6e`](https://github.com/Aurora-Viewer/Aurora-Viewer/commit/7afa101cdc6e0e83b15612e0e4bde57d9c638d9f) | Close a potentially stuck microphone off the caller thread | Control-channel closure still comes first. Both previous join sites use the bounded-reporting background closer; reopened captures have independent threads and buffers. Voice transmission policy and host input revocation are unchanged. This does not establish the cause of the earlier offline shutdown watchdog. |
+
+The wgpu pin is [`3bad1916ef43`](https://github.com/Aurora-Viewer/wgpu/commit/3bad1916ef435277b8edb3252941020a09779ce9), whose parent is the peeled `v30.0.1` tag, `40f4a34ebaf56f9a046231f54125ad046239d3f3`. Its only source change supplies one sampler descriptor when a Vulkan pool would otherwise have no sizes. Independent preview-owner review found no expected conflict with shared Device/Queue, read-only atlases or completion-fence lifetimes; source review cannot prove driver behavior or performance.
+
+Each candidate and the complete sequence were also textually clean against frozen host `47556cce9baf085829c984a83c80c966e89c87d5` (simulated tree `96285d7165927f074d037bd6b98ae24107b3393d`). That is a separate simulation, not a combined host-plus-sixteen-candidate build. The host and new chat/preview work remain separate.
+
 ## Deferred for review
 
 | Upstream commit | Change | Reason / observed conflict |
@@ -57,13 +73,24 @@ The fourteen deferrals below remain deferred. Their recorded textual paths descr
 
 Deferred commits were not partially extracted. Picking, login/session ownership, cache migration, texture input, startup/VR and GPU pause changes require joint review with the fork. Documentation-only conflicts are also left for review rather than manually combined. No deferred commit is approved by this record.
 
+## Third-snapshot deferrals
+
+| Upstream commit | Exact textual conflicts | Semantic / dependency reason |
+|---|---|---|
+| [`3d11510600b2`](https://github.com/Aurora-Viewer/Aurora-Viewer/commit/3d11510600b202b5b0fca1c433d223dd5dfdb011) | Against candidate13: `TASKS.md`, `crates/aurora-viewer/src/cli.rs`. Against frozen M1: those paths plus `crates/aurora-viewer/Cargo.toml`, `crates/aurora-viewer/src/cache_location.rs`. | Uninstall routing crosses worker startup, private profiles and shared credential-entry removal. Requires joint CLI/profile/cache-key review. The entire commit stays deferred; no uninstall action was run. |
+| [`db6209901611`](https://github.com/Aurora-Viewer/Aurora-Viewer/commit/db6209901611562de7b78f7e57e95a224c8f64db) | Against candidate13: `TASKS.md`. Against frozen M1: `TASKS.md`, `crates/aurora-viewer/src/settings.rs`. | Settings v33 media-consent/camera migration and a new modal need joint review with per-launch settings, standby UI, viewport dialogs and host blocked-state reporting. No conflict was resolved. |
+| [`275e3808b951`](https://github.com/Aurora-Viewer/Aurora-Viewer/commit/275e3808b95102b81f269423c3995f63ea99c6e7) | Textually clean on both bases; path `README.md`. | The same intact README patch promises media downloads only after agreement, requiring deferred `db620990`. Keep the whole commit deferred rather than extracting its otherwise-applicable portal wording. |
+
+All fourteen earlier deferrals remain unchanged. The three new deferrals bring the total to seventeen; a clean README patch does not satisfy its missing runtime dependency.
+
 ## Validation
 
+- New sixteen-candidate checkpoint: exact source/tree/provenance and dependency review passed; formatting, strict Clippy, full workspace tests, normal builds and runtime/native acceptance are pending.
+- Prior thirteen-candidate checkpoint `8fbb2f68`: exact-source Windows scripts, formatting, strict Clippy, full workspace tests and package passed (7,635 passed, zero failures, 48 ignored; all 54 retained regressions). [Run](https://github.com/DrCum/Foldurora/actions/runs/42248429950). Combined Linux/runtime/grid acceptance remains pending; this receipt does not validate the new sixteen-candidate tree.
 - Candidate sequence: all nine applied without textual conflicts; resulting code tree matched the independent temporary-index simulation (`423a08a216d570546c279ab56ea74f10231da5dd`).
 - Static dependency and fork-overlap review: completed for the nine candidates.
-- Original nine-candidate checkpoint `5cf34c58`: formatting passed locally; exact-source Windows full tests/build/package are in progress.
-- Thirteen-candidate branch: formatting, strict workspace/all-target Clippy, full workspace tests and normal viewer builds remain pending.
-- Windows package/build and runtime checks: pending.
+- Original nine-candidate checkpoint `5cf34c58`: exact-source Windows scripts, formatting, strict Clippy, full tests and package passed (7,617 passed, zero failures, 48 ignored). [Run](https://github.com/DrCum/Foldurora/actions/runs/42240147315). Linux and runtime acceptance remain pending.
+- The successful prior Windows receipts do not exercise the new wgpu pin or microphone-close code. New sixteen-candidate Windows/Linux builds, tests, driver and runtime acceptance remain pending.
 - Grid-dependent acceptance: human testing only; no automated grid login performed.
 
 Update this record with the exact tested source and results before recommending a combined test build.

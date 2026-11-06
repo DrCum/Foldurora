@@ -1,6 +1,6 @@
 # Aurora Viewer — task tracking
 
-- 🔧 Safe upstream snapshot integration (task `upstream-safe-20261106`; no issue): thirteen intact, statically reviewed candidates through Aurora `b962b2a7`, based on Foldurora `f5043422`; compilation and runtime checks pending. The original nine-candidate checkpoint `5cf34c58` and its Windows checks remain separate. Fourteen overlapping/conflicting commits remain deferred in [the review ledger](docs/UPSTREAM_REVIEW_20261106.md). No manual conflict resolutions or main merge.
+- 🔧 Safe upstream snapshot integration (task `upstream-safe-20261106`; no issue; draft PRs #6 and #7): sixteen intact, statically reviewed candidates through Aurora `7afa101c`, based on Foldurora `f5043422`; the new combined tree awaits compilation and runtime checks. Earlier nine- and thirteen-candidate checkpoints stay pinned; exact-source Windows checks passed at `8fbb2f68` (7,635 passed, zero failures, 48 ignored), while Linux/runtime/grid acceptance remains pending. Seventeen overlapping, conflicting or dependent commits remain deferred in [the review ledger](docs/UPSTREAM_REVIEW_20261106.md). No manual conflict resolutions or main merge.
 
 
 - 🔧 Foldurora shared-GPU contention mitigation (user crash report, 2026-11-06;
