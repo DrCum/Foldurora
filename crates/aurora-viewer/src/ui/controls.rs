@@ -1536,9 +1536,22 @@ mod tests {
         };
         let mut controls = ControlsUi::default();
         let (mut camera, mut movement) = (classic || tab == Tab::Camera, classic || tab == Tab::Movement);
+        let ids = if classic {
+            vec![CLASSIC_CAMERA, CLASSIC_MOVEMENT]
+        } else {
+            vec![WINDOW]
+        };
         let mut native = Rect::NOTHING;
         for frame in 0..12 {
             native = Rect::from_min_size(egui::pos2(7.0, 11.0), Vec2::new(3200.0, 2000.0) / (1.25 * ctx.zoom_factor()));
+            if frame == 4 && !restricted {
+                // Open native edges allow the initial bottom-anchored body
+                // to extend off-screen. Exercise an ordinary user position,
+                // as the snapshot fixture does, without changing that policy.
+                for (index, id) in ids.iter().enumerate() {
+                    widgets::move_floater(&ctx, id, native.min + Vec2::new(24.0, 80.0 + index as f32 * 400.0));
+                }
+            }
             let mut raw = egui::RawInput {
                 screen_rect: Some(native),
                 time: Some(frame as f64 / 60.0),
@@ -1566,11 +1579,6 @@ mod tests {
             layout::restricted_canvas(&ctx).is_none(),
             "the native egui canvas must remain available to ordinary windows"
         );
-        let ids = if classic {
-            vec![CLASSIC_CAMERA, CLASSIC_MOVEMENT]
-        } else {
-            vec![WINDOW]
-        };
         let rects = ids
             .into_iter()
             .map(|id| {
