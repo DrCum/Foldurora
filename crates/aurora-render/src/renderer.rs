@@ -985,7 +985,7 @@ struct Ssao {
 struct GpuTimer {
     query_set: wgpu::QuerySet,
     resolve: wgpu::Buffer,
-    readback: Vec<(wgpu::Buffer, Arc<AtomicBool>, bool)>,
+    readback: Vec<(wgpu::Buffer, Arc<AtomicBool>, bool, Arc<std::sync::OnceLock<Instant>>)>,
     next: usize,
     period_ns: f32,
     last_ms: Option<f32>,
@@ -994,6 +994,8 @@ struct GpuTimer {
     last_pixels: u64,
     /// The world pixels of each readback slot's frame.
     slot_pixels: [std::cell::Cell<u64>; 3],
+    slot_frames: [std::cell::Cell<Option<(u64, u64, Instant)>>; 3],
+    last_completed: Option<crate::session_preview::CompletedGpuSample>,
     /// Marks between and inside passes are written
     /// (TIMESTAMP_QUERY_INSIDE_ENCODERS + TIMESTAMP_QUERY_INSIDE_PASSES).
     marks: bool,
@@ -1205,6 +1207,7 @@ impl GpuTimer {
                     }),
                     Arc::new(AtomicBool::new(false)),
                     false,
+                    Arc::new(std::sync::OnceLock::new()),
                 )
             })
             .collect();
@@ -1217,6 +1220,8 @@ impl GpuTimer {
             last_ms: None,
             last_pixels: 0,
             slot_pixels: Default::default(),
+            slot_frames: Default::default(),
+            last_completed: None,
             marks: device
                 .features()
                 .contains(wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS | wgpu::Features::TIMESTAMP_QUERY_INSIDE_PASSES),
@@ -1234,7 +1239,7 @@ impl GpuTimer {
 
     /// Collect finished readbacks.
     fn harvest(&mut self) {
-        for (slot, (buf, ready, pending)) in self.readback.iter_mut().enumerate() {
+        for (slot, (buf, ready, pending, completed_at)) in self.readback.iter_mut().enumerate() {
             if *pending && ready.load(Ordering::Acquire) {
                 if let Ok(view) = buf.get_mapped_range(..) {
                     let ts: &[u64] = bytemuck::cast_slice(&view[..GPU_TIMESTAMPS as usize * 8]);
@@ -1245,6 +1250,20 @@ impl GpuTimer {
                     if ts[1] > ts[0] {
                         self.last_ms = Some(ms(0, 1));
                         self.last_pixels = self.slot_pixels[slot].get();
+                        if let Some((frame, surface_epoch, submitted_at)) = self.slot_frames[slot].get()
+                            && let Some(&completed_at) = completed_at.get()
+                            && self
+                                .last_completed
+                                .is_none_or(|old| old.surface_epoch != surface_epoch || frame > old.frame)
+                        {
+                            self.last_completed = Some(crate::session_preview::CompletedGpuSample {
+                                frame,
+                                surface_epoch,
+                                submitted_at,
+                                completed_at,
+                                gpu_ms: ms(0, 1),
+                            });
+                        }
                         if self.marks {
                             let mut e = [0.0; GpuElement::ALL.len()];
                             for (t, ranges) in e.iter_mut().zip(GPU_ELEMENTS) {
@@ -5501,6 +5520,7 @@ impl Backend {
     fn result(&mut self, index: u64, stats: RenderStats, captured: Option<(u32, u32, Vec<u8>)>, spent: Spent) -> FrameResult {
         let snapshot = self.end_snapshot();
         FrameResult {
+            completed_gpu: self.timer.as_ref().and_then(|timer| timer.last_completed),
             rendered: false,
             index,
             stats,
@@ -7048,6 +7068,10 @@ impl Backend {
         let timer_slot = self.timer.as_mut().and_then(|t| t.slot());
         if let (Some(t), Some(slot)) = (&self.timer, timer_slot) {
             t.slot_pixels[slot].set(u64::from(world_size.0) * u64::from(world_size.1));
+            // Offscreen previews/photos/XR are not active-world telemetry.
+            t.slot_frames[slot].set(
+                (!self.preview_mode && matches!(&surface_tex, FrameTarget::Surface(_))).then(|| (index, surface.epoch, Instant::now())),
+            );
         }
         let mut first_pass = true;
         let mut take_first = || {
@@ -8981,9 +9005,12 @@ impl Backend {
 
         if let (Some(t), Some(slot)) = (&mut self.timer, timer_slot) {
             let ready = t.readback[slot].1.clone();
+            let completed_at = Arc::new(std::sync::OnceLock::new());
+            t.readback[slot].3 = completed_at.clone();
             t.readback[slot].2 = true;
             t.readback[slot].0.map_async(wgpu::MapMode::Read, .., move |r| {
                 if r.is_ok() {
+                    let _ = completed_at.set(Instant::now());
                     ready.store(true, Ordering::Release);
                 }
             });

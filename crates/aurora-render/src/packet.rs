@@ -140,6 +140,7 @@ pub(crate) struct FramePacket {
 }
 
 pub(crate) struct FrameResult {
+    pub completed_gpu: Option<crate::session_preview::CompletedGpuSample>,
     /// Commands for this output were submitted. This is neither GPU completion
     /// nor a native/session presentation proof.
     pub rendered: bool,

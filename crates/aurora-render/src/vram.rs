@@ -99,6 +99,7 @@ impl BudgetFloor {
 /// off every frame/UI path; readers only copy the last complete sample.
 pub struct VideoMemoryProbe {
     sampler: BudgetSampler,
+    preview_card: Arc<std::sync::OnceLock<Option<(u64, u64, bool)>>>,
     /// For the card's identity, read once on demand (`card`).
     #[cfg(not(target_os = "macos"))]
     adapter: wgpu::Adapter,
@@ -178,12 +179,18 @@ impl VideoMemoryProbe {
         #[cfg(not(target_os = "macos"))]
         let card = adapter.clone();
         let heap = std::sync::OnceLock::new();
+        let preview_card = Arc::new(std::sync::OnceLock::new());
+        let identity = preview_card.clone();
         let sampler = BudgetSampler::new(
-            move || Self::query(&adapter, (*heap.get_or_init(|| Self::budget_heap(&adapter)))?),
+            move || {
+                identity.get_or_init(|| Self::card_for(&adapter));
+                Self::query(&adapter, (*heap.get_or_init(|| Self::budget_heap(&adapter)))?)
+            },
             PROBE_INTERVAL,
         );
         VideoMemoryProbe {
             sampler,
+            preview_card,
             #[cfg(not(target_os = "macos"))]
             adapter: card,
         }
@@ -208,6 +215,17 @@ impl VideoMemoryProbe {
         Some(sample)
     }
 
+    /// Identity of this renderer's own adapter, queried once by the existing
+    /// budget worker. Unknown is not a cross-process same-card permission.
+    pub fn preview_card_luid(&self) -> Option<u64> {
+        self.preview_card
+            .get()
+            .copied()
+            .flatten()
+            .map(|(luid, _, _)| luid)
+            .filter(|luid| *luid != 0)
+    }
+
     fn with_sample(&self, device: &wgpu::Device, (budget, usage): (u64, u64)) -> VideoMemory {
         let budget = forced_budget().unwrap_or(budget);
         // (wgpu's counters: a few atomics, no lock; every buffer counts,
@@ -226,9 +244,14 @@ impl VideoMemoryProbe {
     /// without the Vulkan 1.1 query.
     #[cfg(not(target_os = "macos"))]
     pub fn card(&self) -> Option<(u64, u64, bool)> {
+        Self::card_for(&self.adapter)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn card_for(adapter: &wgpu::Adapter) -> Option<(u64, u64, bool)> {
         // SAFETY: the hal adapter is only borrowed for this call; the queries
         // read properties and change no state.
-        let hal = unsafe { self.adapter.as_hal::<wgpu::hal::api::Vulkan>() }?;
+        let hal = unsafe { adapter.as_hal::<wgpu::hal::api::Vulkan>() }?;
         let shared = hal.shared_instance();
         if shared.instance_api_version() < vk::API_VERSION_1_1 {
             return None;
@@ -265,6 +288,11 @@ impl VideoMemoryProbe {
     /// Metal has no adapter-wide counters to name.
     #[cfg(target_os = "macos")]
     pub fn card(&self) -> Option<(u64, u64, bool)> {
+        None
+    }
+
+    #[cfg(target_os = "macos")]
+    fn card_for(_adapter: &wgpu::Adapter) -> Option<(u64, u64, bool)> {
         None
     }
 

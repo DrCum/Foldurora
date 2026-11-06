@@ -188,6 +188,7 @@ pub struct Renderer {
     surface_epoch: u64,
     session_fences: Requests,
     session_preview: crate::session_preview::Owner,
+    completed_gpu: Option<crate::session_preview::CompletedGpuSample>,
     vsync: bool,
     settings: RenderSettings,
     msaa_supported: Vec<u32>,
@@ -615,6 +616,7 @@ impl Renderer {
             surface_epoch: 1,
             session_fences: Requests::default(),
             session_preview: crate::session_preview::Owner::default(),
+            completed_gpu: None,
             last_stats: RenderStats::default(),
             fresh: false,
             gpu_frames,
@@ -1096,6 +1098,14 @@ impl Renderer {
 
     /// Take in what a frame gave back.
     fn apply(&mut self, mut r: FrameResult) {
+        if let Some(sample) = r.completed_gpu
+            && sample.surface_epoch == self.surface_epoch
+            && self
+                .completed_gpu
+                .is_none_or(|old| old.surface_epoch != sample.surface_epoch || sample.frame > old.frame)
+        {
+            self.completed_gpu = Some(sample);
+        }
         if r.index >= self.hover_valid_from {
             self.hover_latest = r.hover;
         }
@@ -1464,6 +1474,12 @@ impl Renderer {
         stats
     }
 
+    /// Latest actual timestamp-query completion from a native frame. Reading
+    /// this cached value never renews its timestamps or grants GPU ownership.
+    pub fn latest_completed_gpu_sample(&self) -> Option<crate::session_preview::CompletedGpuSample> {
+        self.completed_gpu.filter(|sample| sample.surface_epoch == self.surface_epoch)
+    }
+
     /// The frame being built begins reading its input now (the start of
     /// the viewer's frame): its time to the screen is measured from here.
     pub fn mark_input(&mut self, at: Instant) {
@@ -1654,20 +1670,15 @@ impl Renderer {
     /// Camera/vision policy must be current; unknown budgets and resource
     /// backlogs defer the request before its journal can leave the main thread.
     /// No native output, UI, HUD, picking or session-presentation proof is made.
-    /// Build CPU draw lists for `session_preview::projection` (or a conservative
-    /// enclosing frustum); GPU culling is adjusted to the preview automatically.
-    pub fn request_session_preview(
-        &mut self,
-        request: crate::session_preview::Request,
-        mut params: FrameParams,
-        lists: &DrawLists,
-    ) -> Result<(), crate::session_preview::Error> {
+    /// Prepare the persistent small backend without generating pose writes or
+    /// consuming a scene journal. False means cold initialization is pending;
+    /// callers must wait before building their optional preview scene update.
+    pub fn prepare_session_preview(&mut self, request: &crate::session_preview::Request) -> Result<bool, crate::session_preview::Error> {
         use crate::session_preview::{self as preview, Error};
         self.preview_supported()?;
         self.drive_session_preview()?;
         let now = Instant::now();
-        self.session_preview.check(&request, now)?;
-        preview::validate_params(&params)?;
+        self.session_preview.check(request, now)?;
         if request.admission.fence.surface_epoch != self.surface_epoch {
             return Err(Error::NotAdmitted);
         }
@@ -1677,7 +1688,6 @@ impl Renderer {
         if self.records.slot_count() > preview::MAX_SCENE_SLOTS
             || self.records.faces.len() > preview::MAX_SCENE_SLOTS
             || self.cull.objects.len() > preview::MAX_SCENE_SLOTS
-            || !preview::lists_ready(lists)
             || self.uploads.pending_copies()
             || self.writes.counts()[2] != 0
             || self.writes.bytes() > preview::MAX_JOURNAL_BYTES
@@ -1717,7 +1727,26 @@ impl Renderer {
             }
             // A future call needs fresh admission after initialization. Its
             // sequence/rate and all scene dirty ranges remain unconsumed.
+            return Ok(false);
+        }
+        Ok(true)
+    }
+
+    /// Build CPU draw lists for `session_preview::projection` (or a conservative
+    /// enclosing frustum); GPU culling is adjusted to the preview automatically.
+    pub fn request_session_preview(
+        &mut self,
+        request: crate::session_preview::Request,
+        mut params: FrameParams,
+        lists: &DrawLists,
+    ) -> Result<(), crate::session_preview::Error> {
+        use crate::session_preview::{self as preview, Error};
+        if !self.prepare_session_preview(&request)? {
             return Err(Error::Busy);
+        }
+        preview::validate_params(&params)?;
+        if !preview::lists_ready(lists) {
+            return Err(Error::SceneNotReady);
         }
         let key = self.session_preview.key(&request);
         // Build/strip before reserving the short rendezvous lock. Busy leaves
