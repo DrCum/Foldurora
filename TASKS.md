@@ -2,8 +2,10 @@
 
 - 🔧 Foldurora session host (user request, 2026-11-06; no issue): opt-in CPU
   controller, isolated manual-login workers, typed lease/handoff state machine,
-  private per-launch profiles and ordered GPU completion fences are assembled.
-  Compilation, native activation and offline runtime checks are pending; no
+  private per-launch profiles, ordered GPU completion fences and Windows
+  presentation are assembled. Strict Linux workspace/all-target Clippy passed;
+  all 17 initial core and six fence regressions passed. Complete viewer tests,
+  Windows compilation and offline native runtime checks remain pending; no
   hosted-world acceptance is claimed. Preserve independent viewer processes,
   release held input before handoff, quiesce before another login, and detach
   safely on controller loss. See [the stage and acceptance guide](docs/SESSION_HOST.md).
@@ -17,15 +19,18 @@
   - ⬜ Native Windows focus, mixed DPI, Z-order, taskbar, host failure and
     confirmed shutdown checks; human grid testing only.
 
-- 🔧 Foldurora shared-GPU contention mitigation (user crash report, 2026-11-06;
+- 🟡 Foldurora shared-GPU contention mitigation (user crash report, 2026-11-06;
   no issue): source `81c167e2` passed offline checks, but live multi-character
   testing lost graphics devices in background viewers with long GPU frames.
   Memory exhaustion and the reset's underlying cause are not established.
   Pause background world drawing before the next render packet when another
   live viewer shares the card; preserve focus/photo/VR/setting exemptions and
   separate reactive overload recovery. Verify first-packet geometry/draw gating,
-  peer expiry and isolated real-registry behavior. Human GPU coexistence
-  acceptance remains required; main and earlier checkpoints stay unmerged.
+  peer expiry and isolated real-registry behavior. Replacement source
+  `5e46f785` ([PR #4](https://github.com/DrCum/Foldurora/pull/4)) passed 7,548
+  Windows tests and the user's subsequent live character switching test without
+  the reported crashes. Longer stress and confirmed shutdown acceptance remain
+  pending; main and earlier checkpoints stay unmerged.
   The user has confirmed that the multi-monitor world viewport works; the
   optional viewport-contained interface is being implemented independently.
 
@@ -35,8 +40,12 @@
   chat, dialogs and floaters, retaining absolute native pointer/world geometry.
   Preserve anchors and automatically reduced expanded sizes; fall back to the
   native UI below 640 × 400 logical units so Preferences remains reachable.
-  Seventeen offline geometry/egui regressions and `ui-*` demo modes are prepared;
-  integrated automated checks, captures and human UI acceptance are pending.
+  Source `f5043422` ([PR #5](https://github.com/DrCum/Foldurora/pull/5)) passed
+  all 17 geometry/egui regressions, strict Clippy, 7,566 Windows tests and 7,592
+  Linux tests (one unchanged terrain precision failure, 47 ignored). Partial
+  right-half UI pixels were inspected; both bounded software-Vulkan fixtures
+  timed out before their scheduled capture. Remaining visual/native UI
+  acceptance is pending.
   This follow-up must include the separate multi-viewer GPU contention mitigation.
 
 - 🔧 Foldurora workspace follow-up (user continuation, 2026-11-06; no issue):

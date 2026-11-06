@@ -2,9 +2,9 @@
 
 This is an opt-in implementation in progress. The current source assembles a
 CPU controller, ordinary manual-login workers, private profiles, bounded local
-transport and GPU completion fences. Native activation is still being connected;
-an inactive Activate control does not mean an active hosted world is available.
-No complete host test build or physical Windows acceptance is claimed yet.
+transport and GPU completion fences. The Windows presentation adapter is
+implemented; integrated compilation, runtime checks and physical Windows
+acceptance are still being completed. No complete host test build is accepted yet.
 
 Run `aurora-viewer.exe --session-host` to select the controller mode once using
 an explicitly identified host test build. Ordinary launches retain the existing
@@ -54,7 +54,10 @@ compatibility is claimed.
   issued. It does not prove physical display scanout. Inline rendering and XR
   cannot currently provide this host fence contract.
 - Activation, host-owned viewport cutouts, detach recovery and resize handoff
-  need integrated native checks. Unsupported operations remain disabled.
+  need integrated native checks. Minimize parks the active world; restoring the
+  host currently requires explicit Activate. Device/window recreation detaches
+  to an ordinary worker rather than automatically re-adopting it. Other
+  platforms leave unsupported presentation disabled.
 - Reduced-resolution monitors and inactive-account chat are later stages;
   protocol/budget models alone are not those features.
 

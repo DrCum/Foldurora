@@ -23,8 +23,12 @@ completion and an issued present, not compositor scanout. `aurora-session`
 requires exact revoke/quiescence, a post-Prepare frame on the requested
 device/surface boundary, then grant. Stale replies do not renew leases or advance
 receive sequences. Controller failure restores reachable independent workers;
-it does not force a grid logout. Native activation is still being connected at
-this checkpoint, and an unsupported action remains disabled.
+it does not force a grid logout. The Windows adapter changes only its worker's
+native styles and geometry; the controller reveals that unowned non-topmost
+window through an exact acknowledged viewport cutout. Resize repeats the fenced
+handoff, and pending actions keep the cutout closed until their request receipt.
+Other platforms leave unsupported presentation disabled. Integrated native
+runtime acceptance remains pending.
 
 `app/busy_pause.rs` chooses shared-viewer background pause before the packet's
 world resolution and draw lists. A live peer from the same or an unknown GPU

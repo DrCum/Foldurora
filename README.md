@@ -12,8 +12,9 @@ for the implementation boundaries and remaining Windows/grid acceptance.
 Live testing confirmed the world viewport and exposed a background GPU loss
 with several characters. The preventive shared-GPU pause replacement passed the
 user's subsequent live switching test; longer stress and shutdown checks remain.
-The opt-in [session host](docs/SESSION_HOST.md) is a separate work in progress;
-its initial controller scaffold does not yet host an active world.
+The opt-in [session host](docs/SESSION_HOST.md) is a Windows-first prototype
+under validation. Its native presentation and failure handling still need
+offline runtime and human acceptance; previews and inactive chat are separate stages.
 
 **A modern Second Life viewer, written in Rust.**<br>
 A Vulkan renderer, a clean interface, and the Second Life you already know.
