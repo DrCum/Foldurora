@@ -130,7 +130,7 @@ fn offset_world_projector_and_gizmo_share_the_camera_rays_and_physical_anchors()
             let screen = proj.project(point).unwrap().0;
             assert!(screen.distance(g.cam.project(point).unwrap()) < 0.03);
             let old = original.cam.project(point).unwrap();
-            assert!((screen - old).distance(egui::vec2(1920.0, 240.0) / ppp) < 0.03);
+            assert!((screen - old - egui::vec2(1920.0, 240.0) / ppp).length() < 0.03);
             let (eye, direction) = g.cam.ray(screen.x * ppp, screen.y * ppp);
             let (projector_eye, projector_direction) = crate::ik_edit::ray(&proj, screen).unwrap();
             assert!(direction.dot((point - eye).normalize()) > 0.99999);
