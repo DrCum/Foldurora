@@ -74,13 +74,12 @@ impl ChatWindow {
         owner: &Window,
         worker: &WorkerSummary,
         snapshot: Arc<HostChatSnapshot>,
-        mut ui: ChatUi,
+        make_ui: impl FnOnce() -> ChatUi,
     ) -> anyhow::Result<Self> {
         anyhow::ensure!(
-            worker.binding == snapshot.source.binding() && ui.source() == snapshot.source && chat_ui::eligible(&snapshot),
+            worker.binding == snapshot.source.binding() && chat_ui::eligible(&snapshot),
             "chat source is not available"
         );
-        ui.sync(Some(&snapshot));
         let context = egui::Context::default();
         let theme = Theme {
             panel_alpha: 255,
@@ -111,6 +110,11 @@ impl ChatWindow {
             viewer = crate::cli::window_title()
         );
         let surface = SoftwareWindow::owned_tool(event_loop, &context, owner, title, [640.0, 640.0], [380.0, 360.0])?;
+        // Native creation can fail. Keep retained text and receipts cached
+        // until there is a surface to display this exact session again.
+        let mut ui = make_ui();
+        anyhow::ensure!(ui.source() == snapshot.source, "chat UI belongs to a different source");
+        ui.sync(Some(&snapshot));
         surface.window.set_visible(true);
         surface.window.request_redraw();
         Ok(Self {

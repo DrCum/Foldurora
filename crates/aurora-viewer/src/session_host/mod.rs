@@ -177,11 +177,11 @@ impl Shell {
                 .iter()
                 .find(|worker| worker.binding == source.binding())
                 .ok_or_else(|| anyhow::anyhow!("chat worker is unavailable"))?;
-            let ui = self
-                .closed_chats
-                .take(source, &snapshot, self.closing.is_some())
-                .unwrap_or_else(|| chat_ui::ChatUi::new(source));
-            chat_window::ChatWindow::new(event_loop, &owner.window, worker, chat.clone(), ui)
+            chat_window::ChatWindow::new(event_loop, &owner.window, worker, chat.clone(), || {
+                self.closed_chats
+                    .take(source, &snapshot, self.closing.is_some())
+                    .unwrap_or_else(|| chat_ui::ChatUi::new(source))
+            })
         })();
         match result {
             Ok(window) => self.chat_windows.push(window),
