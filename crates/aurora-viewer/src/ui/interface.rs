@@ -182,7 +182,7 @@ impl Interface {
 /// (the mockup's): "Interface hidden ·", the shortcut's keys, "or hover an
 /// edge to bring it back".
 pub fn hint(ctx: &egui::Context, p: &Palette, binding: Option<&crate::keybinds::Binding>) {
-    let screen = ctx.content_rect();
+    let screen = super::layout::toolbar_rect(ctx);
     let id = Id::unique("interface_hidden_hint");
     let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, id));
     let font = FontId::proportional(12.0);
@@ -259,7 +259,7 @@ pub enum ImmersiveAction {
 /// (`name_tags`: shown now), the HUDs (`huds`: shown now; None while Show
 /// HUDs hides them anyway, no button then), then the way out.
 pub fn immersive_buttons(ctx: &egui::Context, p: &Palette, name_tags: bool, huds: Option<bool>) -> Option<ImmersiveAction> {
-    let screen = ctx.content_rect();
+    let screen = super::layout::toolbar_rect(ctx);
     let size = Vec2::splat(HEIGHT);
     let count = if huds.is_some() { 3.0 } else { 2.0 };
     let rect = Rect::from_min_max(

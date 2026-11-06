@@ -343,6 +343,7 @@ impl App {
     pub(super) fn demo_world_viewport(&mut self) {
         let Ok(mode) = std::env::var("AURORA_DEMO_VIEWPORT") else { return };
         let (mode, restrict_ui) = mode.strip_prefix("ui-").map_or((mode.as_str(), false), |mode| (mode, true));
+        let mode = mode.strip_prefix("tools-").unwrap_or(mode);
         match mode {
             "left" => self.settings.world_viewport.half(false),
             "right" | "toggle" => self.settings.world_viewport.half(true),
@@ -365,26 +366,72 @@ impl App {
     }
 
     pub(super) fn demo_interface_viewport(&mut self) {
-        if self.demo && std::env::var("AURORA_DEMO_VIEWPORT").is_ok_and(|mode| mode == "ui-toggle") {
+        if !self.demo {
+            return;
+        }
+        let Ok(mode) = std::env::var("AURORA_DEMO_VIEWPORT") else { return };
+        if matches!(mode.as_str(), "ui-toggle" | "ui-tools-toggle") {
             let restricted = !(840..1080).contains(&self.frame_count);
             if self.settings.world_viewport.restrict_ui != restricted {
                 self.settings.world_viewport.restrict_ui = restricted;
                 log::info!("demo viewport interface: restricted={restricted} frame={}", self.frame_count);
             }
         }
+        if mode.starts_with("ui-tools-") {
+            // The floating photo panel leaves ordinary windows visible in
+            // the same offline acceptance image; output still renders full-frame.
+            self.settings.photo_window = crate::settings::PhotoWindowStyle::Panel;
+            self.panels.inventory = true;
+            self.panels.settings = true;
+            self.panels.world_map = true;
+            self.panels.minimap = true;
+            self.panels.camera_controls = true;
+            self.panels.snapshot = true;
+            self.snapshots.ui.full_frame = false;
+            if self.frame_count < 4 || self.frame_count == 600 {
+                ui::options::demo(&mut self.options_ui, "layout");
+                let native = self.egui_ctx.content_rect();
+                let free_left = if mode.ends_with("left") { native.center().x } else { native.left() };
+                for (id, position, size) in [
+                    (
+                        "inventory",
+                        egui::pos2(free_left + 12.0, native.top() + 70.0),
+                        egui::vec2(440.0, 580.0),
+                    ),
+                    (
+                        ui::options::WINDOW,
+                        egui::pos2(free_left + 470.0, native.top() + 70.0),
+                        egui::vec2(700.0, 620.0),
+                    ),
+                    (
+                        "worldmap",
+                        egui::pos2(free_left + 12.0, native.top() + 720.0),
+                        egui::vec2(650.0, 560.0),
+                    ),
+                    (
+                        "minimap",
+                        egui::pos2(free_left + 700.0, native.top() + 760.0),
+                        egui::vec2(250.0, 250.0),
+                    ),
+                ] {
+                    ui::widgets::place_floater(&self.egui_ctx, id, position, size);
+                }
+            }
+        }
+    }
+
+    pub(super) fn effective_viewport_settings(&self) -> crate::world_viewport::ViewportSettings {
+        self.settings.world_viewport.for_hosted_worker(self.host_fitted())
     }
 
     pub(super) fn world_viewport_for_size(&self, size: (u32, u32), vr: bool) -> aurora_render::WorldViewport {
-        if self.host_fitted()
-            || self.camera.mouselook()
-            || self.interface.hidden
-            || self.panels.snapshot
-            || self.snapshots.capturing.is_some()
-            || vr
-        {
-            return aurora_render::WorldViewport::full(size);
-        }
-        self.settings.world_viewport.viewport(size)
+        self.effective_viewport_settings().render_viewport(
+            size,
+            self.camera.mouselook(),
+            self.interface.hidden,
+            self.panels.snapshot || self.snapshots.capturing.is_some(),
+            vr,
+        )
     }
 
     pub(super) fn world_pointer_inside(&self) -> bool {

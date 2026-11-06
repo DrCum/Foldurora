@@ -128,9 +128,13 @@ impl Windows {
         let find = |id: u64| open.iter().find(|s| s.id.value() == id).copied();
         // glued windows are open, expanded and still side by side: closing
         // or minimizing one, or pulling an edge away, frees it
-        self.links.retain(|(a, b)| match (find(*a), find(*b)) {
-            (Some(a), Some(b)) => !a.minimized && !b.minimized && snap::touching(a.rect, b.rect),
-            _ => false,
+        let control_rooms = &self.control_rooms;
+        self.links.retain(|(a, b)| {
+            control_rooms.get(a) == control_rooms.get(b)
+                && match (find(*a), find(*b)) {
+                    (Some(a), Some(b)) => !a.minimized && !b.minimized && snap::touching(a.rect, b.rect),
+                    _ => false,
+                }
         });
         if pointer.dragged.is_none() {
             self.refresh_anchors(room);
@@ -153,6 +157,8 @@ impl Windows {
         }
         let mut moved = self.live.moved.take()?;
         let (window, start) = *moved.start.first()?;
+        let scoped = self.control_rooms.get(&window).copied();
+        let (area, room, edges) = scoped.map_or((area, room, edges), |bounds| (bounds, bounds, super::Edges::default()));
         let shown = find(window)?;
         let dragged = pointer.dragged == Some(move_id(shown.id));
         let released = pointer.stopped == Some(move_id(shown.id));
@@ -210,7 +216,11 @@ impl Windows {
             self.live.places.insert(*id, rect.min + travel);
         }
         let movers: Vec<Rect> = moved.start.iter().map(|(_, rect)| rect.translate(travel)).collect();
-        moved.others = open.iter().filter(|s| !in_group(s.id.value())).copied().collect();
+        moved.others = open
+            .iter()
+            .filter(|s| !in_group(s.id.value()) && self.control_rooms.get(&s.id.value()).copied() == scoped)
+            .copied()
+            .collect();
         let others: Vec<Rect> = moved.others.iter().map(|s| s.rect).collect();
         let scene = snap::Scene {
             movers: &movers,
@@ -269,7 +279,7 @@ impl Windows {
             .live
             .open(frame)
             .into_iter()
-            .filter(|s| s.id.value() != request.window)
+            .filter(|s| s.id.value() != request.window && self.control_rooms.get(&s.id.value()) == self.control_rooms.get(&request.window))
             .collect();
         let rects: Vec<Rect> = others.iter().map(|s| s.rect).collect();
         let movers = [request.rect];

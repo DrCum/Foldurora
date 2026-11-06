@@ -20,7 +20,7 @@ drafts while that validation is pending, as authorized for this preview.
 
 | Folderstorm capability | Aurora foundation | This pass |
 | --- | --- | --- |
-| World viewport across displays | One native winit window; world targets composed before egui | Custom world rectangle with consistent rendering, camera, HUD and input coordinates; optional viewport-bound interface; Windows recovery policy; live X11 recovery remains unaccepted |
+| World viewport across displays | One native winit window; world targets composed before egui | Custom world rectangle with consistent rendering, camera, HUD and input coordinates; optional viewport-bound toolbars and camera/snapshot controls with ordinary floaters free across the native window; Windows recovery policy; live X11 recovery remains unaccepted |
 | Several character sessions | Saved-account carousel; separate network/world per process; cross-process GPU fair sharing and background frame cap | Native Characters panel, existing-session focus, explicit manual-login opening, repeated-Open feedback and readable account/grid/phase captions |
 | Named workspaces, bars and window arrangements | Saved native floater geometry and toolbar controls | Follow-up after viewport and character acceptance |
 | Assistant inventory, appearance, camera and workspace tools | Native typed inventory, appearance and camera actions | Follow-up: a bounded permission-aware adapter; no generic input injection |
@@ -44,20 +44,29 @@ The remaining area holds normal Inventory,
 chat, map and other floaters. Those floaters remain inside this native window.
 They are not separate operating-system windows.
 
-To keep the controls beside the world, enable **Keep the interface inside the
-world viewport** in the same section. Toolbars, menus, chat, dialogs and floaters
-then use the world's logical bounds, including its top/left offset. Leave it off
-for the wider panel workspace. Existing floater anchors follow the change;
-automatically reduced expanded sizes return with the wide canvas, while an
-explicit manual resize replaces that retained size. The setting is off by default
-and survives placement presets and restarts.
+To keep the controls beside the world, enable **Keep toolbars and camera controls
+inside the world viewport** in the same section. Top/bottom/side bars, their
+menus, and camera/snapshot controls then stay in the configured world rectangle,
+including its top/left offset. Inventory, Preferences, World Map, mini-map, chat,
+Characters and other ordinary floaters can still use the full native window.
+They can remain wherever they were saved; enabling this option does not move
+them out of the world area or trap them inside it. Leave it off for full-window
+toolbar and camera-control placement too. The setting is off by default and
+survives placement presets and restarts.
 
-Below 640 × 400 logical interface units, the interface uses the full native
-window so Preferences/reset controls remain reachable. The world stays in its
-custom rectangle, the option stays enabled, and restriction resumes automatically
-when the viewport becomes large enough. Mouselook, hidden UI, photos/viewfinder
-and VR temporarily use the full interface canvas. The native title bar, system
-dialogs and separately detached native windows remain operating-system windows.
+Camera/snapshot controls fit or scroll within a small viewport so their title,
+close button and controls stay reachable, even when ordinary floater settings
+permit partial offscreen placement. Snapshot output is a separate choice:
+selecting full-frame output does not move these controls outside the configured
+viewport. Desktop mouselook retains the configured world viewport, including
+when its interface is hidden. Photo output, VR and hiding the interface outside
+mouselook can render full-frame without changing the saved control-placement
+preference. Native cursor confinement/capture still requires separate acceptance.
+Ordinary floaters
+retain full-workspace anchors and sizes, including wide geometry retained before
+the earlier blanket restriction fitted them to the viewport. An explicit manual
+resize replaces the retained size. The native title bar, system dialogs and
+separately detached native windows remain operating-system windows.
 
 Check these cases in the offline demo first, then in the user's normal session:
 
@@ -82,14 +91,24 @@ Check these cases in the offline demo first, then in the user's normal session:
    maximized, fullscreen or VR window. It must stay untouched. After an excluded
    state ends, recovery gets a fresh grace period; an already reachable layout
    clears the pending recovery.
-8. Toggle **Keep the interface inside the world viewport** with Inventory,
-   Conversations, Characters and the mini-map open. Check top/bottom/side bars,
-   chat, tooltips, context menus, dialogs and keyboard focus. Resize a floater
-   against the world edge, including a fixed-aspect media window. Toggle back
-   and check placement and retained sizes; minimize/restore and restart.
-9. Use both nonzero top/left margins and fractional DPI/interface zoom. Make the
-   viewport very narrow: the full native interface must remain usable for
-   changing or resetting it. Expand it again to resume restriction.
+8. Toggle **Keep toolbars and camera controls inside the world viewport** with
+   Inventory, Preferences, World Map, mini-map, chat and Characters open. Keep
+   ordinary windows outside the world area and use their buttons, scrolling,
+   menus and keyboard focus there. Top/bottom/side bars, toolbar menus and
+   camera/snapshot controls must stay inside it. Ordinary window menus must
+   remain usable beside their windows. Toggle back; check saved positions and
+   sizes, including a previously fitted wide floater, minimize/restore and restart.
+9. Repeat with nonzero top/left margins, fractional DPI/interface zoom and both
+   toolbar layouts. Make the viewport very narrow: camera/snapshot controls must
+   fit or scroll inside it while Preferences remains usable across the full
+   workspace. Enable partial offscreen movement for ordinary floaters and select
+   full-frame snapshot output; neither may let camera/snapshot controls escape.
+
+The corrected selective scope still requires automated, offline visual and human
+native-window acceptance; the earlier blanket-interface behavior is not its
+validation evidence. `AURORA_DEMO_VIEWPORT=ui-tools-left|ui-tools-right|ui-tools-inset|ui-tools-toggle`
+opens the relevant controls and ordinary windows without a grid login; see
+[TESTING.md](TESTING.md) for capture frames and the toggle/restart checks.
 
 A native window has one current DPI scale. A spanning-window implementation
 does not provide independent per-display scaling for its floaters. Separate

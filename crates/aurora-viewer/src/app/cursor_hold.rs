@@ -7,7 +7,7 @@
 //! While held the cursor is the tool's (the mouse capture of LLToolGun and
 //! LLToolCamera): the windows neither see it hover, nor get its clicks or its
 //! wheel. Windows and X11 cannot lock it, only confine it to the window, so
-//! mouselook brings it back to the centre whenever it moves
+//! mouselook brings it back to the world viewport's centre whenever it moves
 //! (LLToolGun::handleHover → LLViewerWindow::moveCursorToCenter,
 //! indra/newview/lltoolgun.cpp): it never drifts over a window (#1343).
 
@@ -15,6 +15,31 @@ use super::App;
 use winit::event::{ElementState, WindowEvent};
 use winit::keyboard::KeyCode;
 use winit::window::CursorGrabMode;
+
+/// A desktop mouselook hold belongs to the configured world view even when
+/// a photo temporarily renders a full-frame output. Ordinary camera drags
+/// and VR keep their existing effective-render placement.
+fn capture_center(
+    configured: aurora_render::WorldViewport,
+    rendered: aurora_render::WorldViewport,
+    mouselook: bool,
+    vr: bool,
+) -> (f32, f32) {
+    let view = if mouselook && !vr { configured } else { rendered };
+    let [x, y] = view.project([0.0, 0.0]);
+    (x, y)
+}
+
+/// Recentring is a cursor placement operation, never a clamp or rescale of
+/// raw device motion. A drag can enter mouselook without replacing its first
+/// hold, so the camera mode, rather than HoldKind alone, selects the anchor.
+fn recenter_target(hold: &CursorHold, mouselook: bool, alt_free: bool, cursor: (f32, f32), center: (f32, f32)) -> Option<(f32, f32)> {
+    if !hold.held() || !mouselook || alt_free {
+        return None;
+    }
+    (!cursor.0.is_finite() || !cursor.1.is_finite() || (cursor.0 - center.0).abs() > 0.5 || (cursor.1 - center.1).abs() > 0.5)
+        .then_some(center)
+}
 
 /// A pointer event the windows must not see while the camera holds the
 /// cursor. A release still reaches them: a press they saw before the hold
@@ -30,7 +55,7 @@ pub(super) fn held_from_ui(event: &WindowEvent) -> bool {
 /// Why the camera took the cursor: it decides where the cursor reappears.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum HoldKind {
-    /// LLToolGun::handleSelect: the cursor goes to the centre of the window
+    /// LLToolGun::handleSelect: the cursor goes to the centre of the world view
     /// and comes back there (handleDeselect).
     Mouselook,
     /// LLToolCamera::handleMouseUp on a valid click point (Alt+click, focus
@@ -164,6 +189,10 @@ impl App {
             Some(AltSwitch::Take) => self.set_mouselook_grab(true),
             None => {}
         }
+        // A viewport edit or native resize can move the anchor without a
+        // CursorMoved event. Nothing is warped while Alt or another window
+        // has the cursor, and an unchanged anchor makes no native request.
+        self.recenter_mouselook_cursor();
     }
 
     /// AltGr alone (right Alt, typed as Ctrl + Alt) is a character key, not
@@ -223,16 +252,26 @@ impl App {
     /// the centre, like LLToolGun::handleHover. The view turns from the raw
     /// motion, which the move back does not produce.
     pub(super) fn recenter_mouselook_cursor(&mut self) {
-        if self.cursor_hold.kind != Some(HoldKind::Mouselook) {
+        if !self.focused
+            || self.exit_prompt.open
+            || !self.camera.mouselook()
+            || !self.cursor_hold.held()
+            || self.alt_cursor.free()
+            || self.gfx.as_ref().is_some_and(|gfx| gfx.renderer.vr_engaged())
+        {
             return;
         }
-        let Some(g) = &self.gfx else {
+        let Some(center) = self.cursor_capture_center() else {
             return;
         };
-        let size = g.window.inner_size();
-        let center = (size.width as f32 / 2.0, size.height as f32 / 2.0);
-        if (self.cursor_pos.0 - center.0).abs() > 0.5 || (self.cursor_pos.1 - center.1).abs() > 0.5 {
-            self.move_cursor(center);
+        if let Some(target) = recenter_target(
+            &self.cursor_hold,
+            self.camera.mouselook(),
+            self.alt_cursor.free(),
+            self.cursor_pos,
+            center,
+        ) {
+            self.move_cursor(target);
         }
     }
 
@@ -273,13 +312,22 @@ impl App {
     }
 
     fn move_cursor_to_center(&mut self) {
-        let Some(g) = &self.gfx else {
-            return;
-        };
+        if let Some(center) = self.cursor_capture_center() {
+            self.move_cursor(center);
+        }
+    }
+
+    fn cursor_capture_center(&self) -> Option<(f32, f32)> {
+        let g = self.gfx.as_ref()?;
         let size = g.window.inner_size();
-        let view = self.world_viewport_for_size((size.width, size.height), g.renderer.vr_engaged());
-        let [x, y] = view.project([0.0, 0.0]);
-        self.move_cursor((x, y));
+        if size.width == 0 || size.height == 0 {
+            return None;
+        }
+        let native = (size.width, size.height);
+        let vr = g.renderer.vr_engaged();
+        let configured = self.effective_viewport_settings().viewport(native);
+        let rendered = self.world_viewport_for_size(native, vr);
+        Some(capture_center(configured, rendered, self.camera.mouselook(), vr))
     }
 
     fn move_cursor(&mut self, (x, y): (f32, f32)) {
@@ -296,6 +344,137 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hosted_mouselook_center_matches_the_fitted_world_and_restores_after_detach() {
+        let settings = crate::world_viewport::ViewportSettings {
+            enabled: true,
+            restrict_ui: true,
+            left: 25.0,
+            right: 10.0,
+            top: 15.0,
+            bottom: 20.0,
+        };
+        let native = (3200, 2000);
+        for (fitted, center) in [(false, (1840.0, 950.0)), (true, (1600.0, 1000.0)), (false, (1840.0, 950.0))] {
+            let effective = settings.for_hosted_worker(fitted);
+            let configured = effective.viewport(native);
+            let rendered = effective.render_viewport(native, true, true, false, false);
+            assert_eq!(capture_center(configured, rendered, true, false), center);
+        }
+    }
+
+    #[test]
+    fn desktop_mouselook_anchors_in_the_configured_physical_view_not_a_full_photo_output() {
+        let full = aurora_render::WorldViewport::full((3200, 2000));
+        let mut settings = crate::world_viewport::ViewportSettings::default();
+        settings.half(true);
+        for restrict_ui in [false, true] {
+            settings.restrict_ui = restrict_ui;
+            let view = settings.viewport((3200, 2000));
+            assert_eq!(capture_center(view, full, true, false), (2400.0, 1000.0));
+            assert_eq!(capture_center(view, full, false, false), (1600.0, 1000.0));
+            assert_eq!(capture_center(view, full, true, true), (1600.0, 1000.0));
+        }
+        // CursorMoved and set_cursor_position both use physical client pixels;
+        // neither native DPI nor interface zoom rescales this inset anchor.
+        let inset = aurora_render::WorldViewport {
+            x: 1000,
+            y: 250,
+            width: 2000,
+            height: 1250,
+        };
+        assert_eq!(capture_center(inset, full, true, false), (2000.0, 875.0));
+    }
+
+    #[test]
+    fn captured_cursor_motion_returns_to_the_viewport_without_a_warp_feedback_loop() {
+        let full = aurora_render::WorldViewport::full((1600, 1000));
+        let view = aurora_render::WorldViewport::from_margins((1600, 1000), [0.5, 0.0, 0.0, 0.0]);
+        let center = capture_center(view, full, true, false);
+        let mut hold = CursorHold::default();
+        hold.take(true, false, (1500.0, 700.0));
+        for at in [(800.0, 500.0), (50.0, 100.0), (1599.0, 999.0)] {
+            assert_eq!(recenter_target(&hold, true, false, at, center), Some((1200.0, 500.0)));
+        }
+        assert_eq!(recenter_target(&hold, true, false, center, center), None);
+        assert_eq!(recenter_target(&hold, true, false, (1200.4, 500.4), center), None);
+        assert_eq!(recenter_target(&hold, true, false, (f32::NAN, 500.0), center), Some(center));
+    }
+
+    #[test]
+    fn entering_mouselook_during_a_drag_and_changing_the_viewport_updates_the_anchor() {
+        let mut hold = CursorHold::default();
+        let origin = (1300.0, 600.0);
+        hold.take(false, false, origin);
+        assert_eq!(hold.take(true, false, origin), None, "retain the original drag's release behavior");
+        let right = (1200.0, 500.0);
+        assert_eq!(
+            recenter_target(&hold, false, false, origin, right),
+            None,
+            "ordinary camera drags are unchanged"
+        );
+        assert_eq!(recenter_target(&hold, true, false, origin, right), Some(right));
+        let inset = (900.0, 450.0);
+        assert_eq!(recenter_target(&hold, true, false, right, inset), Some(inset));
+        assert_eq!(hold.give_back(false), Some(Return::At(origin)));
+    }
+
+    #[test]
+    fn alt_and_focus_release_leave_the_cursor_free_for_workspace_windows() {
+        let mut hold = CursorHold::default();
+        hold.take(true, false, (1200.0, 500.0));
+        let outside = (50.0, 100.0);
+        let center = (1200.0, 500.0);
+        assert_eq!(recenter_target(&hold, true, true, outside, center), None);
+        assert_eq!(hold.give_back(true), Some(Return::Stay));
+        assert_eq!(recenter_target(&hold, true, false, outside, center), None);
+        hold.take(true, false, outside);
+        assert_eq!(recenter_target(&hold, true, false, outside, center), Some(center));
+    }
+
+    #[test]
+    fn viewport_recentring_does_not_change_relative_or_absolute_camera_sensitivity() {
+        let size = (3840, 2160);
+        let full = aurora_render::WorldViewport::full(size);
+        let right = aurora_render::WorldViewport::from_margins(size, [0.5, 0.0, 0.0, 0.0]);
+        let inset = aurora_render::WorldViewport::from_margins(size, [0.25, 0.125, 0.1, 0.2]);
+        let mut expected = None;
+        for view in [full, right, inset] {
+            let mut camera = crate::camera::Camera::default();
+            let mut agent = crate::agent::AgentState::default();
+            camera.change_to_mouselook(&mut agent, &crate::camera::CameraSettings::default(), false);
+            let mut hold = CursorHold::default();
+            hold.take(true, false, (0.0, 0.0));
+            let center = capture_center(view, full, camera.mouselook(), false);
+            let relative = crate::raw_mouse::motion((27.0, -13.0)).expect("relative input");
+            assert_eq!(relative, (27.0, -13.0));
+            camera.look(relative.0 as f32, relative.1 as f32, 1.25, &mut agent);
+            assert_eq!(recenter_target(&hold, true, false, (0.0, 0.0), center), Some(center));
+            assert_eq!(recenter_target(&hold, true, false, center, center), None);
+            // Remote/absolute devices still measure the complete virtual
+            // desktop, never the smaller rendered viewport.
+            let mut absolute = crate::raw_mouse::Absolute::default();
+            let packet = |x, y| crate::raw_mouse::Packet {
+                device: 7,
+                flags: 0x03,
+                x,
+                y,
+            };
+            absolute.packet(packet(32768, 32768), |_| (3840.0, 2160.0));
+            let delta = absolute
+                .packet(packet(32896, 32704), |_| (3840.0, 2160.0))
+                .expect("absolute device input");
+            camera.look(delta.0 as f32, delta.1 as f32, 1.25, &mut agent);
+            let aim = (agent.yaw, agent.pitch);
+            assert_ne!(aim, (0.0, 0.0));
+            if let Some(expected) = expected {
+                assert_eq!(aim, expected, "viewport geometry must not clamp or scale device motion");
+            } else {
+                expected = Some(aim);
+            }
+        }
+    }
 
     #[test]
     fn mouselook_gives_the_cursor_back_at_the_centre() {

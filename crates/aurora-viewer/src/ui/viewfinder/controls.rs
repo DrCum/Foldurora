@@ -310,7 +310,7 @@ impl Viewfinder {
         out: &mut Vec<Out>,
     ) {
         let dial = self.dial;
-        egui::Area::new(Id::unique("vf_ring"))
+        crate::ui::widgets::viewport_area(ctx, Id::unique("vf_ring"))
             .order(Order::Foreground)
             .fade_in(false)
             .pivot(Align2::CENTER_BOTTOM)
@@ -361,7 +361,7 @@ impl Viewfinder {
 
     /// The AF mode and area as choices, at the start of the bottom bar.
     pub(super) fn af_choices(&mut self, ctx: &egui::Context, p: &Palette, screen: Rect, s: &Settings, at: Pos2, out: &mut Vec<Out>) {
-        egui::Area::new(Id::unique("vf_af_choices"))
+        crate::ui::widgets::viewport_area(ctx, Id::unique("vf_af_choices"))
             .order(Order::Foreground)
             .fade_in(false)
             .pivot(Align2::LEFT_CENTER)
@@ -435,7 +435,7 @@ impl Viewfinder {
             ),
         };
         let mut pad = Pad::default();
-        egui::Area::new(Id::unique("vf_pad"))
+        crate::ui::widgets::viewport_area(ctx, Id::unique("vf_pad"))
             .order(Order::Foreground)
             .fade_in(false)
             .pivot(Align2::LEFT_BOTTOM)
@@ -561,7 +561,7 @@ impl Viewfinder {
             return;
         };
         let left = ((end - now).max(0.0)).ceil() as i32;
-        egui::Area::new(Id::unique("vf_countdown"))
+        crate::ui::widgets::viewport_area(ctx, Id::unique("vf_countdown"))
             .order(Order::Foreground)
             .fade_in(false)
             .interactable(false)

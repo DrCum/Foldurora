@@ -7,15 +7,12 @@ use serde::{Deserialize, Serialize};
 #[cfg(test)]
 mod interface_tests;
 
-/// Below this logical size, use the native canvas so Preferences and the
-/// controls that widen/reset the world remain reachable.
-const MIN_INTERFACE_SIZE: egui::Vec2 = egui::Vec2::new(640.0, 400.0);
-
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ViewportSettings {
     pub enabled: bool,
-    /// Keep the viewer interface inside the effective world rectangle.
+    /// Keep chrome and camera/photo controls in the world rectangle;
+    /// ordinary windows retain the full native workspace.
     pub restrict_ui: bool,
     /// Percentages of the native canvas, independent of monitor DPI.
     pub left: f32,
@@ -25,6 +22,28 @@ pub struct ViewportSettings {
 }
 
 impl ViewportSettings {
+    /// A fitted worker's native window already is the host's world area.
+    /// Apply this same effective policy to rendering, controls and cursor
+    /// capture without overwriting the saved standalone arrangement.
+    pub fn for_hosted_worker(&self, fitted: bool) -> Self {
+        if fitted { Self::default() } else { self.clone() }
+    }
+
+    pub fn render_viewport(
+        &self,
+        size: (u32, u32),
+        mouselook: bool,
+        interface_hidden: bool,
+        snapshot: bool,
+        vr: bool,
+    ) -> aurora_render::WorldViewport {
+        if snapshot || vr || (interface_hidden && !mouselook) {
+            aurora_render::WorldViewport::full(size)
+        } else {
+            self.viewport(size)
+        }
+    }
+
     pub fn viewport(&self, size: (u32, u32)) -> aurora_render::WorldViewport {
         if !self.enabled {
             return aurora_render::WorldViewport::full(size);
@@ -46,7 +65,10 @@ impl ViewportSettings {
     /// Use the integration's logical canvas to include this frame's native
     /// DPI and interface zoom, rather than the previous egui pass's scale.
     /// Pointer positions stay in the native canvas's absolute coordinates.
-    pub fn interface_rect(&self, view: aurora_render::WorldViewport, native: (u32, u32), screen: egui::Rect) -> Option<egui::Rect> {
+    pub fn toolbar_rect(&self, native: (u32, u32), screen: egui::Rect) -> Option<egui::Rect> {
+        // Placement deliberately uses the configured view. Snapshot output,
+        // mouselook and capture can render full-frame without moving controls.
+        let view = self.viewport(native);
         if !self.enabled
             || !self.restrict_ui
             || native.0 == 0
@@ -61,7 +83,7 @@ impl ViewportSettings {
         let scale = screen.size() / egui::vec2(native.0 as f32, native.1 as f32);
         let min = screen.min + egui::vec2(view.x as f32, view.y as f32) * scale;
         let rect = egui::Rect::from_min_size(min, egui::vec2(view.width as f32, view.height as f32) * scale);
-        (rect.width() >= MIN_INTERFACE_SIZE.x && rect.height() >= MIN_INTERFACE_SIZE.y).then_some(rect)
+        rect.is_positive().then_some(rect)
     }
 }
 
@@ -93,6 +115,37 @@ pub fn span_fits_displays(size: (u32, u32), scale: f64, position: Option<(i32, i
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fitted_workers_share_full_render_and_toolbar_geometry_until_detached() {
+        let settings = ViewportSettings {
+            enabled: true,
+            restrict_ui: true,
+            left: 25.0,
+            right: 10.0,
+            top: 15.0,
+            bottom: 20.0,
+        };
+        let size = (3200, 2000);
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+        let standalone = settings.for_hosted_worker(false);
+        let hosted = settings.for_hosted_worker(true);
+        assert_eq!(
+            standalone.render_viewport(size, true, true, false, false).rect(),
+            [800, 300, 2080, 1300]
+        );
+        assert!(standalone.toolbar_rect(size, screen).is_some());
+        for mouselook in [false, true] {
+            assert_eq!(
+                hosted.render_viewport(size, mouselook, false, false, false),
+                aurora_render::WorldViewport::full(size)
+            );
+            assert!(hosted.toolbar_rect(size, screen).is_none());
+        }
+        let detached = settings.for_hosted_worker(false);
+        assert_eq!(detached, standalone);
+        assert_eq!(settings, standalone, "hosting never rewrites the saved arrangement");
+    }
 
     #[test]
     fn old_settings_default_to_full_canvas_and_presets_keep_the_other_half_for_panels() {

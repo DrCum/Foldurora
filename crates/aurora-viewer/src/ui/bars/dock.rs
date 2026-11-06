@@ -411,7 +411,7 @@ fn emoji_picker(
     };
     let mut close = false;
     let mut escape = false;
-    let shown = egui::Area::new(Id::unique("chat_island_emoji_picker"))
+    let shown = crate::ui::widgets::viewport_area(ui.ctx(), Id::unique("chat_island_emoji_picker"))
         .fade_in(false)
         .order(egui::Order::Foreground)
         .pivot(egui::Align2::RIGHT_BOTTOM)
