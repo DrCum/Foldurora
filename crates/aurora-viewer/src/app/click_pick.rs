@@ -232,12 +232,12 @@ impl ClickWait {
 
 impl App {
     pub(super) fn ui_takes_pointer(&self) -> bool {
-        if !self.world_pointer_inside() {
-            return true;
-        }
         if self.cursor_hold.held() {
             // the hidden cursor is the camera's: the crosshair, never a window (#1343)
             return false;
+        }
+        if !self.world_pointer_inside() {
+            return true;
         }
         let ppp = self.egui_ctx.pixels_per_point();
         ui::widgets::pointer_over_ui(&self.egui_ctx, egui::pos2(self.cursor_pos.0 / ppp, self.cursor_pos.1 / ppp))
@@ -313,6 +313,9 @@ impl App {
     /// cursor without having it (`click_pick`), it asks for it and returns:
     /// `resolve_clicks` runs it again with the answer.
     fn run_click(&mut self, click: Click) {
+        if !self.world_pointer_inside() && !self.cursor_hold.held() {
+            return;
+        }
         let started = Instant::now();
         self.clicks.running = Some(click);
         match click {

@@ -205,7 +205,9 @@ impl App {
 
     /// The hand of a clickable object over a plate that acts.
     pub(super) fn plate_cursor(&self) -> bool {
-        !self.classic_name_tags() && plate_click_acts(self.plate_click_action(), self.plate_hover, self.world.agent_id)
+        self.world_pointer_inside()
+            && !self.classic_name_tags()
+            && plate_click_acts(self.plate_click_action(), self.plate_hover, self.world.agent_id)
     }
 
     /// A left press on the world: on another avatar's plate with an action

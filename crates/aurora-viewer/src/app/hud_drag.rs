@@ -15,6 +15,7 @@ impl App {
     pub(super) fn on_hud_scroll(&mut self, steps: f32) -> bool {
         self.build.sync_hud_zoom(&mut self.world);
         if !self.settings.show_huds
+            || !self.world_pointer_inside()
             || self.camera.mouselook()
             || !matches!(self.screen, Screen::World)
             || self.mouse_mode != MouseMode::None

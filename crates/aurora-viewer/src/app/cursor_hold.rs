@@ -277,7 +277,9 @@ impl App {
             return;
         };
         let size = g.window.inner_size();
-        self.move_cursor((size.width as f32 / 2.0, size.height as f32 / 2.0));
+        let view = self.world_viewport_for_size((size.width, size.height), g.renderer.vr_engaged());
+        let [x, y] = view.project([0.0, 0.0]);
+        self.move_cursor((x, y));
     }
 
     fn move_cursor(&mut self, (x, y): (f32, f32)) {

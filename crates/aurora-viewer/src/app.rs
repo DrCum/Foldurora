@@ -4013,7 +4013,11 @@ impl App {
                 },
                 _ => crate::camera::ToolMode::from_mods(ctrl, self.shift),
             };
-            let width = self.gfx.as_ref().map(|g| g.renderer.size().0 as f32).unwrap_or(1280.0);
+            let width = self
+                .gfx
+                .as_ref()
+                .map(|g| self.world_viewport_for_size(g.renderer.size(), false).width as f32)
+                .unwrap_or(1280.0);
             self.camera.drag(mode, dx, dy, width, &mut self.world.agent);
         } else if self.right_drag {
             if !self.right_gesture.motion(dx, dy, self.egui_ctx.pixels_per_point()) {
