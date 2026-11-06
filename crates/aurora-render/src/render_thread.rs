@@ -149,6 +149,28 @@ impl<J, R> Owner<J, R> {
         }))
     }
 
+    /// Build a resource-owning packet only once a free rendezvous is reserved.
+    /// Busy/contended calls never consume the caller's dirty scene journal or
+    /// staged uploads. Returning None from the builder leaves everything local.
+    pub fn try_submit_with(&self, build: impl FnOnce() -> Option<J>) -> Result<Option<Submitted<R>>, WorkerGone> {
+        let Some(mut s) = self.0.state.try_lock() else { return Ok(None) };
+        if s.worker_gone || s.closed {
+            return Err(WorkerGone);
+        }
+        if s.busy || s.job.is_some() {
+            return Ok(None);
+        }
+        let Some(job) = build() else { return Ok(None) };
+        let previous = s.result.take();
+        s.job = Some(job);
+        s.handed = Some(Instant::now());
+        self.0.to_worker.notify_one();
+        Ok(Some(Submitted {
+            previous,
+            waited: Duration::ZERO,
+        }))
+    }
+
     /// Wait for the job handed over to be done; its result unless already
     /// taken (None also when nothing was submitted).
     pub fn finish(&self) -> Result<Option<R>, WorkerGone> {
@@ -285,6 +307,7 @@ impl<J, R> Drop for Worker<J, R> {
 
 /// What the render thread is asked to do.
 pub(crate) enum Job {
+    SessionPreview(crate::session_preview::Job),
     Frame(Box<FramePacket>),
     /// Ordered after preceding frame packets. Every poll stays on the queue's
     /// owning render thread, including when ordinary frame pacing is disabled.
@@ -299,6 +322,7 @@ pub(crate) enum Job {
 }
 
 pub(crate) enum Done {
+    SessionPreview(Box<crate::session_preview::Reply>),
     Frame(Box<FrameResult>),
     SessionFence(crate::session_fence::Reply),
     Pick(Option<Vec3>),
@@ -444,6 +468,7 @@ fn run(mut backend: Backend, worker: Worker<Job, Done>) -> Backend {
             }
             Job::Pick { x, y } => Done::Pick(backend.pick_world(x, y)),
             Job::SessionFence(ticket) => Done::SessionFence(backend.session_fence(ticket)),
+            Job::SessionPreview(job) => Done::SessionPreview(Box::new(backend.session_preview(job))),
         };
         worker.complete(done);
         // frame pacing (pacing.rs): the frame is handed back; the main
@@ -463,6 +488,49 @@ mod tests {
     use std::sync::mpsc;
 
     const TICK: Duration = Duration::from_millis(40);
+
+    #[test]
+    fn optional_packet_builder_never_consumes_resources_while_busy_or_loses_a_previous_result() {
+        let (owner, worker) = handoff::<u32, u32>();
+        let built = std::cell::Cell::new(0);
+        assert!(
+            owner
+                .try_submit_with(|| {
+                    built.set(built.get() + 1);
+                    Some(7)
+                })
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            owner
+                .try_submit_with(|| {
+                    built.set(built.get() + 1);
+                    Some(8)
+                })
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(built.get(), 1, "an untaken job already applies backpressure");
+        assert_eq!(worker.next().unwrap().0, 7);
+        assert!(
+            owner
+                .try_submit_with(|| {
+                    built.set(built.get() + 1);
+                    Some(9)
+                })
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(built.get(), 1, "a running job must not consume a scene journal");
+        worker.complete(42);
+        assert!(owner.try_submit_with(|| None).unwrap().is_none());
+        assert_eq!(
+            owner.try_take_ready().unwrap(),
+            Some(42),
+            "declined construction preserves the previous reply"
+        );
+    }
 
     /// Wait for a state the other thread reaches, without assuming how long
     /// the scheduler takes to run it (CI runners and busy PCs can hold a

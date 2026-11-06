@@ -1630,6 +1630,17 @@ impl TextureTable {
     /// textures asked to, compact (throttled), record the upload of the
     /// changed locations, and rebuild the bind group when pages changed (at
     /// once for a new page, throttled for dropped ones).
+    /// Small standby views use already published texture bindings. Asset page
+    /// changes/compaction are resumed by the ordinary admitted world path.
+    pub(crate) fn session_preview_ready(&self) -> bool {
+        !self.dirty
+            && !self.rebuild_now
+            && self.store.loc_dirty.is_none()
+            && !self.store.created
+            && !self.store.dropped
+            && self.shrinks.is_empty()
+    }
+
     pub fn maintain(&mut self, device: &wgpu::Device, writes: &mut GpuWrites, uploads: &mut UploadQueue, force: bool) {
         self.receive_pages();
         for page in self.store.expired_spares(Instant::now()) {
