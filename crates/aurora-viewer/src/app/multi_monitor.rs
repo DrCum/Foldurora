@@ -30,7 +30,15 @@ impl Observation {
             .collect::<Vec<_>>();
         displays.sort_unstable();
         displays.dedup();
-        let geometry = g.window.outer_position().ok().map(|position| {
+        let normal = g.shown
+            && g.window.is_visible() == Some(true)
+            && g.window.fullscreen().is_none()
+            && !g.window.is_maximized()
+            && g.window.is_minimized() == Some(false)
+            && !g.renderer.vr_engaged();
+        // Temporary native states do not describe the normal restore rect.
+        // Keep a topology change armed until that geometry is available.
+        let geometry = normal.then(|| g.window.outer_position().ok()).flatten().map(|position| {
             let (outer, inner) = (g.window.outer_size(), g.window.inner_size());
             recovery::Geometry {
                 position: (position.x, position.y),
@@ -41,13 +49,7 @@ impl Observation {
         Self {
             displays,
             geometry,
-            blocked: blocked
-                || !g.shown
-                || g.window.is_visible() != Some(true)
-                || g.window.fullscreen().is_some()
-                || g.window.is_maximized()
-                || g.window.is_minimized() != Some(false)
-                || g.renderer.vr_engaged(),
+            blocked: blocked || !normal,
         }
     }
 }

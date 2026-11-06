@@ -412,4 +412,36 @@ mod tests {
         assert!(!recovery.pending());
         assert!(recovery.observe(t + GRACE * 4, &dual[..1], lost, false).is_none());
     }
+
+    #[test]
+    fn a_topology_change_during_a_temporary_native_state_survives_until_normal_restore() {
+        let mut recovery = Recovery::default();
+        let t = Instant::now();
+        let dual = [display(0, 0, 1920, 1080), display(1920, 0, 1920, 1080)];
+        let lost_normal = Some(window(2100, 100, 1280, 800));
+        recovery.observe(t, &dual, lost_normal, false);
+        // A visible fullscreen/maximized/VR window, a minimized/hidden
+        // window and unknown native state all withhold the normal rect.
+        assert!(recovery.observe(t + POLL, &dual[..1], None, true).is_none());
+        assert!(recovery.pending());
+        let restored = t + GRACE * 10;
+        assert!(recovery.observe(restored, &dual[..1], None, true).is_none());
+        assert!(
+            recovery.pending(),
+            "visible temporary geometry cannot disarm normal-window recovery"
+        );
+        assert!(recovery.observe(restored + POLL, &dual[..1], lost_normal, false).is_none());
+        assert!(
+            recovery
+                .observe(restored + POLL + GRACE - Duration::from_millis(1), &dual[..1], lost_normal, false)
+                .is_none()
+        );
+        assert_eq!(
+            recovery.observe(restored + POLL + GRACE, &dual[..1], lost_normal, false),
+            Some(Plan {
+                position: (320, 140),
+                inner_size: None
+            })
+        );
+    }
 }
