@@ -38,7 +38,7 @@ pub fn identity(uri: &str, username: &str) -> String {
     hash.update(uri.as_bytes());
     hash.update((username.len() as u64).to_le_bytes());
     hash.update(username.as_bytes());
-    format!("{:x}", hash.finalize())
+    hash.finalize().iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 pub fn valid_id(id: &str) -> bool {
@@ -46,7 +46,10 @@ pub fn valid_id(id: &str) -> bool {
 }
 
 fn installation_id(executable: &Path) -> String {
-    format!("{:x}", Sha256::digest(executable.as_os_str().as_encoded_bytes()))
+    Sha256::digest(executable.as_os_str().as_encoded_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,10 +96,11 @@ impl Focus {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct Reservation {
     version: u32,
     account: String,
+    nonce: Uuid,
     stamp: u64,
 }
 
@@ -357,6 +361,7 @@ fn scan(dir: &Path, accounts: &[String], stamp: u64) -> Snapshot {
         if let Some(reservation) = read_json::<Reservation>(&path)
             && reservation.version == VERSION
             && reservation.account == *account
+            && !reservation.nonce.is_nil()
         {
             if fresh(reservation.stamp, stamp, LAUNCH_SECS) {
                 snapshot.opening.insert(reservation.account);
@@ -401,6 +406,59 @@ fn launch_arguments(account: &str) -> Vec<String> {
     ]
 }
 
+fn owns_reservation(expected: &Reservation, current: &Reservation) -> bool {
+    current.version == VERSION && current.account == expected.account && current.nonce == expected.nonce
+}
+
+fn release_reservation(dir: &Path, expected: &Reservation) {
+    let path = reservation_path(dir, &expected.account);
+    if read_json::<Reservation>(&path).is_some_and(|current| owns_reservation(expected, &current)) {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+/// The account lock remains held until startup completes. A slow Vulkan or
+/// avatar-library initialization must not expire into a second launch. Only
+/// this launch nonce can be refreshed or removed by its supervisor.
+fn refresh_reservation(dir: &Path, expected: &Reservation, pid: u32, stamp: u64) -> io::Result<bool> {
+    let path = reservation_path(dir, &expected.account);
+    let Some(mut current) = read_json::<Reservation>(&path).filter(|current| owns_reservation(expected, current)) else {
+        return Ok(false);
+    };
+    if read_json::<Presence>(&record_path(dir, &expected.account)).is_some_and(|peer| peer.current(stamp) && peer.pid == pid) {
+        release_reservation(dir, expected);
+        return Ok(false);
+    }
+    current.stamp = stamp;
+    publish(&path, &current)?;
+    Ok(true)
+}
+
+fn supervise_launch(dir: &Path, reservation: &Reservation, lock: std::fs::File, receiver: std::sync::mpsc::Receiver<std::process::Child>) {
+    let Ok(mut child) = receiver.recv() else {
+        release_reservation(dir, reservation);
+        return;
+    };
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                release_reservation(dir, reservation);
+                return;
+            }
+            Ok(None) => {}
+            Err(_) => break,
+        }
+        match refresh_reservation(dir, reservation, child.id(), now()) {
+            Ok(false) => break,
+            Ok(true) | Err(_) => std::thread::sleep(Duration::from_secs(PUBLISH_SECS)),
+        }
+    }
+    drop(lock);
+    // Unix needs a wait after the child closes; this owns no renderer, no
+    // network session and no build worker while the character remains open.
+    let _ = child.wait();
+}
+
 fn open_character(dir: &Path, executable: &Path, account: &str, stamp: u64) -> io::Result<Notice> {
     if !valid_id(account) {
         return Err(io::Error::other("invalid saved character"));
@@ -424,32 +482,49 @@ fn open_character(dir: &Path, executable: &Path, account: &str, stamp: u64) -> i
         return Ok(Notice::Opening);
     }
     let pending = reservation_path(dir, account);
-    publish(
-        &pending,
-        &Reservation {
-            version: VERSION,
-            account: account.into(),
-            stamp,
-        },
-    )?;
+    let reservation = Reservation {
+        version: VERSION,
+        account: account.into(),
+        nonce: Uuid::new_v4(),
+        stamp,
+    };
+    publish(&pending, &reservation)?;
+    // Prepare the supervisor before spawning so a thread-creation failure
+    // cannot leave an unobserved live child or an unreaped Unix process.
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    let supervisor_dir = dir.to_owned();
+    let supervisor_reservation = reservation.clone();
+    let supervisor = match std::thread::Builder::new().name("character-start".into()).spawn(move || {
+        supervise_launch(&supervisor_dir, &supervisor_reservation, lock, receiver);
+    }) {
+        Ok(supervisor) => supervisor,
+        Err(error) => {
+            release_reservation(dir, &reservation);
+            return Err(error);
+        }
+    };
     let launched = std::process::Command::new(executable)
         .args(launch_arguments(account))
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn();
-    let mut child = match launched {
+    let child = match launched {
         Ok(child) => child,
         Err(error) => {
-            let _ = std::fs::remove_file(pending);
+            drop(sender);
+            let _ = supervisor.join();
+            release_reservation(dir, &reservation);
             return Err(error);
         }
     };
-    // Unix needs a wait after the child closes; this owns no renderer, no
-    // network session and no build worker while the character remains open.
-    let _ = std::thread::Builder::new().name("character-exit".into()).spawn(move || {
+    if let Err(error) = sender.send(child) {
+        let mut child = error.0;
+        let _ = child.kill();
         let _ = child.wait();
-    });
+        release_reservation(dir, &reservation);
+        return Err(io::Error::other("character supervisor stopped"));
+    }
     Ok(Notice::Opening)
 }
 
@@ -733,6 +808,7 @@ mod tests {
             &Reservation {
                 version: VERSION,
                 account: account.clone(),
+                nonce: Uuid::new_v4(),
                 stamp: 100,
             },
         )
@@ -745,6 +821,45 @@ mod tests {
         assert!(
             !reservation_path(&dir, &account).exists(),
             "failed launch must not hold the character"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn slow_child_keeps_its_reservation_until_ready_without_claiming_another_launch() {
+        let dir = temporary();
+        let account = identity("grid", "synthetic");
+        let reservation = Reservation {
+            version: VERSION,
+            account: account.clone(),
+            nonce: Uuid::new_v4(),
+            stamp: 100,
+        };
+        publish(&reservation_path(&dir, &account), &reservation).unwrap();
+        // The supervisor still owns the OS account lock throughout this
+        // simulated cold start, even after the original 30-second lease.
+        assert!(refresh_reservation(&dir, &reservation, 123, 100 + LAUNCH_SECS + 1).unwrap());
+        assert!(scan(&dir, &[account.clone()], 100 + LAUNCH_SECS + 2).opening.contains(&account));
+        assert!(matches!(
+            open_character(&dir, Path::new("/never-launch-this-program"), &account, 100 + LAUNCH_SECS + 2),
+            Ok(Notice::Opening)
+        ));
+        let mut ready = peer(100 + LAUNCH_SECS + 3);
+        ready.account = account.clone();
+        ready.pid = 123;
+        publish(&record_path(&dir, &account), &ready).unwrap();
+        assert!(!refresh_reservation(&dir, &reservation, 123, 100 + LAUNCH_SECS + 3).unwrap());
+        assert!(!reservation_path(&dir, &account).exists());
+        let replacement = Reservation {
+            nonce: Uuid::new_v4(),
+            ..reservation.clone()
+        };
+        publish(&reservation_path(&dir, &account), &replacement).unwrap();
+        assert!(!refresh_reservation(&dir, &reservation, 123, 200).unwrap());
+        release_reservation(&dir, &reservation);
+        assert_eq!(
+            read_json::<Reservation>(&reservation_path(&dir, &account)).unwrap().nonce,
+            replacement.nonce
         );
         std::fs::remove_dir_all(dir).unwrap();
     }
