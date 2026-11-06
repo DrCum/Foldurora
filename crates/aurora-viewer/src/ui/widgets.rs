@@ -239,6 +239,58 @@ fn title_in_reach(
     (asked.is_some() || kept != pos).then_some(kept)
 }
 
+#[derive(Default)]
+struct CanvasSize {
+    restore: Option<Vec2>,
+    retained: bool,
+}
+
+fn saved_canvas_size(ctx: &egui::Context, id: egui::Id) -> Option<Vec2> {
+    ctx.data_mut(|data| data.get_persisted::<Vec2>(id.with("viewport_unrestricted_size")))
+        .filter(|size| size.is_finite() && size.x > 0.0 && size.y > 0.0)
+}
+
+/// A viewport is a temporary layout limit, not a request to forget an
+/// expanded floater or map. A manual resize replaces that retained size.
+fn canvas_size(ctx: &egui::Context, id: egui::Id, expanded: Vec2, room: egui::Rect, resizing: bool, expanding: bool) -> CanvasSize {
+    let key = id.with("viewport_unrestricted_size");
+    if resizing {
+        ctx.data_mut(|data| data.remove::<Vec2>(key));
+        return CanvasSize::default();
+    }
+    let saved = saved_canvas_size(ctx, id);
+    let fits = |size: Vec2| size.x <= room.width() + 0.5 && size.y <= room.height() + 0.5;
+    if super::layout::restricted_canvas(ctx).is_some() {
+        // Expanding a minimized bar: its measured size is the compact one,
+        // while `expanded` still holds the original wide-canvas geometry.
+        let size = if expanding {
+            expanded
+        } else {
+            egui::AreaState::load(ctx, id).and_then(|state| state.size).unwrap_or(expanded)
+        };
+        let retain = saved.is_none() && size.is_finite() && size.x > 0.0 && size.y > 0.0 && !fits(size);
+        if retain {
+            ctx.data_mut(|data| data.insert_persisted(key, size));
+        }
+        CanvasSize {
+            restore: None,
+            retained: saved.is_some() || retain,
+        }
+    } else if let Some(size) = saved {
+        let restored = size.min(room.size());
+        if fits(size) {
+            ctx.data_mut(|data| data.remove::<Vec2>(key));
+        }
+        super::layout::restore_window_size(ctx, id, restored);
+        CanvasSize {
+            restore: Some(restored),
+            retained: false,
+        }
+    } else {
+        CanvasSize::default()
+    }
+}
+
 /// Two compact increment buttons beside numeric fields (LLSpinCtrl).
 /// Uses theme faces and Tabler glyphs, and inherits disabled state.
 pub(crate) fn step_buttons(ui: &mut egui::Ui, height: f32) -> i8 {
@@ -566,6 +618,14 @@ impl<'a> Floater<'a> {
         let scrolls = content_sized && ctx.data(|d| d.get_temp::<bool>(scroll_id)).unwrap_or(false);
         let mut still_too_tall = false;
         let resize_drag = resizable.then(|| resize::Drag::prepare(ctx, window_id, self.min_size)).flatten();
+        let canvas = if resizable {
+            canvas_size(ctx, window_id, expanded, work, resize_drag.is_some(), restore)
+        } else {
+            CanvasSize {
+                restore: None,
+                retained: saved_canvas_size(ctx, window_id).is_some(),
+            }
+        };
         // A resizable window left larger than the room (the viewer window
         // was made smaller) is brought down to it, as Firestorm's floaters
         // are (LLFloaterView::adjustToFitScreen).
@@ -604,6 +664,8 @@ impl<'a> Floater<'a> {
             ));
         } else if let Some(size) = opening.as_ref().and_then(|o| o.size).filter(|_| !self.auto_height) {
             w = w.fixed_size(size);
+        } else if let Some(size) = canvas.restore {
+            w = w.fixed_size(size);
         } else if restore && !self.auto_height {
             w = w.fixed_size(expanded.min(work.size()));
         } else if let Some(size) = shrink {
@@ -619,6 +681,7 @@ impl<'a> Floater<'a> {
         // the viewer window changed size: the floater follows its edges;
         // a placement asked this frame and a resize in progress come after
         let slot = super::layout::slot(ctx, window_id);
+        let slot = if canvas.retained { slot.keep_anchor() } else { slot };
         if opening.is_some() {
             super::layout::reanchor(ctx, window_id);
         }
@@ -637,8 +700,11 @@ impl<'a> Floater<'a> {
             );
             // a window of fixed shape: the snapped rect brought back to it
             match self.aspect {
-                Some((ratio, chrome)) => on_pixels(ctx, drag.keep_aspect(rect, ratio, chrome)),
-                None => rect,
+                Some((ratio, chrome)) => on_pixels(
+                    ctx,
+                    super::layout::fit_aspect_window(ctx, drag.keep_aspect(rect, ratio, chrome), ratio, chrome),
+                ),
+                None => super::layout::fit_window(ctx, rect),
             }
         });
         let size = egui::AreaState::load(ctx, window_id)
@@ -889,7 +955,7 @@ impl<'a> Floater<'a> {
             if let Some((painter, slot)) = glass_slot {
                 let radius = f32::from(ctx.global_style().visuals.window_corner_radius.nw);
                 workspace::finish_glass(
-                    &painter.with_clip_rect(response.response.rect),
+                    &painter.with_clip_rect(response.response.rect.intersect(painter.clip_rect())),
                     slot,
                     response.response.rect,
                     p,
@@ -960,6 +1026,11 @@ pub(crate) fn bare_window(
     locked: bool,
     body: impl FnOnce(&mut egui::Ui),
 ) {
+    let restricted = super::layout::restricted_canvas(ctx).is_some();
+    let room = super::layout::move_area(ctx);
+    let min_size = if restricted { min_size.min(room.size()) } else { min_size };
+    let expanded = default.size();
+    let default = super::layout::fit_window(ctx, default);
     let window_id = egui::Id::unique(id);
     if window_hidden(ctx, window_id, true, false) {
         return;
@@ -969,6 +1040,7 @@ pub(crate) fn bare_window(
     } else {
         resize::Drag::prepare(ctx, window_id, min_size)
     };
+    let canvas = canvas_size(ctx, window_id, expanded, room, drag.is_some(), false);
     let mut w = egui::Window::new(title)
         .id(window_id)
         .title_bar(false)
@@ -981,7 +1053,11 @@ pub(crate) fn bare_window(
         .movable(!locked)
         .resizable(false)
         .constrain(true);
+    if let Some(size) = canvas.restore {
+        w = w.fixed_size(size);
+    }
     let slot = super::layout::slot(ctx, window_id);
+    let slot = if canvas.retained { slot.keep_anchor() } else { slot };
     if let Some(pos) = slot.pos {
         w = w.current_pos(pos);
     }

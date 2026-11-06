@@ -4,10 +4,19 @@
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(test)]
+mod interface_tests;
+
+/// Below this logical size, use the native canvas so Preferences and the
+/// controls that widen/reset the world remain reachable.
+const MIN_INTERFACE_SIZE: egui::Vec2 = egui::Vec2::new(640.0, 400.0);
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ViewportSettings {
     pub enabled: bool,
+    /// Keep the viewer interface inside the effective world rectangle.
+    pub restrict_ui: bool,
     /// Percentages of the native canvas, independent of monitor DPI.
     pub left: f32,
     pub right: f32,
@@ -26,11 +35,33 @@ impl ViewportSettings {
     pub fn half(&mut self, right: bool) {
         *self = Self {
             enabled: true,
+            restrict_ui: self.restrict_ui,
             left: if right { 50.0 } else { 0.0 },
             right: if right { 0.0 } else { 50.0 },
             top: 0.0,
             bottom: 0.0,
         };
+    }
+
+    /// Use the integration's logical canvas to include this frame's native
+    /// DPI and interface zoom, rather than the previous egui pass's scale.
+    /// Pointer positions stay in the native canvas's absolute coordinates.
+    pub fn interface_rect(&self, view: aurora_render::WorldViewport, native: (u32, u32), screen: egui::Rect) -> Option<egui::Rect> {
+        if !self.enabled
+            || !self.restrict_ui
+            || native.0 == 0
+            || native.1 == 0
+            || !screen.is_finite()
+            || !screen.is_positive()
+            || view == aurora_render::WorldViewport::full(native)
+        {
+            return None;
+        }
+        let view = view.fitted(native);
+        let scale = screen.size() / egui::vec2(native.0 as f32, native.1 as f32);
+        let min = screen.min + egui::vec2(view.x as f32, view.y as f32) * scale;
+        let rect = egui::Rect::from_min_size(min, egui::vec2(view.width as f32, view.height as f32) * scale);
+        (rect.width() >= MIN_INTERFACE_SIZE.x && rect.height() >= MIN_INTERFACE_SIZE.y).then_some(rect)
     }
 }
 
@@ -67,11 +98,18 @@ mod tests {
     fn old_settings_default_to_full_canvas_and_presets_keep_the_other_half_for_panels() {
         let mut settings: ViewportSettings = serde_json::from_str("{}").unwrap();
         assert!(!settings.enabled);
+        assert!(!settings.restrict_ui);
         assert_eq!(settings.viewport((3840, 1080)), aurora_render::WorldViewport::full((3840, 1080)));
         settings.half(false);
         assert_eq!(settings.viewport((3840, 1080)).rect(), [0, 0, 1920, 1080]);
         settings.half(true);
         assert_eq!(settings.viewport((3840, 1080)).rect(), [1920, 0, 1920, 1080]);
+        settings.restrict_ui = true;
+        settings.half(false);
+        assert!(settings.restrict_ui, "placement presets retain the interface preference");
+        let saved = serde_json::to_string(&settings).expect("saved viewport");
+        assert_eq!(serde_json::from_str::<ViewportSettings>(&saved).unwrap(), settings);
+        settings.half(true);
         settings.left = f32::NAN;
         settings.top = 500.0;
         settings.bottom = 500.0;

@@ -208,6 +208,113 @@ fn discard(state: &Mutex<Written>, p: &Path, generation: u64) {
 /// without padding).
 pub(crate) const GAP: f32 = 0.0;
 
+fn canvas_id() -> Id {
+    Id::unique("layout_interface_canvas")
+}
+
+fn canvas_bounds_id() -> Id {
+    Id::unique("layout_interface_bounds")
+}
+
+pub(crate) fn canvas_matches(ctx: &egui::Context, expected: Rect) -> bool {
+    let actual = ctx.viewport_rect();
+    let tolerance = 1.0 / ctx.pixels_per_point();
+    (actual.min - expected.min).abs().max_elem() <= tolerance && (actual.max - expected.max).abs().max_elem() <= tolerance
+}
+
+/// Called at the start of the root UI pass, after egui adopts its logical
+/// canvas. Existing perimeter anchors follow it without resetting layouts.
+/// The last frame's bar room cannot place early floaters on the old monitor.
+pub(crate) fn begin_canvas(ctx: &egui::Context, restricted: bool) -> bool {
+    let screen = ctx.content_rect();
+    let previous = ctx.data(|d| d.get_temp::<(Rect, bool)>(canvas_id()));
+    let changed = previous != Some((screen, restricted)) && (restricted || previous.is_some_and(|(_, on)| on));
+    ctx.data_mut(|d| {
+        d.insert_temp(canvas_id(), (screen, restricted));
+        d.insert_temp(canvas_bounds_id(), restricted.then_some(screen));
+    });
+    if changed {
+        // Hit testing at begin_pass still sees the previous canvas's widget
+        // rectangles. A held click/resize must not act on a window that has
+        // just moved to the other monitor. Keyboard focus remains intact.
+        ctx.stop_dragging();
+        ctx.input_mut(|input| input.pointer = Default::default());
+        set_work_area(ctx, default_work_area(screen));
+        set_move_area(ctx, screen);
+    }
+    changed
+}
+
+pub(crate) fn restricted_canvas(ctx: &egui::Context) -> Option<Rect> {
+    ctx.data(|d| d.get_temp::<Option<Rect>>(canvas_bounds_id())).flatten()
+}
+
+/// Bars can consume the whole height of a very small world rectangle.
+/// Keep a finite, positive placement area even then; egui clips to the canvas.
+fn bounded_area(ctx: &egui::Context, area: Rect) -> Rect {
+    let Some(bounds) = restricted_canvas(ctx) else { return area };
+    if !area.is_finite() {
+        return bounds;
+    }
+    let minimum = Vec2::splat(1.0).min(bounds.size());
+    let min = area.min.clamp(bounds.min, bounds.max - minimum);
+    let max = area.max.clamp(min + minimum, bounds.max);
+    Rect::from_min_max(min, max)
+}
+
+/// A resize can bypass egui's normal movement constraint. Keep it inside
+/// the chosen interface canvas as well, including fixed-aspect floaters.
+pub(crate) fn fit_window(ctx: &egui::Context, rect: Rect) -> Rect {
+    if restricted_canvas(ctx).is_none() {
+        return rect;
+    }
+    let room = move_area(ctx);
+    let size = rect.size().max(Vec2::splat(1.0)).min(room.size());
+    let min = rect.min.clamp(room.min, (room.max - size).max(room.min));
+    Rect::from_min_size(min, size)
+}
+
+/// A fixed-aspect body shrinks uniformly inside the available room, keeping
+/// its title/frame chrome unchanged. Capping each axis separately would
+/// distort it after `Drag::keep_aspect` resolved the gesture.
+pub(crate) fn fit_aspect_window(ctx: &egui::Context, rect: Rect, ratio: f32, chrome: Vec2) -> Rect {
+    if restricted_canvas(ctx).is_none() {
+        return rect;
+    }
+    let room = move_area(ctx);
+    if !ratio.is_finite() || ratio <= 0.0 || !chrome.is_finite() || chrome.x >= room.width() || chrome.y >= room.height() {
+        return fit_window(ctx, rect);
+    }
+    let chrome = chrome.max(Vec2::ZERO);
+    let available = room.size() - chrome;
+    let body = (rect.size() - chrome).max(Vec2::ZERO);
+    let width = body.x.min(body.y * ratio).min(available.x).min(available.y * ratio);
+    let size = Vec2::new(width, width / ratio) + chrome;
+    let min = rect.min.clamp(room.min, (room.max - size).max(room.min));
+    Rect::from_min_size(min, size)
+}
+
+/// An automatically reduced floater is returning to its wide-canvas size.
+/// Follow its existing anchor using that size before egui places it.
+pub(crate) fn restore_window_size(ctx: &egui::Context, id: Id, size: Vec2) {
+    let room = move_area(ctx);
+    windows(ctx, |windows| {
+        if let Some(placed) = windows.placed.get_mut(&id.value())
+            && placed.rect.size() != size
+        {
+            placed.rect = Rect::from_min_size(placed.rect.min, size);
+            if let Some(pos) = placed
+                .anchor
+                .map(|anchor| anchor.position(room, size))
+                .filter(|pos| pos.is_finite())
+            {
+                windows.live.places.entry(id.value()).or_insert(pos);
+            }
+            windows.live.followed = None;
+        }
+    });
+}
+
 /// The part of `screen` the windows are laid out in: between the navigation
 /// bar and the bottom bar of the default skin. For what must be known before
 /// the bars are drawn; a frame then reports the real one (`set_work_area`).
@@ -226,6 +333,7 @@ fn work_area_id() -> Id {
 /// The room left by the bars this frame: call it once they are drawn,
 /// before the windows are shown.
 pub(crate) fn set_work_area(ctx: &egui::Context, area: Rect) {
+    let area = bounded_area(ctx, area);
     ctx.data_mut(|d| d.insert_temp(work_area_id(), area));
 }
 
@@ -243,8 +351,11 @@ pub(crate) fn bars_room(left: Rect, bottom_top: f32, classic_bars: bool) -> Rect
 
 /// Where the windows are laid out: the screen without the bars.
 pub(crate) fn work_area(ctx: &egui::Context) -> Rect {
-    ctx.data(|d| d.get_temp::<Rect>(work_area_id()))
-        .unwrap_or_else(|| default_work_area(ctx.content_rect()))
+    bounded_area(
+        ctx,
+        ctx.data(|d| d.get_temp::<Rect>(work_area_id()))
+            .unwrap_or_else(|| default_work_area(ctx.content_rect())),
+    )
 }
 
 fn move_area_id() -> Id {
@@ -256,13 +367,17 @@ fn move_area_id() -> Id {
 /// with the Legacy Viewer's full-width bars, the room between them. Call
 /// it with `set_work_area`.
 pub(crate) fn set_move_area(ctx: &egui::Context, area: Rect) {
+    let area = bounded_area(ctx, area);
     ctx.data_mut(|d| d.insert_temp(move_area_id(), area));
 }
 
 /// Where the windows can be moved (`set_move_area`); the work area when
 /// nothing set it.
 pub(crate) fn move_area(ctx: &egui::Context) -> Rect {
-    ctx.data(|d| d.get_temp::<Rect>(move_area_id())).unwrap_or_else(|| work_area(ctx))
+    bounded_area(
+        ctx,
+        ctx.data(|d| d.get_temp::<Rect>(move_area_id())).unwrap_or_else(|| work_area(ctx)),
+    )
 }
 
 /// Height of a floater's title bar, and the width of it that stays in the
@@ -313,6 +428,9 @@ pub(crate) fn set_window_edges(ctx: &egui::Context, edges: Edges) {
 /// The edges that stop the windows (`set_window_edges`); all of them when
 /// nothing set it.
 pub(crate) fn window_edges(ctx: &egui::Context) -> Edges {
+    if restricted_canvas(ctx).is_some() {
+        return Edges::default();
+    }
     ctx.data(|d| d.get_temp::<Edges>(edges_id())).unwrap_or_default()
 }
 
@@ -326,7 +444,11 @@ fn partial_outside(ctx: &egui::Context, id: Id) -> bool {
 }
 
 pub(crate) fn edges_for(ctx: &egui::Context, id: Id) -> Edges {
-    if partial_outside(ctx, id) { Edges::OPEN } else { window_edges(ctx) }
+    if restricted_canvas(ctx).is_none() && partial_outside(ctx, id) {
+        Edges::OPEN
+    } else {
+        window_edges(ctx)
+    }
 }
 
 /// The rect a window of `size` is kept in (`egui::Window::constrain_to`):
@@ -633,11 +755,19 @@ pub(crate) fn slot(ctx: &egui::Context, id: Id) -> Slot {
         preserve_anchor,
         initial_anchor: None,
         pos,
-        limits,
+        limits: limits.map(|limits| bounded_area(ctx, limits)),
     }
 }
 
 impl Slot {
+    /// An automatic viewport constraint can change size/position while the
+    /// same canvas remains active (for example expanding a minimized bar).
+    /// Keep the user's offset until a deliberate move/resize replaces it.
+    pub(crate) fn keep_anchor(mut self) -> Self {
+        self.preserve_anchor = true;
+        self
+    }
+
     /// An explicit default is applied only after measurement and before the
     /// first recorded placement. Saved layouts and requested moves take priority.
     pub(crate) fn default_anchor(mut self, ctx: &egui::Context, point: Align2, at: Pos2) -> Self {
@@ -772,7 +902,7 @@ pub(crate) fn resizing(ctx: &egui::Context, p: &Palette, id: Id, rect: Rect, edg
     if let Some(overlay) = overlay {
         snap::overlay::paint(ctx, p, &overlay);
     }
-    rect
+    fit_window(ctx, rect)
 }
 
 #[cfg(test)]

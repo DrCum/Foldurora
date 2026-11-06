@@ -13226,6 +13226,8 @@ local-texture-preview-hint = Texture locale — aperçu d’un fichier de cet or
 # Multi-monitor world viewport
 mm-world-viewport = Vue du monde sur plusieurs écrans
 mm-enable = Utiliser une vue du monde personnalisée
+mm-restrict-ui = Garder l’interface dans la vue du monde
+mm-restrict-ui-help = Place les barres d’outils, menus, conversations et fenêtres dans la zone du monde. Désactivez cette option pour utiliser le reste de la fenêtre pour les panneaux. L’interface utilise toute la fenêtre dans les modes temporaires plein cadre ou si la vue est inférieure à 640 × 400 unités d’interface, afin que les commandes restent accessibles.
 mm-enable-help = Étirez la fenêtre sur plusieurs écrans, puis réservez une zone au monde 3D. La caméra, les HUD et les clics dans le monde restent dans cette zone ; les panneaux peuvent occuper le reste. La vue subjective, l’interface masquée, le mode photo et la VR utilisent leur cadre entier.
 mm-presets = Position du monde
 mm-presets-help = Commencez par la moitié gauche ou droite de la fenêtre étirée, puis ajustez les marges pour des écrans de tailles différentes.

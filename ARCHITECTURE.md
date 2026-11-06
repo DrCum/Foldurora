@@ -32,7 +32,7 @@ Its native character controls discover matching local viewer instances and focus
 an existing window or open the same executable at a selected saved account's
 ordinary login screen. No simulator state moves between renderers. The display-
 spanning workspace composes the world in a separate rectangle while egui floaters
-use the whole native window; render dimensions, camera, HUD and pointer conversion
+use the whole native window by default; render dimensions, camera, HUD and pointer conversion
 must share that rectangle. See `docs/FOLDURORA.md` for scope and acceptance.
 
 `aurora-render/src/viewport.rs::WorldViewport` owns the physical-pixel rectangle,
@@ -40,7 +40,16 @@ margin normalization and projection/pick conversion. `world_viewport.rs` holds
 the disabled-by-default saved settings, and `app/multi_monitor.rs` selects the
 effective view, including temporary full-frame modes. The renderer allocates
 world targets at that view's size, composes them into its output rectangle and
-clips HUD/selection overlays. Native egui panels keep the full window canvas.
+clips HUD/selection overlays. The optional `restrict_ui` setting supplies egui
+with that rectangle in absolute logical points through `RawInput::screen_rect`,
+using the integration's current DPI/zoom. Native pointer and world coordinates
+stay unchanged. `ui/layout.rs` refreshes the cached bar room, follows existing
+anchors and bounds move/resize paths; shared floaters retain automatically
+reduced expanded sizes for the next wide canvas. A viewport below 640 × 400
+logical units falls back to the native interface canvas so reset controls remain
+reachable. Full-frame modes use it temporarily too. Pending egui zoom cannot
+record window geometry against the old canvas. `world_viewport/interface_tests.rs`
+exercises real egui input, popups, anchors, scaling and size restoration offline.
 `build::geom::Cam` carries the matching origin and extent for manipulation.
 
 `characters.rs::Manager` keeps heartbeat, discovery, focus requests and launch

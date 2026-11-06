@@ -5,7 +5,9 @@
 # Aurora Viewer
 
 The Foldurora preview branches add a multi-monitor workspace and native character
-switching. See the [feature inventory and morning test guide](docs/FOLDURORA.md)
+switching. Preferences → Layout can keep toolbars, chat and windows inside the
+world viewport, or leave the full window available for panels.
+See the [feature inventory and morning test guide](docs/FOLDURORA.md)
 for the implementation boundaries and remaining Windows/grid acceptance.
 Live testing confirmed the world viewport and exposed a background GPU loss
 with several characters. The follow-up adds preventive shared-GPU pause;

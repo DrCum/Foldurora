@@ -13230,6 +13230,8 @@ local-texture-preview-hint = Local texture — preview from a file on this compu
 # Multi-monitor world viewport
 mm-world-viewport = Multi-monitor world viewport
 mm-enable = Use a custom world viewport
+mm-restrict-ui = Keep the interface inside the world viewport
+mm-restrict-ui-help = Place toolbars, menus, chat and windows inside the world area. Turn this off to use the rest of the viewer window for panels. The interface uses the full window in temporary full-frame modes or when the viewport is smaller than 640 × 400 interface units, so its controls stay reachable.
 mm-enable-help = Stretch the viewer window across monitors, then reserve one area for the 3D world. Camera, HUDs and world clicks stay in that area; panels can use the rest. Mouselook, hidden UI, photo mode and VR use their full frame.
 mm-presets = World placement
 mm-presets-help = Start with the left or right half of a stretched window, then adjust the margins for displays of different sizes.

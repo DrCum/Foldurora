@@ -20,7 +20,7 @@ drafts while that validation is pending, as authorized for this preview.
 
 | Folderstorm capability | Aurora foundation | This pass |
 | --- | --- | --- |
-| World viewport across displays | One native winit window; world targets composed before egui | Custom world rectangle with consistent rendering, camera, HUD and input coordinates; gentle live recovery on Windows/X11 |
+| World viewport across displays | One native winit window; world targets composed before egui | Custom world rectangle with consistent rendering, camera, HUD and input coordinates; optional viewport-bound interface; gentle live recovery on Windows/X11 |
 | Several character sessions | Saved-account carousel; separate network/world per process; cross-process GPU fair sharing and background frame cap | Native Characters panel, existing-session focus, explicit manual-login opening, repeated-Open feedback and readable account/grid/phase captions |
 | Named workspaces, bars and window arrangements | Saved native floater geometry and toolbar controls | Follow-up after viewport and character acceptance |
 | Assistant inventory, appearance, camera and workspace tools | Native typed inventory, appearance and camera actions | Follow-up: a bounded permission-aware adapter; no generic input injection |
@@ -43,6 +43,21 @@ the four percentage margins. **Full window** restores the ordinary view.
 The remaining area holds normal Inventory,
 chat, map and other floaters. Those floaters remain inside this native window.
 They are not separate operating-system windows.
+
+To keep the controls beside the world, enable **Keep the interface inside the
+world viewport** in the same section. Toolbars, menus, chat, dialogs and floaters
+then use the world's logical bounds, including its top/left offset. Leave it off
+for the wider panel workspace. Existing floater anchors follow the change;
+automatically reduced expanded sizes return with the wide canvas, while an
+explicit manual resize replaces that retained size. The setting is off by default
+and survives placement presets and restarts.
+
+Below 640 × 400 logical interface units, the interface uses the full native
+window so Preferences/reset controls remain reachable. The world stays in its
+custom rectangle, the option stays enabled, and restriction resumes automatically
+when the viewport becomes large enough. Mouselook, hidden UI, photos/viewfinder
+and VR temporarily use the full interface canvas. The native title bar, system
+dialogs and separately detached native windows remain operating-system windows.
 
 Check these cases in the offline demo first, then in the user's normal session:
 
@@ -67,6 +82,14 @@ Check these cases in the offline demo first, then in the user's normal session:
    maximized, fullscreen or VR window. It must stay untouched. After an excluded
    state ends, recovery gets a fresh grace period; an already reachable layout
    clears the pending recovery.
+8. Toggle **Keep the interface inside the world viewport** with Inventory,
+   Conversations, Characters and the mini-map open. Check top/bottom/side bars,
+   chat, tooltips, context menus, dialogs and keyboard focus. Resize a floater
+   against the world edge, including a fixed-aspect media window. Toggle back
+   and check placement and retained sizes; minimize/restore and restart.
+9. Use both nonzero top/left margins and fractional DPI/interface zoom. Make the
+   viewport very narrow: the full native interface must remain usable for
+   changing or resetting it. Expand it again to resume restriction.
 
 A native window has one current DPI scale. A spanning-window implementation
 does not provide independent per-display scaling for its floaters. Separate
