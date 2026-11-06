@@ -443,7 +443,7 @@ mod tests {
                 frame: 0,
             }
         }
-        fn show(&mut self, snapshot: Option<&HostChatSnapshot>, events: Vec<Event>) -> Option<SendDraft> {
+        fn show(&mut self, snapshot: Option<&HostChatSnapshot>, mut events: Vec<Event>) -> Option<SendDraft> {
             self.frame += 1;
             let palette = crate::theme::Theme {
                 panel_alpha: 255,
@@ -458,12 +458,12 @@ mod tests {
                     _ => None,
                 })
                 .unwrap_or_default();
+            events.insert(0, Event::ModifiersChanged(modifiers));
             let mut action = None;
             let mut output = self.context.run_ui(
                 egui::RawInput {
                     screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(640.0, 640.0))),
                     time: Some(self.frame as f64 / 60.0),
-                    modifiers,
                     events,
                     ..Default::default()
                 },

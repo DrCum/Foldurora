@@ -82,7 +82,7 @@ impl TryFrom<(Binding, u64)> for ChatSource {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "id", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Conversation {
     /// Always literal normal public-channel text, never chatbar interpretation.
