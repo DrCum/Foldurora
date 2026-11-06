@@ -4359,7 +4359,7 @@ impl App {
 
     /// Voice transmission wanted (microphone button / push-to-talk).
     fn talking(&self) -> bool {
-        if self.minimized_mute.active || self.speak_denied().is_some() {
+        if !self.host_input_allowed() || self.minimized_mute.active || self.speak_denied().is_some() {
             false
         } else if self.settings.audio.mic_hold {
             self.mic_button_held || self.settings.keybinds.held(Action::PushToTalk, &self.down, self.mods())
@@ -5927,6 +5927,10 @@ impl App {
     /// position, 300 ms after the last move / resize: while maximizing,
     /// Windows reports the new geometry before the window reads as maximized.
     fn record_window_geometry(&mut self) {
+        if self.host_fitted() {
+            self.geom_changed = None;
+            return;
+        }
         let Some(t) = self.geom_changed else {
             return;
         };
@@ -7470,6 +7474,10 @@ impl App {
     }
 
     fn update_move_input(&mut self, typing: bool, dt: f32) {
+        if !self.host_input_allowed() {
+            self.input = Default::default();
+            return;
+        }
         self.poll_joystick(dt);
         if self.joystick_flycam_step(dt) {
             return;
@@ -8449,7 +8457,8 @@ impl App {
         self.sync_minimized_mute();
         // a window behind gives its textures back (texture_budget::Background)
         let minimized = self.gfx.as_ref().and_then(|g| g.window.is_minimized()).unwrap_or(false);
-        self.scene.textures.set_window_state(self.focused, minimized);
+        let render_priority = self.host_render_priority();
+        self.scene.textures.set_window_state(render_priority, minimized);
         // (a demo or a timed run neither publishes nor reads, instances.rs)
         let timed = self.capture.is_some() || self.frame_profile.enabled();
         let sharing = crate::instances::coexistence_enabled(self.demo, timed);
@@ -8457,7 +8466,7 @@ impl App {
             sharing,
             crate::instances::Own {
                 usage: self.scene.textures.video_usage(),
-                active: self.focused && !minimized,
+                active: render_priority && !minimized,
                 luid: self.scene.textures.card_luid(),
             },
         );
@@ -8601,6 +8610,7 @@ impl App {
             && self.camera.mouselook()
             && self.vr_camera.is_none()
             && self.focused
+            && self.host_input_allowed()
             && !self.cursor_hold.held()
             && !self.alt_cursor.free()
         {
@@ -8924,24 +8934,30 @@ impl App {
         let Some(mut gfx) = self.gfx.take() else {
             return;
         };
-        self.apply_local_imports(&mut gfx.renderer);
-        self.wearable_ui.preview.apply(&mut self.world, &mut self.scene, &mut gfx.renderer);
-        for command in self.local_bakes.update(&self.world, &mut self.scene) {
-            self.send(command);
+        if self.host_submission_allowed() {
+            self.apply_local_imports(&mut gfx.renderer);
+            self.wearable_ui.preview.apply(&mut self.world, &mut self.scene, &mut gfx.renderer);
+            for command in self.local_bakes.update(&self.world, &mut self.scene) {
+                self.send(command);
+            }
+            if let Some(bakes) = self.local_bakes.take_sent() {
+                self.world.show_local_bakes(bakes);
+            }
+            self.local_bakes.apply(&mut self.scene, &mut gfx.renderer);
+            self.update_blender_live(&mut gfx.renderer);
         }
-        if let Some(bakes) = self.local_bakes.take_sent() {
-            self.world.show_local_bakes(bakes);
-        }
-        self.local_bakes.apply(&mut self.scene, &mut gfx.renderer);
-        self.update_blender_live(&mut gfx.renderer);
         let t_up = Instant::now();
         let (w, h) = gfx.renderer.size();
         // a photo drawn at its own size this frame: its proportions, the
         // part of it this frame draws, the height its details are chosen for
-        self.photo_update(&gfx.renderer);
-        self.viewfinder_frame(&mut gfx.renderer);
-        self.photo_isolate_frame(&mut gfx.renderer);
-        let photo = self.photo_frame(&mut gfx.renderer);
+        let photo = if self.host_submission_allowed() {
+            self.photo_update(&gfx.renderer);
+            self.viewfinder_frame(&mut gfx.renderer);
+            self.photo_isolate_frame(&mut gfx.renderer);
+            self.photo_frame(&mut gfx.renderer)
+        } else {
+            None
+        };
         // A second viewer can occupy the card before a slow frame finishes.
         // Select the pause before this packet's targets and world draw lists.
         self.busy_pause_frame(gfx.renderer.vr_engaged());
@@ -9342,9 +9358,38 @@ impl App {
             });
         }
         self.frame_profile.lap(Lap::AgentCamera);
+        if self.host_session.is_some() {
+            self.advance_loading_screen();
+        }
+        // Standby keeps the normal CPU/network/agent work above, but creates
+        // no scene uploads or egui frames. Atlas patches cannot accumulate
+        // over an indefinitely parked session. Loading progression is CPU-only.
+        if self.in_world() && (!self.host_world_allowed() || !self.host_submission_allowed()) {
+            self.update_ao(now);
+        }
+        if !self.host_submission_allowed() {
+            if let Some(controls) = late_controls {
+                self.net.set_controls(controls);
+            }
+            self.update_maps();
+            self.poll_key_to_name();
+            self.frame_start = Instant::now();
+            self.frame_count += 1;
+            self.gpu_stall_frame(&gfx.renderer);
+            self.gfx = Some(gfx);
+            if let Some(safe) = self.gpu_stall.recover.take() {
+                if !self.recover_from_gpu_loss(event_loop, safe) {
+                    crate::crash::gpu_lost();
+                    self.close_while_gpu_stalled(event_loop);
+                }
+            } else if std::mem::take(&mut self.gpu_stall.close) {
+                self.close_while_gpu_stalled(event_loop);
+            }
+            return;
+        }
         // ---- scene
         let in_world = self.in_world();
-        if in_world {
+        if in_world && self.host_world_allowed() {
             self.scene.draw_distance = self.settings.draw_distance;
             self.scene.synchronize_animations = self.settings.synchronize_animations;
             self.scene.ground_avatar_feet = self.settings.ground_avatar_feet;
@@ -9882,22 +9927,8 @@ impl App {
         // the parts of the `Params` lap (`p_*` in the profile)
         let mut t_part = Instant::now();
 
-        // ---- loading -> world transition
-        if let Screen::Loading { since } = self.screen {
-            let moved = self.move_complete_at.map(|t| t.elapsed().as_secs_f32()).unwrap_or(0.0);
-            let terrain = self.world.terrain_progress();
-            if self.world.movement_complete && since.elapsed() > Duration::from_millis(1500) && (terrain > 0.97 || moved > 6.0) {
-                self.screen = Screen::World;
-                self.world.notifications.started = true;
-                self.camera.snap();
-                // the loading screen fades out over the world
-                let mut o = TpOverlay::new(String::new(), true);
-                o.start = since;
-                o.shown = 1.0;
-                o.end = Some(Instant::now());
-                self.tp_overlay = Some(o);
-                self.was_teleporting = self.world.teleporting;
-            }
+        if self.host_session.is_none() {
+            self.advance_loading_screen();
         }
         // diagnostic after an arrival: what the simulator and our avatar say
         // (T-pose / stuck after a teleport)
@@ -11103,7 +11134,7 @@ impl App {
         // capture is waited for, its pixels are read in the tail below.
         // (nothing of the scene while the 3D drawing is paused behind,
         // texture_budget::Background, busy_pause.rs)
-        let lists = if self.in_world() && !self.drawing_paused() {
+        let lists = if self.in_world() && self.host_world_allowed() && !self.drawing_paused() {
             &self.scene.lists
         } else {
             &self.empty_lists
@@ -11123,11 +11154,18 @@ impl App {
         } else {
             gfx.renderer.render(fp, lists, Some(egui_frame))
         };
+        if self
+            .host_session
+            .as_mut()
+            .is_some_and(|bridge| bridge.after_submission(&mut gfx.renderer))
+        {
+            self.release_host_input();
+        }
         self.photo_gpu_time(&stats);
         self.photo_drawn(&mut gfx.renderer);
         self.last_render = stats;
         self.busy_pause_frame(gfx.renderer.vr_engaged());
-        if stats.presented && !gfx.shown {
+        if stats.presented && !gfx.shown && !self.host_fitted() {
             gfx.shown = true;
             // On Windows, maximizing can show even a hidden window. Defer
             // it until its client area already contains a rendered image;
@@ -11176,7 +11214,7 @@ impl App {
         let timed = self.capture.is_some() || self.frame_profile.enabled();
         let cap = frame_cap(
             &self.settings,
-            self.focused,
+            self.host_render_priority(),
             self.in_world(),
             monitor_hz,
             timed,
@@ -11186,7 +11224,7 @@ impl App {
         // (instances.rs)
         let cap = crate::instances::throttle(
             cap,
-            self.focused,
+            self.host_render_priority(),
             self.instances.peers().in_front(),
             timed || !self.settings.background_fps_cap,
         );
@@ -11194,7 +11232,7 @@ impl App {
         let target = (cap >= 1.0 && !paced_by_vsync).then(|| Duration::from_secs_f32(1.0 / cap));
         // (while Windows holds the window, this thread is left to its loop:
         // the wait is done between the frames, on another thread)
-        if !crate::window_hold::paces(target) {
+        if self.host_submission_allowed() && !crate::window_hold::paces(target) {
             // frame pacing (aurora-render pacing.rs): when the GPU sets the
             // pace, the next frame reads its input once the GPU has finished
             // the frame before this one, instead of waiting behind it with
@@ -20123,6 +20161,39 @@ impl ApplicationHandler for App {
             return;
         }
 
+        if !self.host_input_allowed()
+            && matches!(
+                &event,
+                WindowEvent::KeyboardInput { .. }
+                    | WindowEvent::Ime(_)
+                    | WindowEvent::ModifiersChanged(_)
+                    | WindowEvent::CursorMoved { .. }
+                    | WindowEvent::CursorEntered { .. }
+                    | WindowEvent::CursorLeft { .. }
+                    | WindowEvent::MouseInput { .. }
+                    | WindowEvent::MouseWheel { .. }
+                    | WindowEvent::Touch(_)
+            )
+        {
+            return;
+        }
+        if let WindowEvent::Resized(size) = &event {
+            // A queued pre-fit size must not reconfigure the prepared surface.
+            if self.host_fitted() && self.gfx.as_ref().is_some_and(|gfx| gfx.window.inner_size() != *size) {
+                return;
+            }
+            self.host_resized(size.width, size.height);
+        }
+        if matches!(&event, WindowEvent::ScaleFactorChanged { .. })
+            && self.host_fitted()
+            && let Some(size) = self.gfx.as_ref().map(|gfx| gfx.window.inner_size())
+        {
+            self.host_resized(size.width, size.height);
+        }
+        if matches!(&event, WindowEvent::CloseRequested) && !self.host_input_allowed() {
+            self.invalidate_host_display();
+        }
+
         // the digits of a Windows Alt code typed in a text field are kept
         // from it (alt_codes.rs); the character comes at Alt's release
         if self.alt_code_key(&event) {
@@ -20638,6 +20709,9 @@ impl ApplicationHandler for App {
     }
 
     fn device_event(&mut self, _el: &ActiveEventLoop, _id: winit::event::DeviceId, event: DeviceEvent) {
+        if !self.host_input_allowed() {
+            return;
+        }
         if let DeviceEvent::MouseMotion { delta } = event {
             // a remote desktop's or a tablet's position: its motion (raw_mouse.rs)
             let Some(delta) = crate::raw_mouse::motion(delta) else {
@@ -20668,12 +20742,24 @@ impl ApplicationHandler for App {
         self.tick_monitor_recovery(event_loop);
         self.attention_window();
         self.external_links();
-        if self.gfx.as_ref().is_some_and(|g| !g.shown) {
+        if !self.host_submission_allowed() {
+            let due = self.frame_start + Duration::from_millis(50);
+            if Instant::now() >= due {
+                self.frame(event_loop);
+            }
+            event_loop.set_control_flow(winit::event_loop::ControlFlow::WaitUntil(
+                self.frame_start + Duration::from_millis(50),
+            ));
+        } else if self.host_session.as_ref().is_some_and(|bridge| bridge.needs_prepared_frame())
+            || self.gfx.as_ref().is_some_and(|g| !g.shown)
+        {
+            event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
             // Hidden windows may receive no RedrawRequested event. Keep
             // producing frames until a real presentation makes it visible,
             // including when the render thread returns the previous frame.
             self.frame(event_loop);
         } else if let Some(g) = &self.gfx {
+            event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
             g.window.request_redraw();
         }
     }

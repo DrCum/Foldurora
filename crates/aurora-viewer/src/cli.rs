@@ -88,9 +88,10 @@ pub fn get() -> &'static Cli {
                 .collect::<Vec<_>>()
                 .join(", ");
             println!(
-                "{}\n{}",
+                "{}\n{}\n{}",
                 aurora_i18n::tr!("cli-help", languages = languages),
-                aurora_i18n::tr!("character-switch-cli-help")
+                aurora_i18n::tr!("character-switch-cli-help"),
+                aurora_i18n::tr!("host-cli-help")
             );
             std::process::exit(0);
         }

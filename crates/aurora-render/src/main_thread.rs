@@ -1588,12 +1588,6 @@ impl Renderer {
         self.session_fences.cancel(ticket)
     }
 
-    /// Preserve the UI atlas while the viewer keeps CPU/network work alive
-    /// without submitting a standby/transition frame.
-    pub fn retain_session_ui(&mut self, mut ui: crate::EguiFrame) {
-        self.held_textures.0.append(std::mem::take(&mut ui.textures_delta));
-    }
-
     fn drive_session_fence(&mut self) -> Result<(), SessionFenceError> {
         let ready = match &self.host {
             Host::Thread { owner, .. } => owner.try_take_ready(),

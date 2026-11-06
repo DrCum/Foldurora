@@ -132,14 +132,14 @@ impl App {
     /// The 3D drawing pauses: behind past the driver's memory budget
     /// (texture_budget::Background), or behind on a busy card (this module).
     pub(super) fn drawing_paused(&self) -> bool {
-        self.scene.textures.drawing_paused() || self.busy_pause.paused()
+        !self.host_world_allowed() || self.scene.textures.drawing_paused() || self.busy_pause.paused()
     }
 
     /// Before the packet is built and after rendering: sharing needs no
     /// completed GPU measurement; the slow-frame fallback uses each new one.
     pub(super) fn busy_pause_frame(&mut self, vr: bool) {
         let mut timed = self.capture.is_some() || self.frame_profile.enabled();
-        let (mut behind, mut gpu_ms) = (!self.focused, self.last_render.gpu_ms);
+        let (mut behind, mut gpu_ms) = (!self.host_render_priority(), self.last_render.gpu_ms);
         if self.demo && !self.busy_pause.demo_released && demo_from().is_some_and(|from| self.frame_count >= from) {
             // (a new measure each frame)
             let ms = SLOW_MS * 2.0 + (self.frame_count % 2) as f32;

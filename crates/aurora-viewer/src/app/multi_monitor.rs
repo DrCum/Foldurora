@@ -224,6 +224,9 @@ impl X11Pointer {
 
 impl App {
     pub(super) fn tick_monitor_recovery(&mut self, event_loop: &ActiveEventLoop) {
+        if self.host_fitted() {
+            return;
+        }
         let native_now = Instant::now();
         let state = &mut self.monitor_recovery;
         let Some(g) = &self.gfx else {
@@ -372,7 +375,13 @@ impl App {
     }
 
     pub(super) fn world_viewport_for_size(&self, size: (u32, u32), vr: bool) -> aurora_render::WorldViewport {
-        if self.camera.mouselook() || self.interface.hidden || self.panels.snapshot || self.snapshots.capturing.is_some() || vr {
+        if self.host_fitted()
+            || self.camera.mouselook()
+            || self.interface.hidden
+            || self.panels.snapshot
+            || self.snapshots.capturing.is_some()
+            || vr
+        {
             return aurora_render::WorldViewport::full(size);
         }
         self.settings.world_viewport.viewport(size)
