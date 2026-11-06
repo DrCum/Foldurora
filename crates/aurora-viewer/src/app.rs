@@ -681,6 +681,7 @@ pub struct App {
     tp_dest: Option<String>,
     /// Window moved / resized: its normal geometry is recorded once settled.
     geom_changed: Option<Instant>,
+    monitor_recovery: multi_monitor::MonitorRecovery,
     frame_start: Instant,
     /// A Windows Alt code being typed in a text field (alt_codes.rs), and
     /// the characters it gave, for egui's next frame.
@@ -1574,6 +1575,7 @@ impl App {
             demo_radar_walk: false,
             tp_dest: None,
             geom_changed: None,
+            monitor_recovery: Default::default(),
             frame_start: Instant::now(),
             alt_codes: Default::default(),
             alt_text: Vec::new(),
@@ -20608,6 +20610,7 @@ impl ApplicationHandler for App {
             self.apply_fullscreen_setting();
         }
         self.record_window_geometry();
+        self.tick_monitor_recovery(event_loop);
         self.attention_window();
         self.external_links();
         if self.gfx.as_ref().is_some_and(|g| !g.shown) {

@@ -119,6 +119,7 @@ pub struct Snapshot {
 pub enum Notice {
     Opening,
     FocusRequested,
+    Busy,
     Failed,
     Demo,
     OtherGrid,
@@ -357,17 +358,17 @@ fn scan(dir: &Path, accounts: &[String], stamp: u64) -> Snapshot {
                 let _ = std::fs::remove_file(path);
             }
         }
+        // Readiness/nonce ownership retires pending files; a new launch
+        // replaces them under its lock. Discovery must not remove a paused
+        // cold child's pending file just because its lease expires.
         let path = reservation_path(dir, account);
         if let Some(reservation) = read_json::<Reservation>(&path)
             && reservation.version == VERSION
             && reservation.account == *account
             && !reservation.nonce.is_nil()
+            && fresh(reservation.stamp, stamp, LAUNCH_SECS)
         {
-            if fresh(reservation.stamp, stamp, LAUNCH_SECS) {
-                snapshot.opening.insert(reservation.account);
-            } else {
-                let _ = std::fs::remove_file(path);
-            }
+            snapshot.opening.insert(reservation.account);
         }
     }
     snapshot.peers.sort_by_key(|peer| peer.pid);
@@ -394,6 +395,53 @@ fn request_focus(dir: &Path, expected: &Presence, stamp: u64) -> io::Result<()> 
             stamp,
         },
     )
+}
+
+fn focus_existing_character(dir: &Path, account: &str, stamp: u64) -> io::Result<Option<Notice>> {
+    if let Some(peer) = read_json::<Presence>(&record_path(dir, account)).filter(|peer| peer.account == account && peer.current(stamp)) {
+        allow_foreground(peer.pid);
+        request_focus(dir, &peer, stamp)?;
+        return Ok(Some(Notice::FocusRequested));
+    }
+    Ok(None)
+}
+
+/// Observes a launch without creating files, admitting a process or changing
+/// the owner's reservation. The avatar gate covers every related account.
+fn launch_in_progress(dir: &Path, account: &str) -> io::Result<bool> {
+    let lock = match std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(dir.join(format!("{account}.lock")))
+    {
+        Ok(lock) => lock,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    match lock.try_lock() {
+        Ok(()) => Ok(false),
+        Err(std::fs::TryLockError::WouldBlock) => Ok(true),
+        Err(std::fs::TryLockError::Error(error)) => Err(error),
+    }
+}
+
+fn contended_avatar_feedback(dir: &Path, account: &str, stamp: u64) -> io::Result<Notice> {
+    if let Some(notice) = focus_existing_character(dir, account, stamp)? {
+        return Ok(notice);
+    }
+    let pending = read_json::<Reservation>(&reservation_path(dir, account)).is_some_and(|reservation| {
+        reservation.version == VERSION
+            && reservation.account == account
+            && !reservation.nonce.is_nil()
+            && fresh(reservation.stamp, stamp, LAUNCH_SECS)
+    });
+    if pending || launch_in_progress(dir, account)? {
+        Ok(Notice::Opening)
+    } else {
+        // The avatar lock may belong to another grid, or its owner has not
+        // published yet. Never infer permission to launch this target.
+        Ok(Notice::Busy)
+    }
 }
 
 /// The command line carries no name, password, grid URI, token or SLURL.
@@ -471,13 +519,22 @@ fn open_character(dir: &Path, executable: &Path, account: &str, stamp: u64) -> i
         .create(true)
         .truncate(false)
         .open(dir.join(format!("{account}.lock")))?;
-    lock.try_lock().map_err(io::Error::other)?;
-    let snapshot = scan(dir, &[account.to_owned()], stamp);
-    if let Some(peer) = snapshot.peers.iter().find(|peer| peer.account == account) {
-        allow_foreground(peer.pid);
-        request_focus(dir, peer, stamp)?;
-        return Ok(Notice::FocusRequested);
+    let held = match lock.try_lock() {
+        Ok(()) => true,
+        Err(std::fs::TryLockError::WouldBlock) => false,
+        Err(std::fs::TryLockError::Error(error)) => return Err(error),
+    };
+    if let Some(notice) = focus_existing_character(dir, account, stamp)? {
+        return Ok(notice);
     }
+    if !held {
+        // Another launcher or its cold-start supervisor owns this account.
+        // A queued duplicate is already opening, including before its pending
+        // file appears or after readiness removes it. Do not scan/retire the
+        // owner's reservation while its launch lock is held.
+        return Ok(Notice::Opening);
+    }
+    let snapshot = scan(dir, &[account.to_owned()], stamp);
     if snapshot.opening.contains(account) {
         return Ok(Notice::Opening);
     }
@@ -532,6 +589,16 @@ fn open_character(dir: &Path, executable: &Path, account: &str, stamp: u64) -> i
 /// Do not automate two different grid logins that would write that same store.
 fn open_saved_character(dir: &Path, executable: &Path, account: &str, stamp: u64) -> io::Result<Notice> {
     let accounts = crate::login_accounts::load();
+    open_catalogue_character(dir, executable, account, stamp, &accounts)
+}
+
+fn open_catalogue_character(
+    dir: &Path,
+    executable: &Path,
+    account: &str,
+    stamp: u64,
+    accounts: &[crate::login_accounts::Account],
+) -> io::Result<Notice> {
     let Some(target) = accounts.iter().find(|target| account_id(target) == account) else {
         return Err(io::Error::other("saved character no longer available"));
     };
@@ -543,7 +610,11 @@ fn open_saved_character(dir: &Path, executable: &Path, account: &str, stamp: u64
             .create(true)
             .truncate(false)
             .open(dir.join(format!("avatar-{avatar}.lock")))?;
-        avatar_lock.try_lock().map_err(io::Error::other)?;
+        match avatar_lock.try_lock() {
+            Ok(()) => {}
+            Err(std::fs::TryLockError::WouldBlock) => return contended_avatar_feedback(dir, account, stamp),
+            Err(std::fs::TryLockError::Error(error)) => return Err(error),
+        }
         let related: Vec<_> = accounts
             .iter()
             .filter(|candidate| candidate.agent == Some(avatar))
@@ -556,6 +627,11 @@ fn open_saved_character(dir: &Path, executable: &Path, account: &str, stamp: u64
         let snapshot = scan(dir, &related, stamp);
         if snapshot.peers.iter().any(|peer| peer.account != account) || snapshot.opening.iter().any(|opening| opening != account) {
             return Ok(Notice::OtherGrid);
+        }
+        for related_account in related.iter().filter(|related| related.as_str() != account) {
+            if launch_in_progress(dir, related_account)? {
+                return Ok(Notice::OtherGrid);
+            }
         }
     }
     open_character(dir, executable, account, stamp)
@@ -826,6 +902,212 @@ mod tests {
     }
 
     #[test]
+    fn queued_duplicate_opens_are_idempotent_through_cold_start_and_ready_handoff() {
+        let dir = temporary();
+        let account = identity("grid", "synthetic");
+        let lock = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(dir.join(format!("{account}.lock")))
+            .unwrap();
+        lock.lock().unwrap();
+        let executable = Path::new("/never-launch-this-program");
+        // Another launcher can hold the account lock before it publishes.
+        assert!(matches!(open_character(&dir, executable, &account, 100), Ok(Notice::Opening)));
+        assert!(!reservation_path(&dir, &account).exists());
+        let reservation = Reservation {
+            version: VERSION,
+            account: account.clone(),
+            nonce: Uuid::new_v4(),
+            stamp: 100,
+        };
+        publish(&reservation_path(&dir, &account), &reservation).unwrap();
+        // Model multiple commands drained in one worker tick, followed by a
+        // cold child whose owning supervisor has not refreshed its lease yet.
+        for stamp in [101, 101, 101, 101, 101, 100 + LAUNCH_SECS + 1] {
+            assert!(matches!(open_character(&dir, executable, &account, stamp), Ok(Notice::Opening)));
+            let current: Reservation = read_json(&reservation_path(&dir, &account)).unwrap();
+            assert_eq!(current.nonce, reservation.nonce);
+            assert_eq!(
+                current.stamp, reservation.stamp,
+                "a duplicate must not mutate or retire another launch"
+            );
+        }
+        let mut ready = peer(100 + LAUNCH_SECS + 2);
+        ready.account = account.clone();
+        ready.phase = Phase::Login;
+        publish(&record_path(&dir, &account), &ready).unwrap();
+        release_reservation(&dir, &reservation);
+        // A child's first presence can precede its supervisor releasing the
+        // account lock. The same request now focuses that exact ready window.
+        assert!(matches!(
+            open_character(&dir, executable, &account, 100 + LAUNCH_SECS + 2),
+            Ok(Notice::FocusRequested)
+        ));
+        let focus: Focus = read_json(&focus_path(&dir, ready.instance)).unwrap();
+        assert!(focus.matches(&ready, 100 + LAUNCH_SECS + 2));
+        assert!(!reservation_path(&dir, &account).exists());
+        drop(lock);
+        assert!(matches!(
+            open_character(&dir, executable, &account, 100 + LAUNCH_SECS + 3),
+            Ok(Notice::FocusRequested)
+        ));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn genuine_launch_and_lock_file_failures_are_not_reported_as_opening() {
+        let dir = temporary();
+        let account = identity("grid", "synthetic");
+        let executable = Path::new("/never-launch-this-program");
+        let error = open_character(&dir, executable, &account, 100)
+            .err()
+            .expect("missing executable must fail");
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        assert!(!reservation_path(&dir, &account).exists());
+        // A bad lock-file path is an IO failure, distinct from another
+        // viewer legitimately holding an otherwise usable account lock.
+        let bad_account = identity("grid", "synthetic-bad-lock-path");
+        let lock_path = dir.join(format!("{bad_account}.lock"));
+        std::fs::create_dir(&lock_path).unwrap();
+        assert!(open_character(&dir, executable, &bad_account, 101).is_err());
+        assert!(!reservation_path(&dir, &bad_account).exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    fn saved_avatar_accounts() -> Vec<crate::login_accounts::Account> {
+        (0..2)
+            .map(|index| crate::login_accounts::Account {
+                username: "synthetic-avatar".into(),
+                uri: format!("https://synthetic-grid-{index}.invalid/login"),
+                remember_password: false,
+                remember_mfa: false,
+                start_location: "last".into(),
+                start_region: String::new(),
+                agent: Some(Uuid::from_u128(42)),
+                last_place: None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn avatar_aware_open_reports_contention_without_cross_grid_launch_or_pending_retirement() {
+        let dir = temporary();
+        let accounts = saved_avatar_accounts();
+        let alpha = account_id(&accounts[0]);
+        let beta = account_id(&accounts[1]);
+        let executable = Path::new("/never-launch-this-program");
+        let avatar_lock = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(dir.join(format!("avatar-{}.lock", accounts[0].agent.unwrap())))
+            .unwrap();
+        avatar_lock.lock().unwrap();
+        // This avatar-wide lock alone does not identify the requested grid.
+        assert!(matches!(
+            open_catalogue_character(&dir, executable, &alpha, 100, &accounts),
+            Ok(Notice::Busy)
+        ));
+        let account_lock = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(dir.join(format!("{alpha}.lock")))
+            .unwrap();
+        account_lock.lock().unwrap();
+        let pending = Reservation {
+            version: VERSION,
+            account: alpha.clone(),
+            nonce: Uuid::new_v4(),
+            stamp: 100,
+        };
+        publish(&reservation_path(&dir, &alpha), &pending).unwrap();
+        assert!(matches!(
+            open_catalogue_character(&dir, executable, &alpha, 101, &accounts),
+            Ok(Notice::Opening)
+        ));
+        assert!(matches!(
+            open_catalogue_character(&dir, executable, &beta, 101, &accounts),
+            Ok(Notice::Busy)
+        ));
+        assert!(!reservation_path(&dir, &beta).exists());
+        // A cold child can outlive the crash lease. Neither a contended gate
+        // nor related-account discovery may erase its still-owned nonce.
+        let late = 100 + LAUNCH_SECS + 1;
+        assert!(matches!(
+            open_catalogue_character(&dir, executable, &alpha, late, &accounts),
+            Ok(Notice::Opening)
+        ));
+        drop(avatar_lock);
+        assert!(matches!(
+            open_catalogue_character(&dir, executable, &alpha, late, &accounts),
+            Ok(Notice::Opening)
+        ));
+        let observed: Reservation = read_json(&reservation_path(&dir, &alpha)).unwrap();
+        assert_eq!((observed.nonce, observed.stamp), (pending.nonce, pending.stamp));
+        // Even with an expired lease, the other grid remains excluded by the
+        // exact related launch lock while the avatar gate is owned here.
+        assert!(matches!(
+            open_catalogue_character(&dir, executable, &beta, late, &accounts),
+            Ok(Notice::OtherGrid)
+        ));
+        assert!(!dir.join(format!("{beta}.lock")).exists());
+        assert!(!reservation_path(&dir, &beta).exists());
+        let mut ready = peer(late + 1);
+        ready.account = alpha.clone();
+        ready.phase = Phase::Login;
+        publish(&record_path(&dir, &alpha), &ready).unwrap();
+        release_reservation(&dir, &pending);
+        let avatar_lock = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(dir.join(format!("avatar-{}.lock", accounts[0].agent.unwrap())))
+            .unwrap();
+        avatar_lock.lock().unwrap();
+        assert!(matches!(
+            open_catalogue_character(&dir, executable, &alpha, late + 1, &accounts),
+            Ok(Notice::FocusRequested)
+        ));
+        assert!(matches!(
+            open_catalogue_character(&dir, executable, &beta, late + 1, &accounts),
+            Ok(Notice::Busy)
+        ));
+        drop(avatar_lock);
+        assert!(matches!(
+            open_catalogue_character(&dir, executable, &beta, late + 1, &accounts),
+            Ok(Notice::OtherGrid)
+        ));
+        let focus: Focus = read_json(&focus_path(&dir, ready.instance)).unwrap();
+        assert!(focus.matches(&ready, late + 1));
+        drop(account_lock);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn avatar_aware_open_keeps_real_spawn_and_gate_file_failures_as_errors() {
+        let dir = temporary();
+        let bad_dir = temporary();
+        let accounts = saved_avatar_accounts();
+        let alpha = account_id(&accounts[0]);
+        let executable = Path::new("/never-launch-this-program");
+        let error = open_catalogue_character(&dir, executable, &alpha, 100, &accounts)
+            .err()
+            .expect("missing executable must remain an error through the avatar gate");
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        assert!(!reservation_path(&dir, &alpha).exists());
+        std::fs::create_dir(bad_dir.join(format!("avatar-{}.lock", accounts[0].agent.unwrap()))).unwrap();
+        assert!(open_catalogue_character(&bad_dir, executable, &alpha, 100, &accounts).is_err());
+        assert!(!reservation_path(&bad_dir, &alpha).exists());
+        std::fs::remove_dir_all(dir).unwrap();
+        std::fs::remove_dir_all(bad_dir).unwrap();
+    }
+
+    #[test]
     fn slow_child_keeps_its_reservation_until_ready_without_claiming_another_launch() {
         let dir = temporary();
         let account = identity("grid", "synthetic");
@@ -881,7 +1163,10 @@ mod tests {
             .open(dir.join(format!("{}.lock", existing.account)))
             .unwrap();
         lock.lock().unwrap();
-        assert!(open_character(&dir, Path::new("/never-launch-this-program"), &existing.account, 101).is_err());
+        assert!(matches!(
+            open_character(&dir, Path::new("/never-launch-this-program"), &existing.account, 101),
+            Ok(Notice::Opening)
+        ));
         assert!(!reservation_path(&dir, &existing.account).exists());
         publish(&record_path(&dir, &existing.account), &existing).unwrap();
         assert!(request_focus(&other, &existing, 101).is_err());

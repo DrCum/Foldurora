@@ -13237,6 +13237,14 @@ mm-margin-top = Marge supérieure
 mm-margin-bottom = Marge inférieure
 mm-margin-help = Pourcentage de la fenêtre réservé aux panneaux. Les marges opposées sont réduites ensemble pour conserver au moins 5 % pour le monde.
 
+# Native window captions retain the viewer version and build profile.
+character-window-title = { $account } · { $grid } — { $phase } — { $viewer }
+character-window-login-title = { $phase } — { $viewer }
+character-window-login = Connexion
+character-window-connecting = Connexion en cours
+character-window-online = En ligne
+character-window-main-grid = Second Life
+
 # Native character windows
 character-switch-title = Personnages
 character-switch-description = Gardez vos personnages connectés dans des fenêtres séparées. Passez à une fenêtre ouverte ou ouvrez la connexion d’un personnage enregistré. Vous vous connectez vous-même.
@@ -13263,3 +13271,4 @@ character-switch-custom-grid = Grille personnalisée
 character-switch-missing = Ce personnage enregistré est indisponible. Sélectionnez un compte sur cet écran de connexion.
 character-switch-cli-help = --saved-account <id>  Sélectionner un personnage enregistré sur un écran de connexion manuel
 character-switch-other-grid = Cet avatar a une fenêtre ouverte sur une autre grille. Fermez-la avant cette connexion ; ses données de compte sont partagées entre les grilles.
+character-switch-busy = Une autre ouverture de personnage est en cours de vérification. Réessayez dans un instant.

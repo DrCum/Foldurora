@@ -4710,6 +4710,7 @@ both open states and the selection count. Capture at frame 620.
 | Variable | Effect |
 |---|---|
 | `AURORA_DEMO_VIEWPORT=left\|right\|inset\|scaled` | Synthetic multi-monitor world rectangle, without changing saved preferences |
+| `AURORA_DEMO_MONITOR_RECOVERY=removed\|partial\|drag\|native` | Live display-recovery policy fixtures or the native adapter on an isolated test desktop |
 | `AURORA_DEMO_CHARACTERS=1` | Opens Characters with synthetic account/session rows and inert actions |
 | `AURORA_DEMO_TOOLBAR=1` | Open the "Toolbar buttons" window; the bars mockup's custom state, side toolbars, labels. |
 | `AURORA_DEMO_AREA_SEARCH=1\|filters\|ranges\|scope\|fields\|columns\|all-columns\|link\|parcel\|sale\|search\|menu` | Open Area Search with named objects and sale entries; `menu` opens its right-click menu. |
@@ -5069,6 +5070,35 @@ before (`amis`, `groupes`, `repere`, `historique`…) are still accepted.
   the full-window demo. Floaters retain the full native canvas. Mouselook,
   hidden UI, photos/viewfinder and VR temporarily use the full frame. These
   scenarios change only in-memory demo settings.
+- **`AURORA_DEMO_MONITOR_RECOVERY`** requires `AURORA_DEMO=1`. `removed`,
+  `partial` and `drag` supply synthetic physical display/window rectangles
+  to the ordinary recovery policy; the actual window never moves. Their
+  clock advances at a logical 60 frames/s, independent of rendering speed.
+  A second display disappears at frame 600. `removed` logs a proposed move
+  to `(160,120)` at frame 780; `partial` leaves one pixel of the window on
+  the surviving display and immediately logs `None` at 600. `drag` holds
+  the input guard through frame 839 and logs a proposed move only at 1020, after a fresh
+  three-second grace period. Capture/log after 800 or 1080 respectively;
+  combine with an inset viewport to check the ordinary world remains intact.
+  `native` uses real monitor enumeration, physical window geometry and
+  native pointer guards, and permits recovery even with `AURORA_CAPTURE` or
+  `AURORA_WINDOW_SIZE`. Run this mode only on an isolated synthetic desktop
+  such as an owned Xvfb. Change a real RandR CRTC layout after startup, place
+  the test window wholly outside the remaining display, and expect one
+  `display recovery: returning an inaccessible window` log after at least
+  three settled seconds. Verify the normal window is reachable, retains its
+  size when it fits, requests 80% when oversized (subject to native minimum
+  size), and does not gain focus.
+  A partly visible span, held drag, minimized/maximized/fullscreen or VR
+  window must stay untouched. The first display enumeration only establishes
+  a baseline. Missing positions or unknown/stale native input state prevent
+  recovery; the native guard currently supports Windows and X11. macOS and
+  Wayland leave windows untouched when position or native hold state is
+  unavailable. Real Windows monitor removal, mixed DPI, dragging and focus
+  acceptance remain human tests.
+  A GPU-recovery replacement window keeps the viewer's earlier display
+  baseline and pending recovery, including display changes while no renderer
+  window exists; native input authorization and the grace period start again.
 - **`AURORA_DEMO_CHARACTERS=1`** requires `AURORA_DEMO=1` and opens the
   Characters panel after frame 550. It shows three synthetic saved accounts
   with current/live/offline states. Actions produce a demo notice; they never

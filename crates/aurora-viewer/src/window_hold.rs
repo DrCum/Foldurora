@@ -66,6 +66,15 @@ pub fn paces(period: Option<Duration>) -> bool {
     }
 }
 
+/// Native frame moves, resizing and system menus must finish before a
+/// display-removal recovery can change the window geometry.
+pub fn active() -> bool {
+    #[cfg(windows)]
+    return imp::held();
+    #[cfg(not(windows))]
+    false
+}
+
 /// Called for every main window (at start and after a GPU recovery), on
 /// the thread that created it.
 pub fn install(window: &Window) {
@@ -115,7 +124,7 @@ mod imp {
     /// The cursor counts as moving for this long after its last move.
     const MOVING_FOR: Duration = Duration::from_millis(150);
 
-    fn held() -> bool {
+    pub(super) fn held() -> bool {
         HOLDS.load(Ordering::Acquire) > 0 || MENU.load(Ordering::Acquire)
     }
 

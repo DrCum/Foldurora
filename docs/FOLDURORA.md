@@ -6,7 +6,10 @@ way to open and switch between characters. Each character keeps its own viewer
 process, world and network session. This avoids moving live simulator state
 between renderers.
 
-The integration branch is `feat/overnight-integration`. The source comparison
+The first checkpoint is `feat/overnight-integration` at `62cdd4ea`; its verified
+build remains available. `feat/workspace-followup` adds idempotent repeated Open
+feedback, readable character captions and gentle live display recovery without
+moving that checkpoint. The source comparison
 uses [Folderstorm's tested 82373 tree](https://github.com/DrCum/Folderstorm/tree/abbe3cb0ca66ee2484f277219f6a27706fab7fc6)
 and starts from Aurora commit `ae2fd1016ec83304719fa131312e2ac69c8f37a6`.
 This is a test candidate; Windows display/focus and human grid acceptance are
@@ -17,8 +20,8 @@ drafts while that validation is pending, as authorized for this preview.
 
 | Folderstorm capability | Aurora foundation | This pass |
 | --- | --- | --- |
-| World viewport across displays | One native winit window; world targets composed before egui | Custom world rectangle with consistent rendering, camera, HUD and input coordinates |
-| Several character sessions | Saved-account carousel; separate network/world per process; cross-process GPU fair sharing and background frame cap | Native Characters panel, existing-session focus and explicit opening of another account's login |
+| World viewport across displays | One native winit window; world targets composed before egui | Custom world rectangle with consistent rendering, camera, HUD and input coordinates; gentle live recovery on Windows/X11 |
+| Several character sessions | Saved-account carousel; separate network/world per process; cross-process GPU fair sharing and background frame cap | Native Characters panel, existing-session focus, explicit manual-login opening, repeated-Open feedback and readable account/grid/phase captions |
 | Named workspaces, bars and window arrangements | Saved native floater geometry and toolbar controls | Follow-up after viewport and character acceptance |
 | Assistant inventory, appearance, camera and workspace tools | Native typed inventory, appearance and camera actions | Follow-up: a bounded permission-aware adapter; no generic input injection |
 | Bulk inventory review/history/limited undo | Native inventory mutations and progress tracking | Follow-up after the adapter and acknowledged-operation model |
@@ -55,11 +58,25 @@ Check these cases in the offline demo first, then in the user's normal session:
 5. Try unequal display sizes, negative desktop coordinates and different DPI
    scales. Remove or disable the secondary display, restart, and confirm the
    main window can be recovered on an attached display.
+6. On Windows/X11, change or remove a display while the viewer is running. If
+   the whole normal window becomes inaccessible, expect a recovery attempt after
+   at least three stable seconds. Its size is preserved when it fits; an oversized
+   window requests 80% of the nearest surviving display, subject to native minimum
+   sizes. Check that it does not gain focus.
+7. Repeat with a partly visible span, a held native drag, or a minimized,
+   maximized, fullscreen or VR window. It must stay untouched. After an excluded
+   state ends, recovery gets a fresh grace period; an already reachable layout
+   clears the pending recovery.
 
 A native window has one current DPI scale. A spanning-window implementation
 does not provide independent per-display scaling for its floaters. Separate
 native panel windows would require a further event, input and render-surface
 implementation.
+
+Live recovery arms only after a display topology/DPI change; ordinary manual
+placement does not arm it. Missing geometry or unknown/stale native input state
+prevents movement. This bounded native guard supports Windows and X11; macOS and
+Wayland leave the window alone when reliable position or hold state is unavailable.
 
 ## Character testing
 
@@ -72,9 +89,16 @@ argument or in the switcher's discovery records.
 
 1. Open two different saved accounts on the same grid, then switch between
    their native windows. Confirm the selected name, world, Inventory and chat
-   all belong to that window's account.
+   all belong to that window's account. Check Alt-Tab/taskbar captions show the
+   selected account, short grid label and login/connecting/online phase; unread
+   and render-pause indicators still appear. A custom `--title` remains in force.
+   Custom grids include a short identifier so endpoints sharing a name or host
+   remain distinguishable without displaying private URL details.
 2. Attempt to open the same saved account twice. Check the existing or starting
-   session is used, and a stale/crashed record does not block reopening.
+   session is used, repeated clicks report Opening or a neutral waiting notice,
+   rather than a false failure,
+   and a stale/crashed record does not block reopening. Once ready, the existing
+   window is focused; genuine launch and filesystem errors remain errors.
 3. Switch while movement keys or push-to-talk are held. Release them, type in
    the other window, and confirm no old key or microphone state carries over.
 4. Minimize the target and switch back to it. Test focus after Alt-Tab, while a

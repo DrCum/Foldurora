@@ -17,7 +17,7 @@ pub(super) struct WindowPlan {
 impl App {
     pub(super) fn open_window(&self, event_loop: &ActiveEventLoop, plan: &WindowPlan) -> Result<Arc<Window>, winit::error::OsError> {
         let mut attrs = crate::cli::with_desktop_id(Window::default_attributes())
-            .with_title(crate::cli::window_title())
+            .with_title(self.native_window_title())
             // Metal needs a visible layer to present its first drawable.
             // Other platforms keep the unpainted client area hidden.
             .with_visible(cfg!(target_os = "macos"))

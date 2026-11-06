@@ -13214,6 +13214,14 @@ mm-margin-top = 上の余白
 mm-margin-bottom = 下の余白
 mm-margin-help = パネル用の余白をウィンドウ全体の割合で指定します。向かい合う余白は、ワールド用に少なくとも 5% が残るように調整されます。
 
+# Native window captions retain the viewer version and build profile.
+character-window-title = { $account }・{ $grid } — { $phase } — { $viewer }
+character-window-login-title = { $phase } — { $viewer }
+character-window-login = ログイン
+character-window-connecting = 接続中
+character-window-online = オンライン
+character-window-main-grid = Second Life
+
 # Native character windows
 character-switch-title = キャラクター
 character-switch-description = キャラクターごとに別のビューアウィンドウでログインを維持します。起動中のウィンドウへ切り替えるか、保存済みキャラクターのログイン画面を開きます。ログイン操作はご自身で行ってください。
@@ -13240,3 +13248,4 @@ character-switch-custom-grid = カスタムグリッド
 character-switch-missing = この保存済みキャラクターは利用できません。ログイン画面でアカウントを選択してください。
 character-switch-cli-help = --saved-account <id>  保存済みキャラクターの手動ログイン画面を選択
 character-switch-other-grid = このアバターは別のグリッドでウィンドウを起動しています。アカウントデータを共有するため、そちらを閉じてからログイン画面を開いてください。
+character-switch-busy = 別のキャラクターの起動を確認しています。少し待ってからもう一度お試しください。

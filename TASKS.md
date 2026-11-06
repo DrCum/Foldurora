@@ -1,5 +1,13 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Foldurora workspace follow-up (user continuation, 2026-11-06; no issue):
+  keep the verified PR #2/source `62cdd4ea` checkpoint while correcting repeated
+  Open feedback, adding readable account/grid/phase captions and gently recovering
+  wholly inaccessible Windows/X11 windows after display changes. Cover launch
+  ownership/errors, caption composition and native recovery with offline
+  regressions and isolated process/display fixtures. Human Windows display,
+  focus/minimize and grid/voice acceptance remain pending; main stays unmerged.
+
 - 🔧 Foldurora workspace and character preview (user request, 2026-11-06; no issue):
   implement a custom world viewport for display-spanning windows and a native
   Characters switcher using isolated viewer processes. Feature work uses separate

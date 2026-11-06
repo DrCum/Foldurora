@@ -4,7 +4,7 @@
 
 # Aurora Viewer
 
-The Foldurora preview branch adds a multi-monitor workspace and native character
+The Foldurora preview branches add a multi-monitor workspace and native character
 switching. See the [feature inventory and morning test guide](docs/FOLDURORA.md)
 for the implementation boundaries and remaining Windows/grid acceptance.
 

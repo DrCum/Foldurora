@@ -13241,6 +13241,14 @@ mm-margin-top = Top margin
 mm-margin-bottom = Bottom margin
 mm-margin-help = Percentage of the full viewer window reserved for panels. Opposite margins scale together to leave at least 5% for the world.
 
+# Native window captions retain the viewer version and build profile.
+character-window-title = { $account } · { $grid } — { $phase } — { $viewer }
+character-window-login-title = { $phase } — { $viewer }
+character-window-login = Log in
+character-window-connecting = Connecting
+character-window-online = Online
+character-window-main-grid = Second Life
+
 # Native character windows
 character-switch-title = Characters
 character-switch-description = Keep characters signed in in separate viewer windows. Switch to a running window, or open a saved character’s login. You sign in yourself.
@@ -13267,3 +13275,4 @@ character-switch-custom-grid = Custom grid
 character-switch-missing = That saved character is unavailable. Select an account on this login screen.
 character-switch-cli-help = --saved-account <id>  Select an exact saved character on a manual login screen
 character-switch-other-grid = This avatar has a window open on another grid. Close it before opening this login; its account data is shared across grids.
+character-switch-busy = Another character launch is being checked. Try again shortly.

@@ -1,5 +1,21 @@
 # Aurora Viewer architecture
 
+The workspace follow-up keeps native window captions in the existing attention
+writer: account, short grid label and session phase share the unread/pause
+decoration path. Explicit custom titles, process arguments, log names and
+discovery identities retain their existing semantics; a recreated GPU window
+gets the current caption immediately.
+
+`window_recovery.rs` models physical display/window bounds, the recovery grace
+period and correlated native input replies. `app/multi_monitor.rs` samples the
+normal display topology once a second and rechecks geometry/state before applying
+a move. Windows native holds/buttons and fresh serialized X11 pointer replies
+protect ongoing interaction. Only a later topology change can arm recovery;
+any visible intersection disarms it. Unknown native state leaves the window
+alone. Topology and pending recovery survive GPU-window recreation; unavailable
+or temporary native geometry restarts the grace period. Native Windows and
+physical-display acceptance remain human tests.
+
 The Foldurora preview keeps one world and one network session per viewer process.
 Its native character controls discover matching local viewer instances and focus
 an existing window or open the same executable at a selected saved account's
