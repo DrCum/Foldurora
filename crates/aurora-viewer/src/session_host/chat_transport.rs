@@ -9,16 +9,14 @@
 //! BEFORE consuming their receive sequence high-water mark. Reconnect never
 //! replays a mutation: caller-owned receipts decide Pending/Uncertain behavior.
 
+use super::bridge_auth::{AuthError, ClientAuth, ClientStep, HANDSHAKE_DEADLINE, Purpose, ServerAuth};
+pub(crate) use super::bridge_auth::{BridgeSecret as ChatSecret, Permit};
 use aurora_session::chat::{self, ChatMessage, ChatPacket};
 use aurora_session::{HostId, InstallationId, MAX_WORKERS, WorkerIdentity};
-use ring::hmac;
-use ring::rand::{SecureRandom, SystemRandom};
-use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener, TcpStream};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 const HEADER: usize = 4;
 const MAX_PAYLOAD: usize = chat::MAX_PACKET_BYTES;
@@ -26,89 +24,7 @@ const MAX_FRAME: usize = HEADER + MAX_PAYLOAD;
 const MAX_QUEUE: usize = 16;
 const MAX_PACKETS: usize = 16;
 const MAX_OPERATIONS: usize = 64;
-const HANDSHAKE_DEADLINE: Duration = Duration::from_secs(1);
-const HELLO_VERSION: u16 = 1;
-const AUTH_DOMAIN: &[u8] = b"aurora-session-chat/auth/v1";
-const AUTH_BYTES: usize = AUTH_DOMAIN.len() + 1 + 32 + 16 + 16 + 8 + 32 + 32;
-const WORKER_PROOF: u8 = 1;
-const HOST_PROOF: u8 = 2;
-
-/// Per-worker IPC key, serialized only inside the validated private bootstrap.
-/// Its bytes have no public accessor or equality implementation. Verification
-/// uses ring's constant-time MAC verifier, never ordinary byte equality.
-#[derive(Clone)]
-pub(crate) struct ChatSecret(Arc<[u8; 32]>);
-
-impl ChatSecret {
-    pub fn random() -> io::Result<Self> {
-        Self::from_bytes(random_bytes()?).map_err(|_| io::Error::other("session chat key generation failed"))
-    }
-
-    fn from_bytes(bytes: [u8; 32]) -> Result<Self, LaneError> {
-        if bytes.iter().all(|byte| *byte == 0) {
-            return Err(LaneError::Authentication);
-        }
-        Ok(Self(Arc::new(bytes)))
-    }
-}
-
-impl std::fmt::Debug for ChatSecret {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("ChatSecret([redacted])")
-    }
-}
-
-impl Serialize for ChatSecret {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let text: String = self.0.iter().map(|byte| format!("{byte:02x}")).collect();
-        serializer.serialize_str(&text)
-    }
-}
-
-impl<'de> Deserialize<'de> for ChatSecret {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let text = String::deserialize(deserializer)?;
-        if text.len() != 64 {
-            return Err(serde::de::Error::custom("invalid private session chat key"));
-        }
-        let mut bytes = [0; 32];
-        for (pair, byte) in text.as_bytes().chunks_exact(2).zip(&mut bytes) {
-            let digit = |digit| match digit {
-                b'0'..=b'9' => Some(digit - b'0'),
-                b'a'..=b'f' => Some(digit - b'a' + 10),
-                _ => None,
-            };
-            let (Some(high), Some(low)) = (digit(pair[0]), digit(pair[1])) else {
-                return Err(serde::de::Error::custom("invalid private session chat key"));
-            };
-            *byte = high * 16 + low;
-        }
-        Self::from_bytes(bytes).map_err(|_| serde::de::Error::custom("invalid private session chat key"))
-    }
-}
-
-fn random_bytes() -> io::Result<[u8; 32]> {
-    let mut bytes = [0; 32];
-    SystemRandom::new()
-        .fill(&mut bytes)
-        .map_err(|_| io::Error::other("session chat randomness is unavailable"))?;
-    Ok(bytes)
-}
-
-/// Only the broker's currently owned workers belong in the admission slice.
-/// Do not format this capability-bearing value or the authentication DTOs.
-#[derive(Clone)]
-pub(crate) struct Permit {
-    pub identity: WorkerIdentity,
-    pub lease_epoch: u64,
-    pub secret: ChatSecret,
-}
-
 impl Permit {
-    fn valid(&self) -> bool {
-        self.lease_epoch != 0
-    }
-
     fn matches(&self, packet: &ChatPacket) -> bool {
         packet.source.worker == self.identity && packet.source.lease_epoch == self.lease_epoch
     }
@@ -153,91 +69,14 @@ impl From<io::Error> for LaneError {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Challenge {
-    version: u16,
-    nonce: [u8; 32],
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct WorkerProof {
-    version: u16,
-    identity: WorkerIdentity,
-    lease_epoch: u64,
-    nonce: [u8; 32],
-    tag: [u8; 32],
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct HostProof {
-    version: u16,
-    tag: [u8; 32],
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(tag = "type", content = "data", rename_all = "snake_case", deny_unknown_fields)]
-enum Authentication {
-    Challenge(Challenge),
-    Worker(WorkerProof),
-    Accepted(HostProof),
-}
-
-/// Fixed framed transcript: roles prevent reflection; both fresh challenges
-/// prevent replay across either endpoint/reconnection. Only public identity
-/// enters the transcript. The private key is supplied solely to ring::hmac.
-fn transcript(role: u8, permit: &Permit, server: &[u8; 32], client: &[u8; 32]) -> [u8; AUTH_BYTES] {
-    let mut bytes = [0; AUTH_BYTES];
-    let role = [role];
-    let lease = permit.lease_epoch.to_be_bytes();
-    let parts: [&[u8]; 8] = [
-        AUTH_DOMAIN,
-        &role,
-        permit.identity.installation.as_bytes(),
-        permit.identity.host.as_bytes(),
-        permit.identity.worker.as_bytes(),
-        &lease,
-        server,
-        client,
-    ];
-    let mut offset = 0;
-    for part in parts {
-        bytes[offset..offset + part.len()].copy_from_slice(part);
-        offset += part.len();
+impl From<AuthError> for LaneError {
+    fn from(error: AuthError) -> Self {
+        match error {
+            AuthError::Malformed => Self::Malformed,
+            AuthError::Rejected => Self::Authentication,
+            AuthError::Randomness => Self::Io(io::ErrorKind::Other),
+        }
     }
-    bytes
-}
-
-fn proof(role: u8, permit: &Permit, server: &[u8; 32], client: &[u8; 32]) -> [u8; 32] {
-    let key = hmac::Key::new(hmac::HMAC_SHA256, permit.secret.0.as_ref());
-    let tag = hmac::sign(&key, &transcript(role, permit, server, client));
-    let mut output = [0; 32];
-    // HMAC_SHA256 always returns 32 bytes, independent of external input.
-    output.copy_from_slice(tag.as_ref());
-    output
-}
-
-fn verifies(role: u8, permit: &Permit, server: &[u8; 32], client: &[u8; 32], tag: &[u8; 32]) -> bool {
-    let key = hmac::Key::new(hmac::HMAC_SHA256, permit.secret.0.as_ref());
-    hmac::verify(&key, &transcript(role, permit, server, client), tag).is_ok()
-}
-
-fn authentication_bytes(authentication: &Authentication) -> Result<Vec<u8>, LaneError> {
-    let bytes = serde_json::to_vec(authentication).map_err(|_| LaneError::Malformed)?;
-    if bytes.is_empty() || bytes.len() > MAX_PAYLOAD {
-        Err(LaneError::Malformed)
-    } else {
-        Ok(bytes)
-    }
-}
-
-fn authentication(bytes: &[u8]) -> Result<Authentication, LaneError> {
-    if bytes.is_empty() || bytes.len() > MAX_PAYLOAD {
-        return Err(LaneError::Malformed);
-    }
-    serde_json::from_slice(bytes).map_err(|_| LaneError::Authentication)
 }
 
 /// Includes both completed inbound and outbound frames, with a separate small
@@ -513,7 +352,7 @@ struct PendingClient {
     stream: TcpStream,
     framing: Framing,
     began: Instant,
-    challenge: [u8; 32],
+    auth: ServerAuth,
 }
 
 /// One host listener and at most one unauthenticated socket. Authenticated
@@ -567,13 +406,9 @@ impl Listener {
                     }
                     stream.set_nonblocking(true)?;
                     stream.set_nodelay(true)?;
-                    let challenge = random_bytes()?;
+                    let (auth, bytes) =
+                        ServerAuth::begin(Purpose::Chat).map_err(|_| io::Error::other("session chat challenge could not be encoded"))?;
                     let mut framing = Framing::default();
-                    let bytes = authentication_bytes(&Authentication::Challenge(Challenge {
-                        version: HELLO_VERSION,
-                        nonce: challenge,
-                    }))
-                    .map_err(|_| io::Error::other("session chat challenge could not be encoded"))?;
                     framing
                         .queue(&bytes)
                         .map_err(|_| io::Error::other("session chat challenge queue is full"))?;
@@ -581,7 +416,7 @@ impl Listener {
                         stream,
                         framing,
                         began: Instant::now(),
-                        challenge,
+                        auth,
                     });
                 }
                 Err(error) if matches!(error.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted) => return Ok(None),
@@ -604,26 +439,15 @@ impl Listener {
             Ok(ReadState::Closed) | Err(_) => return Ok(None),
             Ok(ReadState::Frame) => {}
         }
-        let worker = match pending.framing.reader.payload().and_then(authentication) {
-            Ok(Authentication::Worker(worker)) if worker.version == HELLO_VERSION => worker,
-            _ => return Ok(None),
+        let payload = match pending.framing.reader.payload() {
+            Ok(payload) => payload,
+            Err(_) => return Ok(None),
         };
-        let mut permit = None;
-        for candidate in allowed {
-            // Every candidate uses the maintained constant-time tag verifier.
-            // No private key or key-derived identifier is sent for lookup.
-            let valid = verifies(WORKER_PROOF, candidate, &pending.challenge, &worker.nonce, &worker.tag);
-            if valid && candidate.identity == worker.identity && candidate.lease_epoch == worker.lease_epoch {
-                permit = Some(candidate.clone());
-            }
-        }
-        let Some(permit) = permit else { return Ok(None) };
+        let (permit, acknowledgment) = match pending.auth.accept(payload, allowed) {
+            Ok(accepted) => accepted,
+            Err(_) => return Ok(None),
+        };
         pending.framing.reader.consume();
-        let acknowledgment = authentication_bytes(&Authentication::Accepted(HostProof {
-            version: HELLO_VERSION,
-            tag: proof(HOST_PROOF, &permit, &pending.challenge, &worker.nonce),
-        }))
-        .map_err(|_| io::Error::other("session chat authentication could not be encoded"))?;
         pending
             .framing
             .queue(&acknowledgment)
@@ -699,7 +523,7 @@ pub(crate) struct WorkerIo {
     socket: Socket,
     began: Instant,
     ready: bool,
-    challenge: Option<([u8; 32], [u8; 32])>,
+    auth: ClientAuth,
 }
 
 impl WorkerIo {
@@ -709,6 +533,8 @@ impl WorkerIo {
         if port == 0 || !permit.valid() {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid session chat endpoint"));
         }
+        let auth = ClientAuth::new(Purpose::Chat, permit.clone())
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid session chat authentication"))?;
         let address = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port));
         let stream = TcpStream::connect_timeout(&address, HANDSHAKE_DEADLINE)?;
         stream.set_nonblocking(true)?;
@@ -717,7 +543,7 @@ impl WorkerIo {
             socket: Socket::new(stream, Framing::default(), permit, Side::Worker),
             began: Instant::now(),
             ready: false,
-            challenge: None,
+            auth,
         })
     }
 
@@ -760,36 +586,15 @@ impl WorkerIo {
                 ReadState::Closed => return Err(LaneError::Closed),
                 ReadState::Frame => {}
             }
-            let authentication = authentication(self.socket.framing.reader.payload()?)?;
-            if let Some((server, client)) = &self.challenge {
-                let valid = matches!(authentication, Authentication::Accepted(accepted)
-                    if accepted.version == HELLO_VERSION
-                        && verifies(HOST_PROOF, &self.socket.permit, server, client, &accepted.tag));
-                if !valid {
-                    return Err(LaneError::Authentication);
+            let step = self.auth.receive(self.socket.framing.reader.payload()?).map_err(LaneError::from)?;
+            self.socket.framing.reader.consume();
+            match step {
+                ClientStep::Ready => self.ready = true,
+                ClientStep::Reply(bytes) => {
+                    self.socket.framing.queue(&bytes)?;
+                    self.socket.write(&mut budget, MAX_PACKETS)?;
+                    return Ok(Vec::new());
                 }
-                self.socket.framing.reader.consume();
-                self.ready = true;
-                self.challenge = None;
-            } else {
-                let challenge = match authentication {
-                    Authentication::Challenge(challenge) if challenge.version == HELLO_VERSION => challenge,
-                    _ => return Err(LaneError::Authentication),
-                };
-                let client = random_bytes()?;
-                let worker = WorkerProof {
-                    version: HELLO_VERSION,
-                    identity: self.socket.permit.identity,
-                    lease_epoch: self.socket.permit.lease_epoch,
-                    nonce: client,
-                    tag: proof(WORKER_PROOF, &self.socket.permit, &challenge.nonce, &client),
-                };
-                let bytes = authentication_bytes(&Authentication::Worker(worker))?;
-                self.socket.framing.reader.consume();
-                self.socket.framing.queue(&bytes)?;
-                self.challenge = Some((challenge.nonce, client));
-                self.socket.write(&mut budget, MAX_PACKETS)?;
-                return Ok(Vec::new());
             }
         }
         let packets = self.socket.packets(&mut budget, maximum_incoming)?;
@@ -812,7 +617,7 @@ mod tests {
                 worker: WorkerId::from_bytes([3; 16]).expect("synthetic worker"),
             },
             lease_epoch: 7,
-            secret: ChatSecret::from_bytes([7; 32]).expect("synthetic private bootstrap key"),
+            secret: serde_json::from_str(&format!("\"{}\"", "07".repeat(32))).expect("synthetic private bootstrap key"),
         }
     }
 
@@ -997,80 +802,6 @@ mod tests {
         assert_eq!(input.position(), 0);
     }
 
-    #[test]
-    fn chat_lane_authentication_is_versioned_bound_and_rejects_unknown_fields() {
-        let permit = permit();
-        let server = [8; 32];
-        let client = [9; 32];
-        let worker = WorkerProof {
-            version: HELLO_VERSION,
-            identity: permit.identity,
-            lease_epoch: permit.lease_epoch,
-            nonce: client,
-            tag: proof(WORKER_PROOF, &permit, &server, &client),
-        };
-        let bytes = authentication_bytes(&Authentication::Worker(worker)).expect("proof");
-        assert!(matches!(authentication(&bytes), Ok(Authentication::Worker(worker))
-            if worker.version == HELLO_VERSION && verifies(WORKER_PROOF, &permit, &server, &worker.nonce, &worker.tag)));
-        // This is a synthetic public fixture, not a generated runtime key.
-        assert!(!String::from_utf8(bytes.clone()).expect("JSON").contains(&"07".repeat(32)));
-        let mut value: serde_json::Value = serde_json::from_slice(&bytes).expect("synthetic proof JSON");
-        value["data"]["unexpected"] = true.into();
-        assert!(authentication(&serde_json::to_vec(&value).expect("unknown field")).is_err());
-        let encoded = serde_json::to_string(&permit.secret).expect("private bootstrap encoding");
-        let restored: ChatSecret = serde_json::from_str(&encoded).expect("private bootstrap decoding");
-        assert_eq!(format!("{restored:?}"), "ChatSecret([redacted])");
-        assert!(verifies(
-            WORKER_PROOF,
-            &Permit {
-                secret: restored,
-                ..permit.clone()
-            },
-            &server,
-            &client,
-            &proof(WORKER_PROOF, &permit, &server, &client)
-        ));
-        for invalid in ["", "00", &"00".repeat(32), &"FF".repeat(32), &"gg".repeat(32)] {
-            assert!(serde_json::from_str::<ChatSecret>(&format!("\"{invalid}\"")).is_err());
-        }
-    }
-
-    #[test]
-    fn chat_lane_hmac_sha256_matches_rfc4231_and_binds_every_public_field() {
-        // RFC 4231 section 4.2, https://www.rfc-editor.org/rfc/rfc4231.html#section-4.2
-        let vector = [
-            0xb0, 0x34, 0x4c, 0x61, 0xd8, 0xdb, 0x38, 0x53, 0x5c, 0xa8, 0xaf, 0xce, 0xaf, 0x0b, 0xf1, 0x2b, 0x88, 0x1d, 0xc2, 0x00, 0xc9,
-            0x83, 0x3d, 0xa7, 0x26, 0xe9, 0x37, 0x6c, 0x2e, 0x32, 0xcf, 0xf7,
-        ];
-        let key = hmac::Key::new(hmac::HMAC_SHA256, &[0x0b; 20]);
-        assert_eq!(hmac::sign(&key, b"Hi There").as_ref(), vector);
-        assert!(hmac::verify(&key, b"Hi There", &vector).is_ok());
-
-        let permit = permit();
-        let server = [8; 32];
-        let client = [9; 32];
-        let tag = proof(HOST_PROOF, &permit, &server, &client);
-        assert!(verifies(HOST_PROOF, &permit, &server, &client, &tag));
-        assert!(!verifies(WORKER_PROOF, &permit, &server, &client, &tag), "role reflection");
-        assert!(!verifies(HOST_PROOF, &permit, &[10; 32], &client, &tag), "old server challenge");
-        assert!(!verifies(HOST_PROOF, &permit, &server, &[10; 32], &tag), "old client challenge");
-        let mut changed = permit.clone();
-        changed.lease_epoch += 1;
-        assert!(!verifies(HOST_PROOF, &changed, &server, &client, &tag));
-        changed = permit.clone();
-        changed.identity.installation = InstallationId::from_bytes([10; 32]).expect("other installation");
-        assert!(!verifies(HOST_PROOF, &changed, &server, &client, &tag));
-        changed = permit.clone();
-        changed.identity.host = HostId::from_bytes([10; 16]).expect("other host");
-        assert!(!verifies(HOST_PROOF, &changed, &server, &client, &tag));
-        changed = permit.clone();
-        changed.identity.worker = WorkerId::from_bytes([10; 16]).expect("other worker");
-        assert!(!verifies(HOST_PROOF, &changed, &server, &client, &tag));
-        changed = permit;
-        changed.secret = ChatSecret::from_bytes([10; 32]).expect("other synthetic key");
-        assert!(!verifies(HOST_PROOF, &changed, &server, &client, &tag));
-    }
-
     fn connected() -> (Listener, HostIo, WorkerIo) {
         let mut listener = Listener::bind().expect("owned loopback listener");
         let permit = permit();
@@ -1244,9 +975,9 @@ mod tests {
         let (mut fake, _) = listener.accept().expect("owned accepted socket");
         fake.set_nonblocking(true).expect("nonblocking fake host");
         let mut framing = Framing::default();
-        let challenge = authentication_bytes(&Authentication::Challenge(Challenge {
-            version: HELLO_VERSION,
-            nonce: [8; 32],
+        let nonce = [8u8; 32];
+        let challenge = serde_json::to_vec(&serde_json::json!({
+            "type": "challenge", "data": {"version": 1, "nonce": nonce}
         }))
         .expect("public challenge");
         framing.queue(&challenge).expect("challenge frame");
@@ -1259,20 +990,17 @@ mod tests {
                 framing.reader.read(&mut fake, &mut Budget::new()).expect("read client proof"),
                 ReadState::Frame
             ) {
-                let Authentication::Worker(proof) = authentication(framing.reader.payload().expect("proof frame")).expect("typed proof")
-                else {
-                    panic!("client must send only an authentication proof");
-                };
-                break proof.tag;
+                let proof: serde_json::Value = serde_json::from_slice(framing.reader.payload().expect("proof frame")).expect("typed proof");
+                assert_eq!(proof["type"], "worker");
+                break serde_json::from_value::<[u8; 32]>(proof["data"]["tag"].clone()).expect("public proof tag");
             }
             assert!(Instant::now() < deadline, "client proof did not arrive");
             std::thread::yield_now();
         };
         assert!(!worker.ready());
         framing.reader.consume();
-        let echo = authentication_bytes(&Authentication::Accepted(HostProof {
-            version: HELLO_VERSION,
-            tag: reflected,
+        let echo = serde_json::to_vec(&serde_json::json!({
+            "type": "accepted", "data": {"version": 1, "tag": reflected}
         }))
         .expect("reflected tag");
         framing.queue(&echo).expect("fake acknowledgment");

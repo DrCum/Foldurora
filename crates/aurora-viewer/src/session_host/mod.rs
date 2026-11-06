@@ -1,6 +1,7 @@
 //! Opt-in native session controller. Worlds, logins and GPU ownership remain
 //! in separately isolated workers; the host paints only its CPU interface.
 
+pub(crate) mod bridge_auth;
 pub(crate) mod chat;
 pub(crate) mod chat_broker;
 pub(crate) mod chat_io;
