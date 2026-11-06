@@ -4,8 +4,9 @@
 world resolution and draw lists. A live peer from the same or an unknown GPU
 counts even at the login screen or with zero reported memory. The existing
 `background_gpu_pause` setting, focus, photo and VR exemptions remain in force.
-Shared-only pause releases after four seconds of continuous peer absence;
-the distinct slow-GPU latch retains its earlier focus-based release. Both use
+Shared-only pause releases four seconds after the first observed empty peer
+snapshot, with rediscovery restarting the hold; a long frame gap is not absence.
+The distinct slow-GPU latch retains its earlier focus-based release. Both use
 the existing small-target/empty-world-list path while CPU/session/UI work runs.
 `instances.rs` keeps ordinary demos and timed runs isolated. An explicit
 shared-demo fixture is allowed only inside a validated private updater test

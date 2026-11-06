@@ -36,7 +36,7 @@ pub(super) struct BusyPause {
     slow: u8,
     overloaded: bool,
     shared: bool,
-    last_peer: Option<Instant>,
+    absent_since: Option<Instant>,
     reported_shared: bool,
     /// The last GPU time counted: the renderer gives its last measure
     /// again each frame until a new one comes, and one slow frame seen
@@ -56,17 +56,22 @@ impl BusyPause {
             self.slow = 0;
             self.overloaded = false;
             self.shared = false;
-            self.last_peer = None;
+            self.absent_since = None;
         } else {
             if peers {
-                self.last_peer = Some(now);
+                self.shared = true;
+                self.absent_since = None;
+            } else if self.shared {
+                // A slow/stalled frame is not evidence of peer absence.
+                // Start the hold only when an empty snapshot is observed.
+                let absent = self.absent_since.get_or_insert(now);
+                if now.saturating_duration_since(*absent) >= PEER_RELEASE {
+                    self.shared = false;
+                    self.absent_since = None;
+                }
             }
-            self.shared = self.last_peer.is_some_and(|at| now.saturating_duration_since(at) < PEER_RELEASE);
             if self.shared {
                 self.slow = 0;
-            }
-            if !self.shared {
-                self.last_peer = None;
             }
         }
         if !self.shared {
@@ -90,7 +95,7 @@ impl BusyPause {
             self.slow = 0;
             self.overloaded = false;
             self.shared = false;
-            self.last_peer = None;
+            self.absent_since = None;
             self.reported_shared = false;
         } else if !self.overloaded
             && !self.shared
@@ -231,14 +236,35 @@ mod tests {
         b.prepare(true, true, false, t + Duration::from_secs(6));
         assert!(b.paused(), "a newly seen peer starts a fresh absence interval");
         b.prepare(true, true, false, t + Duration::from_secs(7));
+        assert!(
+            b.paused(),
+            "the hold starts at the first empty observation, not the last present frame"
+        );
+        b.prepare(true, true, false, t + Duration::from_secs(10));
         assert!(!b.paused(), "shared-only pause ends after sustained peer absence");
         assert_eq!(b.note_shared_packet(), None);
-        b.prepare(true, true, true, t + Duration::from_secs(8));
+        b.prepare(true, true, true, t + Duration::from_secs(11));
         assert_eq!(
             b.note_shared_packet(),
             Some(false),
             "a later shared pause has its own packet diagnostic"
         );
+    }
+
+    #[test]
+    fn a_long_frame_gap_does_not_turn_one_missing_registry_snapshot_into_permission_to_draw() {
+        let mut b = BusyPause::default();
+        let t = Instant::now();
+        b.prepare(true, true, true, t);
+        let missing = t + Duration::from_secs(30);
+        b.prepare(true, true, false, missing);
+        assert!(b.paused(), "no absence was observed during the stalled frame");
+        b.prepare(true, true, false, missing + PEER_RELEASE - Duration::from_millis(1));
+        assert!(b.paused(), "the first actual miss starts a full grace period");
+        b.prepare(true, true, false, missing + PEER_RELEASE);
+        assert!(!b.paused());
+        b.prepare(true, true, false, missing + PEER_RELEASE * 2);
+        assert!(!b.paused(), "empty snapshots do not create a new shared pause");
     }
 
     #[test]
@@ -267,11 +293,13 @@ mod tests {
         b.prepare(true, true, true, t);
         assert_eq!(b.note_shared_packet(), Some(true));
         b.prepare(true, true, false, t + PEER_RELEASE);
+        b.prepare(true, true, false, t + PEER_RELEASE * 2);
+        assert!(!b.shared && b.overloaded, "the peer hold ended independently of the overload latch");
         assert!(
             b.paused() && !b.shared_only(),
             "existing overload protection retains its focus-based release"
         );
-        b.prepare(false, true, false, t + PEER_RELEASE);
+        b.prepare(false, true, false, t + PEER_RELEASE * 2);
         assert!(!b.paused());
     }
 
