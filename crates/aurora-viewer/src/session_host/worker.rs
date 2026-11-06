@@ -97,6 +97,7 @@ pub(crate) struct WorkerBridge {
     window: u64,
     last_frame: Option<aurora_session::FrameProof>,
     last_receipt: Option<Instant>,
+    chat: Option<super::chat_io::WorkerChannel>,
 }
 
 impl WorkerBridge {
@@ -104,6 +105,20 @@ impl WorkerBridge {
         let Some(startup) = STARTUP.get() else {
             return Ok(None);
         };
+        let chat = startup.config.chat.as_ref().and_then(|chat| {
+            let permit = super::chat_transport::Permit {
+                identity: startup.config.identity,
+                lease_epoch: startup.config.lease_epoch,
+                secret: chat.key.clone(),
+            };
+            match super::chat_io::WorkerChannel::start(chat.port, permit) {
+                Ok(channel) => Some(channel),
+                Err(_) => {
+                    log::warn!("session chat IO could not start; native chat remains unavailable");
+                    None
+                }
+            }
+        });
         Ok(Some(Self {
             config: startup.config.clone(),
             io: WorkerIo::start(startup.config.clone(), startup.directory.clone())?,
@@ -123,6 +138,7 @@ impl WorkerBridge {
             window: 0,
             last_frame: None,
             last_receipt: None,
+            chat,
         }))
     }
 
@@ -215,6 +231,7 @@ impl WorkerBridge {
         if self.guard.mode() == WorkerMode::Detached {
             merge_effects(&mut effects, self.fail_closed());
         }
+        self.sync_chat_source();
         final_display_effects(effects, self.guard.mode())
     }
 
@@ -235,6 +252,28 @@ impl WorkerBridge {
             && binding.session.is_some()
             && receipt_is_current(self.last_receipt, Instant::now()))
         .then_some((binding, self.config.lease_epoch))
+    }
+
+    fn sync_chat_source(&self) {
+        if let Some(chat) = &self.chat {
+            let source = self
+                .bound_session()
+                .and_then(|binding| aurora_session::chat::ChatSource::try_from(binding).ok());
+            let expires = self
+                .last_receipt
+                .and_then(|received| received.checked_add(std::time::Duration::from_millis(aurora_session::LEASE_MILLIS)));
+            chat.set_source(source, expires);
+        }
+    }
+
+    pub(crate) fn chat_ready(&self) -> bool {
+        self.chat.as_ref().is_some_and(|chat| chat.ready())
+    }
+    pub(crate) fn chat_commands(&self) -> Vec<aurora_session::chat::ChatPacket> {
+        self.chat.as_ref().map_or_else(Vec::new, |chat| chat.commands())
+    }
+    pub(crate) fn chat_send(&self, packet: &aurora_session::chat::ChatPacket) -> Result<(), super::chat_transport::LaneError> {
+        self.chat.as_ref().ok_or(super::chat_transport::LaneError::NotReady)?.send(packet)
     }
 
     pub fn world_allowed(&self) -> bool {
@@ -258,7 +297,7 @@ impl WorkerBridge {
                 // Scheduling only. Never assign host focus to App.focused or
                 // use it as permission for movement, shortcuts or microphone.
                 return matches!(self.guard.mode(), WorkerMode::Preparing | WorkerMode::Active)
-                    && native::workspace_foreground(viewport.host_window, self.window);
+                    && native::workspace_foreground(viewport.host_window, self.window, self.config.host_pid);
             }
             self.guard.render_priority(keyboard_focused)
         }
@@ -280,6 +319,9 @@ impl WorkerBridge {
     fn fail_closed(&mut self) -> WorkerEffects {
         self.detached = true;
         self.admitted = false;
+        if let Some(chat) = &self.chat {
+            chat.set_source(None, None);
+        }
         WorkerEffects {
             release_input: true,
             restore_window: true,
@@ -413,6 +455,9 @@ impl WorkerBridge {
             self.gate = DisplayGate::Active;
             window.set_visible(true);
             window.focus_window();
+            if let Some(viewport) = self.guard.viewport() {
+                native_order(window, viewport)?;
+            }
             anyhow::ensure!(
                 self.io.reply(
                     self.guard.binding(),
@@ -423,6 +468,11 @@ impl WorkerBridge {
                 ),
                 "host reply queue is full"
             );
+        }
+        if matches!(self.gate, DisplayGate::Active)
+            && let Some(viewport) = self.guard.viewport()
+        {
+            native_order(window, viewport)?;
         }
         match self.gate {
             DisplayGate::Draining { ticket, reply_to, through } => {
@@ -554,6 +604,39 @@ fn session_clock(since: &mut Option<Instant>, now: Instant) -> u64 {
         .min(u64::MAX as u128) as u64
 }
 
+#[cfg(any(windows, test))]
+fn workspace_family_foreground(
+    foreground: u64,
+    host: u64,
+    worker: u64,
+    host_pid: u32,
+    mut relation: impl FnMut(u64) -> Option<(u32, u64)>,
+) -> bool {
+    if foreground == 0 || host == 0 || host_pid == 0 {
+        return false;
+    }
+    if foreground == worker && worker != 0 {
+        return true;
+    }
+    let mut current = foreground;
+    for _ in 0..8 {
+        let Some((pid, owner)) = relation(current) else {
+            return false;
+        };
+        if pid != host_pid {
+            return false;
+        }
+        if current == host {
+            return true;
+        }
+        if owner == 0 || owner == current {
+            return false;
+        }
+        current = owner;
+    }
+    false
+}
+
 fn receipt_is_current(received: Option<Instant>, now: Instant) -> bool {
     received
         .and_then(|received| now.checked_duration_since(received))
@@ -652,15 +735,24 @@ impl NativePresentation {
     }
 }
 
+fn native_order(window: &winit::window::Window, viewport: aurora_session::HostedViewport) -> anyhow::Result<()> {
+    #[cfg(windows)]
+    native::stay_below_host(window, viewport)?;
+    #[cfg(not(windows))]
+    let _ = (window, viewport);
+    Ok(())
+}
+
 #[cfg(windows)]
 mod native {
     use windows_sys::Win32::{
         Foundation::{HWND, POINT, RECT},
         Graphics::Gdi::ClientToScreen,
         UI::WindowsAndMessaging::{
-            GW_OWNER, GWL_EXSTYLE, GWL_STYLE, GetClientRect, GetForegroundWindow, GetWindow, GetWindowLongPtrW, GetWindowRect,
-            GetWindowThreadProcessId, IsWindow, IsZoomed, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos,
-            WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW, WS_OVERLAPPEDWINDOW, WS_POPUP,
+            GW_HWNDNEXT, GW_OWNER, GWL_EXSTYLE, GWL_STYLE, GetClientRect, GetForegroundWindow, GetWindow, GetWindowLongPtrW, GetWindowRect,
+            GetWindowThreadProcessId, IsWindow, IsZoomed, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+            SetWindowLongPtrW, SetWindowPos, WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
+            WS_OVERLAPPEDWINDOW, WS_POPUP,
         },
     };
     use winit::{dpi::LogicalSize, platform::windows::WindowExtWindows, window::Window};
@@ -765,10 +857,31 @@ mod native {
         valid && super::contains_rect(origin.x, origin.y, rect.right - rect.left, rect.bottom - rect.top, viewport.rect)
     }
 
-    pub(super) fn workspace_foreground(host: u64, worker: u64) -> bool {
-        // SAFETY: a read-only query; this never sets or injects native focus.
+    pub(super) fn workspace_foreground(host: u64, worker: u64, host_pid: u32) -> bool {
+        // SAFETY: read actual foreground and native owners only. Every allowed
+        // tool window must belong to this exact controller PID and owner root.
         let foreground = unsafe { GetForegroundWindow() } as u64;
-        foreground != 0 && (foreground == host || foreground == worker)
+        super::workspace_family_foreground(foreground, host, worker, host_pid, |window| unsafe {
+            let mut pid = 0;
+            if GetWindowThreadProcessId(window as HWND, &mut pid) == 0 {
+                return None;
+            }
+            Some((pid, GetWindow(window as HWND, GW_OWNER) as u64))
+        })
+    }
+
+    pub(super) fn stay_below_host(window: &Window, viewport: aurora_session::HostedViewport) -> std::io::Result<()> {
+        let hwnd = super::native_window(window) as HWND;
+        let host = viewport.host_window as HWND;
+        // SAFETY: query the host's Z-order, then change only this process's
+        // own fitted window. Owned host tools stay above their owner/worker;
+        // no foreign style, global topmost flag, focus or parenting changes.
+        unsafe {
+            if GetWindow(host, GW_HWNDNEXT) != hwnd && SetWindowPos(hwnd, host, 0, 0, 0, 0, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE) == 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn matches(window: &Window, viewport: aurora_session::HostedViewport, host_pid: u32) -> bool {
@@ -984,6 +1097,34 @@ mod tests {
             Some(received),
             received + std::time::Duration::from_millis(aurora_session::LEASE_MILLIS)
         ));
+    }
+
+    #[test]
+    fn render_priority_accepts_only_the_exact_host_owned_tool_family() {
+        let relation = |window| match window {
+            1 => Some((10, 0)),
+            2 => Some((10, 1)),
+            3 => Some((10, 2)),
+            4 => Some((11, 1)),
+            5 => Some((10, 0)),
+            6 => Some((10, 6)),
+            _ => None,
+        };
+        assert!(workspace_family_foreground(1, 1, 9, 10, relation));
+        assert!(workspace_family_foreground(2, 1, 9, 10, relation));
+        assert!(workspace_family_foreground(3, 1, 9, 10, relation));
+        assert!(workspace_family_foreground(9, 1, 9, 10, relation));
+        for window in [0, 4, 5, 6, 7] {
+            assert!(!workspace_family_foreground(window, 1, 9, 10, relation));
+        }
+        assert!(
+            !workspace_family_foreground(2, 1, 9, 12, relation),
+            "the native host PID must match"
+        );
+        assert!(
+            !workspace_family_foreground(100, 1, 9, 10, |window| Some((10, window + 1))),
+            "owner walks are bounded"
+        );
     }
 
     #[test]

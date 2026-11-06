@@ -5,6 +5,8 @@
 //! separate latest-value slot. The fresh WorkerId is the boot nonce; neither a
 //! PID nor a window handle can authorize a command.
 
+pub(crate) use super::chat_broker::HostChatSnapshot;
+use aurora_session::chat::{ChatKey, ChatSource, ChatText};
 use aurora_session::{
     AccountKey, Binding, Command, Coordinator, Effect, Envelope, Event, GridKey, HostId, HostNotice, HostedViewport, InstallationId,
     MAX_WORKERS, Message, PROTOCOL_VERSION, Phase, SessionId, SessionIdentity, WorkerId, WorkerIdentity, WorkerStatus,
@@ -59,6 +61,7 @@ pub(crate) struct HostSnapshot {
     /// Published only after the exact current transaction's grant is accepted.
     pub active_viewport: Option<HostedViewport>,
     pub completed_request: u64,
+    pub chat: Vec<Arc<HostChatSnapshot>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,6 +69,7 @@ pub(crate) enum HostError {
     Busy,
     Unsupported,
     Stopped,
+    Unavailable,
 }
 
 impl std::fmt::Display for HostError {
@@ -81,6 +85,26 @@ enum HostIntent {
     Viewport(HostedViewport),
     Park,
     Detach(WorkerId),
+    ChatSend {
+        key: ChatKey,
+        policy_revision: u64,
+        text: ChatText,
+    },
+}
+
+impl HostIntent {
+    fn controls_presentation(&self) -> bool {
+        match self {
+            Self::ChatSend { .. } => false,
+            Self::Open(_) | Self::Activate(_, _) | Self::Viewport(_) | Self::Park | Self::Detach(_) => true,
+        }
+    }
+}
+
+fn request_result(error: &mut Option<String>, controls_presentation: bool, result: anyhow::Result<()>) {
+    if controls_presentation {
+        *error = result.err().map(|error| error.to_string());
+    }
 }
 
 struct HostRequest {
@@ -180,6 +204,30 @@ impl HostController {
         self.send(HostIntent::Detach(worker))
     }
 
+    pub fn send_chat(&self, key: ChatKey, policy_revision: u64, text: ChatText) -> Result<u64, HostError> {
+        let snapshot = self.snapshot();
+        let allowed = snapshot.chat.iter().any(|chat| {
+            chat.source == key.source
+                && chat.authenticated
+                && chat.live
+                && chat.conversations.iter().any(|info| {
+                    info.policy.key == key
+                        && info.policy.revision == policy_revision
+                        && info.policy.lease_current
+                        && info.policy.ready
+                        && info.policy.can_send
+                })
+        });
+        if !allowed || key.validate().is_err() || text.as_str().trim().is_empty() {
+            return Err(HostError::Unavailable);
+        }
+        self.send(HostIntent::ChatSend {
+            key,
+            policy_revision,
+            text,
+        })
+    }
+
     fn send(&self, intent: HostIntent) -> Result<u64, HostError> {
         if self.stop.load(Ordering::Acquire) || self.stopped() {
             return Err(HostError::Stopped);
@@ -208,6 +256,13 @@ impl Drop for HostController {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub(super) struct ChatBootstrap {
+    pub port: u16,
+    pub key: super::chat_transport::ChatSecret,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct WorkerConfig {
     pub version: u16,
     pub identity: WorkerIdentity,
@@ -217,6 +272,8 @@ pub(super) struct WorkerConfig {
     pub expected_grid: Option<GridKey>,
     pub lease_epoch: u64,
     pub host_pid: u32,
+    #[serde(default)]
+    pub chat: Option<ChatBootstrap>,
 }
 
 impl WorkerConfig {
@@ -224,6 +281,10 @@ impl WorkerConfig {
         anyhow::ensure!(
             self.version == PROTOCOL_VERSION && self.generation != 0 && self.lease_epoch != 0 && self.host_pid != 0,
             "invalid worker configuration"
+        );
+        anyhow::ensure!(
+            self.chat.as_ref().is_none_or(|chat| chat.port != 0),
+            "invalid private chat endpoint"
         );
         anyhow::ensure!(
             self.expected_account.is_some() == self.expected_grid.is_some(),
@@ -625,6 +686,7 @@ struct Child {
     next_reservation: Instant,
     label: String,
     grid: String,
+    chat: super::chat_broker::Peer,
 }
 
 impl Child {
@@ -743,6 +805,7 @@ struct Broker {
     pending: Option<WorkerId>,
     error: Option<String>,
     completed_request: u64,
+    chat_listener: Option<super::chat_transport::Listener>,
 }
 
 impl Broker {
@@ -770,6 +833,7 @@ impl Broker {
                         }
                         Message::Command(Command::Grant { .. }) => self.pending = Some(worker),
                         Message::Command(Command::Detach) => {
+                            child.chat.set_control(None, false);
                             child.granted = None;
                             if self.active_viewport.is_some_and(|active| active.worker == worker) {
                                 self.active_viewport = None;
@@ -816,7 +880,7 @@ impl Broker {
         Ok(())
     }
 
-    fn intent(&mut self, intent: HostIntent, now: u64) -> anyhow::Result<()> {
+    fn intent(&mut self, intent: HostIntent, ticket: u64, now: u64) -> anyhow::Result<()> {
         match intent {
             HostIntent::Open(account) => {
                 if self.opens.len() >= MAX_QUEUE {
@@ -852,6 +916,26 @@ impl Broker {
             HostIntent::Detach(worker) => {
                 let effects = self.coordinator.detach(worker)?;
                 self.effects(effects)?;
+            }
+            HostIntent::ChatSend {
+                key,
+                policy_revision,
+                text,
+            } => {
+                let live = self
+                    .coordinator
+                    .workers()
+                    .any(|entry| entry.live && entry.binding == key.source.binding() && entry.status.phase == Phase::Online);
+                let child = self
+                    .children
+                    .iter_mut()
+                    .find(|child| child.config.identity == key.source.worker && child.config.lease_epoch == key.source.lease_epoch)
+                    .ok_or(HostError::Unavailable)?;
+                if !live || child.detached || child.exited || child.last_seen.is_none_or(|seen| seen.elapsed() > REACHABLE) {
+                    child.chat.set_control(None, false);
+                    anyhow::bail!(HostError::Unavailable);
+                }
+                child.chat.send(key, policy_revision, text, ticket, Instant::now())?;
             }
         }
         Ok(())
@@ -909,7 +993,55 @@ impl Broker {
         self.children.retain(|child| !child.exited);
         let effects = self.coordinator.tick(now);
         self.effects(effects)?;
+        self.poll_chat();
         Ok(())
+    }
+
+    fn poll_chat(&mut self) {
+        let now = Instant::now();
+        for child in &mut self.children {
+            let entry = self
+                .coordinator
+                .workers()
+                .find(|entry| entry.binding.worker == child.config.identity);
+            let live = !child.detached
+                && !child.exited
+                && child.last_seen.is_some_and(|seen| seen.elapsed() <= REACHABLE)
+                && entry.is_some_and(|entry| entry.live && entry.status.phase == Phase::Online);
+            let source = entry
+                .filter(|_| live)
+                .and_then(|entry| ChatSource::try_from((entry.binding, child.config.lease_epoch)).ok());
+            child.chat.set_control(source, live);
+            child.chat.poll(now);
+        }
+        let Some(listener) = &mut self.chat_listener else {
+            return;
+        };
+        let permits: Vec<_> = self
+            .children
+            .iter()
+            .filter(|child| child.chat.accepting())
+            .filter_map(|child| {
+                child.config.chat.as_ref().map(|chat| super::chat_transport::Permit {
+                    identity: child.config.identity,
+                    lease_epoch: child.config.lease_epoch,
+                    secret: chat.key.clone(),
+                })
+            })
+            .collect();
+        match listener.poll(&permits) {
+            Ok(Some(io)) => {
+                if let Some(child) = self
+                    .children
+                    .iter_mut()
+                    .find(|child| child.config.identity == io.identity() && child.config.lease_epoch == io.lease_epoch())
+                {
+                    let _ = child.chat.attach(io);
+                }
+            }
+            Ok(None) => {}
+            Err(_) => log::warn!("session chat listener unavailable; control ownership is unchanged"),
+        }
     }
 
     fn reconcile(&mut self, accounts: &[(SavedAccount, crate::login_accounts::Account)], now: u64) -> anyhow::Result<()> {
@@ -981,7 +1113,12 @@ impl Broker {
             open.gate.can_launch(self.coordinator.active(), self.coordinator.busy()),
             "worker launch requires an acknowledged parked renderer"
         );
-        let config = new_config(self.installation, self.host, account)?;
+        let config = new_config(
+            self.installation,
+            self.host,
+            account,
+            self.chat_listener.as_ref().map(|listener| listener.port()),
+        )?;
         self.coordinator.register(config.identity.worker, config.lease_epoch, now)?;
         let worker = config.identity.worker;
         match launch(config, account, open.reservation) {
@@ -1061,6 +1198,7 @@ impl Broker {
             pending: self.coordinator.busy().then_some(self.pending).flatten(),
             active_viewport,
             completed_request: self.completed_request,
+            chat: self.children.iter().filter_map(|child| child.chat.snapshot()).collect(),
         }
     }
 }
@@ -1103,6 +1241,13 @@ fn host_loop(
         pending: None,
         error: None,
         completed_request: 0,
+        chat_listener: match super::chat_transport::Listener::bind() {
+            Ok(listener) => Some(listener),
+            Err(_) => {
+                log::warn!("session chat listener could not start; native chat remains unavailable");
+                None
+            }
+        },
     };
     // Prepare a process-only reaper before the first child can be spawned.
     // After shutdown it refreshes cold launch permits and observes exits;
@@ -1128,10 +1273,11 @@ fn host_loop(
             if closing.is_some() {
                 break;
             }
-            match broker.intent(request.intent, now) {
-                Ok(()) => broker.error = None,
-                Err(failure) => broker.error = Some(failure.to_string()),
-            }
+            let controls_presentation = request.intent.controls_presentation();
+            let result = broker.intent(request.intent, request.ticket, now);
+            // Chat failures belong to their exact request receipts/popout.
+            // They cannot cover the active world or clear a control failure.
+            request_result(&mut broker.error, controls_presentation, result);
             broker.completed_request = request.ticket;
         }
         if let Err(failure) = broker.poll(now) {
@@ -1172,6 +1318,7 @@ fn new_config(
     installation: InstallationId,
     host: HostId,
     account: Option<&(SavedAccount, crate::login_accounts::Account)>,
+    chat_port: Option<u16>,
 ) -> anyhow::Result<WorkerConfig> {
     let config = WorkerConfig {
         version: PROTOCOL_VERSION,
@@ -1186,6 +1333,9 @@ fn new_config(
         expected_grid: account.map(|(_, account)| grid_key(&account.uri)).transpose()?,
         lease_epoch: 1,
         host_pid: std::process::id(),
+        chat: chat_port
+            .map(|port| super::chat_transport::ChatSecret::random().map(|key| ChatBootstrap { port, key }))
+            .transpose()?,
     };
     config.validate()?;
     Ok(config)
@@ -1216,6 +1366,7 @@ fn launch(
         worker: config.identity,
         session: None,
     };
+    let chat = super::chat_broker::Peer::new(config.identity, config.lease_epoch);
     Ok(Child {
         config,
         directory,
@@ -1233,6 +1384,7 @@ fn launch(
         next_reservation: Instant::now(),
         label: account.map_or_else(String::new, |(saved, _)| saved.label.clone()),
         grid: account.map_or_else(String::new, |(saved, _)| saved.grid.clone()),
+        chat,
     })
 }
 
@@ -1279,7 +1431,50 @@ mod tests {
             expected_grid: Some(GridKey::from_bytes([5; 32]).expect("grid")),
             lease_epoch: 7,
             host_pid: std::process::id(),
+            chat: None,
         }
+    }
+
+    #[test]
+    fn chat_request_failures_do_not_cover_the_active_world_or_clear_control_errors() {
+        let config = config();
+        let source = ChatSource::try_from((status(&config).binding, config.lease_epoch)).unwrap();
+        let intent = HostIntent::ChatSend {
+            key: ChatKey {
+                source,
+                conversation: aurora_session::chat::Conversation::Nearby,
+            },
+            policy_revision: 1,
+            text: ChatText::new("synthetic literal").unwrap(),
+        };
+        let mut error = None;
+        request_result(&mut error, intent.controls_presentation(), Err(HostError::Unavailable.into()));
+        assert!(error.is_none());
+        error = Some("existing control failure".into());
+        request_result(&mut error, intent.controls_presentation(), Ok(()));
+        assert_eq!(error.as_deref(), Some("existing control failure"));
+        request_result(&mut error, HostIntent::Park.controls_presentation(), Ok(()));
+        assert!(error.is_none());
+    }
+
+    #[test]
+    fn private_chat_bootstrap_key_is_redacted_and_old_manual_bootstraps_remain_valid() {
+        let mut config = config();
+        let mut old = serde_json::to_value(&config).unwrap();
+        old.as_object_mut().unwrap().remove("chat");
+        let restored: WorkerConfig = serde_json::from_value(old).unwrap();
+        assert!(restored.chat.is_none());
+        restored.validate().unwrap();
+        let key: super::super::chat_transport::ChatSecret = serde_json::from_str(&format!("\"{}\"", "07".repeat(32))).unwrap();
+        config.chat = Some(ChatBootstrap { port: 12345, key });
+        config.validate().unwrap();
+        assert!(!format!("{config:?}").contains(&"07".repeat(32)));
+        let encoded = serde_json::to_vec(&config).unwrap();
+        assert!(encoded.len() < MAX_CONFIG);
+        let restored: WorkerConfig = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(restored.chat.as_ref().unwrap().port, 12345);
+        config.chat.as_mut().unwrap().port = 0;
+        assert!(config.validate().is_err());
     }
 
     fn status(config: &WorkerConfig) -> Envelope {

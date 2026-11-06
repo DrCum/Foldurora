@@ -84,6 +84,8 @@ pub(crate) use gpu_stall::withdraw_all as withdraw_gpu_notices;
 mod graphics_start;
 mod grid_status;
 mod group_titles;
+mod host_chat;
+mod host_chat_bridge;
 mod host_session;
 pub(crate) use host_session::grid_label as host_grid_label;
 mod hover_height;
@@ -827,6 +829,7 @@ pub struct App {
     busy_pause: busy_pause::BusyPause,
     /// Optional exact-process host bridge; standalone viewers have none.
     host_session: Option<crate::session_host::worker::WorkerBridge>,
+    host_chat: Option<Box<host_chat_bridge::Driver>>,
     /// The other viewers on this PC (instances.rs).
     instances: crate::instances::Instances,
     characters: crate::characters::Manager,
@@ -1679,6 +1682,7 @@ impl App {
             gpu_stall: Default::default(),
             busy_pause: Default::default(),
             host_session: crate::session_host::worker::WorkerBridge::from_startup()?,
+            host_chat: None,
             instances: crate::instances::Instances::new(),
             characters: Default::default(),
             characters_ui: Default::default(),
@@ -8926,6 +8930,7 @@ impl App {
             }
         }
 
+        self.tick_host_chat();
         self.frame_profile.lap(Lap::Social);
         // Coalesce OS pointer moves before taking the renderer for this frame.
         if self.left_down && self.texture_pipette() && !self.egui_ctx.is_pointer_over_egui() {

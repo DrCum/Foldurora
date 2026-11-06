@@ -121,15 +121,7 @@ impl ChatWindow {
     }
 
     pub fn poll(&mut self, snapshot: &HostSnapshot, closing: bool, now: Instant) -> Option<Instant> {
-        let current = (!closing && !snapshot.stopped && snapshot.error.is_none())
-            .then(|| {
-                snapshot
-                    .chat
-                    .iter()
-                    .find(|chat| chat.source == self.source() && chat_ui::eligible(chat))
-                    .cloned()
-            })
-            .flatten();
+        let current = selected_chat(snapshot, self.source(), closing);
         let changed = match (&self.snapshot, &current) {
             (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
             (None, None) => false,
@@ -176,5 +168,84 @@ impl ChatWindow {
             self.repaint = Some(Instant::now());
         }
         Ok(())
+    }
+}
+
+// World presentation failures do not revoke a different, still-live chat
+// source. The broker's exact authenticated source/policy is its authority.
+fn selected_chat(snapshot: &HostSnapshot, source: ChatSource, closing: bool) -> Option<Arc<HostChatSnapshot>> {
+    (!closing && !snapshot.stopped)
+        .then(|| {
+            snapshot
+                .chat
+                .iter()
+                .find(|chat| chat.source == source && chat_ui::eligible(chat))
+                .cloned()
+        })
+        .flatten()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aurora_session::chat::{ChatKey, Conversation, ConversationInfo, NativeChatPolicy};
+    use aurora_session::{AccountKey, GridKey, HostId, InstallationId, Label, SessionId, SessionIdentity, WorkerId, WorkerIdentity};
+
+    #[test]
+    fn chat_popout_keeps_its_live_source_despite_unrelated_world_errors_or_switches() {
+        let source = ChatSource {
+            worker: WorkerIdentity {
+                installation: InstallationId::from_bytes([1; 32]).unwrap(),
+                host: HostId::from_bytes([2; 16]).unwrap(),
+                worker: WorkerId::from_bytes([3; 16]).unwrap(),
+            },
+            session: SessionIdentity {
+                session: SessionId::from_bytes([4; 16]).unwrap(),
+                account: AccountKey::from_bytes([5; 32]).unwrap(),
+                grid: GridKey::from_bytes([6; 32]).unwrap(),
+                generation: 1,
+            },
+            lease_epoch: 7,
+        };
+        let chat = Arc::new(HostChatSnapshot {
+            source,
+            authenticated: true,
+            live: true,
+            conversations: vec![ConversationInfo {
+                title: Label::new("Synthetic").unwrap(),
+                policy: NativeChatPolicy {
+                    key: ChatKey {
+                        source,
+                        conversation: Conversation::Nearby,
+                    },
+                    revision: 1,
+                    lease_current: true,
+                    ready: true,
+                    can_read: true,
+                    can_send: true,
+                },
+            }],
+            lines: Vec::new(),
+            receipts: Vec::new(),
+            gap: false,
+        });
+        let mut snapshot = HostSnapshot {
+            chat: vec![chat.clone()],
+            error: Some("unrelated world operation failed".into()),
+            active: Some(WorkerId::from_bytes([9; 16]).unwrap()),
+            ..Default::default()
+        };
+        assert!(Arc::ptr_eq(&selected_chat(&snapshot, source, false).unwrap(), &chat));
+        assert!(selected_chat(&snapshot, source, true).is_none());
+        snapshot.stopped = true;
+        assert!(selected_chat(&snapshot, source, false).is_none());
+        snapshot.stopped = false;
+        let mut other = source;
+        other.session.generation += 1;
+        assert!(selected_chat(&snapshot, other, false).is_none(), "a captured popout never rebinds");
+        let mut expired = (*chat).clone();
+        expired.live = false;
+        snapshot.chat = vec![Arc::new(expired)];
+        assert!(selected_chat(&snapshot, source, false).is_none());
     }
 }
