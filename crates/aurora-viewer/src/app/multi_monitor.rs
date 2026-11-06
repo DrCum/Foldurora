@@ -324,12 +324,11 @@ impl App {
         // Do not focus, unminimize or leave fullscreen. Resizing can answer
         // synchronously without a Resized event on some platforms.
         let window = g.window.clone();
-        if let Some((width, height)) = plan.inner_size {
-            if let Some(applied) = window.request_inner_size(winit::dpi::PhysicalSize::new(width, height))
-                && let Some(gfx) = &mut self.gfx
-            {
-                gfx.renderer.resize(applied.width, applied.height);
-            }
+        if let Some((width, height)) = plan.inner_size
+            && let Some(applied) = window.request_inner_size(winit::dpi::PhysicalSize::new(width, height))
+            && let Some(gfx) = &mut self.gfx
+        {
+            gfx.renderer.resize(applied.width, applied.height);
         }
         window.set_outer_position(winit::dpi::PhysicalPosition::new(plan.position.0, plan.position.1));
         ui::menu::window_geometry_changed(&self.egui_ctx);
