@@ -314,6 +314,7 @@ impl WorkerBridge {
     /// Run after held movement/PTT/cursor were released, on the native event
     /// thread. No device poll, file operation or GPU wait occurs on this path.
     pub fn pump_display(&mut self, effects: WorkerEffects, window: &winit::window::Window, renderer: &mut aurora_render::Renderer) -> bool {
+        let previously_supported = self.supported;
         self.supported = cfg!(windows) && renderer.session_boundary().is_ok()
             || (cfg!(windows) && matches!(self.gate, DisplayGate::Draining { .. } | DisplayGate::FrameFence { .. }));
         let current = native_window(window);
@@ -333,6 +334,13 @@ impl WorkerBridge {
             self.io.reply(self.guard.binding(), self.request_sequence, Event::Detached);
             self.io.stop();
             return false;
+        }
+        if previously_supported && !self.supported && self.guard.binding().session.is_some() {
+            // Losing the fence contract (for example entering XR) cannot turn
+            // a managed world into an ordinary full-rate renderer while the
+            // controller still believes it owns the prepared native surface.
+            self.invalidate_display();
+            return true;
         }
         if !self.supported {
             self.presentation.restore(window);
