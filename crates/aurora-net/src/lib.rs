@@ -184,6 +184,7 @@ impl NetClient {
             .tls_certs_merge(ll_ca)
             .build()
             .map_err(|e| NetError::Http(e.to_string()))?;
+        let login_http = login::http_client().map_err(|e| NetError::Http(e.to_string()))?;
         // Capabilities / assets: Linden Lab's CA for any simulator name (as
         // llcorehttp, mVerifyHost = false), public authorities only for the
         // host's own name (sim_tls.rs).
@@ -242,7 +243,7 @@ impl NetClient {
             while let Some(cmd) = cmd_rx.recv().await {
                 match cmd {
                     NetCommand::Login(req) => {
-                        session::run_session(&shared, *req, &mut cmd_rx).await;
+                        session::run_session(&shared, &login_http, *req, &mut cmd_rx).await;
                     }
                     // (the offline demo moves its agent every frame)
                     NetCommand::AgentControls(_) => {}

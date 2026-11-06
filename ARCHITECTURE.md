@@ -1,5 +1,20 @@
 # Aurora Viewer architecture
 
+Credential transport is scoped to each service. The login client binds HTTP
+and XML-RPC redirects to the initial URL's origin (scheme, host and effective
+port); Linden logins require HTTPS, while explicitly configured HTTP custom
+grids remain supported. This client is separate from the other network clients.
+Profile-photo requests require HTTPS and attach profile cookies only to the
+profile origin. Storage uploads carry no authentication headers; configured
+and returned completion URLs must lead back to that profile origin. Cached
+profile authentication is scoped to the profile address and OpenID cookie.
+The offline photo demo has a separate loopback transport with synthetic
+cookies, never production credentials.
+`aurora-net/src/login/security_tests.rs` and
+`aurora-viewer/src/snapshot/profile/security_tests.rs` exercise these boundaries
+with independent local servers, including destinations that must receive no
+requests.
+
 World texture/material drops use `Scene::resource_drop_face_at_ray` for one
 consistent object/face hit, including zero-alpha and transparent texel surfaces,
 with HUD ownership, sidedness, distance and terrain occlusion retained. The

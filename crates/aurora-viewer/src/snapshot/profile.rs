@@ -6,7 +6,9 @@
 //! `snapshots/s3_upload_config` gives the form of the storage the PNG is
 //! posted to, whose 303 is followed to finish the post.
 //!
-//! The cookies are session secrets: never logged.
+//! Cookies stay on the profile's exact HTTPS origin. The storage gets only
+//! its signed multipart form, and its completion URL is checked before any
+//! authenticated request. Cookies and network URLs are never logged.
 
 use super::Aspect;
 use serde::{Deserialize, Serialize};
@@ -72,26 +74,118 @@ pub fn grid_web_profile(grid: &crate::settings::GridChoice, login_url: &str) -> 
     }
 }
 
-/// The grid's web profile address, lowercase like getProfileURL("").
+/// Normalize the profile base without changing case-sensitive paths.
 pub fn profile_url(base: &str) -> Option<String> {
-    let base = base.trim();
-    if base.is_empty() {
+    let mut url = destination(base.trim(), false).ok()?;
+    if url.query().is_some() {
         return None;
     }
-    let mut url = base.to_lowercase();
-    if !url.ends_with('/') {
-        url.push('/');
+    if !url.path().ends_with('/') {
+        url.set_path(&format!("{}/", url.path()));
     }
-    Some(url)
+    Some(url.into())
 }
 
-/// What a post needs: the profile's address, the OpenID cookie of the
-/// login (raw, as Firestorm sends it) and the user agent.
+/// A validated profile and the session secret scoped to it. HTTP is only
+/// available through the demo constructor, which supplies its own cookie.
 #[derive(Clone)]
 pub struct Web {
-    pub profile: String,
-    pub openid: String,
-    pub user_agent: String,
+    profile: reqwest::Url,
+    openid: String,
+    user_agent: String,
+    demo: bool,
+}
+
+impl Web {
+    pub fn new(base: &str, openid: String, user_agent: String) -> Result<Self, Error> {
+        let base = profile_url(base).ok_or(Error::UnsafeDestination)?;
+        Ok(Self {
+            profile: destination(&base, false)?,
+            openid: cookie_pair(&openid).ok_or(Error::NoCookie)?,
+            user_agent,
+            demo: false,
+        })
+    }
+
+    pub fn demo(server: &demo::Server, user_agent: String) -> Result<Self, Error> {
+        Ok(Self {
+            profile: destination(&server.url, true)?,
+            openid: demo::OPENID.into(),
+            user_agent,
+            demo: true,
+        })
+    }
+
+    fn profile_destination(&self, base: &reqwest::Url, reference: &str) -> Result<reqwest::Url, Error> {
+        let url = base.join(reference).map_err(|_| Error::UnsafeDestination)?;
+        destination(url.as_str(), self.demo)?;
+        if url.origin() != self.profile.origin() {
+            return Err(Error::UnsafeDestination);
+        }
+        Ok(url)
+    }
+
+    fn client(&self) -> Result<reqwest::Client, Error> {
+        let builder = reqwest::Client::builder()
+            .https_only(!self.demo)
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(TIMEOUT);
+        // The demo must not send even its synthetic cookies through a proxy.
+        let builder = if self.demo { builder.no_proxy() } else { builder };
+        builder.build().map_err(|_| Error::Network)
+    }
+}
+
+/// A profile session cookie is reusable only with the same profile base
+/// and OpenID session. Keep the binding with the secret, including in caches.
+#[derive(Clone)]
+pub struct AuthCookie {
+    profile: reqwest::Url,
+    openid: String,
+    cookie: String,
+}
+
+impl AuthCookie {
+    pub fn matches(&self, web: &Web) -> bool {
+        self.profile == web.profile && self.openid == web.openid
+    }
+}
+
+fn destination(value: &str, demo: bool) -> Result<reqwest::Url, Error> {
+    let url = reqwest::Url::parse(value).map_err(|_| Error::UnsafeDestination)?;
+    let scheme_ok = if demo {
+        url.scheme() == "http"
+            && url.host_str().is_some_and(|h| {
+                h.trim_matches(['[', ']'])
+                    .parse::<std::net::IpAddr>()
+                    .is_ok_and(|ip| ip.is_loopback())
+            })
+    } else {
+        url.scheme() == "https"
+    };
+    if !scheme_ok || !url.has_host() || !url.username().is_empty() || url.password().is_some() || url.fragment().is_some() {
+        return Err(Error::UnsafeDestination);
+    }
+    Ok(url)
+}
+
+/// Set-Cookie attributes describe the server's cookie; they are not part
+/// of the Cookie request header. Refuse malformed pairs before networking.
+fn cookie_pair(raw: &str) -> Option<String> {
+    let pair = raw.split(';').next()?.trim();
+    let (name, value) = pair.split_once('=')?;
+    let name_ok = !name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b));
+    // RFC 6265 allows a quoted value; quotes must surround the complete
+    // value and may not appear inside it. Keep the original wire pair.
+    let value = match value.strip_prefix('"') {
+        Some(quoted) => quoted.strip_suffix('"')?,
+        None => value,
+    };
+    let value_ok = !value.is_empty()
+        && value
+            .bytes()
+            .all(|b| matches!(b, 0x21 | 0x23..=0x2b | 0x2d..=0x3a | 0x3c..=0x5b | 0x5d..=0x7e));
+    (name_ok && value_ok).then(|| pair.to_owned())
 }
 
 /// Where a post stopped (logged; the window says it failed, like
@@ -110,6 +204,7 @@ pub enum Error {
     NoRedirect,
     /// The post's last step failed (HTTP status).
     Finish(u16),
+    UnsafeDestination,
     Network,
 }
 
@@ -122,6 +217,7 @@ impl std::fmt::Display for Error {
             Error::Upload(s) => write!(f, "image refused (HTTP {s})"),
             Error::NoRedirect => write!(f, "no address after the upload"),
             Error::Finish(s) => write!(f, "post not finished (HTTP {s})"),
+            Error::UnsafeDestination => write!(f, "insecure or unexpected profile destination"),
             Error::Network => write!(f, "network error"),
         }
     }
@@ -140,38 +236,54 @@ pub fn escape(text: &str) -> String {
     out
 }
 
-/// LLWebProfile::buildDefaultHeaders (LLViewerMedia::getHeaders) and the
-/// auth cookie appended to them.
-fn request(http: &reqwest::Client, method: reqwest::Method, url: &str, web: &Web, auth: Option<&str>) -> reqwest::RequestBuilder {
-    let mut r = http
-        .request(method, url)
+/// Authenticated requests are confined to the validated profile origin.
+/// Storage requests deliberately use a separate, cookie-free path below.
+fn profile_request(
+    http: &reqwest::Client,
+    url: &reqwest::Url,
+    web: &Web,
+    auth: Option<&AuthCookie>,
+) -> Result<reqwest::RequestBuilder, Error> {
+    web.profile_destination(&web.profile, url.as_str())?;
+    let cookie = if let Some(auth) = auth {
+        if !auth.matches(web) {
+            return Err(Error::NoCookie);
+        }
+        format!("{}; {}", web.openid, auth.cookie)
+    } else {
+        web.openid.clone()
+    };
+    Ok(http
+        .get(url.clone())
         .header("Accept", "*/*")
         .header("Content-Type", "application/xml")
-        .header("Cookie", web.openid.as_str())
+        .header("Cookie", cookie)
         .header("User-Agent", web.user_agent.as_str())
-        .timeout(TIMEOUT);
-    if let Some(auth) = auth {
-        r = r.header("Cookie", auth);
-    }
-    r
+        .timeout(TIMEOUT))
 }
 
-/// getOpenIDCookieCoro: the web profile with the OpenID cookie, redirects
-/// followed; its Set-Cookie, path stripped, is the auth cookie of the posts.
-pub async fn auth_cookie(web: &Web) -> Result<String, Error> {
-    let http = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .build()
-        .map_err(|_| Error::Network)?;
-    let response = http
-        .get(&web.profile)
-        .header("Accept", "*/*")
-        .header("Cookie", web.openid.as_str())
-        .header("User-Agent", web.user_agent.as_str())
-        .timeout(TIMEOUT)
-        .send()
-        .await
-        .map_err(|_| Error::Network)?;
+/// getOpenIDCookieCoro, with bounded same-origin redirects checked before
+/// sending the OpenID cookie on each hop.
+pub async fn auth_cookie(web: &Web) -> Result<AuthCookie, Error> {
+    let http = web.client()?;
+    let mut url = web.profile.clone();
+    let mut redirects = 0;
+    let response = loop {
+        let response = profile_request(&http, &url, web, None)?.send().await.map_err(|_| Error::Network)?;
+        if !matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308) {
+            break response;
+        }
+        if redirects >= 10 {
+            return Err(Error::UnsafeDestination);
+        }
+        let location = response
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|v| v.to_str().ok())
+            .ok_or(Error::UnsafeDestination)?;
+        url = web.profile_destination(&url, location)?;
+        redirects += 1;
+    };
     if !response.status().is_success() {
         log::warn!("photo: web profile: HTTP {}", response.status().as_u16());
         return Err(Error::NoCookie);
@@ -180,26 +292,26 @@ pub async fn auth_cookie(web: &Web) -> Result<String, Error> {
         .headers()
         .get(reqwest::header::SET_COOKIE)
         .and_then(|v| v.to_str().ok())
-        .map(|c| c.split(';').next().unwrap_or("").trim().to_owned())
-        .filter(|c| !c.is_empty());
-    cookie.ok_or(Error::NoCookie)
+        .and_then(cookie_pair)
+        .ok_or(Error::NoCookie)?;
+    Ok(AuthCookie {
+        profile: web.profile.clone(),
+        openid: web.openid.clone(),
+        cookie,
+    })
 }
 
 /// uploadImageCoro: the upload configuration, the form posted to its URL,
 /// then the 303's address.
-pub async fn post(web: &Web, auth: &str, png: Vec<u8>, caption: &str, add_location: bool) -> Result<(), Error> {
-    // setFollowRedirects(false): the 303 is read, then followed by hand
-    let http = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|_| Error::Network)?;
-    let config_url = format!(
-        "{}snapshots/s3_upload_config?caption={}&add_loc={}",
-        web.profile,
+pub async fn post(web: &Web, auth: &AuthCookie, png: Vec<u8>, caption: &str, add_location: bool) -> Result<(), Error> {
+    let http = web.client()?;
+    let mut config_url = web.profile_destination(&web.profile, "snapshots/s3_upload_config")?;
+    config_url.set_query(Some(&format!(
+        "caption={}&add_loc={}",
         escape(caption),
         if add_location { "1" } else { "0" }
-    );
-    let response = request(&http, reqwest::Method::GET, &config_url, web, Some(auth))
+    )));
+    let response = profile_request(&http, &config_url, web, Some(auth))?
         .send()
         .await
         .map_err(|_| Error::Network)?;
@@ -209,8 +321,21 @@ pub async fn post(web: &Web, auth: &str, png: Vec<u8>, caption: &str, add_locati
     let bytes = response.bytes().await.map_err(|_| Error::Network)?;
     let config: serde_json::Value = serde_json::from_slice(&bytes).map_err(|_| Error::ConfigData)?;
     let upload_url = config["url"].as_str().filter(|u| !u.is_empty()).ok_or(Error::ConfigData)?;
+    let upload_url = destination(upload_url, web.demo)?;
+    // S3's success_action_redirect is a signed form field. Check it before
+    // uploading; check the actual Location independently after the upload.
+    let completion = config["data"]["success_action_redirect"]
+        .as_str()
+        .filter(|u| !u.is_empty())
+        .ok_or(Error::ConfigData)?;
+    web.profile_destination(&config_url, completion)?;
     let body = form(&config["data"], &png);
-    let response = request(&http, reqwest::Method::POST, upload_url, web, Some(auth))
+    // A storage provider gets the signed form and PNG, never profile
+    // cookies, Authorization or automatic redirects (including 307/308).
+    let response = http
+        .post(upload_url.clone())
+        .header("Accept", "*/*")
+        .header("User-Agent", web.user_agent.as_str())
         .header("Content-Type", format!("multipart/form-data; boundary={BOUNDARY}"))
         .body(body)
         .send()
@@ -225,9 +350,9 @@ pub async fn post(web: &Web, auth: &str, png: Vec<u8>, caption: &str, add_locati
         .get(reqwest::header::LOCATION)
         .and_then(|v| v.to_str().ok())
         .filter(|l| !l.is_empty())
-        .map(str::to_owned)
         .ok_or(Error::NoRedirect)?;
-    let response = request(&http, reqwest::Method::GET, &location, web, Some(auth))
+    let location = web.profile_destination(&upload_url, location)?;
+    let response = profile_request(&http, &location, web, Some(auth))?
         .send()
         .await
         .map_err(|_| Error::Network)?;
@@ -281,3 +406,6 @@ pub fn encode_png(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, Strin
 }
 
 pub mod demo;
+
+#[cfg(test)]
+mod security_tests;

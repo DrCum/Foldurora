@@ -7167,6 +7167,7 @@ session-land-script-info-failed = Les infos des scripts n'ont pas pu être obten
 session-land-no-attachment-resources = La région ne fournit pas la capability AttachmentResources.
 ui-options-theme-json-layout-json-icons-reloaded-automatically = theme.json · layout.json · icons/  — rechargés à chaud
 login-too-many-redirects = too many redirects
+login-unsafe-address = L’adresse de connexion ou la redirection a été refusée. Vérifiez l’adresse de connexion de la grille.
 build-ui-floaters-transfer = transférer
 fetch-transport-error = transport error
 ui-debug-overlay-too-small = trop petit

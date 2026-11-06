@@ -1168,6 +1168,13 @@ exe before publishing; the local build also writes it to `version.txt`.
   user name is written `<name> Resident`. `--grid` alone selects the grid of
   a new account's form.
 
+Login redirects must stay on the configured login origin: the same scheme,
+host and port. If a custom grid redirects elsewhere, configure its final
+trusted login URL directly. Explicit HTTP custom-grid logins remain supported;
+their credentials are unencrypted in transit. Linden logins require HTTPS.
+Profile-photo uploads require HTTPS on every grid, and profile cookies are
+never sent to the photo-storage server.
+
 ### Demo mode and test switches
 
 The offline **demo mode** simulates a server locally (a plaza, avatars,

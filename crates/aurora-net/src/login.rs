@@ -12,6 +12,85 @@ pub const SL_BETA_GRID: &str = "https://login.aditi.lindenlab.com/cgi-bin/login.
 
 pub const CHANNEL: &str = "Aurora Viewer";
 
+const HTTP_REDIRECT_LIMIT: usize = 10;
+
+/// Login has its own redirect policy: other users of the general HTTP
+/// client (media headers and currency helpers) keep their existing policy.
+pub(crate) fn http_client() -> Result<reqwest::Client, reqwest::Error> {
+    http_client_builder().build()
+}
+
+fn http_client_builder() -> reqwest::ClientBuilder {
+    let ll_ca = reqwest::Certificate::from_pem_bundle(include_bytes!("../lindenlab.pem")).unwrap_or_default();
+    reqwest::Client::builder()
+        .user_agent(aurora_version::user_agent())
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .tls_certs_merge(ll_ca)
+        // Inspect raw Location values ourselves: reqwest's redirect
+        // middleware strips fragments before its custom policy sees them.
+        .redirect(reqwest::redirect::Policy::none())
+}
+
+fn valid_address(url: &reqwest::Url) -> bool {
+    matches!(url.scheme(), "http" | "https")
+        && url.host_str().is_some()
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.fragment().is_none()
+        && (!is_linden_login(url.as_str()) || url.scheme() == "https")
+}
+
+fn address(uri: &str) -> Result<reqwest::Url, LoginError> {
+    reqwest::Url::parse(uri.trim())
+        .ok()
+        .filter(valid_address)
+        .ok_or_else(|| LoginError::UnsafeAddress(aurora_i18n::tr!("login-unsafe-address")))
+}
+
+fn allowed_destination(original: &reqwest::Url, destination: &reqwest::Url) -> bool {
+    valid_address(destination) && original.origin() == destination.origin()
+}
+
+async fn exchange(
+    http: &reqwest::Client,
+    original: &reqwest::Url,
+    mut uri: reqwest::Url,
+    body: String,
+) -> Result<reqwest::Response, LoginError> {
+    let mut post = true;
+    for redirects in 0..=HTTP_REDIRECT_LIMIT {
+        let request = if post {
+            http.post(uri.clone()).header("Content-Type", "text/xml").body(body.clone())
+        } else {
+            http.get(uri.clone())
+        };
+        let response = request.send().await.map_err(|e| LoginError::Http(e.without_url().to_string()))?;
+        let status = response.status().as_u16();
+        if !matches!(status, 301 | 302 | 303 | 307 | 308) {
+            return Ok(response);
+        }
+        let Some(location) = response.headers().get(reqwest::header::LOCATION) else {
+            return Ok(response);
+        };
+        let destination = location
+            .to_str()
+            .ok()
+            .and_then(|location| uri.join(location).ok())
+            .filter(|destination| allowed_destination(original, destination))
+            .ok_or_else(|| LoginError::UnsafeAddress(aurora_i18n::tr!("login-unsafe-address")))?;
+        if redirects == HTTP_REDIRECT_LIMIT {
+            return Err(LoginError::Http(aurora_i18n::tr!("login-too-many-redirects").into()));
+        }
+        uri = destination;
+        // Preserve reqwest's existing status semantics, including an empty
+        // body and no payload headers after a POST changes to GET.
+        if matches!(status, 301..=303) {
+            post = false;
+        }
+    }
+    unreachable!("the last allowed response either returns or refuses its redirect")
+}
+
 #[derive(Debug, Clone)]
 pub enum StartLocation {
     Last,
@@ -108,6 +187,8 @@ impl LoginResponse {
 
 #[derive(Debug, thiserror::Error)]
 pub enum LoginError {
+    #[error("{0}")]
+    UnsafeAddress(&'static str),
     #[error("network error: {0}")]
     Http(String),
     #[error("{0}")]
@@ -384,17 +465,12 @@ fn parse_success(v: Llsd) -> Result<LoginResponse, LoginError> {
 
 /// Perform the login exchange, following "indeterminate" redirects.
 pub async fn login(http: &reqwest::Client, req: &LoginRequest) -> Result<LoginResponse, LoginError> {
-    let mut uri = req.login_uri.clone();
+    let original = address(&req.login_uri)?;
+    let mut uri = original.clone();
     let mut method = "login_to_simulator".to_owned();
     for _attempt in 0..5 {
         let body = xmlrpc::build_call(&method, &build_params(req));
-        let resp = http
-            .post(&uri)
-            .header("Content-Type", "text/xml")
-            .body(body)
-            .send()
-            .await
-            .map_err(|e| LoginError::Http(e.without_url().to_string()))?;
+        let resp = exchange(http, &original, uri.clone(), body).await?;
         let status = resp.status();
         let bytes = resp.bytes().await.map_err(|e| LoginError::Http(e.without_url().to_string()))?;
         if !status.is_success() {
@@ -408,7 +484,11 @@ pub async fn login(http: &reqwest::Client, req: &LoginRequest) -> Result<LoginRe
                 if next.is_empty() {
                     return Err(LoginError::Malformed("indeterminate without next_url"));
                 }
-                uri = next.to_owned();
+                let destination = address(next)?;
+                if !allowed_destination(&original, &destination) {
+                    return Err(LoginError::UnsafeAddress(aurora_i18n::tr!("login-unsafe-address")));
+                }
+                uri = destination;
                 let m = v["next_method"].as_str();
                 if !m.is_empty() {
                     method = m.to_owned();
@@ -420,6 +500,10 @@ pub async fn login(http: &reqwest::Client, req: &LoginRequest) -> Result<LoginRe
     }
     Err(LoginError::Malformed(aurora_i18n::tr!("login-too-many-redirects")))
 }
+
+#[cfg(test)]
+#[path = "login/security_tests.rs"]
+mod security_tests;
 
 #[cfg(test)]
 mod tests {

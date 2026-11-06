@@ -418,7 +418,12 @@ fn ip_from_llsd(v: &Llsd) -> Option<Ipv4Addr> {
 }
 
 /// Run one complete session (login .. logout/disconnect).
-pub(crate) async fn run_session(sh: &Shared, req: LoginRequest, cmd_rx: &mut mpsc::UnboundedReceiver<NetCommand>) {
+pub(crate) async fn run_session(
+    sh: &Shared,
+    login_http: &reqwest::Client,
+    req: LoginRequest,
+    cmd_rx: &mut mpsc::UnboundedReceiver<NetCommand>,
+) {
     emit(
         sh,
         NetEvent::LoginProgress {
@@ -426,7 +431,7 @@ pub(crate) async fn run_session(sh: &Shared, req: LoginRequest, cmd_rx: &mut mps
             fraction: 0.1,
         },
     );
-    let login = match login::login(&sh.http, &req).await {
+    let login = match login::login(login_http, &req).await {
         Ok(l) => Arc::new(l),
         Err(e) => {
             let (mfa, tos) = (matches!(e, LoginError::MfaRequired(_)), matches!(e, LoginError::TosRequired(_)));

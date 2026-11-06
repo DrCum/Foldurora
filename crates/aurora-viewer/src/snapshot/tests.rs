@@ -656,7 +656,7 @@ fn inventory_photos_encode_to_a_texture_of_their_size() {
 fn profile_posts_escape_their_caption_like_lluri() {
     assert_eq!(profile::escape("Coucher de soleil é&=?"), "Coucher%20de%20soleil%20%C3%A9%26%3D%3F");
     assert_eq!(profile::escape("a-b_c.d~e"), "a-b_c.d~e");
-    // getProfileURL(""): lowercase, ends with a slash
+    // The host is normalized; paths keep their case and end with a slash.
     assert_eq!(
         profile::profile_url("https://My.SecondLife.com").as_deref(),
         Some("https://my.secondlife.com/")
@@ -700,24 +700,14 @@ fn the_profile_form_keeps_firestorms_fields_and_order() {
 fn a_photo_is_posted_to_the_web_profile() {
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("runtime");
     let server = profile::demo::start(false).expect("demo profile");
-    let web = profile::Web {
-        profile: server.url.clone(),
-        openid: profile::demo::OPENID.into(),
-        user_agent: "test".into(),
-    };
+    let web = profile::Web::demo(&server, "test".into()).expect("demo context");
     let rgba: Vec<u8> = (0..64 * 48).flat_map(|i| [(i % 256) as u8, 40, 90, 255]).collect();
     let png = profile::encode_png(64, 48, &rgba).expect("PNG");
     assert!(profile::encode_png(64, 48, &rgba[..8]).is_err());
     rt.block_on(async {
         let auth = profile::auth_cookie(&web).await.expect("auth cookie");
-        assert_eq!(auth, "_my_session=demo-auth");
+        assert!(auth.matches(&web));
         profile::post(&web, &auth, png.clone(), "Sunset & sea", true).await.expect("posted");
-        // without the OpenID cookie the profile gives no session
-        let stranger = profile::Web {
-            openid: "other=1".into(),
-            ..web.clone()
-        };
-        assert_eq!(profile::auth_cookie(&stranger).await, Err(profile::Error::NoCookie));
     });
     let posts = server.posts.lock();
     let post = posts.last().expect("a post");
@@ -725,21 +715,18 @@ fn a_photo_is_posted_to_the_web_profile() {
     assert!(post.add_location && post.finished);
     assert_eq!(post.fields, profile::demo::FIELDS);
     assert_eq!(post.png, png);
-    // both cookies, like buildDefaultHeaders + the auth cookie
-    assert!(post.cookies.iter().any(|c| c.contains(profile::demo::OPENID)));
-    assert!(post.cookies.iter().any(|c| c.contains("_my_session=demo-auth")));
+    assert!(post.cookies.is_empty(), "storage must never receive profile cookies");
 }
 
 #[test]
 fn a_refused_configuration_stops_the_post() {
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("runtime");
     let server = profile::demo::start(true).expect("demo profile");
-    let web = profile::Web {
-        profile: server.url.clone(),
-        openid: profile::demo::OPENID.into(),
-        user_agent: "test".into(),
-    };
-    let result = rt.block_on(profile::post(&web, "_my_session=demo-auth", vec![1, 2, 3], "", false));
+    let web = profile::Web::demo(&server, "test".into()).expect("demo context");
+    let result = rt.block_on(async {
+        let auth = profile::auth_cookie(&web).await.expect("auth cookie");
+        profile::post(&web, &auth, vec![1, 2, 3], "", false).await
+    });
     assert_eq!(result, Err(profile::Error::Config(500)));
 }
 
