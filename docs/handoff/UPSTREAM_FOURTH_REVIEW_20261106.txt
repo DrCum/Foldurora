@@ -1,0 +1,51 @@
+# Fourth upstream snapshot: asynchronous logging
+
+Pinned newest upstream: [`4a613cd3e6e3cdc493bd3f98d97d60ec59e31e08`](https://github.com/Aurora-Viewer/Aurora-Viewer/commit/4a613cd3e6e3cdc493bd3f98d97d60ec59e31e08). Fetched without tags into `refs/upstream-review/fourth`. Exactly one commit follows the previous reviewed `7afa101cdc6e0e83b15612e0e4bde57d9c638d9f` snapshot.
+
+**Host/chat integration result: defer the entire new commit.** The clean intact new-candidate subset on frozen host/chat `32b298392c7d40afd2d8cc96d0658041b69be985` is empty. Its logging implementation has both an actual textual conflict and a concrete semantic overlap with the controller's checked diagnostics. Existing seventeen deferrals stay unchanged; no earlier decision was reopened.
+
+On the separate upstream-only sixteen-candidate base, `a17185fd9b5d9eee1706d5634eba371a894d7711`, the same complete commit is textually clean and has no identified dependency on the deferred upstream uninstall/media/login/cache work. It can be considered as a **standalone upstream-only candidate**, in the single-commit order `4a613cd3e6e3cdc493bd3f98d97d60ec59e31e08`, subject to its own integrated validation. That does not make it compatible with the host branch.
+
+## Exact simulation results
+
+| Requested base | Complete-patch result | Exact conflict paths / resulting tree |
+|---|---|---|
+| sixteen candidates `a17185fd9b5d9eee1706d5634eba371a894d7711` | Clean | Tree `347f34e491e4fbf55324a075ef36dc7bc6dfdbb4` |
+| frozen host/chat `32b298392c7d40afd2d8cc96d0658041b69be985` | Conflict; defer whole commit | `crates/aurora-viewer/src/logging.rs` |
+
+There is only one new commit, so individual and one-commit sequence screens are identical. Its complete five-path scope is:
+
+- `ARCHITECTURE.md`
+- `TASKS.md`
+- `crates/aurora-viewer/src/app/gpu_stall.rs`
+- `crates/aurora-viewer/src/logging.rs`
+- `crates/aurora-viewer/src/main.rs`
+
+The other four paths apply cleanly even on host/chat, but they are not separately approved or extracted. In particular, the new main/GPU-stall drain calls depend on the logging implementation in the same intact commit.
+
+## Source and dependency review
+
+The new ordinary logger keeps capability redaction, thread-local `logging::capture`, and recent Dev Toolbox lines on the calling thread. It queues records with nonblocking `try_send` into an 8192-message queue. A background writer batches writes, accounts for dropped records with a gap marker, and periodically calls sink sync. Logger-thread startup failure falls back to synchronous direct sinks. No Cargo/dependency/API update is required outside the five paths.
+
+New `logging::drain(DRAIN_WAIT)` calls use a 500 ms bound for Rust panic, ordinary main exit, and the forced GPU-stall exit. The queue drain reports progress after sink `put` calls; periodic durability sync is separate. Native crashes do not wait. Tests included intact in the commit cover stalled/slow sinks, dropping markers, and thread ordering; no such tests were run in this review.
+
+On the upstream-only sixteen-candidate base, ordinary `Tee`/flusher code is still the upstream design this patch replaces. The earlier microphone-close thread and the wgpu pin are independent: this commit changes neither their ownership nor voice transmission/GPU fence behavior. Newer upstream uninstall routing appears only as unchanged main-context in the patch, so it is not a prerequisite for adding the normal-end drain.
+
+## Concrete host semantic conflicts
+
+The fork's `logging.rs` has a controller-specific contract absent from upstream:
+
+1. `prepare_host_log` creates a distinct PID/nonce log and synchronously writes, flushes and syncs its unfiltered startup record before console detachment. `init_host` uses checked logger installation and can refuse startup. Its `Tee` has host error state and its flusher propagates sync failure into that state. Upstream replaces the surrounding `Tee`/initializer/flusher model with `Queued`/`Direct` sinks and has no adapter for this contract.
+2. Upstream `LogSink::put` and `LogSink::sync` return no result; `LogFile` discards write/sync errors. In contrast, `HostState` latches lost-record errors and `HostLog::flush`/`sync` reports them to `session_host/startup.rs::run_checked`, which shows the controller-owned failure dialog. A mechanical selection of upstream sink semantics would lose that checked host error propagation.
+3. Upstream `Tee::flush` becomes a no-op. Existing `HostLog::flush` first invokes the global logger flush and then syncs its retained file. Under an asynchronous queue this sequence does not prove pending records reached the file before that sync. Upstream's boolean `drain` acknowledges write attempts and bounded waiting; it does not provide the host's checked durable-flush result, and errors/timeouts cannot simply be ignored there.
+4. The fork's `main` returns directly through `session_host::startup::run()` for the controller, before the ordinary main-exit drain added by upstream. Controller final result/error logging is handled by `run_checked` and its diagnostics guard, so the new normal-viewer drain call alone does not cover host shutdown or console-detachment failures.
+
+Relevant exact fork paths: `crates/aurora-viewer/src/logging.rs`, `src/session_host/startup.rs`, and `src/main.rs`. These are reasons to defer intact import, not proposed conflict resolutions. Adapting checked queue acknowledgement, sink error propagation, durable startup/exit, panic behavior and host-owned console lifetime would be outside this read-only screen and intact-import allowance, and would require regression coverage.
+
+No native chat bootstrap/profile/worker/UI source changes occur in this commit. Frozen `32b29839`'s terminal chat-authority revision fix stays untouched. This logging commit does not establish the cause of any earlier shutdown watchdog or driver issue.
+
+## Preservation and evidence
+
+Only a scratch temporary index was used (`read-tree`, full original binary patch through `git apply --cached --3way`, inspect unmerged entries, `write-tree` only on clean application). Conflicts were recorded and discarded with the temporary index; no sides were resolved. Raw result: `.scratch/upstream-fourth-simulation.json`; reproducer: `.scratch/upstream-fourth-screen.py`.
+
+No picks, tracked edits, builds, pushes, PRs or changes to implementation/preview work occurred. ACL branch/worktree remains clean at `1bad9769d19d8837ea4ffd78481b5c57238c2a24`. Native slow-disk/pipe behavior, queue/panic/exit tests, ordinary/host log completeness and performance remain unverified for this combined fork context.

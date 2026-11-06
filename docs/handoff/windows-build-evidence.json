@@ -1,0 +1,902 @@
+{
+  "final-d87d11df-verification.json": {
+    "classification": "experimental_ui_automated_checks_only_root_visual_acceptance_pending",
+    "commit": "d87d11df89ec15ff0688cf3605f8f70d5e98b391",
+    "workflow_run": 42268877155,
+    "artifact_id": 13533112206,
+    "checks": {
+      "outer_names_unique": {
+        "passed": true,
+        "detail": null
+      },
+      "exact_source_manifest": {
+        "passed": true,
+        "detail": "d87d11df89ec15ff0688cf3605f8f70d5e98b391"
+      },
+      "exact_workflow_manifest": {
+        "passed": true,
+        "detail": "https://github.com/DrCum/Foldurora/actions/runs/42268877155"
+      },
+      "all_recorded_checks_passed": {
+        "passed": true,
+        "detail": {
+          "powershell_5_1": "success",
+          "formatting": "success",
+          "clippy": "success",
+          "workspace_tests": "success"
+        }
+      },
+      "build_and_package_succeeded": {
+        "passed": true,
+        "detail": null
+      },
+      "correct_windows_target_and_profile": {
+        "passed": true,
+        "detail": null
+      },
+      "human_and_grid_acceptance_left_pending": {
+        "passed": true,
+        "detail": null
+      },
+      "exact_package_name": {
+        "passed": true,
+        "detail": [
+          "Foldurora-test-d87d11df89ec-windows-x64.zip"
+        ]
+      },
+      "package_checksum_matches_receipt": {
+        "passed": true,
+        "detail": "d26baa6cd6e3366a9018f4e8f7d5d242ccd3d566a6a9f8f6b19b713ad9d1d3b4  Foldurora-test-d87d11df89ec-windows-x64.zip"
+      },
+      "inner_and_outer_manifests_match": {
+        "passed": true,
+        "detail": null
+      },
+      "compiled_version_identifies_source": {
+        "passed": true,
+        "detail": {
+          "schema": 1,
+          "version": "0.9.3-beta.20261106.1+67.gd87d11df8"
+        }
+      },
+      "morning_guide_present": {
+        "passed": true,
+        "detail": null
+      },
+      "binary_is_x64_windows_pe": {
+        "passed": true,
+        "detail": {
+          "machine": 34404
+        }
+      },
+      "full_workspace_test_summaries_pass": {
+        "passed": true,
+        "detail": {
+          "passed": 7656,
+          "failed": 0,
+          "ignored": 47
+        }
+      },
+      "all_required_named_regressions_pass": {
+        "passed": true,
+        "detail": []
+      }
+    },
+    "failures": [],
+    "human_validation": "pending",
+    "outer_artifact_sha256": "a6da3ecd32ea81ab0c8d350785d94cff1d24228ea72ea64820ecab7108d0e974",
+    "manifest": {
+      "schema": 1,
+      "commit": "d87d11df89ec15ff0688cf3605f8f70d5e98b391",
+      "source": "https://github.com/DrCum/Foldurora/tree/d87d11df89ec15ff0688cf3605f8f70d5e98b391",
+      "workflow_run": "https://github.com/DrCum/Foldurora/actions/runs/42268877155",
+      "built_at_utc": "2026-11-06T18:54:51.3428694Z",
+      "target": "x86_64-pc-windows-msvc",
+      "compiler": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+      "profile": "dev",
+      "features": [
+        "xr-static-loader"
+      ],
+      "checks": {
+        "powershell_5_1": "success",
+        "formatting": "success",
+        "clippy": "success",
+        "workspace_tests": "success"
+      },
+      "all_checks_passed": true,
+      "build": "success",
+      "package": "success",
+      "human_validation": "pending",
+      "windows_gpu_and_multiple_monitors": "pending",
+      "grid_validation": "pending",
+      "performance_measurement": "pending; development profile, without release LTO"
+    },
+    "package_filename": "Foldurora-test-d87d11df89ec-windows-x64.zip",
+    "package_sha256": "d26baa6cd6e3366a9018f4e8f7d5d242ccd3d566a6a9f8f6b19b713ad9d1d3b4",
+    "compiled_version": "0.9.3-beta.20261106.1+67.gd87d11df8",
+    "windows_exe_sha256": "d0d579d7f52653d5963cae0fde518b904fd532a2708bf5486922451731d75fce",
+    "windows_tests": {
+      "passed": 7656,
+      "failed": 0,
+      "ignored": 47
+    },
+    "named_regressions": {
+      "ui::login::carousel::tests::explicit_saved_character_survives_first_carousel_frames_and_centers_paginated_targets": "test ui::login::carousel::tests::explicit_saved_character_survives_first_carousel_frames_and_centers_paginated_targets ... ok",
+      "ui::characters::tests::row_actions_bind_to_exact_identity_and_current_or_opening_rows_are_disabled": "test ui::characters::tests::row_actions_bind_to_exact_identity_and_current_or_opening_rows_are_disabled ... ok",
+      "ui::login::saved_character_tests::saved_character_selection_is_exact_grid_scoped_and_never_submits_or_saves": "test ui::login::saved_character_tests::saved_character_selection_is_exact_grid_scoped_and_never_submits_or_saves ... ok",
+      "characters::tests::account_identity_is_grid_scoped_framed_and_case_normalized": "test characters::tests::account_identity_is_grid_scoped_framed_and_case_normalized ... ok",
+      "characters::tests::login_and_connecting_windows_prevent_a_duplicate_launch": "test characters::tests::login_and_connecting_windows_prevent_a_duplicate_launch ... ok",
+      "characters::tests::queued_duplicate_opens_are_idempotent_through_cold_start_and_ready_handoff": "test characters::tests::queued_duplicate_opens_are_idempotent_through_cold_start_and_ready_handoff ... ok",
+      "characters::tests::genuine_launch_and_lock_file_failures_are_not_reported_as_opening": "test characters::tests::genuine_launch_and_lock_file_failures_are_not_reported_as_opening ... ok",
+      "characters::tests::avatar_aware_open_reports_contention_without_cross_grid_launch_or_pending_retirement": "test characters::tests::avatar_aware_open_reports_contention_without_cross_grid_launch_or_pending_retirement ... ok",
+      "characters::tests::avatar_aware_open_keeps_real_spawn_and_gate_file_failures_as_errors": "test characters::tests::avatar_aware_open_keeps_real_spawn_and_gate_file_failures_as_errors ... ok",
+      "characters::tests::slow_child_keeps_its_reservation_until_ready_without_claiming_another_launch": "test characters::tests::slow_child_keeps_its_reservation_until_ready_without_claiming_another_launch ... ok",
+      "app::attention::tests::character_caption_tracks_selection_login_logout_and_missing_targets": "test app::attention::tests::character_caption_tracks_selection_login_logout_and_missing_targets ... ok",
+      "app::attention::tests::custom_and_automation_captions_keep_their_cli_identity": "test app::attention::tests::custom_and_automation_captions_keep_their_cli_identity ... ok",
+      "app::attention::tests::caption_identity_is_bounded_one_line_unicode_without_direction_spoofing": "test app::attention::tests::caption_identity_is_bounded_one_line_unicode_without_direction_spoofing ... ok",
+      "app::attention::tests::caption_grid_uses_short_labels_or_hosts_and_never_endpoint_secrets": "test app::attention::tests::caption_grid_uses_short_labels_or_hosts_and_never_endpoint_secrets ... ok",
+      "app::attention::tests::custom_grid_captions_distinguish_exact_endpoints_and_duplicate_friendly_labels": "test app::attention::tests::custom_grid_captions_distinguish_exact_endpoints_and_duplicate_friendly_labels ... ok",
+      "app::attention::tests::native_caption_is_reapplied_to_a_recreated_window_without_other_changes": "test app::attention::tests::native_caption_is_reapplied_to_a_recreated_window_without_other_changes ... ok",
+      "app::attention::tests::character_caption_templates_resolve_in_every_supported_language": "test app::attention::tests::character_caption_templates_resolve_in_every_supported_language ... ok",
+      "window_recovery::tests::live_recovery_waits_for_a_changed_topology_and_settled_geometry_then_moves_once": "test window_recovery::tests::live_recovery_waits_for_a_changed_topology_and_settled_geometry_then_moves_once ... ok",
+      "window_recovery::tests::dragging_or_excluded_states_require_a_fresh_grace_period_before_recovery": "test window_recovery::tests::dragging_or_excluded_states_require_a_fresh_grace_period_before_recovery ... ok",
+      "window_recovery::tests::moving_geometry_and_further_dpi_or_origin_changes_restart_the_wait": "test window_recovery::tests::moving_geometry_and_further_dpi_or_origin_changes_restart_the_wait ... ok",
+      "window_recovery::tests::every_partly_visible_span_is_preserved_including_negative_origins_and_one_pixel": "test window_recovery::tests::every_partly_visible_span_is_preserved_including_negative_origins_and_one_pixel ... ok",
+      "window_recovery::tests::recovery_uses_real_monitor_rectangles_and_nearest_survivor_not_the_desktop_box": "test window_recovery::tests::recovery_uses_real_monitor_rectangles_and_nearest_survivor_not_the_desktop_box ... ok",
+      "window_recovery::tests::oversized_recovery_uses_eighty_percent_and_preserves_native_decoration_allowance": "test window_recovery::tests::oversized_recovery_uses_eighty_percent_and_preserves_native_decoration_allowance ... ok",
+      "window_recovery::tests::missing_native_geometry_or_displays_fail_closed_and_never_cause_a_late_snap": "test window_recovery::tests::missing_native_geometry_or_displays_fail_closed_and_never_cause_a_late_snap ... ok",
+      "window_recovery::tests::enumeration_order_duplicates_and_invalid_displays_do_not_arm_recovery": "test window_recovery::tests::enumeration_order_duplicates_and_invalid_displays_do_not_arm_recovery ... ok",
+      "window_recovery::tests::old_pointer_replies_cannot_authorize_new_requests_or_a_slow_native_query": "test window_recovery::tests::old_pointer_replies_cannot_authorize_new_requests_or_a_slow_native_query ... ok",
+      "window_recovery::tests::a_visible_layout_clears_pending_immediately_even_while_input_is_blocked": "test window_recovery::tests::a_visible_layout_clears_pending_immediately_even_while_input_is_blocked ... ok",
+      "window_recovery::tests::a_topology_change_during_a_temporary_native_state_survives_until_normal_restore": "test window_recovery::tests::a_topology_change_during_a_temporary_native_state_survives_until_normal_restore ... ok",
+      "window_recovery::tests::pending_recovery_survives_native_window_recreation_and_requires_new_grace": "test window_recovery::tests::pending_recovery_survives_native_window_recreation_and_requires_new_grace ... ok",
+      "window_recovery::tests::display_changes_during_recreation_keep_the_old_baseline_but_startup_still_never_moves": "test window_recovery::tests::display_changes_during_recreation_keep_the_old_baseline_but_startup_still_never_moves ... ok",
+      "instances::tests::shared_demo_fixture_requires_private_test_root_and_cannot_override_timed_exemptions": "test instances::tests::shared_demo_fixture_requires_private_test_root_and_cannot_override_timed_exemptions ... ok",
+      "instances::tests::login_inactive_and_unknown_card_peers_count_but_different_cards_and_stale_peers_do_not": "test instances::tests::login_inactive_and_unknown_card_peers_count_but_different_cards_and_stale_peers_do_not ... ok",
+      "app::busy_pause::tests::a_shared_background_world_pauses_before_any_gpu_measurement_and_first_packet": "test app::busy_pause::tests::a_shared_background_world_pauses_before_any_gpu_measurement_and_first_packet ... ok",
+      "app::busy_pause::tests::transient_registry_misses_do_not_resume_but_sustained_absence_does": "test app::busy_pause::tests::transient_registry_misses_do_not_resume_but_sustained_absence_does ... ok",
+      "app::busy_pause::tests::focus_and_exemptions_release_shared_pause_immediately_and_reentry_is_protected": "test app::busy_pause::tests::focus_and_exemptions_release_shared_pause_immediately_and_reentry_is_protected ... ok",
+      "app::busy_pause::tests::a_previous_overload_latch_survives_peer_exit_but_focus_still_releases_it": "test app::busy_pause::tests::a_previous_overload_latch_survives_peer_exit_but_focus_still_releases_it ... ok",
+      "app::busy_pause::tests::a_long_frame_gap_does_not_turn_one_missing_registry_snapshot_into_permission_to_draw": "test app::busy_pause::tests::a_long_frame_gap_does_not_turn_one_missing_registry_snapshot_into_permission_to_draw ... ok",
+      "world_viewport::interface_tests::interface_canvas_uses_current_native_dpi_and_zoom_with_both_origins": "test world_viewport::interface_tests::interface_canvas_uses_current_native_dpi_and_zoom_with_both_origins ... ok",
+      "world_viewport::interface_tests::interface_canvas_minimum_uses_logical_units_and_keeps_reset_controls_reachable": "test world_viewport::interface_tests::interface_canvas_minimum_uses_logical_units_and_keeps_reset_controls_reachable ... ok",
+      "world_viewport::interface_tests::interface_canvas_is_optional_and_full_frame_modes_use_the_native_canvas": "test world_viewport::interface_tests::interface_canvas_is_optional_and_full_frame_modes_use_the_native_canvas ... ok",
+      "world_viewport::interface_tests::interface_egui_anchors_chrome_and_popups_inside_an_offset_fractional_dpi_canvas": "test world_viewport::interface_tests::interface_egui_anchors_chrome_and_popups_inside_an_offset_fractional_dpi_canvas ... ok",
+      "world_viewport::interface_tests::interface_egui_keeps_absolute_pointer_input_and_does_not_own_the_old_panel_margin": "test world_viewport::interface_tests::interface_egui_keeps_absolute_pointer_input_and_does_not_own_the_old_panel_margin ... ok",
+      "world_viewport::interface_tests::interface_egui_toggling_and_temporary_full_frames_keep_saved_window_anchors": "test world_viewport::interface_tests::interface_egui_toggling_and_temporary_full_frames_keep_saved_window_anchors ... ok",
+      "world_viewport::interface_tests::interface_login_floaters_without_a_bars_pass_keep_their_original_canvas_insets": "test world_viewport::interface_tests::interface_login_floaters_without_a_bars_pass_keep_their_original_canvas_insets ... ok",
+      "world_viewport::interface_tests::interface_egui_relayout_cancels_a_release_against_the_previous_canvas": "test world_viewport::interface_tests::interface_egui_relayout_cancels_a_release_against_the_previous_canvas ... ok",
+      "world_viewport::interface_tests::interface_egui_pending_zoom_does_not_record_a_stale_startup_or_viewport_canvas": "test world_viewport::interface_tests::interface_egui_pending_zoom_does_not_record_a_stale_startup_or_viewport_canvas ... ok",
+      "world_viewport::interface_tests::interface_narrow_canvas_falls_back_without_shrinking_saved_floaters": "test world_viewport::interface_tests::interface_narrow_canvas_falls_back_without_shrinking_saved_floaters ... ok",
+      "world_viewport::interface_tests::interface_automatically_shrunk_floaters_restore_their_wide_size_after_restart": "test world_viewport::interface_tests::interface_automatically_shrunk_floaters_restore_their_wide_size_after_restart ... ok",
+      "world_viewport::interface_tests::interface_expanding_a_previously_minimized_floater_retains_its_wide_geometry": "test world_viewport::interface_tests::interface_expanding_a_previously_minimized_floater_retains_its_wide_geometry ... ok",
+      "world_viewport::interface_tests::interface_expanding_on_the_wide_canvas_restores_size_and_right_anchor_after_minimizing": "test world_viewport::interface_tests::interface_expanding_on_the_wide_canvas_restores_size_and_right_anchor_after_minimizing ... ok",
+      "world_viewport::interface_tests::interface_bare_maps_restore_their_wide_geometry_including_locked_maps": "test world_viewport::interface_tests::interface_bare_maps_restore_their_wide_geometry_including_locked_maps ... ok",
+      "world_viewport::interface_tests::interface_manual_resize_replaces_the_retained_wide_floater_or_map_size": "test world_viewport::interface_tests::interface_manual_resize_replaces_the_retained_wide_floater_or_map_size ... ok",
+      "world_viewport::interface_tests::interface_aspect_fit_preserves_body_ratio_and_chrome_when_one_axis_overflows": "test world_viewport::interface_tests::interface_aspect_fit_preserves_body_ratio_and_chrome_when_one_axis_overflows ... ok",
+      "world_viewport::interface_tests::interface_aspect_floater_drag_stays_in_the_offset_bar_room_without_distortion": "test world_viewport::interface_tests::interface_aspect_floater_drag_stays_in_the_offset_bar_room_without_distortion ... ok"
+    },
+    "root_ui_acceptance": "pending explicit validation of this exact source; do not recommend UI package yet",
+    "source": "d87d11df89ec15ff0688cf3605f8f70d5e98b391",
+    "run_id": 42268877155,
+    "job_id": 128067928016,
+    "workflow_url": "https://github.com/DrCum/Foldurora/actions/runs/42268877155",
+    "workflow_conclusion": "success",
+    "raw_outcomes": {
+      "SCRIPTS": "success",
+      "FORMAT": "success",
+      "CLIPPY": "success",
+      "TESTS": "success",
+      "BUILD": "success",
+      "PACKAGE": "success"
+    },
+    "artifact_url": "https://github.com/DrCum/Foldurora/actions/runs/42268877155/artifacts/13533112206",
+    "artifact_bytes": 71118537,
+    "artifact_expires_at": "2026-11-13T18:54:55Z",
+    "GitHub_digest_verified": true,
+    "raw_job_log": "/workspace/work/windows-build/.scratch/host-d87d11df-windows-job.log",
+    "normalized_log_sha256": "191e9d652ce32491ce0ed0125730dbd34c844e09f6578305a55d5b9cdcac1bc6",
+    "new_named_regressions": 90,
+    "new_regression_receipt": "/workspace/work/windows-build/.scratch/host-d87d11df-named-regressions.json",
+    "priority_ACL_evidence": {
+      "a_profile_can_only_be_opened_by_one_worker_at_a_time": {
+        "source_file": "crates/aurora-viewer/src/session_host/profile.rs",
+        "matches": [
+          [
+            "session_host::profile::tests::a_profile_can_only_be_opened_by_one_worker_at_a_time",
+            "ok"
+          ]
+        ],
+        "passed": true
+      },
+      "created_windows_directories_and_explicitly_owned_files_are_private": {
+        "source_file": "crates/aurora-viewer/src/session_host/profile.rs",
+        "matches": [
+          [
+            "session_host::profile::tests::created_windows_directories_and_explicitly_owned_files_are_private",
+            "ok"
+          ]
+        ],
+        "passed": true
+      },
+      "session_bootstrap_accepts_only_its_private_bound_location_and_known_fields": {
+        "source_file": "crates/aurora-viewer/src/session_host/transport.rs",
+        "matches": [
+          [
+            "session_host::transport::tests::session_bootstrap_accepts_only_its_private_bound_location_and_known_fields",
+            "ok"
+          ]
+        ],
+        "passed": true
+      },
+      "session_worker_transport_keeps_commands_bounded_and_does_not_renew_replays": {
+        "source_file": "crates/aurora-viewer/src/session_host/transport.rs",
+        "matches": [
+          [
+            "session_host::transport::tests::session_worker_transport_keeps_commands_bounded_and_does_not_renew_replays",
+            "ok"
+          ]
+        ],
+        "passed": true
+      },
+      "private_file_creation_is_exclusive_and_existing_files_are_not_truncated": {
+        "source_file": "crates/aurora-viewer/src/session_host/profile.rs",
+        "matches": [
+          [
+            "session_host::profile::tests::private_file_creation_is_exclusive_and_existing_files_are_not_truncated",
+            "ok"
+          ]
+        ],
+        "passed": true
+      },
+      "inherited_windows_file_ownership_is_checked_without_repairing_existing_files": {
+        "source_file": "crates/aurora-viewer/src/session_host/profile.rs",
+        "matches": [
+          [
+            "session_host::profile::tests::inherited_windows_file_ownership_is_checked_without_repairing_existing_files",
+            "ok"
+          ]
+        ],
+        "passed": true
+      }
+    },
+    "ignored_visual_fixture_present_but_not_run": {},
+    "verification_scope": "Actual Windows strict checks, full tests, linked PE and exact portable source/version/manifests/checksums; not native GUI/taskbar/adoption/chat-popup/worker-detach/grid acceptance",
+    "known_UI_scope_followup": "New user contract requires ordinary Inventory/Settings/Map full workspace; separate f504-based viewport-toolbars-only fix is not included in this checkpoint. Do not claim this package validates that correction.",
+    "duplicate_exe_or_inner_zip_written": false,
+    "verified_at": "2026-11-06T18:59:27.329166+00:00",
+    "exact_Linux_CPU_host_smoke": "/workspace/work/windows-build/.scratch/cpu-host-d87-summary.json",
+    "PR8_source_equivalent_compiler_checks": "/workspace/work/windows-build/.scratch/pr8-ci-verification.json"
+  },
+  "final-480176d0-verification.json": {
+    "classification": "experimental_ui_automated_checks_only_root_visual_acceptance_pending",
+    "commit": "480176d037eb576119775e8d67aa2df065aa86ae",
+    "workflow_run": 42266902733,
+    "artifact_id": 13531138507,
+    "checks": {
+      "outer_names_unique": {
+        "passed": true,
+        "detail": null
+      },
+      "exact_source_manifest": {
+        "passed": true,
+        "detail": "480176d037eb576119775e8d67aa2df065aa86ae"
+      },
+      "exact_workflow_manifest": {
+        "passed": true,
+        "detail": "https://github.com/DrCum/Foldurora/actions/runs/42266902733"
+      },
+      "all_recorded_checks_passed": {
+        "passed": true,
+        "detail": {
+          "powershell_5_1": "success",
+          "formatting": "success",
+          "clippy": "success",
+          "workspace_tests": "success"
+        }
+      },
+      "build_and_package_succeeded": {
+        "passed": true,
+        "detail": null
+      },
+      "correct_windows_target_and_profile": {
+        "passed": true,
+        "detail": null
+      },
+      "human_and_grid_acceptance_left_pending": {
+        "passed": true,
+        "detail": null
+      },
+      "exact_package_name": {
+        "passed": true,
+        "detail": [
+          "Foldurora-test-480176d037eb-windows-x64.zip"
+        ]
+      },
+      "package_checksum_matches_receipt": {
+        "passed": true,
+        "detail": "3236651479bffcd4ee871bb68c2110e652ea10229a3e9296929f51d40234d845  Foldurora-test-480176d037eb-windows-x64.zip"
+      },
+      "inner_and_outer_manifests_match": {
+        "passed": true,
+        "detail": null
+      },
+      "compiled_version_identifies_source": {
+        "passed": true,
+        "detail": {
+          "schema": 1,
+          "version": "0.9.3-beta.20261106.1+81.g480176d03"
+        }
+      },
+      "morning_guide_present": {
+        "passed": true,
+        "detail": null
+      },
+      "binary_is_x64_windows_pe": {
+        "passed": true,
+        "detail": {
+          "machine": 34404
+        }
+      },
+      "full_workspace_test_summaries_pass": {
+        "passed": true,
+        "detail": {
+          "passed": 7708,
+          "failed": 0,
+          "ignored": 48
+        }
+      },
+      "all_required_named_regressions_pass": {
+        "passed": true,
+        "detail": []
+      }
+    },
+    "failures": [],
+    "human_validation": "pending",
+    "outer_artifact_sha256": "521c189fb3bbd9a0a26290f8f23615620cfd97f5bbed7354fbd010efe5601823",
+    "manifest": {
+      "schema": 1,
+      "commit": "480176d037eb576119775e8d67aa2df065aa86ae",
+      "source": "https://github.com/DrCum/Foldurora/tree/480176d037eb576119775e8d67aa2df065aa86ae",
+      "workflow_run": "https://github.com/DrCum/Foldurora/actions/runs/42266902733",
+      "built_at_utc": "2026-11-06T18:49:52.3082561Z",
+      "target": "x86_64-pc-windows-msvc",
+      "compiler": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+      "profile": "dev",
+      "features": [
+        "xr-static-loader"
+      ],
+      "checks": {
+        "powershell_5_1": "success",
+        "formatting": "success",
+        "clippy": "success",
+        "workspace_tests": "success"
+      },
+      "all_checks_passed": true,
+      "build": "success",
+      "package": "success",
+      "human_validation": "pending",
+      "windows_gpu_and_multiple_monitors": "pending",
+      "grid_validation": "pending",
+      "performance_measurement": "pending; development profile, without release LTO"
+    },
+    "package_filename": "Foldurora-test-480176d037eb-windows-x64.zip",
+    "package_sha256": "3236651479bffcd4ee871bb68c2110e652ea10229a3e9296929f51d40234d845",
+    "compiled_version": "0.9.3-beta.20261106.1+81.g480176d03",
+    "windows_exe_sha256": "c06d9f33f4376d16c6329359858fae6e25e2e95d72ca879a7721392c7e83e182",
+    "windows_tests": {
+      "passed": 7708,
+      "failed": 0,
+      "ignored": 48
+    },
+    "named_regressions": {
+      "ui::login::carousel::tests::explicit_saved_character_survives_first_carousel_frames_and_centers_paginated_targets": "test ui::login::carousel::tests::explicit_saved_character_survives_first_carousel_frames_and_centers_paginated_targets ... ok",
+      "ui::characters::tests::row_actions_bind_to_exact_identity_and_current_or_opening_rows_are_disabled": "test ui::characters::tests::row_actions_bind_to_exact_identity_and_current_or_opening_rows_are_disabled ... ok",
+      "ui::login::saved_character_tests::saved_character_selection_is_exact_grid_scoped_and_never_submits_or_saves": "test ui::login::saved_character_tests::saved_character_selection_is_exact_grid_scoped_and_never_submits_or_saves ... ok",
+      "characters::tests::account_identity_is_grid_scoped_framed_and_case_normalized": "test characters::tests::account_identity_is_grid_scoped_framed_and_case_normalized ... ok",
+      "characters::tests::login_and_connecting_windows_prevent_a_duplicate_launch": "test characters::tests::login_and_connecting_windows_prevent_a_duplicate_launch ... ok",
+      "characters::tests::queued_duplicate_opens_are_idempotent_through_cold_start_and_ready_handoff": "test characters::tests::queued_duplicate_opens_are_idempotent_through_cold_start_and_ready_handoff ... ok",
+      "characters::tests::genuine_launch_and_lock_file_failures_are_not_reported_as_opening": "test characters::tests::genuine_launch_and_lock_file_failures_are_not_reported_as_opening ... ok",
+      "characters::tests::avatar_aware_open_reports_contention_without_cross_grid_launch_or_pending_retirement": "test characters::tests::avatar_aware_open_reports_contention_without_cross_grid_launch_or_pending_retirement ... ok",
+      "characters::tests::avatar_aware_open_keeps_real_spawn_and_gate_file_failures_as_errors": "test characters::tests::avatar_aware_open_keeps_real_spawn_and_gate_file_failures_as_errors ... ok",
+      "characters::tests::slow_child_keeps_its_reservation_until_ready_without_claiming_another_launch": "test characters::tests::slow_child_keeps_its_reservation_until_ready_without_claiming_another_launch ... ok",
+      "app::attention::tests::character_caption_tracks_selection_login_logout_and_missing_targets": "test app::attention::tests::character_caption_tracks_selection_login_logout_and_missing_targets ... ok",
+      "app::attention::tests::custom_and_automation_captions_keep_their_cli_identity": "test app::attention::tests::custom_and_automation_captions_keep_their_cli_identity ... ok",
+      "app::attention::tests::caption_identity_is_bounded_one_line_unicode_without_direction_spoofing": "test app::attention::tests::caption_identity_is_bounded_one_line_unicode_without_direction_spoofing ... ok",
+      "app::attention::tests::caption_grid_uses_short_labels_or_hosts_and_never_endpoint_secrets": "test app::attention::tests::caption_grid_uses_short_labels_or_hosts_and_never_endpoint_secrets ... ok",
+      "app::attention::tests::custom_grid_captions_distinguish_exact_endpoints_and_duplicate_friendly_labels": "test app::attention::tests::custom_grid_captions_distinguish_exact_endpoints_and_duplicate_friendly_labels ... ok",
+      "app::attention::tests::native_caption_is_reapplied_to_a_recreated_window_without_other_changes": "test app::attention::tests::native_caption_is_reapplied_to_a_recreated_window_without_other_changes ... ok",
+      "app::attention::tests::character_caption_templates_resolve_in_every_supported_language": "test app::attention::tests::character_caption_templates_resolve_in_every_supported_language ... ok",
+      "window_recovery::tests::live_recovery_waits_for_a_changed_topology_and_settled_geometry_then_moves_once": "test window_recovery::tests::live_recovery_waits_for_a_changed_topology_and_settled_geometry_then_moves_once ... ok",
+      "window_recovery::tests::dragging_or_excluded_states_require_a_fresh_grace_period_before_recovery": "test window_recovery::tests::dragging_or_excluded_states_require_a_fresh_grace_period_before_recovery ... ok",
+      "window_recovery::tests::moving_geometry_and_further_dpi_or_origin_changes_restart_the_wait": "test window_recovery::tests::moving_geometry_and_further_dpi_or_origin_changes_restart_the_wait ... ok",
+      "window_recovery::tests::every_partly_visible_span_is_preserved_including_negative_origins_and_one_pixel": "test window_recovery::tests::every_partly_visible_span_is_preserved_including_negative_origins_and_one_pixel ... ok",
+      "window_recovery::tests::recovery_uses_real_monitor_rectangles_and_nearest_survivor_not_the_desktop_box": "test window_recovery::tests::recovery_uses_real_monitor_rectangles_and_nearest_survivor_not_the_desktop_box ... ok",
+      "window_recovery::tests::oversized_recovery_uses_eighty_percent_and_preserves_native_decoration_allowance": "test window_recovery::tests::oversized_recovery_uses_eighty_percent_and_preserves_native_decoration_allowance ... ok",
+      "window_recovery::tests::missing_native_geometry_or_displays_fail_closed_and_never_cause_a_late_snap": "test window_recovery::tests::missing_native_geometry_or_displays_fail_closed_and_never_cause_a_late_snap ... ok",
+      "window_recovery::tests::enumeration_order_duplicates_and_invalid_displays_do_not_arm_recovery": "test window_recovery::tests::enumeration_order_duplicates_and_invalid_displays_do_not_arm_recovery ... ok",
+      "window_recovery::tests::old_pointer_replies_cannot_authorize_new_requests_or_a_slow_native_query": "test window_recovery::tests::old_pointer_replies_cannot_authorize_new_requests_or_a_slow_native_query ... ok",
+      "window_recovery::tests::a_visible_layout_clears_pending_immediately_even_while_input_is_blocked": "test window_recovery::tests::a_visible_layout_clears_pending_immediately_even_while_input_is_blocked ... ok",
+      "window_recovery::tests::a_topology_change_during_a_temporary_native_state_survives_until_normal_restore": "test window_recovery::tests::a_topology_change_during_a_temporary_native_state_survives_until_normal_restore ... ok",
+      "window_recovery::tests::pending_recovery_survives_native_window_recreation_and_requires_new_grace": "test window_recovery::tests::pending_recovery_survives_native_window_recreation_and_requires_new_grace ... ok",
+      "window_recovery::tests::display_changes_during_recreation_keep_the_old_baseline_but_startup_still_never_moves": "test window_recovery::tests::display_changes_during_recreation_keep_the_old_baseline_but_startup_still_never_moves ... ok",
+      "instances::tests::shared_demo_fixture_requires_private_test_root_and_cannot_override_timed_exemptions": "test instances::tests::shared_demo_fixture_requires_private_test_root_and_cannot_override_timed_exemptions ... ok",
+      "instances::tests::login_inactive_and_unknown_card_peers_count_but_different_cards_and_stale_peers_do_not": "test instances::tests::login_inactive_and_unknown_card_peers_count_but_different_cards_and_stale_peers_do_not ... ok",
+      "app::busy_pause::tests::a_shared_background_world_pauses_before_any_gpu_measurement_and_first_packet": "test app::busy_pause::tests::a_shared_background_world_pauses_before_any_gpu_measurement_and_first_packet ... ok",
+      "app::busy_pause::tests::transient_registry_misses_do_not_resume_but_sustained_absence_does": "test app::busy_pause::tests::transient_registry_misses_do_not_resume_but_sustained_absence_does ... ok",
+      "app::busy_pause::tests::focus_and_exemptions_release_shared_pause_immediately_and_reentry_is_protected": "test app::busy_pause::tests::focus_and_exemptions_release_shared_pause_immediately_and_reentry_is_protected ... ok",
+      "app::busy_pause::tests::a_previous_overload_latch_survives_peer_exit_but_focus_still_releases_it": "test app::busy_pause::tests::a_previous_overload_latch_survives_peer_exit_but_focus_still_releases_it ... ok",
+      "app::busy_pause::tests::a_long_frame_gap_does_not_turn_one_missing_registry_snapshot_into_permission_to_draw": "test app::busy_pause::tests::a_long_frame_gap_does_not_turn_one_missing_registry_snapshot_into_permission_to_draw ... ok",
+      "world_viewport::interface_tests::interface_canvas_uses_current_native_dpi_and_zoom_with_both_origins": "test world_viewport::interface_tests::interface_canvas_uses_current_native_dpi_and_zoom_with_both_origins ... ok",
+      "world_viewport::interface_tests::interface_canvas_minimum_uses_logical_units_and_keeps_reset_controls_reachable": "test world_viewport::interface_tests::interface_canvas_minimum_uses_logical_units_and_keeps_reset_controls_reachable ... ok",
+      "world_viewport::interface_tests::interface_canvas_is_optional_and_full_frame_modes_use_the_native_canvas": "test world_viewport::interface_tests::interface_canvas_is_optional_and_full_frame_modes_use_the_native_canvas ... ok",
+      "world_viewport::interface_tests::interface_egui_anchors_chrome_and_popups_inside_an_offset_fractional_dpi_canvas": "test world_viewport::interface_tests::interface_egui_anchors_chrome_and_popups_inside_an_offset_fractional_dpi_canvas ... ok",
+      "world_viewport::interface_tests::interface_egui_keeps_absolute_pointer_input_and_does_not_own_the_old_panel_margin": "test world_viewport::interface_tests::interface_egui_keeps_absolute_pointer_input_and_does_not_own_the_old_panel_margin ... ok",
+      "world_viewport::interface_tests::interface_egui_toggling_and_temporary_full_frames_keep_saved_window_anchors": "test world_viewport::interface_tests::interface_egui_toggling_and_temporary_full_frames_keep_saved_window_anchors ... ok",
+      "world_viewport::interface_tests::interface_login_floaters_without_a_bars_pass_keep_their_original_canvas_insets": "test world_viewport::interface_tests::interface_login_floaters_without_a_bars_pass_keep_their_original_canvas_insets ... ok",
+      "world_viewport::interface_tests::interface_egui_relayout_cancels_a_release_against_the_previous_canvas": "test world_viewport::interface_tests::interface_egui_relayout_cancels_a_release_against_the_previous_canvas ... ok",
+      "world_viewport::interface_tests::interface_egui_pending_zoom_does_not_record_a_stale_startup_or_viewport_canvas": "test world_viewport::interface_tests::interface_egui_pending_zoom_does_not_record_a_stale_startup_or_viewport_canvas ... ok",
+      "world_viewport::interface_tests::interface_narrow_canvas_falls_back_without_shrinking_saved_floaters": "test world_viewport::interface_tests::interface_narrow_canvas_falls_back_without_shrinking_saved_floaters ... ok",
+      "world_viewport::interface_tests::interface_automatically_shrunk_floaters_restore_their_wide_size_after_restart": "test world_viewport::interface_tests::interface_automatically_shrunk_floaters_restore_their_wide_size_after_restart ... ok",
+      "world_viewport::interface_tests::interface_expanding_a_previously_minimized_floater_retains_its_wide_geometry": "test world_viewport::interface_tests::interface_expanding_a_previously_minimized_floater_retains_its_wide_geometry ... ok",
+      "world_viewport::interface_tests::interface_expanding_on_the_wide_canvas_restores_size_and_right_anchor_after_minimizing": "test world_viewport::interface_tests::interface_expanding_on_the_wide_canvas_restores_size_and_right_anchor_after_minimizing ... ok",
+      "world_viewport::interface_tests::interface_bare_maps_restore_their_wide_geometry_including_locked_maps": "test world_viewport::interface_tests::interface_bare_maps_restore_their_wide_geometry_including_locked_maps ... ok",
+      "world_viewport::interface_tests::interface_manual_resize_replaces_the_retained_wide_floater_or_map_size": "test world_viewport::interface_tests::interface_manual_resize_replaces_the_retained_wide_floater_or_map_size ... ok",
+      "world_viewport::interface_tests::interface_aspect_fit_preserves_body_ratio_and_chrome_when_one_axis_overflows": "test world_viewport::interface_tests::interface_aspect_fit_preserves_body_ratio_and_chrome_when_one_axis_overflows ... ok",
+      "world_viewport::interface_tests::interface_aspect_floater_drag_stays_in_the_offset_bar_room_without_distortion": "test world_viewport::interface_tests::interface_aspect_floater_drag_stays_in_the_offset_bar_room_without_distortion ... ok"
+    },
+    "root_ui_acceptance": "pending explicit validation of this exact source; do not recommend UI package yet",
+    "source": "480176d037eb576119775e8d67aa2df065aa86ae",
+    "run_id": 42266902733,
+    "job_id": 128061067218,
+    "workflow_url": "https://github.com/DrCum/Foldurora/actions/runs/42266902733",
+    "workflow_conclusion": "success",
+    "raw_outcomes": {
+      "SCRIPTS": "success",
+      "FORMAT": "success",
+      "CLIPPY": "success",
+      "TESTS": "success",
+      "BUILD": "success",
+      "PACKAGE": "success"
+    },
+    "artifact_url": "https://github.com/DrCum/Foldurora/actions/runs/42266902733/artifacts/13531138507",
+    "artifact_bytes": 71299083,
+    "artifact_expires_at": "2026-11-13T18:49:56Z",
+    "GitHub_digest_verified": true,
+    "raw_job_log": "/workspace/work/windows-build/.scratch/chat-480176d0-windows-job.log",
+    "normalized_log_sha256": "8d81903ab22dcf70f8ab2f930a9892c2cf6a400e35cde4cb259e0a3c682f82b5",
+    "new_named_regressions": 142,
+    "new_regression_receipt": "/workspace/work/windows-build/.scratch/chat-480176d0-named-regressions.json",
+    "priority_ACL_evidence": {
+      "a_profile_can_only_be_opened_by_one_worker_at_a_time": {
+        "source_file": "crates/aurora-viewer/src/session_host/profile.rs",
+        "matches": [
+          [
+            "session_host::profile::tests::a_profile_can_only_be_opened_by_one_worker_at_a_time",
+            "ok"
+          ]
+        ],
+        "passed": true
+      },
+      "created_windows_directories_and_explicitly_owned_files_are_private": {
+        "source_file": "crates/aurora-viewer/src/session_host/profile.rs",
+        "matches": [
+          [
+            "session_host::profile::tests::created_windows_directories_and_explicitly_owned_files_are_private",
+            "ok"
+          ]
+        ],
+        "passed": true
+      },
+      "session_bootstrap_accepts_only_its_private_bound_location_and_known_fields": {
+        "source_file": "crates/aurora-viewer/src/session_host/transport.rs",
+        "matches": [
+          [
+            "session_host::transport::tests::session_bootstrap_accepts_only_its_private_bound_location_and_known_fields",
+            "ok"
+          ]
+        ],
+        "passed": true
+      },
+      "session_worker_transport_keeps_commands_bounded_and_does_not_renew_replays": {
+        "source_file": "crates/aurora-viewer/src/session_host/transport.rs",
+        "matches": [
+          [
+            "session_host::transport::tests::session_worker_transport_keeps_commands_bounded_and_does_not_renew_replays",
+            "ok"
+          ]
+        ],
+        "passed": true
+      },
+      "private_file_creation_is_exclusive_and_existing_files_are_not_truncated": {
+        "source_file": "crates/aurora-viewer/src/session_host/profile.rs",
+        "matches": [
+          [
+            "session_host::profile::tests::private_file_creation_is_exclusive_and_existing_files_are_not_truncated",
+            "ok"
+          ]
+        ],
+        "passed": true
+      },
+      "inherited_windows_file_ownership_is_checked_without_repairing_existing_files": {
+        "source_file": "crates/aurora-viewer/src/session_host/profile.rs",
+        "matches": [
+          [
+            "session_host::profile::tests::inherited_windows_file_ownership_is_checked_without_repairing_existing_files",
+            "ok"
+          ]
+        ],
+        "passed": true
+      }
+    },
+    "ignored_visual_fixture_present_but_not_run": {
+      "host_chat_cpu_visual_fixture": {
+        "source_file": "crates/aurora-viewer/src/session_host/chat_ui/visual.rs",
+        "matches": [
+          [
+            "session_host::chat_ui::visual::host_chat_cpu_visual_fixture",
+            "ignored"
+          ]
+        ],
+        "present_as_intentionally_ignored": true
+      }
+    },
+    "verification_scope": "Actual Windows strict checks, full tests, linked PE and exact portable source/version/manifests/checksums; not native GUI/taskbar/adoption/chat-popup/worker-detach/grid acceptance",
+    "known_UI_scope_followup": "New user contract requires ordinary Inventory/Settings/Map full workspace; separate f504-based viewport-toolbars-only fix is not included in this checkpoint. Do not claim this package validates that correction.",
+    "duplicate_exe_or_inner_zip_written": false,
+    "verified_at": "2026-11-06T18:59:27.353003+00:00",
+    "superseded_by_source": "32b298392c7d40afd2d8cc96d0658041b69be985",
+    "later_exact_Linux_CPU_host_smoke": "/workspace/work/windows-build/.scratch/cpu-host-32b29839-summary.json"
+  },
+  "final-a17185fd-verification.json": {
+    "classification": "experimental_ui_automated_checks_only_root_visual_acceptance_pending",
+    "commit": "a17185fd9b5d9eee1706d5634eba371a894d7711",
+    "workflow_run": 42263229823,
+    "artifact_id": 13528889147,
+    "checks": {
+      "outer_names_unique": {
+        "passed": true,
+        "detail": null
+      },
+      "exact_source_manifest": {
+        "passed": true,
+        "detail": "a17185fd9b5d9eee1706d5634eba371a894d7711"
+      },
+      "exact_workflow_manifest": {
+        "passed": true,
+        "detail": "https://github.com/DrCum/Foldurora/actions/runs/42263229823"
+      },
+      "all_recorded_checks_passed": {
+        "passed": true,
+        "detail": {
+          "powershell_5_1": "success",
+          "formatting": "success",
+          "clippy": "success",
+          "workspace_tests": "success"
+        }
+      },
+      "build_and_package_succeeded": {
+        "passed": true,
+        "detail": null
+      },
+      "correct_windows_target_and_profile": {
+        "passed": true,
+        "detail": null
+      },
+      "human_and_grid_acceptance_left_pending": {
+        "passed": true,
+        "detail": null
+      },
+      "exact_package_name": {
+        "passed": true,
+        "detail": [
+          "Foldurora-test-a17185fd9b5d-windows-x64.zip"
+        ]
+      },
+      "package_checksum_matches_receipt": {
+        "passed": true,
+        "detail": "4efe42d73e58da2cde2c1ed1358dd10c6004fa6b82c856fd70defd3363abe824  Foldurora-test-a17185fd9b5d-windows-x64.zip"
+      },
+      "inner_and_outer_manifests_match": {
+        "passed": true,
+        "detail": null
+      },
+      "compiled_version_identifies_source": {
+        "passed": true,
+        "detail": {
+          "version": "0.9.3-beta.20261106.1+61.ga17185fd9",
+          "schema": 1
+        }
+      },
+      "morning_guide_present": {
+        "passed": true,
+        "detail": null
+      },
+      "binary_is_x64_windows_pe": {
+        "passed": true,
+        "detail": {
+          "machine": 34404
+        }
+      },
+      "full_workspace_test_summaries_pass": {
+        "passed": true,
+        "detail": {
+          "passed": 7637,
+          "failed": 0,
+          "ignored": 48
+        }
+      },
+      "all_required_named_regressions_pass": {
+        "passed": true,
+        "detail": []
+      }
+    },
+    "failures": [],
+    "human_validation": "pending",
+    "outer_artifact_sha256": "d05aef127053024dbe4fd3004b3a7d283812b2a914b24fde22c8669df4327184",
+    "manifest": {
+      "schema": 1,
+      "commit": "a17185fd9b5d9eee1706d5634eba371a894d7711",
+      "source": "https://github.com/DrCum/Foldurora/tree/a17185fd9b5d9eee1706d5634eba371a894d7711",
+      "workflow_run": "https://github.com/DrCum/Foldurora/actions/runs/42263229823",
+      "built_at_utc": "2026-11-06T18:33:05.2807735Z",
+      "target": "x86_64-pc-windows-msvc",
+      "compiler": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+      "profile": "dev",
+      "features": [
+        "xr-static-loader"
+      ],
+      "checks": {
+        "powershell_5_1": "success",
+        "formatting": "success",
+        "clippy": "success",
+        "workspace_tests": "success"
+      },
+      "all_checks_passed": true,
+      "build": "success",
+      "package": "success",
+      "human_validation": "pending",
+      "windows_gpu_and_multiple_monitors": "pending",
+      "grid_validation": "pending",
+      "performance_measurement": "pending; development profile, without release LTO"
+    },
+    "package_filename": "Foldurora-test-a17185fd9b5d-windows-x64.zip",
+    "package_sha256": "4efe42d73e58da2cde2c1ed1358dd10c6004fa6b82c856fd70defd3363abe824",
+    "compiled_version": "0.9.3-beta.20261106.1+61.ga17185fd9",
+    "windows_exe_sha256": "4cfe64e3171bdb002fc791bdd34a2722e88e5a7460734685988ca8d2d27e04e2",
+    "windows_tests": {
+      "passed": 7637,
+      "failed": 0,
+      "ignored": 48
+    },
+    "named_regressions": {
+      "ui::login::carousel::tests::explicit_saved_character_survives_first_carousel_frames_and_centers_paginated_targets": "test ui::login::carousel::tests::explicit_saved_character_survives_first_carousel_frames_and_centers_paginated_targets ... ok",
+      "ui::characters::tests::row_actions_bind_to_exact_identity_and_current_or_opening_rows_are_disabled": "test ui::characters::tests::row_actions_bind_to_exact_identity_and_current_or_opening_rows_are_disabled ... ok",
+      "ui::login::saved_character_tests::saved_character_selection_is_exact_grid_scoped_and_never_submits_or_saves": "test ui::login::saved_character_tests::saved_character_selection_is_exact_grid_scoped_and_never_submits_or_saves ... ok",
+      "characters::tests::account_identity_is_grid_scoped_framed_and_case_normalized": "test characters::tests::account_identity_is_grid_scoped_framed_and_case_normalized ... ok",
+      "characters::tests::login_and_connecting_windows_prevent_a_duplicate_launch": "test characters::tests::login_and_connecting_windows_prevent_a_duplicate_launch ... ok",
+      "characters::tests::queued_duplicate_opens_are_idempotent_through_cold_start_and_ready_handoff": "test characters::tests::queued_duplicate_opens_are_idempotent_through_cold_start_and_ready_handoff ... ok",
+      "characters::tests::genuine_launch_and_lock_file_failures_are_not_reported_as_opening": "test characters::tests::genuine_launch_and_lock_file_failures_are_not_reported_as_opening ... ok",
+      "characters::tests::avatar_aware_open_reports_contention_without_cross_grid_launch_or_pending_retirement": "test characters::tests::avatar_aware_open_reports_contention_without_cross_grid_launch_or_pending_retirement ... ok",
+      "characters::tests::avatar_aware_open_keeps_real_spawn_and_gate_file_failures_as_errors": "test characters::tests::avatar_aware_open_keeps_real_spawn_and_gate_file_failures_as_errors ... ok",
+      "characters::tests::slow_child_keeps_its_reservation_until_ready_without_claiming_another_launch": "test characters::tests::slow_child_keeps_its_reservation_until_ready_without_claiming_another_launch ... ok",
+      "app::attention::tests::character_caption_tracks_selection_login_logout_and_missing_targets": "test app::attention::tests::character_caption_tracks_selection_login_logout_and_missing_targets ... ok",
+      "app::attention::tests::custom_and_automation_captions_keep_their_cli_identity": "test app::attention::tests::custom_and_automation_captions_keep_their_cli_identity ... ok",
+      "app::attention::tests::caption_identity_is_bounded_one_line_unicode_without_direction_spoofing": "test app::attention::tests::caption_identity_is_bounded_one_line_unicode_without_direction_spoofing ... ok",
+      "app::attention::tests::caption_grid_uses_short_labels_or_hosts_and_never_endpoint_secrets": "test app::attention::tests::caption_grid_uses_short_labels_or_hosts_and_never_endpoint_secrets ... ok",
+      "app::attention::tests::custom_grid_captions_distinguish_exact_endpoints_and_duplicate_friendly_labels": "test app::attention::tests::custom_grid_captions_distinguish_exact_endpoints_and_duplicate_friendly_labels ... ok",
+      "app::attention::tests::native_caption_is_reapplied_to_a_recreated_window_without_other_changes": "test app::attention::tests::native_caption_is_reapplied_to_a_recreated_window_without_other_changes ... ok",
+      "app::attention::tests::character_caption_templates_resolve_in_every_supported_language": "test app::attention::tests::character_caption_templates_resolve_in_every_supported_language ... ok",
+      "window_recovery::tests::live_recovery_waits_for_a_changed_topology_and_settled_geometry_then_moves_once": "test window_recovery::tests::live_recovery_waits_for_a_changed_topology_and_settled_geometry_then_moves_once ... ok",
+      "window_recovery::tests::dragging_or_excluded_states_require_a_fresh_grace_period_before_recovery": "test window_recovery::tests::dragging_or_excluded_states_require_a_fresh_grace_period_before_recovery ... ok",
+      "window_recovery::tests::moving_geometry_and_further_dpi_or_origin_changes_restart_the_wait": "test window_recovery::tests::moving_geometry_and_further_dpi_or_origin_changes_restart_the_wait ... ok",
+      "window_recovery::tests::every_partly_visible_span_is_preserved_including_negative_origins_and_one_pixel": "test window_recovery::tests::every_partly_visible_span_is_preserved_including_negative_origins_and_one_pixel ... ok",
+      "window_recovery::tests::recovery_uses_real_monitor_rectangles_and_nearest_survivor_not_the_desktop_box": "test window_recovery::tests::recovery_uses_real_monitor_rectangles_and_nearest_survivor_not_the_desktop_box ... ok",
+      "window_recovery::tests::oversized_recovery_uses_eighty_percent_and_preserves_native_decoration_allowance": "test window_recovery::tests::oversized_recovery_uses_eighty_percent_and_preserves_native_decoration_allowance ... ok",
+      "window_recovery::tests::missing_native_geometry_or_displays_fail_closed_and_never_cause_a_late_snap": "test window_recovery::tests::missing_native_geometry_or_displays_fail_closed_and_never_cause_a_late_snap ... ok",
+      "window_recovery::tests::enumeration_order_duplicates_and_invalid_displays_do_not_arm_recovery": "test window_recovery::tests::enumeration_order_duplicates_and_invalid_displays_do_not_arm_recovery ... ok",
+      "window_recovery::tests::old_pointer_replies_cannot_authorize_new_requests_or_a_slow_native_query": "test window_recovery::tests::old_pointer_replies_cannot_authorize_new_requests_or_a_slow_native_query ... ok",
+      "window_recovery::tests::a_visible_layout_clears_pending_immediately_even_while_input_is_blocked": "test window_recovery::tests::a_visible_layout_clears_pending_immediately_even_while_input_is_blocked ... ok",
+      "window_recovery::tests::a_topology_change_during_a_temporary_native_state_survives_until_normal_restore": "test window_recovery::tests::a_topology_change_during_a_temporary_native_state_survives_until_normal_restore ... ok",
+      "window_recovery::tests::pending_recovery_survives_native_window_recreation_and_requires_new_grace": "test window_recovery::tests::pending_recovery_survives_native_window_recreation_and_requires_new_grace ... ok",
+      "window_recovery::tests::display_changes_during_recreation_keep_the_old_baseline_but_startup_still_never_moves": "test window_recovery::tests::display_changes_during_recreation_keep_the_old_baseline_but_startup_still_never_moves ... ok",
+      "instances::tests::shared_demo_fixture_requires_private_test_root_and_cannot_override_timed_exemptions": "test instances::tests::shared_demo_fixture_requires_private_test_root_and_cannot_override_timed_exemptions ... ok",
+      "instances::tests::login_inactive_and_unknown_card_peers_count_but_different_cards_and_stale_peers_do_not": "test instances::tests::login_inactive_and_unknown_card_peers_count_but_different_cards_and_stale_peers_do_not ... ok",
+      "app::busy_pause::tests::a_shared_background_world_pauses_before_any_gpu_measurement_and_first_packet": "test app::busy_pause::tests::a_shared_background_world_pauses_before_any_gpu_measurement_and_first_packet ... ok",
+      "app::busy_pause::tests::transient_registry_misses_do_not_resume_but_sustained_absence_does": "test app::busy_pause::tests::transient_registry_misses_do_not_resume_but_sustained_absence_does ... ok",
+      "app::busy_pause::tests::focus_and_exemptions_release_shared_pause_immediately_and_reentry_is_protected": "test app::busy_pause::tests::focus_and_exemptions_release_shared_pause_immediately_and_reentry_is_protected ... ok",
+      "app::busy_pause::tests::a_previous_overload_latch_survives_peer_exit_but_focus_still_releases_it": "test app::busy_pause::tests::a_previous_overload_latch_survives_peer_exit_but_focus_still_releases_it ... ok",
+      "app::busy_pause::tests::a_long_frame_gap_does_not_turn_one_missing_registry_snapshot_into_permission_to_draw": "test app::busy_pause::tests::a_long_frame_gap_does_not_turn_one_missing_registry_snapshot_into_permission_to_draw ... ok",
+      "world_viewport::interface_tests::interface_canvas_uses_current_native_dpi_and_zoom_with_both_origins": "test world_viewport::interface_tests::interface_canvas_uses_current_native_dpi_and_zoom_with_both_origins ... ok",
+      "world_viewport::interface_tests::interface_canvas_minimum_uses_logical_units_and_keeps_reset_controls_reachable": "test world_viewport::interface_tests::interface_canvas_minimum_uses_logical_units_and_keeps_reset_controls_reachable ... ok",
+      "world_viewport::interface_tests::interface_canvas_is_optional_and_full_frame_modes_use_the_native_canvas": "test world_viewport::interface_tests::interface_canvas_is_optional_and_full_frame_modes_use_the_native_canvas ... ok",
+      "world_viewport::interface_tests::interface_egui_anchors_chrome_and_popups_inside_an_offset_fractional_dpi_canvas": "test world_viewport::interface_tests::interface_egui_anchors_chrome_and_popups_inside_an_offset_fractional_dpi_canvas ... ok",
+      "world_viewport::interface_tests::interface_egui_keeps_absolute_pointer_input_and_does_not_own_the_old_panel_margin": "test world_viewport::interface_tests::interface_egui_keeps_absolute_pointer_input_and_does_not_own_the_old_panel_margin ... ok",
+      "world_viewport::interface_tests::interface_egui_toggling_and_temporary_full_frames_keep_saved_window_anchors": "test world_viewport::interface_tests::interface_egui_toggling_and_temporary_full_frames_keep_saved_window_anchors ... ok",
+      "world_viewport::interface_tests::interface_login_floaters_without_a_bars_pass_keep_their_original_canvas_insets": "test world_viewport::interface_tests::interface_login_floaters_without_a_bars_pass_keep_their_original_canvas_insets ... ok",
+      "world_viewport::interface_tests::interface_egui_relayout_cancels_a_release_against_the_previous_canvas": "test world_viewport::interface_tests::interface_egui_relayout_cancels_a_release_against_the_previous_canvas ... ok",
+      "world_viewport::interface_tests::interface_egui_pending_zoom_does_not_record_a_stale_startup_or_viewport_canvas": "test world_viewport::interface_tests::interface_egui_pending_zoom_does_not_record_a_stale_startup_or_viewport_canvas ... ok",
+      "world_viewport::interface_tests::interface_narrow_canvas_falls_back_without_shrinking_saved_floaters": "test world_viewport::interface_tests::interface_narrow_canvas_falls_back_without_shrinking_saved_floaters ... ok",
+      "world_viewport::interface_tests::interface_automatically_shrunk_floaters_restore_their_wide_size_after_restart": "test world_viewport::interface_tests::interface_automatically_shrunk_floaters_restore_their_wide_size_after_restart ... ok",
+      "world_viewport::interface_tests::interface_expanding_a_previously_minimized_floater_retains_its_wide_geometry": "test world_viewport::interface_tests::interface_expanding_a_previously_minimized_floater_retains_its_wide_geometry ... ok",
+      "world_viewport::interface_tests::interface_expanding_on_the_wide_canvas_restores_size_and_right_anchor_after_minimizing": "test world_viewport::interface_tests::interface_expanding_on_the_wide_canvas_restores_size_and_right_anchor_after_minimizing ... ok",
+      "world_viewport::interface_tests::interface_bare_maps_restore_their_wide_geometry_including_locked_maps": "test world_viewport::interface_tests::interface_bare_maps_restore_their_wide_geometry_including_locked_maps ... ok",
+      "world_viewport::interface_tests::interface_manual_resize_replaces_the_retained_wide_floater_or_map_size": "test world_viewport::interface_tests::interface_manual_resize_replaces_the_retained_wide_floater_or_map_size ... ok",
+      "world_viewport::interface_tests::interface_aspect_fit_preserves_body_ratio_and_chrome_when_one_axis_overflows": "test world_viewport::interface_tests::interface_aspect_fit_preserves_body_ratio_and_chrome_when_one_axis_overflows ... ok",
+      "world_viewport::interface_tests::interface_aspect_floater_drag_stays_in_the_offset_bar_room_without_distortion": "test world_viewport::interface_tests::interface_aspect_floater_drag_stays_in_the_offset_bar_room_without_distortion ... ok"
+    },
+    "root_ui_acceptance": "pending explicit validation of this exact source; do not recommend UI package yet",
+    "source": "a17185fd9b5d9eee1706d5634eba371a894d7711",
+    "run_id": 42263229823,
+    "job_id": 128048332565,
+    "workflow_url": "https://github.com/DrCum/Foldurora/actions/runs/42263229823",
+    "workflow_conclusion": "success",
+    "raw_outcomes": {
+      "SCRIPTS": "success",
+      "FORMAT": "success",
+      "CLIPPY": "success",
+      "TESTS": "success",
+      "BUILD": "success",
+      "PACKAGE": "success"
+    },
+    "artifact_url": "https://github.com/DrCum/Foldurora/actions/runs/42263229823/artifacts/13528889147",
+    "artifact_bytes": 70810705,
+    "artifact_expires_at": "2026-11-13T18:33:10Z",
+    "GitHub_digest_verified": true,
+    "outer_zip_path": "/workspace/work/windows-build/.scratch/artifact-a17185fd/Foldurora-preview-a17185fd-windows.zip",
+    "raw_job_log": "/workspace/work/windows-build/.scratch/upstream16-a17185fd-job.log",
+    "normalized_log_sha256": "a82a0b98cb92c70145de6febd1fa088fea933a6c7e7adeff16c6ea442fe4ac78",
+    "new_upstream_test_names": [
+      {
+        "source_file": "crates/aurora-audio/src/capture.rs",
+        "function": "a_stuck_close_still_joins_after_the_warning",
+        "matches": [
+          [
+            "capture::tests::a_stuck_close_still_joins_after_the_warning",
+            "ok"
+          ]
+        ]
+      },
+      {
+        "source_file": "crates/aurora-audio/src/capture.rs",
+        "function": "closing_never_waits_for_a_stuck_device",
+        "matches": [
+          [
+            "capture::tests::closing_never_waits_for_a_stuck_device",
+            "ok"
+          ]
+        ]
+      }
+    ],
+    "verification_scope": "Actual Windows strict checks, full tests and exact portable PE/package/source/version; native/physical displays/grid and full Linux/macOS validation of this exact source remain pending",
+    "duplicate_exe_or_inner_zip_written": false,
+    "verified_at": "2026-11-06T18:36:06.729804+00:00"
+  },
+  "pr8-ci-verification.json": {
+    "PR": 8,
+    "source": "d87d11df89ec15ff0688cf3605f8f70d5e98b391",
+    "observed_at": "2026-11-06T19:01:56.614015+00:00",
+    "CI_run": {
+      "id": 42269917855,
+      "url": "https://github.com/DrCum/Foldurora/actions/runs/42269917855",
+      "conclusion": "success",
+      "actual_checks": "Windows PowerShell parser/fmt/strict all-target Clippy; Linux Clippy with existing -A dead-code plus43 media/updater tests; Gitleaks26commits/no leaks",
+      "full_PR_Linux_tests": "skipped",
+      "full_PR_Windows_test_shards": "skipped; aggregate only"
+    },
+    "macOS_run": {
+      "id": 42269916194,
+      "url": "https://github.com/DrCum/Foldurora/actions/runs/42269916194",
+      "conclusion": "failure",
+      "needed": "true (Cargo.lock)",
+      "rest_job": 128071604873,
+      "rest_status": "cancelled",
+      "runner_id": 0,
+      "runner_name": "",
+      "requested_labels": [
+        "macos-15"
+      ],
+      "steps": [],
+      "aggregation_job": 128079451569,
+      "aggregation_failure": "dependency cancelled, exit1",
+      "actual_mac_compiler_tests_runtime": "none in either attempt",
+      "cancellation_cause": "not provided; both required rest jobs were cancelled before runner assignment/steps",
+      "manual_reruns": 1,
+      "attempt1": {
+        "id": 42269916194,
+        "url": "https://github.com/DrCum/Foldurora/actions/runs/42269916194",
+        "conclusion": "failure",
+        "needed": "true (Cargo.lock)",
+        "rest_job": 128071604873,
+        "rest_status": "cancelled",
+        "runner_id": 0,
+        "runner_name": "",
+        "requested_labels": [
+          "macos-15"
+        ],
+        "steps": [],
+        "aggregation_job": 128079451569,
+        "aggregation_failure": "dependency cancelled, exit1",
+        "actual_mac_compiler_tests_runtime": "none",
+        "cancellation_cause": "not provided by API/log; no source compiler failure evidence",
+        "manual_reruns": 0
+      },
+      "latest_attempt": 2,
+      "latest_status": "completed_failure",
+      "latest_rest_job": 128083289417,
+      "rerun_action": "Parent invoked exactly one supported job rerun; child did not invoke it",
+      "automatic_repeat_allowed": false,
+      "status": "completed",
+      "latest_rest_conclusion": "cancelled",
+      "latest_rest_runner_id": 0,
+      "latest_rest_steps": [],
+      "latest_aggregate_job": 128090912010,
+      "attempt2_aggregate_log": "/workspace/work/windows-build/.scratch/pr8-macos-attempt2-aggregate.log",
+      "attempt2_aggregate_log_sha256": "336025104beb6f4988109375ecfac2a75b9ff677cd8a0d7ba6ca9433079d1e9c"
+    },
+    "logs": {
+      "windows": {
+        "path": "/workspace/work/windows-build/.scratch/pr8-windows-job.log",
+        "normalized_sha256": "c0fcda34c06ecee92c1a486539051ef36826480843085b57107cadf9842eb232",
+        "actual_test_counts": {
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        }
+      },
+      "linux": {
+        "path": "/workspace/work/windows-build/.scratch/pr8-linux-job.log",
+        "normalized_sha256": "cad84d5238f1190743b20699a90646933274ab5b698ae427fff8961cf1b7da22",
+        "actual_test_counts": {
+          "passed": 43,
+          "failed": 0,
+          "ignored": 0
+        }
+      },
+      "secret": {
+        "path": "/workspace/work/windows-build/.scratch/pr8-secret-job.log",
+        "normalized_sha256": "ecd58ac46d8369a36e77eb32f66898ccabea44f0e59d71962a936fd90d02c551",
+        "actual_test_counts": {
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        }
+      },
+      "macos-scope": {
+        "path": "/workspace/work/windows-build/.scratch/pr8-macos-scope-job.log",
+        "normalized_sha256": "695da6a8f42f0c49ab24229eb5d2857a0fb162988c64bf9a902ff8c87971056e",
+        "actual_test_counts": {
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        }
+      },
+      "macos-aggregate": {
+        "path": "/workspace/work/windows-build/.scratch/pr8-macos-aggregate-job.log",
+        "normalized_sha256": "cc79c02a078d9571efb41983c5092dab00762349791b608c5c65c3de460e577d",
+        "actual_test_counts": {
+          "passed": 0,
+          "failed": 0,
+          "ignored": 0
+        }
+      }
+    },
+    "provenance": {
+      "head": "d87d11df89ec15ff0688cf3605f8f70d5e98b391",
+      "base": "f504342231006423d392224f1225bc08e9e32fb5",
+      "CI_checkout_merge_commit": "5e4cf591ffa23dfb7f212454aff2e50aa761acd0",
+      "checkout_ref": "refs/remotes/pull/8/merge",
+      "merge_tree": "979e3b69f6f05f35500c1a2a2a8afaa54c19591f",
+      "head_tree": "979e3b69f6f05f35500c1a2a2a8afaa54c19591f",
+      "trees_equal": true,
+      "base_is_head_ancestor": true,
+      "primary_metadata_url": "https://api.github.com/repos/DrCum/Foldurora/git/commits/5e4cf591ffa23dfb7f212454aff2e50aa761acd0",
+      "scope": "PR merge-source compiler checks, tree-identical to head; distinct from exact-head portable run42268877155"
+    },
+    "exact_head_portable_run": {
+      "id": 42268877155,
+      "status": "full tests in progress; raw checks/package pending"
+    },
+    "acceptance": "No Mac compiler/runtime acceptance; no Windows native taskbar/adoption/grid/physical-display acceptance"
+  }
+}

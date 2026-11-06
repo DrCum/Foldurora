@@ -1,0 +1,24 @@
+{
+  "repository": "DrCum/Foldurora",
+  "frozen_main": "ae2fd1016ec83304719fa131312e2ac69c8f37a6",
+  "viewport": {
+    "pr": 9,
+    "source": "989a08f3fca3719230f397beeb6da710ab4a80e2",
+    "base": "f504342231006423d392224f1225bc08e9e32fb5",
+    "Windows_run": 42280773023,
+    "acceptance": "pending"
+  },
+  "preserved_remote_refs": {
+    "handoff/session-host-chat-20261106": "32b298392c7d40afd2d8cc96d0658041b69be985",
+    "handoff/session-preview-renderer-20261106": "a449faa78bd0b80f8a39b07b2cb25347a59eb167",
+    "handoff/session-preview-suspension-20261106": "213d8e498ea8b1e15e121f7186c50a799c9e2b0a"
+  },
+  "wip_patch": {
+    "base": "a449faa78bd0b80f8a39b07b2cb25347a59eb167",
+    "sha256": "6b23d11abf7c109da1e3c4a55118bac1a521bb8c1441db17db5902b14603f8bd",
+    "bytes": 119501,
+    "status": "unreviewed_uncompiled_disabled",
+    "gzip_sha256": "d11000431d89e5ad819ae7eb0495d025dacbf6ccbd2c29850b7e457079d10b2f",
+    "gzip_bytes": 29222
+  }
+}
