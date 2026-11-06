@@ -13241,6 +13241,14 @@ mm-margin-top = Top margin
 mm-margin-bottom = Bottom margin
 mm-margin-help = Percentage of the full viewer window reserved for panels. Opposite margins scale together to leave at least 5% for the world.
 
+# Native window captions retain the viewer version and build profile.
+character-window-title = { $account } · { $grid } — { $phase } — { $viewer }
+character-window-login-title = { $phase } — { $viewer }
+character-window-login = Log in
+character-window-connecting = Connecting
+character-window-online = Online
+character-window-main-grid = Second Life
+
 # Native character windows
 character-switch-title = Characters
 character-switch-description = Keep characters signed in in separate viewer windows. Switch to a running window, or open a saved character’s login. You sign in yourself.

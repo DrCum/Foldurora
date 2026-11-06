@@ -13237,6 +13237,14 @@ mm-margin-top = Marge supérieure
 mm-margin-bottom = Marge inférieure
 mm-margin-help = Pourcentage de la fenêtre réservé aux panneaux. Les marges opposées sont réduites ensemble pour conserver au moins 5 % pour le monde.
 
+# Native window captions retain the viewer version and build profile.
+character-window-title = { $account } · { $grid } — { $phase } — { $viewer }
+character-window-login-title = { $phase } — { $viewer }
+character-window-login = Connexion
+character-window-connecting = Connexion en cours
+character-window-online = En ligne
+character-window-main-grid = Second Life
+
 # Native character windows
 character-switch-title = Personnages
 character-switch-description = Gardez vos personnages connectés dans des fenêtres séparées. Passez à une fenêtre ouverte ou ouvrez la connexion d’un personnage enregistré. Vous vous connectez vous-même.
