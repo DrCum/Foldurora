@@ -1,5 +1,12 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Profile picker cutout bounds (visual review, 2026-11-06; no issue): keep
+  the outer dropdown frame inside the host roster, including long names,
+  narrow canvases and fractional zoom. Respect egui's inner popup budget rather
+  than adding frame margins twice. Wrap occupied-profile help inline so it is
+  readable beside the native world cutout. Source review/formatting passed;
+  compiled and native outcomes are recorded with this follow-up candidate.
+
 - 🔧 Persistent character profiles (human request, 2026-11-06; no issue): add
   five stable per-installation slots with renameable bounded labels and explicit
   manual login, retaining settings/account files and isolated caches after

@@ -1,5 +1,20 @@
 # Foldurora workspace and character preview
 
+## Profile picker boundary follow-up
+
+Branch `fix/profile-popup-bounds` follows the combined profile/chat source
+`8cd9a2aa005491b651e5bb8591d94fd6fb891520`. Visual review found that the
+selector's outer frame crossed the roster/world boundary by its popup margins.
+Windows removes the world rectangle from the controller's native window, so
+those extra pixels would be clipped. The picker now respects its inner width
+budget, and occupied-profile guidance wraps inside the roster instead of using
+a tooltip over that cutout. Long names remain truncated.
+
+The added regression measures the actual popup Area, including its frame,
+against the roster/world boundary at narrow sizes, fractional zoom and after
+reopening narrower. This changes host UI geometry only. Check outcomes and exact
+source accompany the candidate; native Windows acceptance remains pending.
+
 ## Five persistent profiles integration candidate
 
 Branch `feat/persistent-profiles-and-chat` combines the host/menu fixes,
