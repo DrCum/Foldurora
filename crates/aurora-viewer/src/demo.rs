@@ -7967,6 +7967,7 @@ pub fn local_texture_mips(id: &Uuid) -> bool {
         || *id == TEX_SOFT_MASK
         || *id == TEX_PROJECTED
         || *id == TEX_FOLIAGE
+        || *id == hud::TEX_MASK_PANEL
         || plants::is_texture(id)
 }
 
@@ -8512,8 +8513,11 @@ fn alpha_panels() -> [(Uuid, Option<Uuid>, &'static str); 6] {
     ]
 }
 
-/// Pixels of a procedural demo texture (RGBA8, 64×64; the hair demo's 256×256).
+/// Pixels and dimensions of a procedural demo texture (RGBA8).
 pub fn local_texture(id: &Uuid) -> Option<(Vec<u8>, u32, u32)> {
+    if *id == hud::TEX_MASK_PANEL {
+        return Some(hud::mask_cutoff_texture());
+    }
     if let Some(texture) = alpha_mask_ab::texture(id) {
         return Some(texture);
     }
