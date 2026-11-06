@@ -60,6 +60,13 @@ impl CharactersUi {
                 .id_salt("character_list")
                 .max_height(270.0)
                 .show(ui, |ui| {
+                    let switch = aurora_i18n::tr!("character-switch-switch");
+                    let open_login = aurora_i18n::tr!("character-switch-open-login");
+                    let button_width = widgets::action_button_fit(ui, "switch-horizontal", switch)
+                        .max(widgets::action_button_fit(ui, "external-link", open_login))
+                        .ceil()
+                        .clamp(128.0, 220.0)
+                        .min(ui.available_width());
                     for account in accounts.iter().take(64).filter(|account| matches(account, grids, &search)) {
                         shown = true;
                         let id = account_id(account);
@@ -68,11 +75,18 @@ impl CharactersUi {
                         let opening = peer.is_none() && snapshot.opening.contains(&id);
                         let other_grid = peer.is_none() && crate::characters::other_grid_open(account, accounts, snapshot);
                         ui.push_id(&id, |ui| {
-                            ui.horizontal(|ui| {
+                            ui.horizontal_wrapped(|ui| {
                                 widgets::glyph(ui, "user-filled", p.violet_pale, 21.0);
+                                let details_width = (ui.available_width() - button_width - ui.spacing().item_spacing.x).max(100.0);
                                 ui.vertical(|ui| {
-                                    ui.label(RichText::new(&account.username).strong().color(p.ink));
-                                    ui.label(RichText::new(grid_label(account, grids)).size(11.0).color(p.muted));
+                                    // Reserve the action column before laying out long names.
+                                    // A narrow floater wraps the action onto the next line.
+                                    ui.set_width(details_width);
+                                    ui.add(egui::Label::new(RichText::new(&account.username).strong().color(p.ink)).truncate())
+                                        .on_hover_text(&account.username);
+                                    let grid = grid_label(account, grids);
+                                    ui.add(egui::Label::new(RichText::new(&grid).size(11.0).color(p.muted)).truncate())
+                                        .on_hover_text(grid);
                                     let status = if current {
                                         aurora_i18n::tr!("character-switch-current")
                                     } else if opening {
@@ -93,32 +107,32 @@ impl CharactersUi {
                                             .color(if current { p.violet_pale } else { p.muted }),
                                     );
                                 });
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    let response = ui
-                                        .add_enabled_ui(!current && !opening && !other_grid, |ui| {
-                                            widgets::action_button(
-                                                ui,
-                                                p,
-                                                if peer.is_some() { "switch-horizontal" } else { "external-link" },
-                                                if peer.is_some() {
-                                                    aurora_i18n::tr!("character-switch-switch")
-                                                } else {
-                                                    aurora_i18n::tr!("character-switch-open-login")
-                                                },
-                                                ActionKind::Flat,
-                                                egui::vec2(128.0, 30.0),
-                                            )
-                                        })
-                                        .inner;
-                                    #[cfg(test)]
-                                    ctx.data_mut(|data| data.insert_temp(egui::Id::unique(("character_action", &id)), response.rect));
-                                    if response.clicked() {
-                                        action = Some(match peer {
-                                            Some(peer) => Action::Focus(peer.clone()),
-                                            None => Action::Open(id.clone()),
-                                        });
-                                    }
-                                });
+                                ui.allocate_ui_with_layout(
+                                    egui::vec2(button_width, 30.0),
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        let response = ui
+                                            .add_enabled_ui(!current && !opening && !other_grid, |ui| {
+                                                widgets::action_button(
+                                                    ui,
+                                                    p,
+                                                    if peer.is_some() { "switch-horizontal" } else { "external-link" },
+                                                    if peer.is_some() { switch } else { open_login },
+                                                    ActionKind::Flat,
+                                                    egui::vec2(button_width, 30.0),
+                                                )
+                                            })
+                                            .inner;
+                                        #[cfg(test)]
+                                        ctx.data_mut(|data| data.insert_temp(egui::Id::unique(("character_action", &id)), response.rect));
+                                        if response.clicked() {
+                                            action = Some(match peer {
+                                                Some(peer) => Action::Focus(peer.clone()),
+                                                None => Action::Open(id.clone()),
+                                            });
+                                        }
+                                    },
+                                );
                             });
                             ui.add_space(10.0);
                         });

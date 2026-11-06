@@ -42,6 +42,8 @@ pub struct LoginForm {
     pub show_info: bool,
     pub page: usize,
     pub selection_shown_for: Option<(String, String)>,
+    /// A requested saved character takes precedence over the initial middle card.
+    pub explicit_selection: bool,
     pub pending_connect: Option<usize>,
     pub pending_since: Option<f64>,
     pub wheel_scroll: f32,
@@ -133,6 +135,7 @@ pub(crate) fn select_saved_character(settings: &mut Settings, form: &mut LoginFo
         form.editing = false;
         form.adding = false;
         form.selection_shown_for = None;
+        form.explicit_selection = true;
         true
     } else {
         // A removed or invalid target must not fall through to the profile
@@ -146,6 +149,7 @@ pub(crate) fn select_saved_character(settings: &mut Settings, form: &mut LoginFo
         form.mfa_for = None;
         form.pending_connect = None;
         form.transition = None;
+        form.explicit_selection = false;
         form.editing = true;
         form.adding = true;
         false
