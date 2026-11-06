@@ -13240,6 +13240,43 @@ mm-margin-top = Marge supérieure
 mm-margin-bottom = Marge inférieure
 mm-margin-help = Pourcentage de la fenêtre réservé aux panneaux. Les marges opposées sont réduites ensemble pour conserver au moins 5 % pour le monde.
 
+# Session host controller
+host-title = Hôte de sessions
+host-manual-login-help = Ouvrez un viewer et connectez-vous manuellement dans sa fenêtre.
+host-search = Rechercher un personnage ou une grille
+host-open-login = Ouvrir la connexion
+host-running-sessions = Sessions
+host-saved-characters = Personnages enregistrés
+host-no-sessions = Aucune fenêtre de session correspondante.
+host-no-saved-characters = Les comptes enregistrés dans le viewer apparaissent ici.
+host-unnamed-session = Session du viewer
+host-starting = Démarrage du viewer…
+host-login = En attente de connexion manuelle
+host-connecting = Connexion…
+host-online = En ligne
+host-disconnected = Déconnecté
+host-unreachable = Le viewer ne répond pas
+host-worker-blocked = Terminez le dialogue dans le viewer
+host-hosted = Hébergée
+host-switching = Basculement…
+host-keyboard-focus = Focus clavier
+host-activate = Activer
+host-detach = Détacher
+host-detach-help = Garder cette session active dans sa propre fenêtre de viewer.
+host-opening = Ouverture de la fenêtre de connexion…
+host-no-hosted-session = Aucune session hébergée
+host-activate-help = Sélectionnez une session puis activez-la après vous être connecté.
+host-platform-help = L’affichage hébergé est disponible sous Windows. Sur cette plateforme, les sessions utilisent des fenêtres de viewer séparées.
+host-unavailable-help = L’affichage hébergé n’est pas disponible dans cette version. Les sessions restent dans des fenêtres de viewer séparées.
+host-request-queued = Demande mise en attente.
+host-busy = Attendez la fin de la demande en cours.
+host-stopped = La connexion à l’hôte est terminée. Utilisez les fenêtres du viewer ou rouvrez l’hôte.
+host-close = Fermer l’hôte
+host-close-question = Fermer l’hôte de sessions ?
+host-close-help = Vos sessions continueront dans des fenêtres de viewer séparées.
+host-close-confirm = Détacher les sessions et fermer
+host-closing = Restauration des fenêtres du viewer…
+
 # Native window captions retain the viewer version and build profile.
 character-window-title = { $account } · { $grid } — { $phase } — { $viewer }
 character-window-login-title = { $phase } — { $viewer }
