@@ -286,6 +286,7 @@ impl WorkerChat {
             ChatCommand::Poll { after_event } => {
                 self.sync(native)?;
                 let mut result = Vec::new();
+                let mut advertised = BTreeSet::new();
                 let keys: Vec<_> = self.states.keys().copied().collect();
                 if !keys.is_empty() {
                     let key = keys[self.metadata % keys.len()];
@@ -297,6 +298,7 @@ impl WorkerChat {
                         title: state.snapshot.title.clone(),
                     };
                     result.push(self.packet(packet.sequence, ChatEvent::Conversation(info))?);
+                    advertised.insert(key);
                 }
                 // Recheck current native restrictions on every exported line,
                 // including conversations outside this tick's scan rotation.
@@ -320,6 +322,16 @@ impl WorkerChat {
                     self.refresh(native, line.key.conversation)?;
                     let current = self.states.get(&line.key.conversation).ok_or(ChatError::Unavailable)?;
                     if current.policy.can_read && current.policy.ready && current.policy.revision == line.policy_revision {
+                        // The host must never invent permissions for a line
+                        // outside the rotating metadata conversation. Send
+                        // its trusted current policy first in the same batch.
+                        if advertised.insert(line.key.conversation) {
+                            let info = ConversationInfo {
+                                policy: current.policy,
+                                title: current.snapshot.title.clone(),
+                            };
+                            result.push(self.packet(packet.sequence, ChatEvent::Conversation(info))?);
+                        }
                         result.push(self.packet(packet.sequence, ChatEvent::Line(line))?);
                     }
                 }
@@ -340,7 +352,9 @@ impl WorkerChat {
 mod tests {
     use super::*;
     use aurora_session::chat::{LineKind, SendRequest};
-    use aurora_session::{AccountKey, GridKey, HostId, InstallationId, SessionId, SessionIdentity, WorkerId, WorkerIdentity};
+    use aurora_session::{
+        AccountKey, ConversationId, GridKey, HostId, InstallationId, SessionId, SessionIdentity, WorkerId, WorkerIdentity,
+    };
     use std::cell::Cell;
 
     fn source(generation: u64) -> ChatSource {
@@ -370,6 +384,7 @@ mod tests {
         initial: u64,
         largest_scan: Cell<usize>,
         submits: usize,
+        direct: bool,
     }
     impl Native {
         fn new() -> Self {
@@ -383,6 +398,7 @@ mod tests {
                 initial: 0,
                 largest_scan: Cell::new(0),
                 submits: 0,
+                direct: false,
             }
         }
     }
@@ -398,7 +414,11 @@ mod tests {
             Some(self.source)
         }
         fn catalogue(&self) -> Vec<Conversation> {
-            vec![Conversation::Nearby]
+            let mut conversations = vec![Conversation::Nearby];
+            if self.direct {
+                conversations.push(Conversation::Direct(ConversationId::from_bytes([7; 16]).unwrap()));
+            }
+            conversations
         }
         fn snapshot(&self, _: Conversation) -> Option<NativeSnapshot> {
             Some(NativeSnapshot {
@@ -556,7 +576,7 @@ mod tests {
         assert_eq!(backend.lines.len(), MAX_RETAINED_LINES);
         assert_eq!(native.largest_scan.get(), SCAN_LINES);
         let replies = backend.handle(&mut native, &poll(source(1), 1)).unwrap();
-        assert!(replies.len() <= 7);
+        assert!(replies.len() <= 11);
         assert!(
             replies
                 .iter()
@@ -580,5 +600,38 @@ mod tests {
                 .iter()
                 .any(|packet| matches!(packet.message, ChatMessage::Event(ChatEvent::Conversation(ref info)) if !info.policy.can_read))
         );
+    }
+
+    #[test]
+    fn host_chat_backend_each_exported_conversation_supplies_native_policy_before_its_lines() {
+        let mut native = Native::new();
+        native.direct = true;
+        native.entries = 8;
+        let mut backend = WorkerChat::default();
+        backend.sync(&native).unwrap();
+        let mut request = poll(source(1), 1);
+        // The rotating metadata begins with Nearby, but the selected retained
+        // lines belong to a Direct conversation the host has not seen yet.
+        request.message = ChatMessage::Command(ChatCommand::Poll { after_event: 8 });
+        let replies = backend.handle(&mut native, &request).unwrap();
+        let mut policies = BTreeMap::new();
+        let mut lines = 0;
+        for reply in replies {
+            match reply.message {
+                ChatMessage::Event(ChatEvent::Conversation(info)) => {
+                    policies.insert(info.policy.key.conversation, info.policy);
+                }
+                ChatMessage::Event(ChatEvent::Line(line)) => {
+                    let policy = policies.get(&line.key.conversation).expect("same-batch native policy before line");
+                    assert_eq!(line.key, policy.key);
+                    assert_eq!(line.policy_revision, policy.revision);
+                    assert!(policy.can_read && policy.ready && policy.lease_current);
+                    assert!(matches!(line.key.conversation, Conversation::Direct(_)));
+                    lines += 1;
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(lines, POLL_LINES);
     }
 }
