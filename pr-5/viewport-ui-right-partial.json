@@ -1,0 +1,28 @@
+{
+  "source": "f504342231006423d392224f1225bc08e9e32fb5",
+  "version": "0.9.3-beta.20261106.1+41.gf50434223",
+  "binary_sha256": "bebccb6015a718ec35708979c7d62e044960ddb4fefa53d0892399b6084c4838",
+  "image": "viewport-ui-right-partial.png",
+  "image_sha256": "2bd86b4d05b1a86db3018fb7ee9922469d2eb88f725a4f7dd329d288265f805b",
+  "image_size": [
+    1700,
+    1100
+  ],
+  "native_interface_size": [
+    1600,
+    1000
+  ],
+  "ui_rect_native": [
+    800,
+    0,
+    1600,
+    1000
+  ],
+  "demo": "ui-right; synthetic offline EN; islands",
+  "requested_world_render_scale_percent": 25,
+  "actual_clamped_world_render_scale_percent": 50,
+  "scope": "Partial real production UI evidence; not scheduled frame700, Characters, inset/scale/toggle or human acceptance.",
+  "fixture_result": "360second timeout before required frame700; original pixels preserved; viewer/Xvfb/feed cleaned",
+  "external_grid_logins": 0,
+  "user_attachments_published": false
+}
