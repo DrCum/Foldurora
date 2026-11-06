@@ -482,6 +482,149 @@ fn refresh_reservation(dir: &Path, expected: &Reservation, pid: u32, stamp: u64)
     Ok(true)
 }
 
+/// The host uses the ordinary account/avatar launch gates, but remains the
+/// sole owner of its child process. This permit never spawns, waits or kills.
+pub(crate) enum HostLaunchReservation {
+    Permit(HostLaunchPermit),
+    Existing(Notice),
+}
+
+pub(crate) struct HostLaunchPermit {
+    directory: PathBuf,
+    reservation: Reservation,
+    account_lock: Option<std::fs::File>,
+    avatar_lock: Option<std::fs::File>,
+}
+
+impl HostLaunchPermit {
+    /// Hold both gates throughout cold startup, until this child publishes its
+    /// exact PID or the broker observes its exit and drops the permit.
+    pub fn refresh(&mut self, pid: u32) -> io::Result<bool> {
+        self.refresh_at(pid, now())
+    }
+
+    fn refresh_at(&mut self, pid: u32, stamp: u64) -> io::Result<bool> {
+        if self.account_lock.is_none() {
+            return Ok(false);
+        }
+        if read_json::<Presence>(&record_path(&self.directory, &self.reservation.account))
+            .is_some_and(|peer| peer.account == self.reservation.account && peer.current(stamp) && peer.pid == pid)
+        {
+            self.release();
+            return Ok(false);
+        }
+        let path = reservation_path(&self.directory, &self.reservation.account);
+        if read_json::<Reservation>(&path).is_some_and(|current| !owns_reservation(&self.reservation, &current)) {
+            return Err(io::Error::other("host launch reservation changed owner"));
+        }
+        // An unrelated ordinary viewer can remove a pending file as it first
+        // publishes. Its PID is not this child's readiness acknowledgement.
+        self.reservation.stamp = stamp;
+        publish(&path, &self.reservation)?;
+        Ok(true)
+    }
+
+    fn release(&mut self) {
+        release_reservation(&self.directory, &self.reservation);
+        self.account_lock = None;
+        self.avatar_lock = None;
+    }
+}
+
+impl Drop for HostLaunchPermit {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
+
+pub(crate) fn reserve_host_launch(executable: &Path, account: &str) -> io::Result<HostLaunchReservation> {
+    let directory = crate::logging::logs_dir()
+        .with_file_name("characters")
+        .join(installation_id(executable));
+    std::fs::create_dir_all(&directory)?;
+    reserve_catalogue_host_launch(&directory, account, now(), &crate::login_accounts::load())
+}
+
+fn reserve_catalogue_host_launch(
+    directory: &Path,
+    account: &str,
+    stamp: u64,
+    accounts: &[crate::login_accounts::Account],
+) -> io::Result<HostLaunchReservation> {
+    if !valid_id(account) {
+        return Err(io::Error::other("invalid saved character"));
+    }
+    let target = accounts
+        .iter()
+        .find(|target| account_id(target) == account)
+        .ok_or_else(|| io::Error::other("saved character no longer available"))?;
+    let mut avatar_lock = None;
+    if let Some(avatar) = target.agent.filter(|avatar| !avatar.is_nil()) {
+        let lock = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(directory.join(format!("avatar-{avatar}.lock")))?;
+        match lock.try_lock() {
+            Ok(()) => {}
+            Err(std::fs::TryLockError::WouldBlock) => {
+                return contended_avatar_feedback(directory, account, stamp).map(HostLaunchReservation::Existing);
+            }
+            Err(std::fs::TryLockError::Error(error)) => return Err(error),
+        }
+        let related: Vec<_> = accounts
+            .iter()
+            .filter(|candidate| candidate.agent == Some(avatar))
+            .take(MAX_ACCOUNTS + 1)
+            .map(account_id)
+            .collect();
+        if related.len() > MAX_ACCOUNTS {
+            return Ok(HostLaunchReservation::Existing(Notice::OtherGrid));
+        }
+        let snapshot = scan(directory, &related, stamp);
+        if snapshot.peers.iter().any(|peer| peer.account != account) || snapshot.opening.iter().any(|opening| opening != account) {
+            return Ok(HostLaunchReservation::Existing(Notice::OtherGrid));
+        }
+        for other in related.iter().filter(|other| other.as_str() != account) {
+            if launch_in_progress(directory, other)? {
+                return Ok(HostLaunchReservation::Existing(Notice::OtherGrid));
+            }
+        }
+        avatar_lock = Some(lock);
+    }
+    let account_lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(directory.join(format!("{account}.lock")))?;
+    let held = match account_lock.try_lock() {
+        Ok(()) => true,
+        Err(std::fs::TryLockError::WouldBlock) => false,
+        Err(std::fs::TryLockError::Error(error)) => return Err(error),
+    };
+    if let Some(notice) = focus_existing_character(directory, account, stamp)? {
+        return Ok(HostLaunchReservation::Existing(notice));
+    }
+    if !held || scan(directory, &[account.to_owned()], stamp).opening.contains(account) {
+        return Ok(HostLaunchReservation::Existing(Notice::Opening));
+    }
+    let reservation = Reservation {
+        version: VERSION,
+        account: account.to_owned(),
+        nonce: Uuid::new_v4(),
+        stamp,
+    };
+    publish(&reservation_path(directory, account), &reservation)?;
+    Ok(HostLaunchReservation::Permit(HostLaunchPermit {
+        directory: directory.to_owned(),
+        reservation,
+        account_lock: Some(account_lock),
+        avatar_lock,
+    }))
+}
+
 fn supervise_launch(dir: &Path, reservation: &Reservation, lock: std::fs::File, receiver: std::sync::mpsc::Receiver<std::process::Child>) {
     let Ok(mut child) = receiver.recv() else {
         release_reservation(dir, reservation);
@@ -990,6 +1133,97 @@ mod tests {
                 last_place: None,
             })
             .collect()
+    }
+
+    #[test]
+    fn host_launch_permit_holds_both_gates_until_its_own_child_is_ready() {
+        let directory = temporary();
+        let accounts = saved_avatar_accounts();
+        let account = account_id(&accounts[0]);
+        let other_grid = account_id(&accounts[1]);
+        let HostLaunchReservation::Permit(mut permit) =
+            reserve_catalogue_host_launch(&directory, &account, 100, &accounts).expect("permit")
+        else {
+            panic!("first host launch must own its reservation");
+        };
+        assert!(matches!(
+            reserve_catalogue_host_launch(&directory, &account, 100 + LAUNCH_SECS + 1, &accounts),
+            Ok(HostLaunchReservation::Existing(Notice::Opening))
+        ));
+        assert!(matches!(
+            reserve_catalogue_host_launch(&directory, &other_grid, 101, &accounts),
+            Ok(HostLaunchReservation::Existing(Notice::Busy | Notice::OtherGrid))
+        ));
+        let mut unrelated = peer(102);
+        unrelated.account = account.clone();
+        unrelated.pid = 10;
+        publish(&record_path(&directory, &account), &unrelated).expect("unrelated presence");
+        std::fs::remove_file(reservation_path(&directory, &account)).expect("model ordinary presence publication");
+        assert!(permit.refresh_at(11, 102).expect("wrong PID keeps reservation"));
+        assert!(launch_in_progress(&directory, &account).expect("account lock remains held"));
+        let current: Reservation = read_json(&reservation_path(&directory, &account)).expect("reservation restored");
+        assert_eq!(current.nonce, permit.reservation.nonce);
+        unrelated.pid = 11;
+        publish(&record_path(&directory, &account), &unrelated).expect("own child readiness");
+        assert!(!permit.refresh_at(11, 102).expect("exact child releases permit"));
+        assert!(!launch_in_progress(&directory, &account).expect("account lock released"));
+        assert!(!reservation_path(&directory, &account).exists());
+        drop(permit);
+        std::fs::remove_dir_all(directory).expect("cleanup");
+    }
+
+    #[test]
+    fn host_launch_reservation_focuses_exact_existing_windows_and_rejects_other_grids() {
+        let directory = temporary();
+        let accounts = saved_avatar_accounts();
+        let account = account_id(&accounts[0]);
+        let other = account_id(&accounts[1]);
+        let mut existing = peer(100);
+        existing.account = account.clone();
+        publish(&record_path(&directory, &account), &existing).expect("existing viewer");
+        assert!(matches!(
+            reserve_catalogue_host_launch(&directory, &account, 101, &accounts),
+            Ok(HostLaunchReservation::Existing(Notice::FocusRequested))
+        ));
+        let focus: Focus = read_json(&focus_path(&directory, existing.instance)).expect("exact focus request");
+        assert!(focus.matches(&existing, 101));
+        assert!(matches!(
+            reserve_catalogue_host_launch(&directory, &other, 101, &accounts),
+            Ok(HostLaunchReservation::Existing(Notice::OtherGrid))
+        ));
+        assert!(!reservation_path(&directory, &other).exists());
+        std::fs::remove_dir_all(directory).expect("cleanup");
+    }
+
+    #[test]
+    fn failed_host_launch_releases_only_its_own_nonce_and_never_another_reservation() {
+        let directory = temporary();
+        let accounts = saved_avatar_accounts();
+        let account = account_id(&accounts[0]);
+        let HostLaunchReservation::Permit(permit) = reserve_catalogue_host_launch(&directory, &account, 100, &accounts).expect("permit")
+        else {
+            panic!("first reservation");
+        };
+        drop(permit); // Model bootstrap publication/spawn failure before a child exists.
+        assert!(!reservation_path(&directory, &account).exists());
+        assert!(!launch_in_progress(&directory, &account).expect("released lock"));
+        let HostLaunchReservation::Permit(mut permit) =
+            reserve_catalogue_host_launch(&directory, &account, 101, &accounts).expect("new permit")
+        else {
+            panic!("new reservation");
+        };
+        let foreign = Reservation {
+            version: VERSION,
+            account: account.clone(),
+            nonce: Uuid::new_v4(),
+            stamp: 101,
+        };
+        publish(&reservation_path(&directory, &account), &foreign).expect("other nonce");
+        assert!(permit.refresh_at(11, 102).is_err());
+        drop(permit);
+        let kept: Reservation = read_json(&reservation_path(&directory, &account)).expect("foreign reservation retained");
+        assert_eq!(kept.nonce, foreign.nonce);
+        std::fs::remove_dir_all(directory).expect("cleanup");
     }
 
     #[test]
