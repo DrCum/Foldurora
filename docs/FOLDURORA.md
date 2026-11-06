@@ -93,7 +93,8 @@ argument or in the switcher's discovery records.
    selected account, short grid label and login/connecting/online phase; unread
    and render-pause indicators still appear. A custom `--title` remains in force.
 2. Attempt to open the same saved account twice. Check the existing or starting
-   session is used, repeated clicks report Opening rather than a false failure,
+   session is used, repeated clicks report Opening or a neutral waiting notice,
+   rather than a false failure,
    and a stale/crashed record does not block reopening. Once ready, the existing
    window is focused; genuine launch and filesystem errors remain errors.
 3. Switch while movement keys or push-to-talk are held. Release them, type in
