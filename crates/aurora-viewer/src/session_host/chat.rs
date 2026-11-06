@@ -133,6 +133,7 @@ impl WorkerChat {
     fn refresh(&mut self, native: &impl NativeChat, conversation: Conversation) -> Result<(), ChatError> {
         let source = self.context(native)?;
         let snapshot = native.snapshot(conversation).ok_or(ChatError::Unavailable)?;
+        let existing = self.states.contains_key(&conversation);
         let changed = self.states.get(&conversation).is_none_or(|state| {
             state.snapshot.stamp != snapshot.stamp
                 || state.snapshot.ready != snapshot.ready
@@ -145,14 +146,17 @@ impl WorkerChat {
             }
             return Ok(());
         }
-        if !self.states.contains_key(&conversation) && self.states.len() == MAX_CONVERSATIONS {
+        if !existing && self.states.len() == MAX_CONVERSATIONS {
             return Err(ChatError::Capacity);
         }
         self.next_policy = self.next_policy.checked_add(1).ok_or(ChatError::Sequence)?;
         let key = ChatKey { source, conversation };
         let previous = self.lines.len();
         self.lines.retain(|line| line.key != key);
-        if previous != self.lines.len() {
+        // The host may still retain a title or text after this worker has
+        // evicted its own duplicate. Invalidation cannot depend on retained
+        // native lines, nor wait for this conversation's metadata rotation.
+        if existing || previous != self.lines.len() {
             self.gap()?;
         }
         let policy = NativeChatPolicy {
@@ -174,10 +178,11 @@ impl WorkerChat {
         let source = self.context(native)?;
         let catalogue: Vec<_> = native.catalogue().into_iter().take(MAX_CONVERSATIONS).collect();
         let known: BTreeSet<_> = catalogue.iter().copied().collect();
+        let previous_states = self.states.len();
         self.states.retain(|conversation, _| known.contains(conversation));
         let before = self.lines.len();
         self.lines.retain(|line| known.contains(&line.key.conversation));
-        if before != self.lines.len() {
+        if previous_states != self.states.len() || before != self.lines.len() {
             self.gap()?;
         }
         for _ in 0..SCAN_CONVERSATIONS.min(catalogue.len()) {
@@ -285,31 +290,19 @@ impl WorkerChat {
             }
             ChatCommand::Poll { after_event } => {
                 self.sync(native)?;
-                let mut result = Vec::new();
-                let mut advertised = BTreeSet::new();
                 let keys: Vec<_> = self.states.keys().copied().collect();
-                if !keys.is_empty() {
+                let metadata = if !keys.is_empty() {
                     let key = keys[self.metadata % keys.len()];
                     self.metadata = self.metadata.wrapping_add(1);
                     self.refresh(native, key)?;
-                    let state = self.states.get(&key).ok_or(ChatError::Unavailable)?;
-                    let info = ConversationInfo {
-                        policy: state.policy,
-                        title: state.snapshot.title.clone(),
-                    };
-                    result.push(self.packet(packet.sequence, ChatEvent::Conversation(info))?);
-                    advertised.insert(key);
-                }
+                    Some(key)
+                } else {
+                    None
+                };
                 // Recheck current native restrictions on every exported line,
                 // including conversations outside this tick's scan rotation.
-                if *after_event < self.gap_through {
-                    result.push(self.packet(
-                        packet.sequence,
-                        ChatEvent::Gap {
-                            through_event: self.gap_through,
-                        },
-                    )?);
-                }
+                // Stage all native refreshes first: any can invalidate host
+                // caches, and that reset must precede every new metadata line.
                 let after = (*after_event).max(self.gap_through);
                 let selected: Vec<_> = self
                     .lines
@@ -318,8 +311,26 @@ impl WorkerChat {
                     .take(POLL_LINES)
                     .cloned()
                     .collect();
-                for line in selected {
+                for line in &selected {
                     self.refresh(native, line.key.conversation)?;
+                }
+                let mut events = Vec::new();
+                let mut advertised = BTreeSet::new();
+                if *after_event < self.gap_through {
+                    events.push(ChatEvent::Gap {
+                        through_event: self.gap_through,
+                    });
+                }
+                if let Some(key) = metadata {
+                    let state = self.states.get(&key).ok_or(ChatError::Unavailable)?;
+                    events.push(ChatEvent::Conversation(ConversationInfo {
+                        policy: state.policy,
+                        title: state.snapshot.title.clone(),
+                    }));
+                    advertised.insert(key);
+                }
+                let after = (*after_event).max(self.gap_through);
+                for line in selected.into_iter().filter(|line| line.event > after) {
                     let current = self.states.get(&line.key.conversation).ok_or(ChatError::Unavailable)?;
                     if current.policy.can_read && current.policy.ready && current.policy.revision == line.policy_revision {
                         // The host must never invent permissions for a line
@@ -330,17 +341,21 @@ impl WorkerChat {
                                 policy: current.policy,
                                 title: current.snapshot.title.clone(),
                             };
-                            result.push(self.packet(packet.sequence, ChatEvent::Conversation(info))?);
+                            events.push(ChatEvent::Conversation(info));
                         }
-                        result.push(self.packet(packet.sequence, ChatEvent::Line(line))?);
+                        events.push(ChatEvent::Line(line));
                     }
                 }
                 if let Some(receipt) = self.receipt {
-                    result.push(self.packet(packet.sequence, ChatEvent::Receipt(receipt))?);
+                    events.push(ChatEvent::Receipt(receipt));
                 }
                 if self.context(native)? != source {
                     return Err(ChatError::Binding);
                 }
+                let result = events
+                    .into_iter()
+                    .map(|event| self.packet(packet.sequence, event))
+                    .collect::<Result<Vec<_>, _>>()?;
                 self.received = packet.sequence;
                 Ok(result)
             }
@@ -385,6 +400,8 @@ mod tests {
         largest_scan: Cell<usize>,
         submits: usize,
         direct: bool,
+        snapshots: Cell<usize>,
+        change_policy: Option<(usize, u64)>,
     }
     impl Native {
         fn new() -> Self {
@@ -399,6 +416,8 @@ mod tests {
                 largest_scan: Cell::new(0),
                 submits: 0,
                 direct: false,
+                snapshots: Cell::new(0),
+                change_policy: None,
             }
         }
     }
@@ -420,10 +439,17 @@ mod tests {
             }
             conversations
         }
-        fn snapshot(&self, _: Conversation) -> Option<NativeSnapshot> {
+        fn snapshot(&self, conversation: Conversation) -> Option<NativeSnapshot> {
+            let call = self.snapshots.get() + 1;
+            self.snapshots.set(call);
+            let revision = self
+                .change_policy
+                .filter(|_| matches!(conversation, Conversation::Direct(_)))
+                .filter(|(at, _)| call >= *at)
+                .map_or(self.revision, |(_, revision)| revision);
             Some(NativeSnapshot {
                 title: Label::new("Synthetic nearby").unwrap(),
-                stamp: [self.revision, 0, 0, 0],
+                stamp: [revision, 0, 0, 0],
                 ready: true,
                 can_send: true,
                 can_read: self.readable,
@@ -633,5 +659,113 @@ mod tests {
             }
         }
         assert_eq!(lines, POLL_LINES);
+    }
+
+    #[test]
+    fn host_chat_backend_policy_change_resets_host_cache_even_after_native_history_is_empty() {
+        let mut native = Native::new();
+        native.entries = 8;
+        let mut backend = WorkerChat::default();
+        backend.sync(&native).unwrap();
+        let first = backend.handle(&mut native, &poll(source(1), 1)).unwrap();
+        let cached = first
+            .iter()
+            .find_map(|packet| match &packet.message {
+                ChatMessage::Event(ChatEvent::Line(line)) => Some(line.clone()),
+                _ => None,
+            })
+            .expect("host retained a real exported line");
+        let mut catch_up = poll(source(1), 2);
+        catch_up.message = ChatMessage::Command(ChatCommand::Poll { after_event: 4 });
+        let second = backend.handle(&mut native, &catch_up).unwrap();
+        let after_event = second
+            .iter()
+            .filter_map(|packet| match &packet.message {
+                ChatMessage::Event(ChatEvent::Line(line)) => Some(line.event),
+                _ => None,
+            })
+            .max()
+            .unwrap();
+        assert_eq!(after_event, 8);
+        // Model the consumer retaining a line after its producer no longer
+        // retains a duplicate. A privacy reset must not depend on that copy.
+        backend.lines.clear();
+        native.entries = 0;
+        native.revision += 1;
+        native.readable = false;
+        let mut request = poll(source(1), 3);
+        request.message = ChatMessage::Command(ChatCommand::Poll { after_event });
+        let replies = backend.handle(&mut native, &request).unwrap();
+        assert!(backend.lines.is_empty());
+        assert!(matches!(replies[0].message, ChatMessage::Event(ChatEvent::Gap { through_event }) if through_event > after_event));
+        assert!(matches!(&replies[1].message, ChatMessage::Event(ChatEvent::Conversation(info))
+            if info.policy.key == cached.key && info.policy.revision > cached.policy_revision && !info.policy.can_read));
+        assert!(
+            !replies
+                .iter()
+                .any(|packet| matches!(packet.message, ChatMessage::Event(ChatEvent::Line(_))))
+        );
+        assert!(replies.len() <= 11);
+        assert!(replies.iter().all(|packet| aurora_session::chat::encode(packet).is_ok()));
+    }
+
+    #[test]
+    fn host_chat_backend_closed_conversation_resets_cached_titles_without_native_lines() {
+        let mut native = Native::new();
+        native.direct = true;
+        let mut backend = WorkerChat::default();
+        backend.sync(&native).unwrap();
+        assert!(backend.lines.is_empty());
+        let first = backend.handle(&mut native, &poll(source(1), 1)).unwrap();
+        let second = backend.handle(&mut native, &poll(source(1), 2)).unwrap();
+        assert!(
+            !first
+                .iter()
+                .chain(&second)
+                .any(|packet| matches!(packet.message, ChatMessage::Event(ChatEvent::Gap { .. }))),
+            "first policy discovery does not invalidate an existing cache"
+        );
+        assert!(
+            second
+                .iter()
+                .any(|packet| matches!(&packet.message, ChatMessage::Event(ChatEvent::Conversation(info))
+            if matches!(info.policy.key.conversation, Conversation::Direct(_))))
+        );
+        native.direct = false;
+        let closed = backend.handle(&mut native, &poll(source(1), 3)).unwrap();
+        assert!(matches!(closed[0].message, ChatMessage::Event(ChatEvent::Gap { .. })));
+        assert!(closed.iter().all(
+            |packet| !matches!(&packet.message, ChatMessage::Event(ChatEvent::Conversation(info))
+            if matches!(info.policy.key.conversation, Conversation::Direct(_)))
+        ));
+    }
+
+    #[test]
+    fn host_chat_backend_late_line_preflight_reset_still_precedes_all_metadata() {
+        let mut native = Native::new();
+        native.direct = true;
+        native.entries = 8;
+        let mut backend = WorkerChat::default();
+        backend.sync(&native).unwrap();
+        native.snapshots.set(0);
+        // Two sync snapshots, rotating Nearby metadata, then the selected
+        // Direct line's preflight discovers a changed existing policy.
+        native.change_policy = Some((4, 1));
+        let mut request = poll(source(1), 1);
+        request.message = ChatMessage::Command(ChatCommand::Poll { after_event: 8 });
+        let replies = backend.handle(&mut native, &request).unwrap();
+        assert!(matches!(replies[0].message, ChatMessage::Event(ChatEvent::Gap { through_event }) if through_event > 16));
+        assert!(
+            replies
+                .iter()
+                .skip(1)
+                .any(|packet| matches!(packet.message, ChatMessage::Event(ChatEvent::Conversation(_))))
+        );
+        assert!(
+            !replies
+                .iter()
+                .any(|packet| matches!(packet.message, ChatMessage::Event(ChatEvent::Line(_))))
+        );
+        assert!(replies.len() <= 11);
     }
 }
