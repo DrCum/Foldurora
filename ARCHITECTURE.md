@@ -73,6 +73,15 @@ active world's scheduling recognizes only its exact host PID/owned-window
 family; keyboard focus remains an independent native fact. Integrated builds,
 privacy/failure tests and native acceptance are required before publication.
 
+`ChatUi` owns a bounded policy-stamped draft map, including each editor's Undo
+state. A pass moves editor state into egui only for its exact source/conversation/
+policy/incarnation and removes it afterward, so background authority changes can
+purge text without waiting for a repaint. `ChatUiCache` keeps moved session UI
+across ordinary native popout Close/reopen, revalidates closed states on every
+host poll, and drops them on source loss or shutdown. Native surfaces and contexts
+are disposable. Queue admission consumes only matching policy/text, never a newer
+draft; receipt uncertainty remains independent of conversation navigation.
+
 The test-only `session_host/chat_ui/visual.rs` drives that same popout body with
 real egui input and paints through `crash::software::Painter`, as
 `SoftwareWindow` does. Its ignored, explicitly configured EN/FR/JA fixture

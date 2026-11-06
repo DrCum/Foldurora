@@ -1,5 +1,21 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Host chat draft retention (Folderstorm port, 2026-11-06; no issue): keep
+  separate source/policy-bound Nearby and resident IM text/Undo state while
+  navigating and closing/reopening a popout. Validate parked state while closed
+  or minimized; purge on policy/source loss, preserve unrelated history-gap drafts,
+  consume only exact admitted text and never replay uncertainty. Source review,
+  formatting, Linux lint and all new regressions passed. EN/FR/JA CPU fixtures
+  produced 42 captures; changed normal/narrow restoration screens were inspected.
+  Native acceptance remains pending. Retention is memory-only. See [the ledger](docs/FOLDURORA_PORT_STATUS.md).
+
+- 🔧 Crash details without a stack (human test report, 2026-11-06; no issue):
+  show/copy the existing sanitized summary when no raw trace was recovered, with
+  accurate EN/FR/JA copy/privacy text. Preserve recovered-trace behavior; do not
+  change collection, transmission or GPU recovery. Source review, formatting,
+  Linux lint and integrated clipboard/summary tests passed; native Windows
+  acceptance remains pending.
+
 - 🔧 Host title-bar move and standalone recovery (human test report,
   2026-11-06; no issue): the active worker detached after the controller moved,
   then remained unresponsive without a taskbar entry after host closure. Treat

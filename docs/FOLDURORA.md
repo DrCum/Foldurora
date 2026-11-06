@@ -1,5 +1,41 @@
 # Foldurora workspace and character preview
 
+## Conversation drafts and usable crash details
+
+Branch `feat/host-conversation-drafts` follows the frozen host/menu source
+`8b738ea8b2c700b7538b7e16135a7de19c192d43`. Its chat popouts retain separate
+Nearby and existing resident IM drafts when navigating, and retain session UI
+state through an ordinary Close/reopen. Each window remains bound to its exact
+character, grid, session and lease. Switching the active world does not choose
+the sender. Retention is memory-only and ends with authority or host-session loss.
+
+Every snapshot validates parked drafts against their own complete native policy.
+Revoked/missing permissions purge affected text and Undo state even while the
+popout is closed or minimized. Ordinary history truncation does not erase an
+unaffected draft. Failed local queue admission retains text; admitted sends
+consume only the matching frozen draft, and uncertain sends are never replayed.
+The current one-request receipt behavior remains; this is not shared-chat,
+group-chat, Attention or persistence-across-restart parity.
+
+For a crash without a recovered stack, Technical details now shows and copies
+the sanitized summary already saved in `public-report.md`, including available
+build/GPU/loss information. A recovered raw trace keeps its existing display
+and privacy warning. This changes diagnostic visibility, not GPU recovery or the
+unresolved cause of the standalone switching crash.
+
+See [the coordination ledger](FOLDURORA_PORT_STATUS.md) for frozen candidates,
+check receipts, remaining ports and input needed later. Native Windows popout
+focus, close/reopen and clipboard behavior still need acceptance. Only the human
+tests real-grid routing and native restrictions; automated fixtures use synthetic
+accounts and do not contact a grid.
+
+At this checkpoint Linux formatting and workspace/all-target Clippy passed with
+the existing `-A dead-code` platform allowance. Full tests reported 7,836 passes,
+49 ignored and the same software-Vulkan terrain-ramp precision failure as before.
+All eleven new draft/cache/diagnostic regressions passed. The isolated CPU fixture
+passed in EN/FR/JA, generating fourteen captures each; the restored-draft screens
+were inspected at normal size and a narrow 150% display scale.
+
 ## Host movement and dropdown follow-up
 
 Branch `fix/host-move-and-dropdowns` starts from combined Windows source

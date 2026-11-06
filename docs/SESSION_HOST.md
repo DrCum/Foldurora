@@ -81,6 +81,12 @@ compatibility is claimed.
   files, logs or process arguments. IO is separate from control, and native
   restrictions/account/lease are checked again at submission. Uncertain sends
   are not automatically retried, and policy gaps purge cached text/titles.
+- Each popout retains separate bounded Nearby/existing-IM drafts and editor Undo
+  state under its exact source and native policy. Ordinary Close drops the native
+  surface while the host retains session UI state; reopening the same live source
+  restores it into a fresh context. Closed and minimized states still process
+  policy/receipt updates. Lost authority discards affected text and Undo history;
+  host shutdown ends all retention. No draft files or restart persistence are added.
 - Reduced-resolution monitors are a later stage; protocol/budget models or an
   uninvoked renderer backend alone are not that feature.
 

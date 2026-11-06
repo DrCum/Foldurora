@@ -47,8 +47,9 @@ cargo test --workspace host_chat_cpu_visual_fixture -- --ignored --test-threads=
 
 The fixture drives the actual chat widgets with egui pointer/text events and
 paints their meshes through the same CPU painter as `SoftwareWindow`. It
-creates twelve PNGs with matching JSON records and a combined `manifest.json`:
-Nearby, an inactive resident IM draft, queued and uncertain receipts, source
+creates fourteen PNGs with matching JSON records and a combined `manifest.json`:
+Nearby, an inactive resident IM draft, a restored Nearby draft after navigation,
+queued and uncertain receipts, source
 replacement, and revoked reading/sending policy, at 640 × 640 points and at
 380 × 640 points with 150% native scaling. Each record checks the immutable
 synthetic account/grid/session, selected conversation title, visible sender,
