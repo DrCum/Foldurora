@@ -669,6 +669,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "aurora-session"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "aurora-updater"
 version = "0.1.0"
 dependencies = [
@@ -708,6 +716,7 @@ dependencies = [
  "aurora-net",
  "aurora-prim",
  "aurora-render",
+ "aurora-session",
  "aurora-updater",
  "aurora-version",
  "aurora-voice",
