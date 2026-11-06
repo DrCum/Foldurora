@@ -37,7 +37,7 @@ impl ViewportSettings {
 /// A saved spanning canvas must fit the connected desktop when restored.
 /// Positions can be negative; the saved window dimensions are logical and
 /// must be compared with display bounds in physical pixels at the new DPI.
-pub fn span_fits_displays(size: (u32, u32), scale: f64, displays: &[[i64; 4]]) -> bool {
+pub fn span_fits_displays(size: (u32, u32), scale: f64, position: Option<(i32, i32)>, displays: &[[i64; 4]]) -> bool {
     let bounds = displays
         .iter()
         .copied()
@@ -45,8 +45,18 @@ pub fn span_fits_displays(size: (u32, u32), scale: f64, displays: &[[i64; 4]]) -
         .reduce(|a, b| [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]);
     let Some(bounds) = bounds else { return true };
     let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
-    (f64::from(size.0) * scale).round() <= (bounds[2] - bounds[0]) as f64 + 1.0
-        && (f64::from(size.1) * scale).round() <= (bounds[3] - bounds[1]) as f64 + 1.0
+    let (width, height) = ((f64::from(size.0) * scale).round(), (f64::from(size.1) * scale).round());
+    if width > (bounds[2] - bounds[0]) as f64 + 1.0 || height > (bounds[3] - bounds[1]) as f64 + 1.0 {
+        return false;
+    }
+    position.is_none_or(|(x, y)| {
+        // Saved origins include native decorations; tolerate a frame border.
+        let border = 32.0;
+        f64::from(x) >= bounds[0] as f64 - border
+            && f64::from(y) >= bounds[1] as f64 - border
+            && f64::from(x) + width <= bounds[2] as f64 + border
+            && f64::from(y) + height <= bounds[3] as f64 + border
+    })
 }
 
 #[cfg(test)]
@@ -73,12 +83,22 @@ mod tests {
     #[test]
     fn saved_spans_survive_connected_displays_and_recover_after_removal_or_dpi_changes() {
         let dual = [[-1920, 0, 0, 1080], [0, 0, 2560, 1440]];
-        assert!(span_fits_displays((4480, 1440), 1.0, &dual));
-        assert!(span_fits_displays((2987, 960), 1.5, &dual));
-        assert!(!span_fits_displays((4480, 1440), 1.0, &dual[1..]));
-        assert!(!span_fits_displays((4480, 1440), 1.5, &dual));
-        assert!(span_fits_displays((3200, 2104), 1.0, &[[-1280, -1024, 0, 0], [0, 0, 1920, 1080]]));
-        assert!(span_fits_displays((800, 600), f64::NAN, &[[0, 0, 1920, 1080]]));
-        assert!(span_fits_displays((4480, 1440), 1.0, &[]));
+        assert!(span_fits_displays((4480, 1440), 1.0, Some((-1920, 0)), &dual));
+        assert!(span_fits_displays((2987, 960), 1.5, Some((-1920, 0)), &dual));
+        assert!(!span_fits_displays((4480, 1440), 1.0, Some((-1920, 0)), &dual[1..]));
+        assert!(!span_fits_displays((4480, 1440), 1.5, Some((-1920, 0)), &dual));
+        assert!(span_fits_displays(
+            (3200, 2104),
+            1.0,
+            Some((-1280, -1024)),
+            &[[-1280, -1024, 0, 0], [0, 0, 1920, 1080]]
+        ));
+        assert!(span_fits_displays((800, 600), f64::NAN, Some((0, 0)), &[[0, 0, 1920, 1080]]));
+        assert!(span_fits_displays((4480, 1440), 1.0, None, &[]));
+        let right = [[0, 0, 1920, 1080], [1920, 0, 3840, 1080]];
+        let left = [[-1920, 0, 0, 1080], [0, 0, 1920, 1080]];
+        assert!(span_fits_displays((3840, 1080), 1.0, Some((0, 0)), &right));
+        assert!(!span_fits_displays((3840, 1080), 1.0, Some((0, 0)), &left));
+        assert!(span_fits_displays((3840, 1080), 1.0, Some((-1920, 0)), &left));
     }
 }

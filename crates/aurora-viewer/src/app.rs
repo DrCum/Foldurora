@@ -17476,7 +17476,7 @@ impl ApplicationHandler for App {
                 })
                 .collect();
             let unavailable_span =
-                self.settings.world_viewport.enabled && !crate::world_viewport::span_fits_displays((w, h), sf, &displays);
+                self.settings.world_viewport.enabled && !crate::world_viewport::span_fits_displays((w, h), sf, pos, &displays);
             if unavailable_span || (!self.settings.world_viewport.enabled && w as f64 >= mw * 0.95 && h as f64 >= mh * 0.9) {
                 w = (mw * 0.8) as u32;
                 h = (mh * 0.8) as u32;
