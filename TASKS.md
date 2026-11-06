@@ -14,8 +14,13 @@
     are isolated per launch and must not be described as persistent.
   - ⬜ Read-only small render targets at 0.5/1/2/5 FPS, latest-only frames and a
     shared budget; no full-resolution background capture shortcut.
-  - ⬜ Inactive-account chat through native conversation/restriction paths,
-    bounded source-bound drafts/events and no implicit world activation.
+  - 🔧 Native inactive chat: connect optional private bootstrap keys, mutually
+    authenticated memory-only sockets, dedicated bounded worker IO, source/lease
+    broker caches, native restriction/ledger handling and CPU owned tool windows.
+    Start with literal Nearby/existing resident IM, preserve uncertain receipts
+    across reconnects without replay, purge cached text/titles on policy gaps,
+    and keep active-world visibility independent of owned chat focus. Source
+    regressions/reviews are in progress; integrated/native acceptance is pending.
   - ⬜ Native Windows focus, mixed DPI, Z-order, taskbar, host failure and
     confirmed shutdown checks; human grid testing only.
 

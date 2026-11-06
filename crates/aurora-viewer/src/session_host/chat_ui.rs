@@ -595,6 +595,35 @@ mod tests {
     }
 
     #[test]
+    fn host_chat_popout_nearby_retention_gap_preserves_an_inactive_im_draft() {
+        let initial = snapshot(source());
+        let mut frames = Frames::new();
+        frames.show(Some(&initial), Vec::new());
+        frames.click(&initial, Id::unique("host_chat_combo_rect"));
+        frames.click(&initial, Id::unique(("host_chat_pick", direct())));
+        frames.type_text(&initial, "Keep this inactive IM draft");
+        let policy = frames.ui.policy;
+        let mut overflow = initial.clone();
+        overflow.gap = true;
+        overflow.lines[0].event = 300;
+        overflow.lines[0].text = ChatText::new("Latest synthetic nearby line").unwrap();
+        for _ in 0..3 {
+            assert!(frames.show(Some(&overflow), Vec::new()).is_none());
+        }
+        assert_eq!(frames.ui.draft, "Keep this inactive IM draft");
+        assert_eq!(frames.ui.policy, policy);
+        let send = frames.click(&overflow, Id::unique("host_chat_send_rect")).unwrap();
+        assert_eq!(
+            send.key,
+            ChatKey {
+                source: source(),
+                conversation: direct()
+            }
+        );
+        assert_eq!(send.text.as_str(), "Keep this inactive IM draft");
+    }
+
+    #[test]
     fn host_chat_popout_source_or_policy_change_purges_draft_before_pending_click_release() {
         let initial = snapshot(source());
         let mut changed_source = source();

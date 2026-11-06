@@ -26,8 +26,8 @@ pub struct Cli {
     pub saved_account: Option<String>,
     /// Opt-in CPU-rendered controller; it never initializes a world renderer.
     pub session_host: bool,
-    /// Internal, private worker configuration. It carries identities only;
-    /// workers always use the ordinary manual login form.
+    /// Internal private worker bootstrap, including local IPC authentication.
+    /// Workers always use the ordinary manual login form.
     pub host_worker_config: Option<std::path::PathBuf>,
     /// The startup SLURL (CmdLineLoginLocation): `--url <slurl>`, `-url`
     /// (the form the system's `secondlife:` handler passes) or a bare

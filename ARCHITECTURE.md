@@ -30,6 +30,26 @@ handoff, and pending actions keep the cutout closed until their request receipt.
 Other platforms leave unsupported presentation disabled. Integrated native
 runtime acceptance remains pending.
 
+Native inactive chat uses a separate memory-only loopback lane. A distinct
+random 32-byte bootstrap key and role-separated HMAC challenge proofs
+(`chat_transport.rs`) authenticate both peers before chat data is exchanged.
+`chat_io.rs` owns socket IO/codecs on its own thread, independent of control
+receipts; queues, packet sizes and per-frame native commands are bounded.
+`chat_broker.rs` validates exact current control source/lease before advancing
+receive sequences or exposing immutable conversation/history/receipt snapshots.
+Native permission gaps purge cached text and titles before fresh metadata.
+
+`app/host_chat_bridge.rs` drives `session_host/chat.rs` and `app/host_chat.rs` on
+the owning App thread, including standby CPU ticks. The literal Nearby/existing
+resident-IM adapter rechecks actual World/account and native restrictions at
+submission. Its ledger survives socket reconnects, and an uncertain enqueue is
+never automatically resubmitted. `chat_window.rs`/`chat_ui.rs` provide CPU owned
+tool windows bound to one immutable source, with no taskbar entry or world
+activation. Only authenticated live native policies enable the controls. The
+active world's scheduling recognizes only its exact host PID/owned-window
+family; keyboard focus remains an independent native fact. Integrated builds,
+privacy/failure tests and native acceptance are required before publication.
+
 `app/busy_pause.rs` chooses shared-viewer background pause before the packet's
 world resolution and draw lists. A live peer from the same or an unknown GPU
 counts even at the login screen or with zero reported memory. The existing

@@ -63,8 +63,17 @@ compatibility is claimed.
   platforms leave unsupported presentation disabled. Requesting fullscreen
   first detaches the fitted worker so host geometry is not saved as the user's
   ordinary window placement.
-- Reduced-resolution monitors and inactive-account chat are later stages;
-  protocol/budget models alone are not those features.
+- The native inactive-chat path is connected for literal Nearby and existing
+  resident IM conversations, with its CPU tool window bound to one immutable
+  source. It needs integrated tests/native acceptance before publication; groups,
+  offers and other interactive actions are not exported. Controls require a live
+  authenticated worker and actual native permission metadata. A distinct private
+  bootstrap key authenticates both socket peers; chat text never enters IPC
+  files, logs or process arguments. IO is separate from control, and native
+  restrictions/account/lease are checked again at submission. Uncertain sends
+  are not automatically retried, and policy gaps purge cached text/titles.
+- Reduced-resolution monitors are a later stage; protocol/budget models or an
+  uninvoked renderer backend alone are not that feature.
 
 ## Acceptance before recommending a build
 
@@ -76,7 +85,12 @@ Clippy and workspace tests, then build the normal viewer at the exact source.
 
 Native Windows checks must prove the taskbar and Z-order behavior, switching,
 host-control focus, held-key/PTT release, resizing, mixed DPI, display removal,
-worker crash and host-death recovery. Closing a viewer can open a confirmation;
+worker crash and host-death recovery. Chat checks must cover inactive-account
+Nearby/IM source selection, source-specific drafts, native restrictions/mutes,
+policy changes with old host-only cached history, reconnect uncertainty without
+replay, and composing in an owned tool window while the active world stays
+visible. No chat action may promote a world or redirect text after a switch.
+ Closing a viewer can open a confirmation;
 distinguish an unconfirmed Close request from a hung confirmed Quit. Preserve
 the earlier standalone/viewport test packages while this work is validated.
 
