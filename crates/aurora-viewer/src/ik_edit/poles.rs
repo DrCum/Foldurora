@@ -53,6 +53,9 @@ impl Editor {
             let Some((at, _)) = proj.project(point) else {
                 continue;
             };
+            if !proj.clip_rect().contains(at) {
+                continue;
+            }
             let selected = self.selected == Some(limb.end) && self.control == Control::Pole;
             let response = egui::Area::new(egui::Id::unique(("ik-pole", limb.end)))
                 .fixed_pos(at - egui::vec2(14.0, 14.0))
@@ -60,6 +63,7 @@ impl Editor {
                 .movable(false)
                 .interactable(!gizmo_owns)
                 .show(ctx, |ui| {
+                    ui.set_clip_rect(ui.clip_rect().intersect(proj.clip_rect()));
                     let (rect, response) = ui.allocate_exact_size(
                         egui::vec2(28.0, 28.0),
                         if gizmo_owns { Sense::hover() } else { Sense::click_and_drag() },

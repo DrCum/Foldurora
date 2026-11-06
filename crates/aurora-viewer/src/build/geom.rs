@@ -72,6 +72,14 @@ impl Cam {
         self
     }
 
+    pub fn clip_rect(&self) -> egui::Rect {
+        let [left, top, right, bottom] = self.hud.map_or(self.area, |view| view.area);
+        egui::Rect::from_min_max(
+            egui::pos2(left / self.ppp, top / self.ppp),
+            egui::pos2(right / self.ppp, bottom / self.ppp),
+        )
+    }
+
     /// LLManip's SELECT_TYPE_HUD projection: orthographic, with the same
     /// zoom and viewport as the HUD renderer and triangle picking.
     pub fn for_hud(view: aurora_render::HudView, ppp: f32) -> Self {

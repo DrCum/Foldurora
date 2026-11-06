@@ -31,6 +31,9 @@ impl Geometry {
         self.pivot + self.rotation * Vec3::AXES[axis] * self.length
     }
     fn pick(&self, pointer: Pos2) -> Option<Part> {
+        if !self.cam.clip_rect().contains(pointer) {
+            return None;
+        }
         let center = self.cam.project(self.pivot)?;
         if center.distance(pointer) <= 9.0 {
             return Some(Part::Uniform);

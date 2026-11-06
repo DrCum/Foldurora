@@ -10639,11 +10639,7 @@ impl App {
             // before any field reads its keys: Ctrl+W is the frontmost window's
             ui::close_key::begin(ui.ctx());
             let t = Instant::now();
-            let projector = ui::hud::Projector::for_ui(
-                ui.ctx(),
-                aurora_render::viewport_matrix(viewport, (w, h)) * vp,
-                [w as f32, h as f32],
-            );
+            let projector = ui::hud::Projector::for_ui(ui.ctx(), vp, [w as f32, h as f32]).in_viewport(viewport);
             // A discarded pass (`request_discard`) is followed by one that
             // gets no input events: what the first pass clicked must survive
             // the second, or a click that changed a row's size is lost.

@@ -52,6 +52,7 @@ fn compact_default_ik_window_keeps_two_bindings_and_smoothing_visible_without_sc
     theme.apply(&ctx, 1.0);
     let palette = theme.palette();
     let proj = Projector {
+        world_viewport: None,
         view_proj: Mat4::IDENTITY,
         width: 1600.0,
         height: 900.0,
@@ -784,6 +785,7 @@ fn visible_tabs_and_real_button_clicks_keep_the_source_selected_when_picking_an_
     let eye = point + Vec3::new(3.0, -3.0, 2.0);
     let view = glam::camera::rh::view::look_to_mat4(eye, (point - eye).normalize(), Vec3::Z);
     let proj = Projector {
+        world_viewport: None,
         view_proj: glam::camera::rh::proj::directx::perspective_infinite_reverse(0.8, 16.0 / 9.0, 0.05) * view,
         width: 1600.0,
         height: 900.0,

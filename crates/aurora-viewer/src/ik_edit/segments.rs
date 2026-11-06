@@ -135,11 +135,13 @@ impl Editor {
                     }))
         })
     }
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn pick_segment(
         &mut self,
         ctx: &egui::Context,
         palette: &Palette,
         world: &World,
+        proj: &Projector,
         frame: &Frame,
         segments: &[Segment],
         gizmo_owns: bool,
@@ -157,7 +159,7 @@ impl Editor {
         let Some(pointer) = ctx.input(|i| i.pointer.interact_pos()) else {
             return;
         };
-        if ctx.layer_id_at(pointer).is_some_and(|l| l.order > egui::Order::Background) {
+        if !proj.clip_rect().contains(pointer) || ctx.layer_id_at(pointer).is_some_and(|l| l.order > egui::Order::Background) {
             return;
         }
         let rig = &world.avatar_lib.rig;
@@ -183,10 +185,14 @@ impl Editor {
             .order(egui::Order::Background)
             .fixed_pos(at - egui::vec2(6.0, 6.0))
             .movable(false)
-            .show(ctx, |ui| ui.allocate_exact_size(egui::vec2(12.0, 12.0), Sense::click()).1)
+            .show(ctx, |ui| {
+                ui.set_clip_rect(ui.clip_rect().intersect(proj.clip_rect()));
+                ui.allocate_exact_size(egui::vec2(12.0, 12.0), Sense::click()).1
+            })
             .inner;
         if response.hovered() {
             ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::unique("ik-skeleton")))
+                .with_clip_rect(proj.clip_rect())
                 .line_segment([s.a.0, s.b.0], Stroke::new(3.0, palette.violet_light));
         }
         if response.clicked() {

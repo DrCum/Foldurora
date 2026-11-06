@@ -48,6 +48,9 @@ pub struct Projector {
     pub width: f32,
     pub height: f32,
     pub ppp: f32,
+    /// A local world view embedded in the native canvas; floaters use the
+    /// full canvas while world overlays paint and take input only here.
+    pub world_viewport: Option<aurora_render::WorldViewport>,
 }
 
 impl Projector {
@@ -60,7 +63,36 @@ impl Projector {
             width: size[0],
             height: size[1],
             ppp: ctx.pixels_per_point(),
+            world_viewport: None,
         }
+    }
+
+    pub fn in_viewport(mut self, view: aurora_render::WorldViewport) -> Self {
+        let size = (self.width as u32, self.height as u32);
+        let view = view.fitted(size);
+        self.view_proj = aurora_render::viewport_matrix(view, size) * self.view_proj;
+        self.world_viewport = (view != aurora_render::WorldViewport::full(size)).then_some(view);
+        self
+    }
+
+    pub fn viewport(&self) -> aurora_render::WorldViewport {
+        self.world_viewport
+            .unwrap_or_else(|| aurora_render::WorldViewport::full((self.width as u32, self.height as u32)))
+    }
+
+    pub fn clip_rect(&self) -> egui::Rect {
+        let [left, top, right, bottom] = self.viewport().area();
+        egui::Rect::from_min_max(
+            egui::pos2(left / self.ppp, top / self.ppp),
+            egui::pos2(right / self.ppp, bottom / self.ppp),
+        )
+    }
+
+    /// Recover the local camera projection for CPU world manipulators.
+    pub fn world_view_proj(&self) -> Mat4 {
+        self.world_viewport.map_or(self.view_proj, |view| {
+            aurora_render::viewport_matrix(view, (self.width as u32, self.height as u32)).inverse() * self.view_proj
+        })
     }
 
     /// World -> egui points (None if behind the camera / off-screen).
@@ -88,13 +120,17 @@ impl Projector {
     }
 
     fn screen_point(&self, x: f32, y: f32) -> Option<Pos2> {
-        if x.abs() > 1.2 || y.abs() > 1.2 {
+        let point = Pos2::new((x * 0.5 + 0.5) * self.width / self.ppp, (0.5 - y * 0.5) * self.height / self.ppp);
+        let (local_x, local_y) = self.world_viewport.map_or((x, y), |view| {
+            (
+                (point.x * self.ppp - view.x as f32) / view.width as f32 * 2.0 - 1.0,
+                1.0 - (point.y * self.ppp - view.y as f32) / view.height as f32 * 2.0,
+            )
+        });
+        if local_x.abs() > 1.2 || local_y.abs() > 1.2 {
             return None;
         }
-        Some(Pos2::new(
-            (x * 0.5 + 0.5) * self.width / self.ppp,
-            (0.5 - y * 0.5) * self.height / self.ppp,
-        ))
+        Some(point)
     }
 }
 
@@ -871,6 +907,7 @@ mod tests {
         let p = crate::theme::Theme::default().palette();
         let icons = super::super::icons::Icons::default();
         let proj = Projector {
+            world_viewport: None,
             view_proj: Mat4::from_scale(Vec3::splat(1.0 / 512.0)),
             width: 1600.0,
             height: 900.0,
@@ -975,6 +1012,7 @@ mod tests {
         let p = crate::theme::Theme::default().palette();
         let icons = super::super::icons::Icons::default();
         let proj = Projector {
+            world_viewport: None,
             view_proj: Mat4::from_scale(Vec3::splat(1.0 / 512.0)),
             width: 1600.0,
             height: 900.0,
@@ -1132,6 +1170,7 @@ mod tests {
                 let projection = glam::camera::rh::proj::directx::perspective_infinite_reverse(1.0, 1.6, 0.1);
                 for ppp in [1.0, 1.5, 2.0] {
                     let proj = Projector {
+                        world_viewport: None,
                         view_proj: projection * view,
                         width: 1280.0,
                         height: 800.0,
@@ -1155,6 +1194,7 @@ mod tests {
     #[test]
     fn name_tag_visibility_uses_the_combined_screen_position() {
         let proj = Projector {
+            world_viewport: None,
             view_proj: Mat4::IDENTITY,
             width: 1280.0,
             height: 800.0,
@@ -1170,6 +1210,7 @@ mod tests {
         assert!(proj.project_name_tag(root, Vec3::new(0.0, 2.0, 0.0)).is_none());
 
         let perspective = Projector {
+            world_viewport: None,
             view_proj: glam::camera::rh::proj::directx::perspective_infinite_reverse(1.0, 1.6, 0.1),
             ..proj
         };

@@ -10,6 +10,7 @@ fn geometry(tool: Tool, basis: Quat, ppp: f32, edge_on: bool) -> Geometry {
         };
     let view = glam::camera::rh::view::look_to_mat4(eye, (pivot - eye).normalize(), Vec3::Z);
     let proj = Projector {
+        world_viewport: None,
         view_proj: glam::camera::rh::proj::directx::perspective_infinite_reverse(0.8, 16.0 / 9.0, 0.05) * view,
         width: 1600.0,
         height: 900.0,
@@ -88,6 +89,142 @@ fn bone_gizmo_edge_on_ring_uses_a_visible_tangent_without_moving_the_contact() {
     let moved = drag.update(start + tangent * radius * 0.4).unwrap();
     assert_eq!(moved.position, pose.position);
     assert!(moved.rotation.dot(Quat::from_rotation_x(0.4) * pose.rotation).abs() > 0.99999);
+}
+
+fn offset_projector(ppp: f32) -> (Projector, Geometry) {
+    let original = geometry(Tool::Move, Quat::IDENTITY, ppp, false);
+    let proj = Projector {
+        view_proj: original.cam.view_proj,
+        width: 3840.0,
+        height: 1440.0,
+        ppp,
+        world_viewport: None,
+    }
+    .in_viewport(aurora_render::WorldViewport {
+        x: 1920,
+        y: 240,
+        width: 1600,
+        height: 900,
+    });
+    (proj, original)
+}
+
+#[test]
+fn offset_world_projector_and_gizmo_share_the_camera_rays_and_physical_anchors() {
+    for ppp in [1.0, 1.25, 1.5, 2.0] {
+        let (proj, original) = offset_projector(ppp);
+        let g = Geometry::new(&proj, original.pivot, Quat::IDENTITY, Tool::Move).unwrap();
+        assert!(g.cam.eye.distance(original.cam.eye) < 0.001);
+        assert!((g.cam.fov_y - original.cam.fov_y).abs() < 0.001);
+        assert!((g.length - original.length).abs() < 0.001);
+        assert_eq!(g.cam.clip_rect(), proj.clip_rect());
+        for (recovered, expected) in proj
+            .world_view_proj()
+            .to_cols_array()
+            .into_iter()
+            .zip(original.cam.view_proj.to_cols_array())
+        {
+            assert!((recovered - expected).abs() < 0.0001);
+        }
+        for point in [g.pivot, g.pivot + Vec3::X * 0.1, g.pivot + Vec3::Z * 0.2] {
+            let screen = proj.project(point).unwrap().0;
+            assert!(screen.distance(g.cam.project(point).unwrap()) < 0.03);
+            let old = original.cam.project(point).unwrap();
+            assert!((screen - old).distance(egui::vec2(1920.0, 240.0) / ppp) < 0.03);
+            let (eye, direction) = g.cam.ray(screen.x * ppp, screen.y * ppp);
+            let (projector_eye, projector_direction) = crate::ik_edit::ray(&proj, screen).unwrap();
+            assert!(direction.dot((point - eye).normalize()) > 0.99999);
+            assert!(direction.dot(projector_direction) > 0.99999);
+            assert!((projector_eye - eye).cross(direction).length() < 0.001);
+            assert!((projector_eye - eye).dot(direction) > 0.0);
+        }
+        let outside = original.cam.inv_view_proj * Vec4::new(-1.3, 0.0, 0.1, 1.0);
+        assert!(
+            proj.project(outside.truncate() / outside.w).is_none(),
+            "the panel margin is outside the local camera view"
+        );
+    }
+}
+
+#[test]
+fn a_gizmo_in_the_panel_margin_cannot_take_a_drag_but_a_floater_button_still_works() {
+    let ppp = 1.25;
+    let (proj, original) = offset_projector(ppp);
+    let g = Geometry::new(&proj, original.pivot, Quat::IDENTITY, Tool::Move).unwrap();
+    let (eye, direction) = g.cam.ray(1780.0, 690.0);
+    let pivot = eye + direction * (g.cam.depth(g.pivot) / direction.dot(g.cam.at));
+    let hidden = Geometry::new(&proj, pivot, Quat::IDENTITY, Tool::Move).unwrap();
+    let pointer = hidden.cam.project(pivot + hidden.axis(0) * hidden.length * 0.85).unwrap();
+    assert!(!proj.clip_rect().contains(pointer));
+    assert!(hidden.pick(pointer).is_none());
+
+    let ctx = egui::Context::default();
+    let theme = crate::theme::Theme::default();
+    theme.apply(&ctx, 1.0);
+    let p = theme.palette();
+    let mut gizmo = Gizmo::default();
+    let pose = Pose {
+        position: pivot,
+        rotation: Quat::IDENTITY,
+    };
+    let mut button = egui::pos2(200.0, 300.0);
+    let mut clicked = false;
+    for step in 0..12 {
+        let at = if matches!(step, 4 | 5) {
+            pointer + egui::vec2(20.0, -10.0)
+        } else if step < 6 {
+            pointer
+        } else {
+            button
+        };
+        let mut events = vec![egui::Event::PointerMoved(at)];
+        if matches!(step, 3 | 5 | 10 | 11) {
+            events.push(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: matches!(step, 3 | 10),
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        let mut raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(proj.width, proj.height) / ppp)),
+            time: Some(step as f64 / 60.0),
+            events,
+            ..Default::default()
+        };
+        raw.viewports.entry(egui::ViewportId::ROOT).or_default().native_pixels_per_point = Some(ppp);
+        let mut out = ctx.run_ui(raw, |ui| {
+            assert!((ui.ctx().pixels_per_point() - ppp).abs() < 0.0001);
+            let (owns, edit) = gizmo.show(ui.ctx(), &p, hidden, pose, true);
+            assert!(
+                !owns && edit.is_none() && !gizmo.dragging(),
+                "world handles cannot start an edit in the panel margin"
+            );
+            crate::ui::widgets::Floater::new("margin-controls", "Panel", egui::pos2(100.0, 200.0), egui::vec2(260.0, 180.0)).show(
+                ui.ctx(),
+                &p,
+                &mut true,
+                |ui| {
+                    let response = ui.add_sized(egui::vec2(180.0, 80.0), egui::Button::new("panel action"));
+                    button = response.rect.center();
+                    clicked |= response.clicked();
+                },
+            );
+        });
+        let axes: Vec<_> = out
+            .shapes
+            .iter()
+            .filter(|s| matches!(&s.shape, egui::Shape::LineSegment { stroke, .. } if stroke.color == p.danger))
+            .collect();
+        assert!(!axes.is_empty(), "the regression exercises a projected world handle");
+        assert!(
+            axes.iter().all(|s| s.clip_rect == proj.clip_rect()),
+            "world paint is clipped to the viewport"
+        );
+        assert!(!proj.clip_rect().contains(button), "the floater is in the panel margin");
+        out.textures_delta.clear();
+    }
+    assert!(clicked, "ordinary panel controls remain interactive outside the world viewport");
 }
 
 #[test]
