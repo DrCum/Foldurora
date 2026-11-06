@@ -149,6 +149,21 @@ pub struct Recovery {
 }
 
 impl Recovery {
+    /// Device recovery may replace the native window while the desktop
+    /// changes. Retain its topology baseline and pending decision, but never
+    /// carry settled geometry or input permission across that gap.
+    pub fn suspend(&mut self, now: Instant) {
+        if let Some(pending) = &mut self.pending {
+            pending.since = now;
+            pending.geometry = None;
+        }
+    }
+
+    pub fn window_recreated(&mut self, now: Instant) {
+        self.suspend(now);
+        self.checked = None;
+    }
+
     pub fn due(&self, now: Instant) -> bool {
         self.checked.is_none_or(|t| now.saturating_duration_since(t) >= POLL)
     }
@@ -443,5 +458,54 @@ mod tests {
                 inner_size: None
             })
         );
+    }
+
+    #[test]
+    fn pending_recovery_survives_native_window_recreation_and_requires_new_grace() {
+        let mut recovery = Recovery::default();
+        let t = Instant::now();
+        let dual = [display(0, 0, 1920, 1080), display(1920, 0, 1920, 1080)];
+        let lost = Some(window(2100, 100, 1280, 800));
+        recovery.observe(t, &dual, lost, false);
+        recovery.observe(t + POLL, &dual[..1], lost, false);
+        assert!(recovery.pending());
+        recovery.suspend(t + POLL * 2);
+        let replacement = t + GRACE * 10;
+        recovery.window_recreated(replacement);
+        assert!(recovery.pending());
+        assert!(recovery.due(replacement), "a new window resamples immediately");
+        assert!(recovery.observe(replacement, &dual[..1], lost, false).is_none());
+        assert!(
+            recovery
+                .observe(replacement + GRACE - Duration::from_millis(1), &dual[..1], lost, false)
+                .is_none()
+        );
+        assert!(recovery.observe(replacement + GRACE, &dual[..1], lost, false).is_some());
+    }
+
+    #[test]
+    fn display_changes_during_recreation_keep_the_old_baseline_but_startup_still_never_moves() {
+        let t = Instant::now();
+        let dual = [display(0, 0, 1920, 1080), display(1920, 0, 1920, 1080)];
+        let lost = Some(window(2100, 100, 1280, 800));
+        for observed_during_gap in [false, true] {
+            let mut recovery = Recovery::default();
+            recovery.observe(t, &dual, lost, false);
+            recovery.suspend(t + POLL);
+            if observed_during_gap {
+                recovery.observe(t + GRACE, &dual[..1], None, true);
+                assert!(recovery.pending());
+            }
+            let replacement = t + GRACE * 10;
+            recovery.window_recreated(replacement);
+            assert!(recovery.observe(replacement, &dual[..1], lost, false).is_none());
+            assert!(recovery.pending(), "replacement compares with the previous viewer window's desktop");
+            assert!(recovery.observe(replacement + GRACE, &dual[..1], lost, false).is_some());
+        }
+        let mut initial = Recovery::default();
+        initial.window_recreated(t);
+        initial.observe(t, &dual[..1], lost, false);
+        assert!(!initial.pending());
+        assert!(initial.observe(t + GRACE * 20, &dual[..1], lost, false).is_none());
     }
 }

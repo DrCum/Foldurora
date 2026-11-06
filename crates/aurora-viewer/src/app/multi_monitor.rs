@@ -20,16 +20,7 @@ struct Observation {
 
 impl Observation {
     fn read(g: &Gfx, blocked: bool) -> Self {
-        let mut displays = g
-            .window
-            .available_monitors()
-            .map(|monitor| {
-                let (position, size) = (monitor.position(), monitor.size());
-                recovery::Display::new((position.x, position.y), (size.width, size.height), monitor.scale_factor())
-            })
-            .collect::<Vec<_>>();
-        displays.sort_unstable();
-        displays.dedup();
+        let displays = connected_displays(g.window.available_monitors());
         let normal = g.shown
             && g.window.is_visible() == Some(true)
             && g.window.fullscreen().is_none()
@@ -52,6 +43,18 @@ impl Observation {
             blocked: blocked || !normal,
         }
     }
+}
+
+fn connected_displays(monitors: impl Iterator<Item = winit::monitor::MonitorHandle>) -> Vec<recovery::Display> {
+    let mut displays = monitors
+        .map(|monitor| {
+            let (position, size) = (monitor.position(), monitor.size());
+            recovery::Display::new((position.x, position.y), (size.width, size.height), monitor.scale_factor())
+        })
+        .collect::<Vec<_>>();
+    displays.sort_unstable();
+    displays.dedup();
+    displays
 }
 
 enum PointerSample {
@@ -220,23 +223,39 @@ impl X11Pointer {
 }
 
 impl App {
-    pub(super) fn tick_monitor_recovery(&mut self) {
-        let Some(g) = &self.gfx else { return };
+    pub(super) fn tick_monitor_recovery(&mut self, event_loop: &ActiveEventLoop) {
+        let native_now = Instant::now();
         let state = &mut self.monitor_recovery;
-        if state.window != Some(g.window.id()) {
-            *state = MonitorRecovery {
-                window: Some(g.window.id()),
-                demo: self.demo.then(DemoRecovery::new).flatten(),
-                ..Default::default()
-            };
+        let Some(g) = &self.gfx else {
+            if state.window.is_some() {
+                state.waiting = None;
+                state.pointer = NativePointer::default();
+                state.policy.suspend(native_now);
+                if state.policy.due(native_now) && state.demo.as_ref().is_none_or(|d| d.mode == "native") {
+                    let displays = connected_displays(event_loop.available_monitors());
+                    state.policy.observe(native_now, &displays, None, true);
+                }
+            }
+            return;
+        };
+        let recreated = state.window != Some(g.window.id());
+        if recreated {
+            if state.window.is_none() {
+                state.demo = self.demo.then(DemoRecovery::new).flatten();
+            }
+            state.window = Some(g.window.id());
+            state.waiting = None;
+            state.pointer = NativePointer::default();
         }
         let synthetic = state.demo.as_ref().is_some_and(|d| d.mode != "native");
-        let native_now = Instant::now();
         let now = state
             .demo
             .as_ref()
             .filter(|_| synthetic)
             .map_or(native_now, |d| d.clock + Duration::from_secs(self.frame_count / 60));
+        if recreated {
+            state.policy.window_recreated(now);
+        }
         if state.waiting.is_none() && !state.policy.due(now) {
             return;
         }

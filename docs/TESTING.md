@@ -5096,6 +5096,9 @@ before (`amis`, `groupes`, `repere`, `historique`…) are still accepted.
   Wayland leave windows untouched when position or native hold state is
   unavailable. Real Windows monitor removal, mixed DPI, dragging and focus
   acceptance remain human tests.
+  A GPU-recovery replacement window keeps the viewer's earlier display
+  baseline and pending recovery, including display changes while no renderer
+  window exists; native input authorization and the grace period start again.
 - **`AURORA_DEMO_CHARACTERS=1`** requires `AURORA_DEMO=1` and opens the
   Characters panel after frame 550. It shows three synthetic saved accounts
   with current/live/offline states. Actions produce a demo notice; they never

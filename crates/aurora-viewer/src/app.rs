@@ -20610,7 +20610,7 @@ impl ApplicationHandler for App {
             self.apply_fullscreen_setting();
         }
         self.record_window_geometry();
-        self.tick_monitor_recovery();
+        self.tick_monitor_recovery(event_loop);
         self.attention_window();
         self.external_links();
         if self.gfx.as_ref().is_some_and(|g| !g.shown) {
