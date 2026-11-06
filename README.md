@@ -1143,12 +1143,17 @@ exe before publishing; the local build also writes it to `version.txt`.
 | `--language <code>` | Forces the language of this instance (`en`, `fr`, `ja`, or another language added to the catalogues), without changing the saved choice |
 | `--grid <name>` | Selects the login grid: `agni`, `aditi`, a saved grid name/nickname or a login URI (`--loginuri <uri>` too) |
 | `--login <first> <last> <password>` | Logs in with this account as soon as the login screen opens |
+| `--saved-account <id>` | Preselects the exact saved account/grid by its local identity hash; leaves login manual |
 | `<slurl>`, `--url <slurl>` | Starts at this place, or hands it to the viewer already running; must come last |
 | `-h`, `--help` | Shows the help |
 | `-V`, `--version` | Prints the built version then exits, with no window, log or network |
 
 - `--title`: the build profile ends the title (Dev, Release, Debug); the log
   file is `aurora-<text>.log` (`aurora-demo-<text>.log` in demo mode).
+- `--saved-account`: used by Characters when opening this same executable.
+  The 64-hex-character identifier selects a local saved-account record; it is
+  not a credential. Missing or invalid targets leave a blank login with an
+  error. The option does not submit a login or pass a password to the child.
 - `--fps-limit`: applies an extra limit to this process, including captures
   and online sessions; a lower user preference remains effective.
 - `--vr`: what the VR button's "Restart in VR" passes when the headset was

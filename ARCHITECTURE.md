@@ -8,6 +8,24 @@ spanning workspace composes the world in a separate rectangle while egui floater
 use the whole native window; render dimensions, camera, HUD and pointer conversion
 must share that rectangle. See `docs/FOLDURORA.md` for scope and acceptance.
 
+`aurora-render/src/viewport.rs::WorldViewport` owns the physical-pixel rectangle,
+margin normalization and projection/pick conversion. `world_viewport.rs` holds
+the disabled-by-default saved settings, and `app/multi_monitor.rs` selects the
+effective view, including temporary full-frame modes. The renderer allocates
+world targets at that view's size, composes them into its output rectangle and
+clips HUD/selection overlays. Native egui panels keep the full window canvas.
+`build::geom::Cam` carries the matching origin and extent for manipulation.
+
+`characters.rs::Manager` keeps heartbeat, discovery, focus requests and launch
+reservations on a worker. Discovery is scoped to the exact executable and saved
+account/grid identity; focus requests bind to an instance nonce and generation.
+`app/characters.rs` routes native focus and explicit child launch actions, while
+`ui/characters.rs` draws the shared Characters floater. `--saved-account` selects
+the ordinary login form without submitting credentials. Saved-account catalogue
+refresh runs on the worker and leaves the current login draft untouched. The
+existing instance GPU-budget sharing and background frame cap remain shared by
+the independently running worlds.
+
 `ui/inventory.rs::TabFilters` keeps each window's finder state per tab, including
 advanced searches and the temporary filters of Find links / Find similar.
 Both layouts use `set_tab` to swap that state. `InventoryPreferences` retains

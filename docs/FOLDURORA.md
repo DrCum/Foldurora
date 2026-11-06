@@ -33,8 +33,11 @@ targets, typed actions and background workers.
 
 ## Multi-monitor testing
 
-Stretch the main native window across the displays, then use the custom world
-viewport controls in Preferences. The remaining area holds normal Inventory,
+Stretch the main native window across the displays, then open Preferences →
+Layout → first tab → **Multi-monitor world viewport**. Enable **Use a custom
+world viewport**, use **Left half** or **Right half**, or adjust
+the four percentage margins. **Full window** restores the ordinary view.
+The remaining area holds normal Inventory,
 chat, map and other floaters. Those floaters remain inside this native window.
 They are not separate operating-system windows.
 
@@ -60,7 +63,8 @@ implementation.
 
 ## Character testing
 
-Use the Characters panel to select an existing session or open a saved
+Open **Me → Characters**, or use the users icon on the login screen. Use the
+Characters panel to select an existing session or open a saved
 account's login window. Opening another character does not log out the first.
 The new window uses the ordinary login and two-factor prompts; the user logs
 in. No password, two-factor code or login session token belongs in a process
@@ -86,6 +90,12 @@ or unified voice. Global Aurora preferences and layout keep their existing
 shared-file behavior; account-specific data uses Aurora's existing account
 paths. Avoid editing global preferences simultaneously while validating this
 preview. The saved-account catalogue already merges changes under an OS lock.
+Some existing account files are keyed by avatar UUID alone; conversation
+transcripts also include the grid. Known same-avatar cross-grid launches need
+special handling rather than assuming all account data is grid-isolated. The
+switcher refuses Open login when that avatar is known to be live on another
+grid. Distinct avatars can run concurrently; manually started viewers retain
+the existing storage behavior.
 
 ## Build and verification
 
@@ -109,6 +119,9 @@ dimensions, with `AURORA_PROFILE=1`. Record frame time and its tail, memory and
 switch recovery; FPS from the software Vulkan cloud environment is not a GPU
 benchmark. Aurora's existing background cap and GPU budget sharing remain in
 effect for real simultaneous sessions.
+
+The viewport reduces the world 3D targets. The native presentation surface,
+interface and HUD depth resources still cover the full native window.
 
 The artifact-only Windows workflow packages a commit-bound ZIP and checksum.
 It does not create a version tag, GitHub release or updater feed. Its runner
