@@ -14,6 +14,9 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
+mod telemetry;
+pub use telemetry::CompletedGpuSample;
+
 pub const GPU_RESERVE_BYTES: u64 = 128 << 20;
 pub(crate) const MAX_SCENE_SLOTS: usize = 65_536;
 pub(crate) const MAX_JOURNAL_BYTES: usize = 4 << 20;
