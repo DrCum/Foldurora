@@ -13275,3 +13275,4 @@ character-switch-custom-grid = Custom grid
 character-switch-missing = That saved character is unavailable. Select an account on this login screen.
 character-switch-cli-help = --saved-account <id>  Select an exact saved character on a manual login screen
 character-switch-other-grid = This avatar has a window open on another grid. Close it before opening this login; its account data is shared across grids.
+character-switch-busy = Another character launch is being checked. Try again shortly.

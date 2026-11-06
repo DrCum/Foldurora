@@ -13248,3 +13248,4 @@ character-switch-custom-grid = カスタムグリッド
 character-switch-missing = この保存済みキャラクターは利用できません。ログイン画面でアカウントを選択してください。
 character-switch-cli-help = --saved-account <id>  保存済みキャラクターの手動ログイン画面を選択
 character-switch-other-grid = このアバターは別のグリッドでウィンドウを起動しています。アカウントデータを共有するため、そちらを閉じてからログイン画面を開いてください。
+character-switch-busy = 別のキャラクターの起動を確認しています。少し待ってからもう一度お試しください。

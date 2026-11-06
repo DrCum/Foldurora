@@ -157,6 +157,7 @@ impl CharactersUi {
                     RichText::new(match notice {
                         Notice::Opening => aurora_i18n::tr!("character-switch-launch-requested"),
                         Notice::FocusRequested => aurora_i18n::tr!("character-switch-focus-requested"),
+                        Notice::Busy => aurora_i18n::tr!("character-switch-busy"),
                         Notice::Failed => aurora_i18n::tr!("character-switch-failed"),
                         Notice::Demo => aurora_i18n::tr!("character-switch-demo-action"),
                         Notice::OtherGrid => aurora_i18n::tr!("character-switch-other-grid"),

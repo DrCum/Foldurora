@@ -13271,3 +13271,4 @@ character-switch-custom-grid = Grille personnalisée
 character-switch-missing = Ce personnage enregistré est indisponible. Sélectionnez un compte sur cet écran de connexion.
 character-switch-cli-help = --saved-account <id>  Sélectionner un personnage enregistré sur un écran de connexion manuel
 character-switch-other-grid = Cet avatar a une fenêtre ouverte sur une autre grille. Fermez-la avant cette connexion ; ses données de compte sont partagées entre les grilles.
+character-switch-busy = Une autre ouverture de personnage est en cours de vérification. Réessayez dans un instant.
