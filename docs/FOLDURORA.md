@@ -20,7 +20,7 @@ drafts while that validation is pending, as authorized for this preview.
 
 | Folderstorm capability | Aurora foundation | This pass |
 | --- | --- | --- |
-| World viewport across displays | One native winit window; world targets composed before egui | Custom world rectangle with consistent rendering, camera, HUD and input coordinates; optional viewport-bound interface; gentle live recovery on Windows/X11 |
+| World viewport across displays | One native winit window; world targets composed before egui | Custom world rectangle with consistent rendering, camera, HUD and input coordinates; optional viewport-bound interface; Windows recovery policy; live X11 recovery remains unaccepted |
 | Several character sessions | Saved-account carousel; separate network/world per process; cross-process GPU fair sharing and background frame cap | Native Characters panel, existing-session focus, explicit manual-login opening, repeated-Open feedback and readable account/grid/phase captions |
 | Named workspaces, bars and window arrangements | Saved native floater geometry and toolbar controls | Follow-up after viewport and character acceptance |
 | Assistant inventory, appearance, camera and workspace tools | Native typed inventory, appearance and camera actions | Follow-up: a bounded permission-aware adapter; no generic input injection |
@@ -73,7 +73,7 @@ Check these cases in the offline demo first, then in the user's normal session:
 5. Try unequal display sizes, negative desktop coordinates and different DPI
    scales. Remove or disable the secondary display, restart, and confirm the
    main window can be recovered on an attached display.
-6. On Windows/X11, change or remove a display while the viewer is running. If
+6. On Windows, change or remove a display while the viewer is running. If
    the whole normal window becomes inaccessible, expect a recovery attempt after
    at least three stable seconds. Its size is preserved when it fits; an oversized
    window requests 80% of the nearest surviving display, subject to native minimum
@@ -98,8 +98,11 @@ implementation.
 
 Live recovery arms only after a display topology/DPI change; ordinary manual
 placement does not arm it. Missing geometry or unknown/stale native input state
-prevents movement. This bounded native guard supports Windows and X11; macOS and
-Wayland leave the window alone when reliable position or hold state is unavailable.
+prevents movement. Windows physical-display acceptance remains required. The
+owned Xvfb/RandR fixture exposed stale winit monitor lists, so live X11 recovery
+is not accepted at this checkpoint; fresh sampling is isolated on a separate
+branch. macOS and Wayland leave the window alone when reliable native state is
+unavailable.
 
 ## Character testing
 
@@ -115,6 +118,11 @@ heavy frame. Known different GPUs are excluded; unknown GPU identities count
 conservatively. Photos, VR, capture/profile runs and the setting's opt-out retain
 their exemptions. The underlying reset cause remains unconfirmed; a person
 still needs to accept simultaneous sessions on the affected hardware.
+
+Restart **all** participating viewers from the replacement build before testing
+the mitigation. A newly launched child cannot update the pause policy inside
+an older process that is still running. Keep the earlier ZIPs separately for
+comparison; they have not passed this simultaneous-session acceptance.
 
 Open **Me → Characters**, or use the users icon on the login screen. Use the
 Characters panel to select an existing session or open a saved
