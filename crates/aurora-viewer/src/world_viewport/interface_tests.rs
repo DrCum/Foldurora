@@ -203,14 +203,14 @@ impl Interface {
             }
             layout::begin_canvas(&ctx, restricted);
             assert_eq!(ctx.input(|input| input.viewport().inner_rect), Some(desktop_rect));
-            self.top = egui::TopBottomPanel::top("viewport_interface_top")
-                .exact_height(24.0)
-                .show_inside(ui, |ui| ui.label("Menu"))
+            self.top = egui::Panel::top("viewport_interface_top")
+                .exact_size(24.0)
+                .show(ui, |ui| ui.label("Menu"))
                 .response
                 .rect;
-            self.bottom = egui::TopBottomPanel::bottom("viewport_interface_bottom")
-                .exact_height(32.0)
-                .show_inside(ui, |ui| ui.label("Toolbar and chat"))
+            self.bottom = egui::Panel::bottom("viewport_interface_bottom")
+                .exact_size(32.0)
+                .show(ui, |ui| ui.label("Toolbar and chat"))
                 .response
                 .rect;
             if self.classic_room {
