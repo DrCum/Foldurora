@@ -1,5 +1,8 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Safe upstream snapshot integration (task `upstream-safe-20261106`; no issue): nine intact, statically reviewed commits from Aurora `fccd1629a67c`, based on Foldurora `f5043422`; compilation and runtime checks pending. Fourteen overlapping/conflicting commits remain deferred in [the review ledger](docs/UPSTREAM_REVIEW_20261106.md). No manual conflict resolutions or main merge.
+
+
 - 🔧 Foldurora shared-GPU contention mitigation (user crash report, 2026-11-06;
   no issue): source `81c167e2` passed offline checks, but live multi-character
   testing lost graphics devices in background viewers with long GPU frames.
