@@ -22,8 +22,10 @@ pub fn load() -> Key {
         return Key::random().unwrap_or_else(|| Key::from_bytes([0x5a; 32]));
     }
     let started = std::time::Instant::now();
-    if aurora_updater::test_environment().is_none()
-        && let Some(key) = from_store()
+    if shared_store_allowed(
+        aurora_updater::test_environment().is_some(),
+        crate::session_host::profile::root().is_some(),
+    ) && let Some(key) = from_store()
     {
         log::info!("cache key: credential store ({} ms)", started.elapsed().as_millis());
         return key;
@@ -36,6 +38,12 @@ pub fn load() -> Key {
     // no store, no file: a key for this session (the cache is lost at exit)
     log::warn!("cache key: none could be kept; this session's cache will not be read again");
     Key::random().unwrap_or_else(|| Key::from_bytes([0x5a; 32]))
+}
+
+/// A worker's disposable cache belongs to its private profile, including its
+/// sealing key. It must never create or replace the ordinary shared key.
+fn shared_store_allowed(update_fixture: bool, host_worker: bool) -> bool {
+    !update_fixture && !host_worker
 }
 
 fn parse(bytes: &[u8]) -> Option<Key> {
@@ -101,6 +109,14 @@ fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn isolated_workers_and_update_fixtures_never_select_the_shared_cache_key_store() {
+        assert!(shared_store_allowed(false, false));
+        assert!(!shared_store_allowed(false, true));
+        assert!(!shared_store_allowed(true, false));
+        assert!(!shared_store_allowed(true, true));
+    }
 
     #[test]
     fn key_file_is_made_once_then_kept() {

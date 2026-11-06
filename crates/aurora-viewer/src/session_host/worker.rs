@@ -127,12 +127,7 @@ impl WorkerBridge {
                 ..Default::default()
             };
         };
-        let now = self
-            .since
-            .get_or_insert_with(Instant::now)
-            .elapsed()
-            .as_millis()
-            .min(u64::MAX as u128) as u64;
+        let now = session_clock(&mut self.since, Instant::now());
         for envelope in self.io.commands() {
             let Message::Command(command) = &envelope.message else {
                 continue;
@@ -181,6 +176,12 @@ impl WorkerBridge {
     pub fn restore(&mut self, window: &winit::window::Window) {
         self.presentation.restore(window);
     }
+}
+
+fn session_clock(since: &mut Option<Instant>, now: Instant) -> u64 {
+    now.saturating_duration_since(*since.get_or_insert(now))
+        .as_millis()
+        .min(u64::MAX as u128) as u64
 }
 
 fn merge_effects(target: &mut WorkerEffects, next: WorkerEffects) {
@@ -330,6 +331,18 @@ mod native {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_cold_renderer_does_not_consume_the_never_owned_startup_lease() {
+        let process_start = Instant::now();
+        let first_event = process_start + std::time::Duration::from_secs(60);
+        let mut since = None;
+        assert_eq!(session_clock(&mut since, first_event), 0);
+        assert_eq!(
+            session_clock(&mut since, first_event + std::time::Duration::from_millis(15_001)),
+            15_001
+        );
+    }
 
     #[test]
     fn lease_effects_always_preserve_input_release_and_window_restoration() {
