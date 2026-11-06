@@ -353,8 +353,15 @@ impl HostUi {
             .width(width)
             .truncate()
             .show_ui(ui, |ui| {
-                ui.set_max_width(width);
+                // Popup already deducted its frame from the button's outer
+                // width. Restoring that outer width here adds the margins
+                // again, painting into the native world's cutout.
+                let inner_width = (width - egui::Frame::popup(ui.style()).total_margin().sum().x).max(1.0);
+                ui.set_max_width(ui.available_width().min(inner_width));
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+                #[cfg(test)]
+                ui.ctx()
+                    .data_mut(|data| data.insert_temp(Id::unique("host_slot_popup_area"), ui.layer_id().id));
                 for slot in snapshot.slots.iter().take(MAX_WORKERS) {
                     let text = if slot.available {
                         slot_name(slot)
@@ -370,8 +377,12 @@ impl HostUi {
                 }
             });
         #[cfg(test)]
-        ui.ctx()
-            .data_mut(|data| data.insert_temp(Id::unique("host_slot_combo"), combo.response.rect));
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(Id::unique("host_slot_combo"), combo.response.rect);
+            if combo.inner.is_none() {
+                data.remove::<Id>(Id::unique("host_slot_popup_area"));
+            }
+        });
         #[cfg(not(test))]
         let _ = combo;
         let selected = self.selected_slot.and_then(|id| snapshot.slots.iter().find(|slot| slot.id == id));
@@ -394,10 +405,12 @@ impl HostUi {
                 self.rename = Some((slot.id, slot.label.as_str().to_owned()));
             }
             if selected.is_some_and(|slot| !slot.available) {
-                ui.label(RichText::new(aurora_i18n::tr!("host-profile-occupied")).small().color(p.muted))
-                    .on_hover_text(aurora_i18n::tr!("host-profile-occupied-help"));
+                ui.label(RichText::new(aurora_i18n::tr!("host-profile-occupied")).small().color(p.muted));
             }
         });
+        if selected.is_some_and(|slot| !slot.available) {
+            ui.add(egui::Label::new(RichText::new(aurora_i18n::tr!("host-profile-occupied-help")).small().color(p.muted)).wrap());
+        }
         if let Some(error) = &snapshot.registry_error {
             ui.label(RichText::new(error).small().color(p.danger));
         }
@@ -667,6 +680,7 @@ mod tests {
         ctx: egui::Context,
         ui: HostUi,
         frame: u64,
+        size: egui::Vec2,
     }
 
     impl Frames {
@@ -681,6 +695,7 @@ mod tests {
                 ctx,
                 ui: HostUi::default(),
                 frame: 0,
+                size: vec2(1240.0, 800.0),
             }
         }
 
@@ -694,13 +709,15 @@ mod tests {
             let mut action = None;
             let mut output = self.ctx.run_ui(
                 egui::RawInput {
-                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1240.0, 800.0))),
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, self.size)),
                     time: Some(self.frame as f64 / 60.0),
                     events,
                     ..Default::default()
                 },
                 |ui| {
                     let shown = self.ui.show(ui, &p, snapshot, native_ready, None, false);
+                    ui.ctx()
+                        .data_mut(|data| data.insert_temp(Id::unique("host_world_rect"), shown.world));
                     action = action.take().or(shown.action);
                     assert!(shown.world.left() >= 260.0 && shown.world.top() >= 58.0);
                 },
@@ -820,6 +837,71 @@ mod tests {
         assert_eq!(frames.click(&snapshot, Id::unique("host_slot_cancel"), false), None);
         assert!(!frames.ui.modal_open());
         assert_eq!(snapshot.slots[0].label, SlotLabel::default());
+    }
+
+    #[test]
+    fn profile_selector_outer_popup_stays_in_roster_with_long_names_narrow_windows_and_fractional_zoom() {
+        let mut snapshot = snapshot();
+        for (index, slot) in snapshot.slots.iter_mut().enumerate() {
+            slot.label = SlotLabel::new(&if index % 2 == 0 { "W".repeat(64) } else { "キャラ".repeat(7) }).unwrap();
+        }
+        for (size, zoom) in [
+            (vec2(1240.0, 800.0), 1.0),
+            (vec2(620.0, 680.0), 1.0),
+            (vec2(990.0, 760.0), 1.25),
+            (vec2(620.0, 680.0), 1.5),
+        ] {
+            let mut frames = Frames::new();
+            frames.size = size;
+            frames.ctx.set_zoom_factor(zoom);
+            for smaller in [false, true] {
+                if smaller {
+                    frames.size.x = 540.0;
+                }
+                assert_eq!(frames.click(&snapshot, Id::unique("host_slot_combo"), false), None);
+                for _ in 0..6 {
+                    frames.show(&snapshot, Vec::new(), false);
+                }
+                let popup_id = frames
+                    .ctx
+                    .data(|data| data.get_temp::<Id>(Id::unique("host_slot_popup_area")))
+                    .expect("live popup Area captured");
+                assert!(egui::Popup::is_id_open(&frames.ctx, popup_id));
+                // Area state includes the Frame's margins and stroke. Row or
+                // label rectangles alone miss the part clipped by RGN_DIFF.
+                let outer = frames
+                    .ctx
+                    .memory(|memory| memory.area_rect(popup_id))
+                    .expect("actual popup outer Area");
+                let world = frames
+                    .ctx
+                    .data(|data| data.get_temp::<Rect>(Id::unique("host_world_rect")))
+                    .unwrap();
+                let button = frames
+                    .ctx
+                    .data(|data| data.get_temp::<Rect>(Id::unique("host_slot_combo")))
+                    .unwrap();
+                let tolerance = 1.0 / frames.ctx.pixels_per_point();
+                assert!(outer.is_positive(), "popup must be laid out");
+                assert!(
+                    outer.left() >= -tolerance && outer.right() <= world.left() + tolerance,
+                    "outer popup {outer:?} crosses roster/world boundary {world:?}, size {size:?}, zoom {zoom}"
+                );
+                assert!(
+                    outer.width() <= button.width() + tolerance,
+                    "popup frame must fit the button's outer budget: {outer:?} vs {button:?}"
+                );
+                assert_eq!(frames.click(&snapshot, Id::unique("host_slot_combo"), false), None);
+                frames.show(&snapshot, Vec::new(), false);
+                assert!(
+                    frames
+                        .ctx
+                        .data(|data| data.get_temp::<Id>(Id::unique("host_slot_popup_area")))
+                        .is_none(),
+                    "closed popups cannot leave a stale geometry capture"
+                );
+            }
+        }
     }
 
     #[test]
