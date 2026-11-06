@@ -170,25 +170,32 @@ fn caption_grid(uri: &str, grids: &[crate::grids::Grid]) -> String {
         crate::settings::GridChoice::SecondLife => aurora_i18n::tr!("character-window-main-grid").into(),
         crate::settings::GridChoice::SecondLifeBeta => aurora_i18n::tr!("character-switch-beta-grid").into(),
         crate::settings::GridChoice::Custom => {
-            if let Some(grid) = grids.iter().find(|grid| grid.login.trim() == uri.trim())
+            // Paths/schemes can select different grids on the same host,
+            // and friendly labels need not be unique. An opaque URI-only
+            // tag distinguishes them without exposing endpoint details.
+            let identity = crate::characters::identity(uri, "");
+            let tag = &identity[..8];
+            let budget = LIMIT - 3 - tag.len();
+            let label = grids
+                .iter()
+                .find(|grid| grid.login.trim() == uri.trim())
                 // A pasted endpoint is not a display label. In particular,
                 // never echo its userinfo, path, query or fragment.
-                && !grid.name.contains(['/', '\\', '@', '?', '#', ':'])
-            {
-                let label = caption_text(&grid.name, LIMIT);
-                if !label.is_empty() {
-                    return label;
-                }
-            }
-            reqwest::Url::parse(uri.trim())
-                .ok()
-                .filter(|url| matches!(url.scheme(), "http" | "https"))
-                .and_then(|url| {
-                    let host = url.host_str()?;
-                    let port = url.port().map_or_else(String::new, |port| format!(":{port}"));
-                    Some(format!("{}{port}", caption_text(host, LIMIT - port.len())))
+                .filter(|grid| !grid.name.contains(['/', '\\', '@', '?', '#', ':']))
+                .map(|grid| caption_text(&grid.name, budget))
+                .filter(|label| !label.is_empty())
+                .or_else(|| {
+                    reqwest::Url::parse(uri.trim())
+                        .ok()
+                        .filter(|url| matches!(url.scheme(), "http" | "https"))
+                        .and_then(|url| {
+                            let host = url.host_str()?;
+                            let port = url.port().map_or_else(String::new, |port| format!(":{port}"));
+                            Some(format!("{}{port}", caption_text(host, budget - port.len())))
+                        })
                 })
-                .unwrap_or_else(|| aurora_i18n::tr!("character-switch-custom-grid").into())
+                .unwrap_or_else(|| caption_text(aurora_i18n::tr!("character-switch-custom-grid"), budget));
+            format!("{label} · {tag}")
         }
     }
 }
@@ -661,13 +668,14 @@ mod tests {
     #[test]
     fn caption_grid_uses_short_labels_or_hosts_and_never_endpoint_secrets() {
         let uri = "https://synthetic-user:synthetic-password@grid.invalid:8002/private-path?synthetic-query=1#synthetic-fragment";
-        assert_eq!(caption_grid(uri, &[]), "grid.invalid:8002");
+        let host = caption_grid(uri, &[]);
+        assert!(host.starts_with("grid.invalid:8002 · "));
         let mut grid = crate::grids::Grid {
             login: uri.into(),
             name: "  Grille 雪\nBleue  ".into(),
             ..Default::default()
         };
-        assert_eq!(caption_grid(uri, std::slice::from_ref(&grid)), "Grille 雪 Bleue");
+        assert!(caption_grid(uri, std::slice::from_ref(&grid)).starts_with("Grille 雪 Bleue · "));
         for invalid_name in [
             uri,
             "name?synthetic-query",
@@ -676,19 +684,98 @@ mod tests {
             "synthetic-user@grid.invalid",
         ] {
             grid.name = invalid_name.into();
-            assert_eq!(caption_grid(uri, std::slice::from_ref(&grid)), "grid.invalid:8002");
+            assert_eq!(caption_grid(uri, std::slice::from_ref(&grid)), host);
         }
-        assert_eq!(
-            caption_grid("not a URL synthetic-private-value", &[]),
-            aurora_i18n::tr!("character-switch-custom-grid")
-        );
+        let invalid = caption_grid("not a URL synthetic-private-value", &[]);
+        assert!(invalid.starts_with(aurora_i18n::tr!("character-switch-custom-grid")));
+        assert!(!invalid.contains("synthetic-private-value"));
         assert_ne!(
             caption_grid(aurora_net::login::SL_MAIN_GRID, &[]),
             caption_grid(aurora_net::login::SL_BETA_GRID, &[])
         );
         let long_host = format!("https://{}.invalid:8003/private-path", "a".repeat(55));
         let label = caption_grid(&long_host, &[]);
-        assert!(label.chars().count() <= 48 && label.ends_with(":8003"));
+        assert!(label.chars().count() <= 48 && label.contains(":8003 · "));
+    }
+
+    #[test]
+    fn custom_grid_captions_distinguish_exact_endpoints_and_duplicate_friendly_labels() {
+        let uris = [
+            "https://synthetic-user:synthetic-password@grid.invalid/login-a?synthetic-query=1#synthetic-fragment",
+            "https://synthetic-user:synthetic-password@grid.invalid/login-b?synthetic-query=1#synthetic-fragment",
+            "http://synthetic-user:synthetic-password@grid.invalid/login-a?synthetic-query=1#synthetic-fragment",
+        ];
+        let mut grids: Vec<_> = uris
+            .iter()
+            .map(|uri| crate::grids::Grid {
+                login: (*uri).into(),
+                name: "Synthetic shared grid".into(),
+                ..Default::default()
+            })
+            .collect();
+        for friendly in [false, true] {
+            let catalogue = if friendly { grids.as_slice() } else { &[] };
+            let labels: Vec<_> = uris.iter().map(|uri| caption_grid(uri, catalogue)).collect();
+            let unique: std::collections::BTreeSet<_> = labels.iter().collect();
+            assert_eq!(
+                unique.len(),
+                uris.len(),
+                "same host and duplicate names must retain exact grid identity"
+            );
+            let captions: std::collections::BTreeSet<_> = labels
+                .iter()
+                .map(|label| account_caption("Aurora Viewer 0.8 (Dev)", CaptionPhase::Login, Some(("Synthetic Alpha", label))))
+                .collect();
+            assert_eq!(
+                captions.len(),
+                uris.len(),
+                "the same login name remains distinguishable across grids"
+            );
+            for (uri, label) in uris.iter().zip(labels) {
+                assert!(label.chars().count() <= 48);
+                assert!(label.starts_with(if friendly {
+                    "Synthetic shared grid · "
+                } else {
+                    "grid.invalid · "
+                }));
+                let (_, tag) = label.rsplit_once(" · ").unwrap();
+                assert_eq!(tag.len(), 8);
+                assert!(tag.bytes().all(|c| c.is_ascii_hexdigit()));
+                assert_eq!(
+                    label,
+                    caption_grid(&format!(" {uri} "), catalogue),
+                    "identity trims only endpoint whitespace"
+                );
+                for hidden in [
+                    "synthetic-user",
+                    "synthetic-password",
+                    "login-a",
+                    "login-b",
+                    "synthetic-query",
+                    "synthetic-fragment",
+                    "://",
+                    "?",
+                    "#",
+                    "@",
+                ] {
+                    assert!(!label.contains(hidden), "endpoint details must not enter the caption: {label}");
+                }
+            }
+        }
+        grids[0].name = "雪".repeat(1000);
+        let label = caption_grid(uris[0], &grids);
+        assert_eq!(label.chars().count(), 48);
+        assert!(label.starts_with('雪') && label.contains("… · "));
+        let (_, tag) = label.rsplit_once(" · ").unwrap();
+        assert_eq!(tag.len(), 8, "bounded labels must retain the distinguishing tag");
+        assert_eq!(
+            caption_grid(aurora_net::login::SL_MAIN_GRID, &[]),
+            aurora_i18n::tr!("character-window-main-grid")
+        );
+        assert_eq!(
+            caption_grid(aurora_net::login::SL_BETA_GRID, &[]),
+            aurora_i18n::tr!("character-switch-beta-grid")
+        );
     }
 
     #[test]
