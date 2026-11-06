@@ -92,7 +92,7 @@ impl HostUi {
                         .workers
                         .iter()
                         .take(MAX_WORKERS)
-                        .filter(|worker| matches(&worker.label, &worker.grid, &query))
+                        .filter(|worker| matches(display_name(worker), display_grid(worker), &query))
                     {
                         count += 1;
                         let id = worker.binding.worker.worker;
@@ -102,7 +102,7 @@ impl HostUi {
                             if widgets::navigation(ui, p, "user-filled", label, selected).clicked() {
                                 self.selected = Some(id);
                             }
-                            ui.label(RichText::new(&worker.grid).small().color(p.muted));
+                            ui.label(RichText::new(display_grid(worker)).small().color(p.muted));
                             ui.label(
                                 RichText::new(status(worker))
                                     .small()
@@ -313,11 +313,26 @@ pub(super) fn same_snapshot(a: &HostSnapshot, b: &HostSnapshot) -> bool {
 }
 
 fn display_name(worker: &WorkerSummary) -> &str {
-    if worker.label.trim().is_empty() {
+    let label = worker
+        .status
+        .as_ref()
+        .map(|status| status.name.as_str())
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or(&worker.label);
+    if label.trim().is_empty() {
         aurora_i18n::tr!("host-unnamed-session")
     } else {
-        &worker.label
+        label
     }
+}
+
+fn display_grid(worker: &WorkerSummary) -> &str {
+    worker
+        .status
+        .as_ref()
+        .map(|status| status.grid_label.as_str())
+        .filter(|grid| !grid.trim().is_empty())
+        .unwrap_or(&worker.grid)
 }
 
 fn worker_ready(worker: &WorkerSummary) -> bool {
@@ -338,12 +353,10 @@ fn status(worker: &WorkerSummary) -> &'static str {
     let Some(status) = &worker.status else {
         return aurora_i18n::tr!("host-starting");
     };
-    if status.blocked {
-        return aurora_i18n::tr!("host-worker-blocked");
-    }
     match status.phase {
         Phase::Login => aurora_i18n::tr!("host-login"),
         Phase::Connecting => aurora_i18n::tr!("host-connecting"),
+        Phase::Online if status.blocked => aurora_i18n::tr!("host-worker-blocked"),
         Phase::Online => aurora_i18n::tr!("host-online"),
         Phase::Disconnected => aurora_i18n::tr!("host-disconnected"),
     }
@@ -537,6 +550,29 @@ mod tests {
         assert!(matches("Demo One", "Example Grid", "example"));
         assert!(matches("Demo One", "Example Grid", "one"));
         assert!(!matches("Demo One", "Example Grid", "missing"));
+    }
+
+    #[test]
+    fn controller_generic_login_adopts_acknowledged_character_and_grid_metadata() {
+        let mut snapshot = snapshot();
+        let worker = &mut snapshot.workers[0];
+        worker.label.clear();
+        worker.grid.clear();
+        let identity = worker.binding;
+        assert_eq!(display_name(worker), "Demo One");
+        assert_eq!(display_grid(worker), "Example Grid");
+        assert!(matches(display_name(worker), display_grid(worker), "demo"));
+        assert!(matches(display_name(worker), display_grid(worker), "example"));
+        assert_eq!(worker.binding, identity, "labels never substitute the protocol binding");
+        worker.status.as_mut().unwrap().phase = Phase::Login;
+        worker.status.as_mut().unwrap().blocked = true;
+        assert_eq!(status(worker), aurora_i18n::tr!("host-login"));
+        worker.status.as_mut().unwrap().name = Label::new("").unwrap();
+        worker.status.as_mut().unwrap().grid_label = Label::new("").unwrap();
+        worker.label = "Saved Character".into();
+        worker.grid = "Saved Grid".into();
+        assert_eq!(display_name(worker), "Saved Character");
+        assert_eq!(display_grid(worker), "Saved Grid");
     }
 
     #[test]
