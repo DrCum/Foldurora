@@ -48,7 +48,6 @@ struct Entry {
 struct Active {
     binding: Binding,
     viewport: Option<HostedViewport>,
-    activation: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -223,16 +222,11 @@ impl Coordinator {
         if !self.ready(target) {
             return Err(Error::Unavailable);
         }
-        if let Some(active) = self.active.filter(|active| active.binding == target) {
-            let envelope = self.send(
-                worker,
-                Command::SetViewport {
-                    activation: active.activation,
-                    viewport,
-                },
-            )?;
-            self.active = Some(Active { viewport, ..active });
-            return Ok(vec![Effect::Send(envelope)]);
+        if self
+            .active
+            .is_some_and(|active| active.binding == target && active.viewport == viewport)
+        {
+            return Ok(Vec::new());
         }
         let activation = self.next_activation()?;
         let stage = if self.active.is_some() {
@@ -465,11 +459,7 @@ impl Coordinator {
                 } else {
                     pending.viewport
                 };
-                self.active = Some(Active {
-                    binding,
-                    viewport,
-                    activation: pending.activation,
-                });
+                self.active = Some(Active { binding, viewport });
                 self.pending = None;
                 return Ok(vec![Effect::Notice(if rollback {
                     HostNotice::RolledBack(worker)

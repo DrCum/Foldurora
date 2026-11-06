@@ -663,6 +663,54 @@ fn parking_failure_never_emits_parked_and_standby_detachment_does_not_promote_an
 }
 
 #[test]
+fn active_viewport_change_repeats_fence_prepare_and_grant_on_the_same_worker() {
+    let mut alpha = Peer::new(3);
+    let mut host = coordinator(&mut [&mut alpha]);
+    initial_activate(&mut host, &mut alpha);
+    assert!(
+        host.activate(worker_id(3), None, 0).unwrap().is_empty(),
+        "unchanged geometry is idempotent"
+    );
+    let viewport = Some(HostedViewport {
+        host_window: 42,
+        rect: PhysicalRect {
+            x: -1200,
+            y: 50,
+            width: 1200,
+            height: 800,
+        },
+    });
+    let heartbeat = message(host.tick(1));
+    let bypass = command(
+        alpha.guard.binding(),
+        heartbeat.sequence,
+        Command::SetViewport {
+            activation: alpha.guard.activation(),
+            viewport,
+        },
+    );
+    assert!(matches!(alpha.accept(&bypass, 1).reply.unwrap().event, Event::Rejected { .. }));
+    assert_eq!(alpha.guard.viewport(), None);
+    assert!(alpha.guard.input_owned());
+    let revoke = message(host.activate(worker_id(3), viewport, 1).unwrap());
+    assert!(matches!(revoke.message, Message::Command(Command::Revoke { .. })));
+    alpha.accept(&revoke, 1);
+    assert!(!alpha.guard.input_owned());
+    let prepare = message(host.observe(&alpha.idle(&revoke, 11), 1).unwrap());
+    assert!(matches!(prepare.message, Message::Command(Command::Prepare { viewport: observed, .. }) if observed == viewport));
+    assert_eq!(host.active(), None);
+    alpha.accept(&prepare, 1);
+    let grant = message(host.observe(&alpha.ready(&prepare, 12), 1).unwrap());
+    assert!(!alpha.guard.input_owned());
+    let reply = alpha.accept(&grant, 1).reply.unwrap();
+    host.observe(&alpha.envelope(reply), 1).unwrap();
+    assert_eq!(host.active(), Some(worker_id(3)));
+    assert_eq!(alpha.guard.viewport(), viewport);
+    assert!(alpha.guard.input_owned());
+    assert!(!host.busy());
+}
+
+#[test]
 fn preview_admission_reserves_pending_rates_and_never_renders_a_promoted_or_stale_source() {
     let demand = PreviewDemand {
         requested: Some(PreviewRate::Five),

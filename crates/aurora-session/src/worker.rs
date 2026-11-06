@@ -239,10 +239,11 @@ impl WorkerGuard {
                     event: Event::Granted { activation: *activation },
                 });
             }
-            Command::SetViewport { activation, viewport } if self.mode == WorkerMode::Active && *activation == self.activation => {
-                self.viewport = *viewport;
-                result.effects.apply_viewport = viewport.is_some();
-                result.effects.restore_window = viewport.is_none();
+            Command::SetViewport { activation, viewport }
+                if self.mode == WorkerMode::Active && *activation == self.activation && *viewport == self.viewport =>
+            {
+                // An unchanged policy is idempotent. Any geometry/surface
+                // change must revoke, fence and prepare a fresh frame first.
             }
             _ => rejected = true,
         }
