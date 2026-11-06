@@ -85,6 +85,7 @@ mod graphics_start;
 mod grid_status;
 mod group_titles;
 mod host_session;
+mod window_capture;
 pub(crate) use host_session::grid_label as host_grid_label;
 mod hover_height;
 mod hover_tips;
@@ -180,6 +181,8 @@ struct Gfx {
     renderer: Renderer,
     egui_state: egui_winit::State,
     window: Arc<Window>,
+    window_epoch: u64,
+    capture_policy: window_capture::Policy<winit::window::WindowId>,
     /// Revealed only once the renderer has presented its first image.
     shown: bool,
     maximize_on_show: bool,
@@ -17591,7 +17594,11 @@ impl ApplicationHandler for App {
                 .then(|| winit::window::Fullscreen::Borderless(monitor.clone())),
         };
         self.fullscreen_applied = plan.fullscreen.is_some();
-        let window = match self.open_window(event_loop, &plan) {
+        let gpu_recovery::OpenedWindow {
+            window,
+            window_epoch,
+            capture_policy,
+        } = match self.open_window(event_loop, &plan) {
             Ok(w) => w,
             Err(e) => {
                 log::error!("cannot create window: {e}");
@@ -17655,6 +17662,8 @@ impl ApplicationHandler for App {
         let egui_state = self.egui_state_for(&window, &renderer);
         self.gfx = Some(Gfx {
             window,
+            window_epoch,
+            capture_policy,
             shown: false,
             maximize_on_show: self.settings.window_maximized && !self.settings.window_fullscreen && !capture,
             renderer,

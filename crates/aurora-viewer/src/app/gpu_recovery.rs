@@ -14,8 +14,14 @@ pub(super) struct WindowPlan {
     pub fullscreen: Option<winit::window::Fullscreen>,
 }
 
+pub(super) struct OpenedWindow {
+    pub window: Arc<Window>,
+    pub window_epoch: u64,
+    pub capture_policy: super::window_capture::Policy<winit::window::WindowId>,
+}
+
 impl App {
-    pub(super) fn open_window(&self, event_loop: &ActiveEventLoop, plan: &WindowPlan) -> Result<Arc<Window>, winit::error::OsError> {
+    pub(super) fn open_window(&self, event_loop: &ActiveEventLoop, plan: &WindowPlan) -> Result<OpenedWindow, winit::error::OsError> {
         let mut attrs = crate::cli::with_desktop_id(Window::default_attributes())
             .with_title(self.native_window_title())
             // Metal needs a visible layer to present its first drawable.
@@ -30,9 +36,16 @@ impl App {
         if let Some(position) = plan.position {
             attrs = attrs.with_position(position);
         }
+        let capture = super::window_capture::Creation::from_attributes(&attrs);
         let window = Arc::new(event_loop.create_window(attrs)?);
+        let capture_policy = capture.bind(window.id());
+        let window_epoch = capture_policy.epoch();
         crate::window_hold::install(&window);
-        Ok(window)
+        Ok(OpenedWindow {
+            window,
+            window_epoch,
+            capture_policy,
+        })
     }
 
     /// The renderer for `window`, the user's settings applied once the
@@ -193,7 +206,11 @@ impl App {
         if safe {
             self.safe_graphics_after_losses();
         }
-        let window = match self.open_window(event_loop, &plan) {
+        let OpenedWindow {
+            window,
+            window_epoch,
+            capture_policy,
+        } = match self.open_window(event_loop, &plan) {
             Ok(w) => w,
             Err(e) => {
                 log::error!("GPU recovery: cannot create a window: {e}");
@@ -216,6 +233,8 @@ impl App {
             renderer,
             egui_state,
             window,
+            window_epoch,
+            capture_policy,
             shown: false,
             maximize_on_show: maximized,
         });
