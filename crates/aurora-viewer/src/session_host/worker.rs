@@ -53,7 +53,9 @@ pub(crate) struct WorkerBridge {
     config: WorkerConfig,
     io: WorkerIo,
     guard: WorkerGuard,
-    since: Instant,
+    /// The native renderer can take longer than one lease to initialize.
+    /// No ownership is established until the event loop can process commands.
+    since: Option<Instant>,
     detached: bool,
     generation: u64,
     previous_account: Option<(AccountKey, GridKey)>,
@@ -71,7 +73,7 @@ impl WorkerBridge {
             config: startup.config.clone(),
             io,
             guard,
-            since: Instant::now(),
+            since: None,
             detached: false,
             generation: startup.config.generation - 1,
             previous_account: None,
@@ -116,8 +118,21 @@ impl WorkerBridge {
                 ..Default::default()
             };
         }
-        let mut effects = self.guard.update_session(session).unwrap_or_default();
-        let now = self.since.elapsed().as_millis().min(u64::MAX as u128) as u64;
+        let Ok(mut effects) = self.guard.update_session(session) else {
+            self.detached = true;
+            self.io.stop();
+            return WorkerEffects {
+                release_input: true,
+                restore_window: true,
+                ..Default::default()
+            };
+        };
+        let now = self
+            .since
+            .get_or_insert_with(Instant::now)
+            .elapsed()
+            .as_millis()
+            .min(u64::MAX as u128) as u64;
         for envelope in self.io.commands() {
             let Message::Command(command) = &envelope.message else {
                 continue;

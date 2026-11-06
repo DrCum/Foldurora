@@ -85,6 +85,7 @@ mod graphics_start;
 mod grid_status;
 mod group_titles;
 mod host_session;
+pub(crate) use host_session::grid_label as host_grid_label;
 mod hover_height;
 mod hover_tips;
 mod hud_drag;

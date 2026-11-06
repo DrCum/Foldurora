@@ -460,7 +460,9 @@ impl Child {
             .ok_or_else(|| io::Error::other("session sequence exhausted"))?;
         let envelope = Envelope {
             version: PROTOCOL_VERSION,
-            binding: self.binding,
+            // Login can change between publication and receipt. Lease/Detach
+            // bind the worker boot identity, never yesterday's login session.
+            binding: command_binding(self.binding, &command),
             lease_epoch: self.config.lease_epoch,
             sequence: self.sequence,
             reply_to: 0,
@@ -529,6 +531,13 @@ impl Child {
     }
 }
 
+fn command_binding(mut binding: Binding, command: &Command) -> Binding {
+    if !command.session_bound() {
+        binding.session = None;
+    }
+    binding
+}
+
 fn host_loop(rx: &Receiver<HostIntent>, shared: &Arc<Mutex<Arc<HostSnapshot>>>, stop: &AtomicBool) -> anyhow::Result<()> {
     anyhow::ensure!(
         aurora_updater::test_environment().is_none(),
@@ -543,7 +552,7 @@ fn host_loop(rx: &Receiver<HostIntent>, shared: &Arc<Mutex<Arc<HostSnapshot>>>, 
                 SavedAccount {
                     key,
                     label: account.username.clone(),
-                    grid: account.uri.clone(),
+                    grid: crate::app::host_grid_label(&account.uri, &[]),
                 },
                 account,
             ));
@@ -797,5 +806,33 @@ mod tests {
         io.stop();
         // IO shutdown is deliberately asynchronous; its thread performs no
         // further writes after this lease-only fixture has been stopped.
+    }
+
+    #[test]
+    fn session_worker_lease_and_detach_survive_logout_before_command_receipt() {
+        let config = config();
+        let online = status(&config).binding;
+        let mut guard = aurora_session::WorkerGuard::new(config.identity, config.lease_epoch, 0).expect("guard");
+        guard.update_session(online.session).expect("online");
+        let heartbeat = Command::Heartbeat {
+            workspace_foreground: true,
+        };
+        let mut envelope = Envelope {
+            version: PROTOCOL_VERSION,
+            binding: command_binding(online, &heartbeat),
+            lease_epoch: config.lease_epoch,
+            sequence: 1,
+            reply_to: 0,
+            message: Message::Command(heartbeat),
+        };
+        guard.update_session(None).expect("logout before receipt");
+        assert!(guard.on_command(&envelope, 100).is_ok());
+        envelope.sequence += 1;
+        assert!(guard.on_command(&envelope, 200).is_ok(), "subsequent heartbeat continues");
+        envelope.sequence += 1;
+        envelope.binding = command_binding(online, &Command::Detach);
+        envelope.message = Message::Command(Command::Detach);
+        let reply = guard.on_command(&envelope, 300).expect("detach across logout").reply.expect("ack");
+        assert_eq!(reply.event, Event::Detached);
     }
 }

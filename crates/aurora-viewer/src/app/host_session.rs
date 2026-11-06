@@ -25,7 +25,7 @@ impl App {
         let status = WorkerStatus {
             phase,
             name: label(&self.settings.username),
-            grid_label: label(&uri),
+            grid_label: label(&grid_label(&uri, &self.settings.grids)),
             native_window: self
                 .gfx
                 .as_ref()
@@ -55,6 +55,10 @@ impl App {
         }
         self.host_session = Some(bridge);
     }
+}
+
+pub(crate) fn grid_label(uri: &str, grids: &[crate::grids::Grid]) -> String {
+    super::attention::caption_grid(uri, grids)
 }
 
 fn label(text: &str) -> Label {
