@@ -56,6 +56,7 @@ pub fn run() -> anyhow::Result<()> {
         ui: HostUi::default(),
         surface: None,
         chat_windows: Vec::new(),
+        closed_chats: chat_window::ChatUiCache::default(),
         error: None,
         next_poll: now,
         repaint: Some(now),
@@ -88,6 +89,7 @@ struct Shell {
     ui: HostUi,
     surface: Option<SoftwareWindow>,
     chat_windows: Vec<chat_window::ChatWindow>,
+    closed_chats: chat_window::ChatUiCache,
     error: Option<String>,
     next_poll: Instant,
     repaint: Option<Instant>,
@@ -125,6 +127,7 @@ impl Shell {
             Action::Detach(worker) => self.controller.detach(worker),
             Action::Close => {
                 self.chat_windows.clear();
+                self.closed_chats.clear();
                 self.close_region();
                 self.controller.shutdown();
                 self.closing = Some(Instant::now());
@@ -160,22 +163,25 @@ impl Shell {
             window.focus();
             return;
         }
+        let snapshot = self.controller.snapshot();
         let result = (|| {
             anyhow::ensure!(self.chat_windows.len() < aurora_session::MAX_WORKERS, "chat window limit reached");
             let owner = self.surface.as_ref().ok_or_else(|| anyhow::anyhow!("host window is unavailable"))?;
-            let chat = self
-                .snapshot
+            let chat = snapshot
                 .chat
                 .iter()
                 .find(|chat| chat.source == source && chat_ui::eligible(chat))
                 .ok_or_else(|| anyhow::anyhow!("chat source is unavailable"))?;
-            let worker = self
-                .snapshot
+            let worker = snapshot
                 .workers
                 .iter()
                 .find(|worker| worker.binding == source.binding())
                 .ok_or_else(|| anyhow::anyhow!("chat worker is unavailable"))?;
-            chat_window::ChatWindow::new(event_loop, &owner.window, worker, chat.clone())
+            let ui = self
+                .closed_chats
+                .take(source, &snapshot, self.closing.is_some())
+                .unwrap_or_else(|| chat_ui::ChatUi::new(source));
+            chat_window::ChatWindow::new(event_loop, &owner.window, worker, chat.clone(), ui)
         })();
         match result {
             Ok(window) => self.chat_windows.push(window),
@@ -235,6 +241,7 @@ impl Shell {
             self.repaint = Some(now);
         }
         self.snapshot = snapshot;
+        self.closed_chats.sync(&self.snapshot, self.closing.is_some());
         if self
             .notice_at
             .is_some_and(|at| now.saturating_duration_since(at) >= Duration::from_secs(4))
@@ -406,7 +413,11 @@ impl ApplicationHandler for Shell {
             match self.chat_windows[index].event(event_loop, &event, &self.controller) {
                 Ok(false) => {}
                 Ok(true) => {
-                    self.chat_windows.swap_remove(index);
+                    let window = self.chat_windows.swap_remove(index);
+                    if matches!(event, WindowEvent::CloseRequested) {
+                        let snapshot = self.controller.snapshot();
+                        self.closed_chats.remember(window.into_ui(), &snapshot, self.closing.is_some());
+                    }
                 }
                 Err(error) => {
                     log::warn!("session host: owned chat surface closed after native error: {error}");
@@ -511,6 +522,7 @@ impl ApplicationHandler for Shell {
         self.controller.shutdown();
         // Drop clipboard/surface while the platform connection still lives.
         self.chat_windows.clear();
+        self.closed_chats.clear();
         self.surface = None;
     }
 }

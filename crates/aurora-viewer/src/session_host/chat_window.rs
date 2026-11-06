@@ -15,6 +15,47 @@ use winit::window::{Window, WindowId};
 
 const MIN_FRAME: Duration = Duration::from_millis(33);
 
+/// Only session UI survives an ordinary popout close. Native surfaces and
+/// egui contexts are disposable; closed drafts still observe authority loss.
+#[derive(Default)]
+pub(super) struct ChatUiCache {
+    states: Vec<ChatUi>,
+}
+
+impl ChatUiCache {
+    pub fn sync(&mut self, snapshot: &HostSnapshot, closing: bool) {
+        self.states.retain_mut(|ui| {
+            let current = selected_chat(snapshot, ui.source(), closing);
+            ui.sync(current.as_deref());
+            current.is_some()
+        });
+    }
+
+    pub fn remember(&mut self, mut ui: ChatUi, snapshot: &HostSnapshot, closing: bool) {
+        self.sync(snapshot, closing);
+        let current = selected_chat(snapshot, ui.source(), closing);
+        ui.sync(current.as_deref());
+        if current.is_none() {
+            return;
+        }
+        self.states.retain(|previous| previous.source() != ui.source());
+        if self.states.len() >= aurora_session::MAX_WORKERS {
+            self.states.remove(0);
+        }
+        self.states.push(ui);
+    }
+
+    pub fn take(&mut self, source: ChatSource, snapshot: &HostSnapshot, closing: bool) -> Option<ChatUi> {
+        self.sync(snapshot, closing);
+        let index = self.states.iter().position(|ui| ui.source() == source)?;
+        Some(self.states.remove(index))
+    }
+
+    pub fn clear(&mut self) {
+        self.states.clear();
+    }
+}
+
 pub(super) struct ChatWindow {
     surface: SoftwareWindow,
     context: egui::Context,
@@ -33,11 +74,13 @@ impl ChatWindow {
         owner: &Window,
         worker: &WorkerSummary,
         snapshot: Arc<HostChatSnapshot>,
+        mut ui: ChatUi,
     ) -> anyhow::Result<Self> {
         anyhow::ensure!(
-            worker.binding == snapshot.source.binding() && chat_ui::eligible(&snapshot),
+            worker.binding == snapshot.source.binding() && ui.source() == snapshot.source && chat_ui::eligible(&snapshot),
             "chat source is not available"
         );
+        ui.sync(Some(&snapshot));
         let context = egui::Context::default();
         let theme = Theme {
             panel_alpha: 255,
@@ -68,8 +111,6 @@ impl ChatWindow {
             viewer = crate::cli::window_title()
         );
         let surface = SoftwareWindow::owned_tool(event_loop, &context, owner, title, [640.0, 640.0], [380.0, 360.0])?;
-        let mut ui = ChatUi::new(snapshot.source);
-        ui.sync(Some(&snapshot));
         surface.window.set_visible(true);
         surface.window.request_redraw();
         Ok(Self {
@@ -90,6 +131,9 @@ impl ChatWindow {
     }
     pub fn source(&self) -> ChatSource {
         self.ui.source()
+    }
+    pub fn into_ui(self) -> ChatUi {
+        self.ui
     }
     pub fn focused(&self) -> bool {
         self.surface.window.has_focus()
@@ -191,23 +235,25 @@ mod tests {
     use aurora_session::chat::{ChatKey, Conversation, ConversationInfo, NativeChatPolicy};
     use aurora_session::{AccountKey, GridKey, HostId, InstallationId, Label, SessionId, SessionIdentity, WorkerId, WorkerIdentity};
 
-    #[test]
-    fn chat_popout_keeps_its_live_source_despite_unrelated_world_errors_or_switches() {
-        let source = ChatSource {
+    fn source(worker: u8, generation: u64) -> ChatSource {
+        ChatSource {
             worker: WorkerIdentity {
                 installation: InstallationId::from_bytes([1; 32]).unwrap(),
                 host: HostId::from_bytes([2; 16]).unwrap(),
-                worker: WorkerId::from_bytes([3; 16]).unwrap(),
+                worker: WorkerId::from_bytes([worker; 16]).unwrap(),
             },
             session: SessionIdentity {
                 session: SessionId::from_bytes([4; 16]).unwrap(),
                 account: AccountKey::from_bytes([5; 32]).unwrap(),
                 grid: GridKey::from_bytes([6; 32]).unwrap(),
-                generation: 1,
+                generation,
             },
             lease_epoch: 7,
-        };
-        let chat = Arc::new(HostChatSnapshot {
+        }
+    }
+
+    fn chat(source: ChatSource) -> Arc<HostChatSnapshot> {
+        Arc::new(HostChatSnapshot {
             source,
             authenticated: true,
             live: true,
@@ -228,7 +274,80 @@ mod tests {
             lines: Vec::new(),
             receipts: Vec::new(),
             gap: false,
-        });
+        })
+    }
+
+    #[test]
+    fn closed_chat_sessions_keep_only_exact_current_sources_within_the_worker_bound() {
+        let sources: Vec<_> = (1..=aurora_session::MAX_WORKERS + 1)
+            .map(|worker| source(worker as u8, 1))
+            .collect();
+        let mut snapshot = HostSnapshot {
+            chat: sources.iter().copied().map(chat).collect(),
+            ..Default::default()
+        };
+        let mut cache = ChatUiCache::default();
+        for source in &sources {
+            cache.remember(ChatUi::new(*source), &snapshot, false);
+        }
+        assert_eq!(cache.states.len(), aurora_session::MAX_WORKERS);
+        assert!(
+            cache.take(sources[0], &snapshot, false).is_none(),
+            "the cache never exceeds its fixed capacity"
+        );
+
+        let reopened = cache.take(sources[1], &snapshot, false).unwrap();
+        assert_eq!(reopened.source(), sources[1]);
+        assert!(
+            cache.take(sources[1], &snapshot, false).is_none(),
+            "state moves into only one surface"
+        );
+        cache.remember(reopened, &snapshot, false);
+
+        let mut replacement = sources[1];
+        replacement.session.generation += 1;
+        snapshot.chat = vec![chat(replacement)];
+        cache.remember(ChatUi::new(replacement), &snapshot, false);
+        assert_eq!(cache.states.len(), 1, "obsolete generations cannot crowd a new live session");
+        assert!(cache.take(sources[1], &snapshot, false).is_none());
+        assert_eq!(cache.take(replacement, &snapshot, false).unwrap().source(), replacement);
+    }
+
+    #[test]
+    fn closed_chat_sessions_are_purged_on_authority_loss_and_host_shutdown() {
+        let source = source(3, 1);
+        let live = chat(source);
+        for loss in 0..6 {
+            let mut snapshot = HostSnapshot {
+                chat: vec![live.clone()],
+                ..Default::default()
+            };
+            let mut cache = ChatUiCache::default();
+            cache.remember(ChatUi::new(source), &snapshot, false);
+            let mut unavailable = (*live).clone();
+            match loss {
+                0 => unavailable.authenticated = false,
+                1 => unavailable.live = false,
+                2 => unavailable.conversations.clear(),
+                3 => snapshot.chat.clear(),
+                4 => snapshot.stopped = true,
+                _ => {}
+            }
+            if loss < 3 {
+                snapshot.chat = vec![Arc::new(unavailable)];
+            }
+            cache.sync(&snapshot, loss == 5);
+            assert!(cache.states.is_empty());
+            assert!(cache.take(source, &snapshot, loss == 5).is_none());
+            cache.remember(ChatUi::new(source), &snapshot, loss == 5);
+            assert!(cache.states.is_empty(), "closing after source loss cannot retain session UI");
+        }
+    }
+
+    #[test]
+    fn chat_popout_keeps_its_live_source_despite_unrelated_world_errors_or_switches() {
+        let source = source(3, 1);
+        let chat = chat(source);
         let mut snapshot = HostSnapshot {
             chat: vec![chat.clone()],
             error: Some("unrelated world operation failed".into()),
