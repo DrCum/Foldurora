@@ -804,8 +804,10 @@ impl<'a> Floater<'a> {
         let held = self.steady_size && resizable && egui::AreaState::load(ctx, window_id).is_some_and(|s| s.size.is_some());
         let mut glass_slot = None;
         let response = w.show(ctx, |outer| {
-            if let Some(bounds) = bounds {
+            if self.viewport_control {
                 super::layout::toolbar_layer(ctx, outer.layer_id());
+            }
+            if let Some(bounds) = bounds {
                 outer.set_clip_rect(outer.clip_rect().intersect(bounds));
             }
             glass_slot = Some((outer.painter().clone(), outer.painter().add(egui::Shape::Noop)));
@@ -1011,6 +1013,17 @@ impl<'a> Floater<'a> {
         });
         if let Some(response) = response {
             window_click_tolerance(&response.response);
+            if bounds.is_some()
+                && resize_drag.is_some()
+                && let Some((rect, native_room)) = ctx.data_mut(|d| d.get_persisted::<(egui::Rect, egui::Rect)>(backup_id))
+            {
+                ctx.data_mut(|d| {
+                    d.insert_persisted(
+                        backup_id,
+                        (egui::Rect::from_min_size(rect.min, response.response.rect.size()), native_room),
+                    )
+                });
+            }
             if content_sized {
                 let too_tall = if scrolls {
                     still_too_tall
@@ -1130,8 +1143,8 @@ impl ViewportArea {
     }
     pub(crate) fn show<R>(self, ctx: &egui::Context, body: impl FnOnce(&mut egui::Ui) -> R) -> egui::InnerResponse<R> {
         self.area.show(ctx, |ui| {
+            super::layout::toolbar_layer(ctx, ui.layer_id());
             if let Some(bounds) = self.bounds {
-                super::layout::toolbar_layer(ctx, ui.layer_id());
                 ui.set_max_size(bounds.size());
                 ui.set_clip_rect(ui.clip_rect().intersect(bounds));
                 egui::ScrollArea::both()

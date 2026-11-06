@@ -510,3 +510,59 @@ fn viewport_snapshot_output_and_desktop_mouselook_are_independent_of_control_pla
         }
     }
 }
+
+#[test]
+fn selective_viewport_control_reanchors_to_its_own_left_edge_when_the_viewport_changes() {
+    let mut f = Interface::new(1.0, 1.0);
+    f.settings.half(true);
+    f.settings.restrict_ui = true;
+    f.frames(6);
+    let position = f.bounds().min + vec2(12.0, 90.0);
+    widgets::move_floater(&f.ctx, CAMERA, position);
+    f.frames(5);
+    assert!((f.window(CAMERA).left() - f.bounds().left() - 12.0).abs() <= 1.0);
+    f.settings.left = 40.0;
+    f.frames(6);
+    assert!(
+        (f.window(CAMERA).left() - f.bounds().left() - 12.0).abs() <= 1.0,
+        "the camera follows its viewport edge, not the native center: {:?} in {:?}",
+        f.window(CAMERA),
+        f.bounds()
+    );
+}
+
+#[test]
+fn selective_viewport_changes_preserve_held_input_in_the_unmoved_settings_window() {
+    let mut f = Interface::new(1.0, 1.0);
+    f.settings.restrict_ui = true;
+    f.frames(6);
+    let point = f.buttons[1].center();
+    assert!(!f.bounds().contains(point));
+    f.show(vec![egui::Event::PointerMoved(point)], true);
+    f.show(
+        vec![egui::Event::PointerButton {
+            pos: point,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }],
+        true,
+    );
+    assert!(f.ctx.input(|input| input.pointer.primary_down()));
+    f.settings.left = 30.0;
+    f.show(Vec::new(), true);
+    assert!(
+        f.ctx.input(|input| input.pointer.primary_down()),
+        "moving chrome must not cancel an ordinary Settings gesture"
+    );
+    f.show(
+        vec![egui::Event::PointerButton {
+            pos: point,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+        true,
+    );
+    assert_eq!(f.clicks[1], 1);
+}

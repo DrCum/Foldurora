@@ -265,8 +265,20 @@ pub(crate) fn set_toolbar_canvas(ctx: &egui::Context, bounds: Option<Rect>) -> b
     if previous == bounds {
         return false;
     }
-    ctx.stop_dragging();
-    ctx.input_mut(|input| input.pointer = Default::default());
+    let layers = ctx.data(|data| data.get_temp::<(u64, Vec<egui::LayerId>)>(Id::unique("toolbar_layers")));
+    let pressed_layer = ctx
+        .input(|input| input.pointer.press_origin())
+        .and_then(|point| ctx.layer_id_at(point));
+    let dragged_layer = ctx
+        .dragged_id()
+        .and_then(|id| ctx.read_response(id))
+        .map(|response| response.layer_id);
+    if layers.is_some_and(|(_, layers)| pressed_layer.into_iter().chain(dragged_layer).any(|layer| layers.contains(&layer))) {
+        // Only controls that actually moved lose a held gesture. Settings
+        // and ordinary floaters can keep adjusting the viewport continuously.
+        ctx.stop_dragging();
+        ctx.input_mut(|input| input.pointer = Default::default());
+    }
     windows(ctx, |windows| {
         windows.control_rooms.retain(|_, room| {
             if let Some(bounds) = bounds {
@@ -290,9 +302,6 @@ pub(crate) fn toolbar_rect(ctx: &egui::Context) -> Rect {
 }
 
 pub(crate) fn toolbar_layer(ctx: &egui::Context, layer: egui::LayerId) {
-    if toolbar_canvas(ctx).is_none() {
-        return;
-    }
     let frame = ctx.cumulative_frame_nr();
     ctx.data_mut(|data| {
         let layers = data.get_temp_mut_or_default::<(u64, Vec<egui::LayerId>)>(Id::unique("toolbar_layers"));
@@ -727,7 +736,8 @@ impl Windows {
         if !block.is_finite() {
             return;
         }
-        let point = Anchor::nearest(room, block).point;
+        let group_room = self.control_rooms.get(&window).copied().unwrap_or(room);
+        let point = Anchor::nearest(group_room, block).point;
         for id in members {
             if let Some(placed) = self.placed.get_mut(&id) {
                 let room = self.control_rooms.get(&id).copied().unwrap_or(room);

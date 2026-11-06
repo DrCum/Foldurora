@@ -1718,6 +1718,265 @@ fn shutter(ui: &mut egui::Ui, p: &Palette) -> egui::Response {
 mod tests {
     use super::*;
 
+    struct ViewportPhotoFixture {
+        ctx: egui::Context,
+        ui: SnapshotUi,
+        settings: Settings,
+        viewport: crate::world_viewport::ViewportSettings,
+        frame: usize,
+        open: bool,
+        fov: f32,
+        classic: bool,
+        viewfinder: bool,
+    }
+
+    impl ViewportPhotoFixture {
+        fn new(classic: bool) -> Self {
+            let ctx = egui::Context::default();
+            crate::theme::Theme::default().apply(&ctx, 1.0);
+            ctx.set_zoom_factor(1.2);
+            ctx.all_styles_mut(|style| style.animation_time = 0.0);
+            Self {
+                ctx,
+                ui: SnapshotUi::default(),
+                settings: Settings {
+                    resolution: Resolution::Window,
+                    aspect: Aspect::Window,
+                    quality: false,
+                    ..Default::default()
+                },
+                viewport: crate::world_viewport::ViewportSettings {
+                    enabled: true,
+                    restrict_ui: true,
+                    left: 25.0,
+                    right: 10.0,
+                    top: 15.0,
+                    bottom: 20.0,
+                },
+                frame: 0,
+                open: true,
+                fov: crate::camera::DEFAULT_FOV,
+                classic,
+                viewfinder: false,
+            }
+        }
+
+        fn native(&self) -> Rect {
+            Rect::from_min_size(egui::pos2(7.0, 11.0), Vec2::new(3200.0, 2000.0) / (1.25 * self.ctx.zoom_factor()))
+        }
+
+        fn bounds(&self) -> Rect {
+            let configured = crate::world_viewport::ViewportSettings {
+                restrict_ui: true,
+                ..self.viewport.clone()
+            };
+            configured
+                .toolbar_rect((3200, 2000), self.native())
+                .expect("configured world rectangle")
+        }
+
+        fn id(&self) -> &'static str {
+            if self.classic { CLASSIC_WINDOW } else { WINDOW }
+        }
+
+        fn rect(&self) -> Rect {
+            self.ctx
+                .memory(|memory| memory.area_rect(egui::Id::unique(self.id())))
+                .expect("actual snapshot window")
+        }
+
+        fn frames(&mut self, count: usize) {
+            for _ in 0..count {
+                self.show(Vec::new());
+            }
+        }
+
+        fn show(&mut self, events: Vec<egui::Event>) {
+            use super::super::layout;
+            self.frame += 1;
+            let native = self.native();
+            let catalog = crate::world::env_select::SettingsCatalog::default();
+            let view = View {
+                window: (3200, 2000),
+                photo: self.settings.size((3200, 2000)),
+                tiles: 1,
+                preview: None,
+                busy: None,
+                message: None,
+                last_saved: None,
+                gallery: &[],
+                reel: None,
+                folder: PathBuf::new(),
+                inventory: None,
+                item_saved: false,
+                profile: None,
+                profile_posted: false,
+                email: None,
+                exposure: 0.0,
+                hdr: true,
+                env: EnvView {
+                    catalog: &catalog,
+                    own: crate::world::eep_env::LocalView::SHARED,
+                    sun: (120.0, 20.0),
+                    locked: false,
+                    loading: false,
+                },
+                back_key: None,
+                quality_reduced: false,
+            };
+            let p = crate::theme::Theme::default().palette();
+            let mut raw = egui::RawInput {
+                screen_rect: Some(native),
+                time: Some(self.frame as f64 / 60.0),
+                events,
+                ..Default::default()
+            };
+            raw.viewports.entry(raw.viewport_id).or_default().native_pixels_per_point = Some(1.25);
+            let mut output = self.ctx.run_ui(raw, |ui| {
+                layout::begin_canvas(ui.ctx(), false);
+                layout::set_toolbar_canvas(ui.ctx(), self.viewport.toolbar_rect((3200, 2000), native));
+                layout::set_work_area(ui.ctx(), native);
+                layout::set_move_area(ui.ctx(), native);
+                layout::set_window_edges(ui.ctx(), layout::Edges::OPEN);
+                layout::frame(ui.ctx(), &p, false);
+                // The UI only emits actions; no renderer, file service or
+                // network consumer is installed in this offline fixture.
+                if self.viewfinder {
+                    self.ui.full_frame(
+                        ui.ctx(),
+                        &p,
+                        &mut self.settings,
+                        &mut self.fov,
+                        crate::camera::DEFAULT_FOV,
+                        view.photo,
+                    );
+                } else {
+                    self.ui.show(
+                        ui.ctx(),
+                        &p,
+                        &mut self.open,
+                        &mut self.settings,
+                        &mut self.fov,
+                        crate::camera::DEFAULT_FOV,
+                        &view,
+                        self.classic,
+                    );
+                }
+            });
+            output.textures_delta.clear();
+        }
+
+        fn click(&mut self, position: Pos2) {
+            self.show(vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::NONE),
+                egui::Event::PointerMoved(position),
+            ]);
+            for pressed in [true, false] {
+                self.show(vec![egui::Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }]);
+            }
+        }
+    }
+
+    #[test]
+    fn actual_snapshot_panel_and_classic_window_keep_full_frame_output_independent_of_tool_bounds() {
+        for classic in [false, true] {
+            for restricted in [false, true] {
+                let mut f = ViewportPhotoFixture::new(classic);
+                f.viewport.restrict_ui = restricted;
+                f.ui.full_frame = true;
+                let before = f.settings.clone();
+                f.frames(12);
+                if !restricted {
+                    widgets::move_floater(&f.ctx, f.id(), f.native().min + Vec2::new(24.0, 80.0));
+                    f.frames(6);
+                }
+                let rect = f.rect();
+                assert!(f.native().expand(1.0).contains_rect(rect), "{classic}/{restricted}: {rect:?}");
+                if restricted {
+                    assert!(
+                        f.bounds().expand(1.0).contains_rect(rect),
+                        "{classic}: {rect:?} outside {:?}",
+                        f.bounds()
+                    );
+                } else {
+                    assert!(
+                        rect.left() < f.bounds().left() - 5.0,
+                        "disabled snapshot tools must use the full workspace"
+                    );
+                }
+                assert!((f.ctx.content_rect().min - f.native().min).abs().max_elem() < 1.0);
+                assert!((f.ctx.content_rect().max - f.native().max).abs().max_elem() < 1.0);
+                assert_eq!(f.settings, before, "placement must not rewrite snapshot output settings");
+                assert_eq!(f.settings.size((3200, 2000)), (3200, 2000));
+                assert_eq!(f.fov, crate::camera::DEFAULT_FOV);
+                assert!(f.ui.full_frame, "opening the tools must not change the requested full-frame mode");
+            }
+        }
+    }
+
+    #[test]
+    fn actual_snapshot_tools_fit_a_small_viewport_and_keep_title_actions_and_close_reachable() {
+        for classic in [false, true] {
+            let mut f = ViewportPhotoFixture::new(classic);
+            f.viewport.left = 50.0;
+            f.viewport.right = 30.0;
+            f.viewport.top = 30.0;
+            f.viewport.bottom = 45.0;
+            f.frames(12);
+            assert!(f.bounds().width() < 640.0 && f.bounds().height() < 400.0);
+            assert!(
+                f.bounds().expand(1.0).contains_rect(f.rect()),
+                "{classic}: {:?} outside {:?}",
+                f.rect(),
+                f.bounds()
+            );
+            let maximize = f
+                .ctx
+                .data(|data| data.get_temp::<Rect>(egui::Id::unique(("floater_action", f.id(), "maximize"))))
+                .expect("actual title action");
+            assert!(f.bounds().contains_rect(maximize));
+            f.click(maximize.center());
+            assert!(
+                f.ui.full_frame,
+                "the bounded title action must remain clickable above the scrolling body"
+            );
+            // The close button is two equal title-button cells to the right
+            // of the measured maximize action (collapse is between them).
+            let close = maximize.translate(Vec2::new(2.0 * (maximize.width() + 6.0), 0.0)).center();
+            assert!(f.bounds().contains(close), "close must stay in the selected viewport");
+            f.click(close);
+            assert!(!f.open, "the close button must remain reachable on a short photo window");
+        }
+    }
+
+    #[test]
+    fn actual_snapshot_full_frame_strip_and_tags_stay_in_the_selected_viewport() {
+        let mut f = ViewportPhotoFixture::new(false);
+        f.viewfinder = true;
+        f.ui.full_frame = true;
+        let before = f.settings.clone();
+        f.frames(12);
+        for id in ["photo_full_strip", "photo_full_size", "photo_full_exit"] {
+            let rect = f
+                .ctx
+                .memory(|memory| memory.area_rect(egui::Id::unique(id)))
+                .expect("actual full-frame photo control");
+            assert!(
+                f.bounds().expand(1.0).contains_rect(rect),
+                "{id}: {rect:?} outside {:?}",
+                f.bounds()
+            );
+        }
+        assert_eq!(f.settings, before);
+        assert_eq!(f.settings.size((3200, 2000)), (3200, 2000));
+        assert!((f.ctx.content_rect().size() - f.native().size()).abs().max_elem() < 1.0);
+    }
+
     #[test]
     fn a_sun_value_differs_past_its_shown_degree_and_azimuths_wrap() {
         assert!(!sun_differs(120.3, 120.0, true));

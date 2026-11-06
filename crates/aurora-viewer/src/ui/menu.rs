@@ -352,16 +352,16 @@ fn scoped_body<R>(ui: &mut Ui, bounds: Option<egui::Rect>, body: impl FnOnce(&mu
 }
 
 fn show_scoped(mut popup: Popup<'_>, bounds: Option<egui::Rect>, body: impl FnOnce(&mut Ui)) -> bool {
-    if let Some(bounds) = bounds {
-        if let Some(rect) = popup.get_popup_rect() {
-            let size = rect.size().min(bounds.size());
-            let position = rect.min.clamp(bounds.min, (bounds.max - size).max(bounds.min));
-            popup = popup
-                .at_position(position)
-                .align(egui::RectAlign::BOTTOM_START)
-                .align_alternatives(&[])
-                .gap(0.0);
-        }
+    if let Some(bounds) = bounds
+        && let Some(rect) = popup.get_popup_rect()
+    {
+        let size = rect.size().min(bounds.size());
+        let position = rect.min.clamp(bounds.min, (bounds.max - size).max(bounds.min));
+        popup = popup
+            .at_position(position)
+            .align(egui::RectAlign::BOTTOM_START)
+            .align_alternatives(&[])
+            .gap(0.0);
     }
     popup.show(|ui| scoped_body(ui, bounds, body)).is_some()
 }
@@ -705,15 +705,16 @@ pub(crate) fn choice_panel(ui: &Ui, p: &Palette, id: Id, pos: egui::Pos2, open: 
     // Register the child in egui's menu hierarchy so a click in its name
     // field does not dismiss the menu being edited underneath it.
     egui::containers::menu::MenuState::from_ui(ui, |state, _| state.open_item = Some(id));
-    Popup::new(id, ui.ctx().clone(), PopupAnchor::Position(pos), ui.layer_id())
+    let bounds = super::layout::toolbar_layer_bounds(ui.ctx(), ui.layer_id());
+    let popup = Popup::new(id, ui.ctx().clone(), PopupAnchor::Position(pos), ui.layer_id())
         .kind(PopupKind::Menu)
         .align(egui::RectAlign::BOTTOM_START)
         .align_alternatives(&[])
         .layout(egui::Layout::top_down_justified(egui::Align::Min))
         .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
         .style(style(p))
-        .open_bool(open)
-        .show(body);
+        .open_bool(open);
+    show_scoped(popup, bounds, body);
 }
 
 /// A menu's editing companion, kept beside its owner until it is locked again.
@@ -726,7 +727,8 @@ pub(crate) fn settings_panel(ui: &Ui, p: &Palette, id: Id, body: impl FnOnce(&mu
         }
     });
     let anchor = ui.min_rect().expand(4.0);
-    let work = ui.ctx().content_rect();
+    let bounds = super::layout::toolbar_layer_bounds(ui.ctx(), ui.layer_id());
+    let work = bounds.unwrap_or_else(|| ui.ctx().content_rect());
     let left = anchor.left() - work.left() - 8.0;
     let right = work.right() - anchor.right() - 8.0;
     let width = left.max(right).clamp(160.0, 340.0).min(work.width());
@@ -735,7 +737,7 @@ pub(crate) fn settings_panel(ui: &Ui, p: &Palette, id: Id, body: impl FnOnce(&mu
     } else {
         (egui::RectAlign::LEFT_END, egui::RectAlign::RIGHT_END)
     };
-    Popup::new(id, ui.ctx().clone(), PopupAnchor::ParentRect(anchor), ui.layer_id())
+    let popup = Popup::new(id, ui.ctx().clone(), PopupAnchor::ParentRect(anchor), ui.layer_id())
         .kind(PopupKind::Menu)
         .align(align)
         .align_alternatives(&[other])
@@ -744,16 +746,16 @@ pub(crate) fn settings_panel(ui: &Ui, p: &Palette, id: Id, body: impl FnOnce(&mu
         .close_behavior(PopupCloseBehavior::IgnoreClicks)
         .style(style(p))
         .frame(egui::Frame::NONE)
-        .open(true)
-        .show(|ui| {
-            let spacing = ui.ctx().global_style().spacing.item_spacing;
-            ui.spacing_mut().item_spacing = spacing;
-            super::widgets::overlay(ui, p, egui::Margin::same(12), |ui| {
-                ui.set_width((width - 24.0).max(1.0));
-                super::widgets::organization_typography(ui);
-                body(ui);
-            });
+        .open(true);
+    show_scoped(popup, bounds, |ui| {
+        let spacing = ui.ctx().global_style().spacing.item_spacing;
+        ui.spacing_mut().item_spacing = spacing;
+        super::widgets::overlay(ui, p, egui::Margin::same(12), |ui| {
+            ui.set_width((width - 24.0).max(1.0));
+            super::widgets::organization_typography(ui);
+            body(ui);
         });
+    });
 }
 
 /// Editing can cross between the menu, its submenus and the settings shelf.
