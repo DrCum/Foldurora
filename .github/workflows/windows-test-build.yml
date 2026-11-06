@@ -99,6 +99,7 @@ jobs:
           $out = Join-Path '.scratch/windows-test-build' $name
           ./scripts/package.ps1 -Exe target/debug/aurora-viewer.exe -Out $out
           if ($LASTEXITCODE -ne 0) { throw 'Packaging failed.' }
+          Copy-Item -LiteralPath docs/FOLDURORA.md -Destination (Join-Path $out 'MORNING-TEST-GUIDE.md') -ErrorAction Stop
           "package_name=$name" >> $env:GITHUB_OUTPUT
           "package_dir=$out" >> $env:GITHUB_OUTPUT
       - name: Record results and build provenance

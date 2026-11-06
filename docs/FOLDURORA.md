@@ -10,7 +10,8 @@ The integration branch is `feat/overnight-integration`. The source comparison
 uses [Folderstorm's tested 82373 tree](https://github.com/DrCum/Folderstorm/tree/abbe3cb0ca66ee2484f277219f6a27706fab7fc6)
 and starts from Aurora commit `ae2fd1016ec83304719fa131312e2ac69c8f37a6`.
 This is a test candidate; Windows display/focus and human grid acceptance are
-still required before a viewer-change pull request.
+still required before the preview is accepted. Checkpoint pull requests remain
+drafts while that validation is pending, as authorized for this preview.
 
 ## Feature inventory
 
@@ -118,6 +119,8 @@ the candidate handed to the user.
 The Linux cloud environment uses software Vulkan. Its existing terrain
 triplanar GPU precision test has failed in the base checkout; that result is
 tracked separately from feature tests and Windows hardware acceptance. No
-grid session is automated. Under `AGENTS.md`, human validation precedes a
-viewer-change PR, so an overnight candidate may be a pushed branch with an
-artifact and a morning checklist while that validation is pending.
+grid session is automated. The user has explicitly authorized checkpoint draft
+pull requests for this preview; human Windows and grid validation remain pending
+and nothing is merged automatically. Local-computer actions require the user's
+separate computer-use approval; cloud Linux and hosted Windows CI do not use that
+computer.
