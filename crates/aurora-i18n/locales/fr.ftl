@@ -13286,6 +13286,29 @@ character-window-connecting = Connexion en cours
 character-window-online = En ligne
 character-window-main-grid = Second Life
 
+# Account-bound session-host chat popouts
+host-chat-open = Discussion
+host-chat-title = { $account } · { $grid } — Discussion — { $viewer }
+host-chat-identity = { $account } · { $grid }
+host-chat-bound-help = Cette discussion reste liée à ce personnage quand vous changez de monde.
+host-chat-no-conversation = Choisir une conversation
+host-chat-unavailable = Cette connexion de discussion est indisponible. Rouvrez la discussion après la reconnexion du personnage.
+host-chat-restricted = La lecture ou l’envoi est restreint dans ce viewer.
+host-chat-history-gap = Certaines lignes antérieures ne sont plus disponibles.
+host-chat-input = Message à cette conversation
+host-chat-send = Envoyer
+host-chat-compose-help = Ctrl+Entrée pour envoyer. Le texte est envoyé tel quel.
+host-chat-draft-cleared = Brouillon effacé : la conversation ou ses autorisations ont changé.
+host-chat-too-long = Les messages sont limités à 1 023 octets UTF-8.
+host-chat-invalid = Retirez les caractères de contrôle non pris en charge avant l’envoi.
+host-chat-queued = En attente pour ce personnage.
+host-chat-accepted = Transmis localement. La réception à distance n’est pas confirmée.
+host-chat-uncertain = Le résultat de l’envoi est incertain. Vérifiez la conversation avant de renvoyer un message.
+host-chat-rejected = Ce viewer n’a pas envoyé le message.
+host-chat-empty = Aucun message en direct pour le moment.
+host-chat-queue-busy = La file de discussion locale est occupée. Votre brouillon est conservé.
+host-chat-queue-unavailable = La discussion est indisponible. Votre brouillon n’a pas été envoyé.
+
 # Native character windows
 character-switch-title = Personnages
 character-switch-description = Gardez vos personnages connectés dans des fenêtres séparées. Passez à une fenêtre ouverte ou ouvrez la connexion d’un personnage enregistré. Vous vous connectez vous-même.

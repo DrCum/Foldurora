@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, OwnedDisplayHandle};
-use winit::window::Window;
+use winit::window::{Window, WindowAttributes};
 
 pub(super) struct SoftwareWindow {
     pub window: Arc<Window>,
@@ -22,14 +22,18 @@ pub(super) struct SoftwareWindow {
 
 impl SoftwareWindow {
     pub fn new(event_loop: &ActiveEventLoop, context: &Context, title: String) -> anyhow::Result<Self> {
-        let window = Arc::new(
-            event_loop.create_window(
-                crate::cli::with_desktop_id(Window::default_attributes())
-                    .with_title(title)
-                    .with_inner_size(winit::dpi::LogicalSize::new(1240.0, 800.0))
-                    .with_min_inner_size(winit::dpi::LogicalSize::new(760.0, 520.0)),
-            )?,
-        );
+        Self::with_attributes(
+            event_loop,
+            context,
+            crate::cli::with_desktop_id(Window::default_attributes())
+                .with_title(title)
+                .with_inner_size(winit::dpi::LogicalSize::new(1240.0, 800.0))
+                .with_min_inner_size(winit::dpi::LogicalSize::new(760.0, 520.0)),
+        )
+    }
+
+    pub fn with_attributes(event_loop: &ActiveEventLoop, context: &Context, attributes: WindowAttributes) -> anyhow::Result<Self> {
+        let window = Arc::new(event_loop.create_window(attributes)?);
         let display = softbuffer::Context::new(event_loop.owned_display_handle()).map_err(|error| anyhow::anyhow!("{error}"))?;
         let surface = softbuffer::Surface::new(&display, window.clone()).map_err(|error| anyhow::anyhow!("{error}"))?;
         let input = egui_winit::State::new(
@@ -47,6 +51,43 @@ impl SoftwareWindow {
             painter: Default::default(),
             pending: Default::default(),
         })
+    }
+
+    /// Creates a hidden CPU tool surface owned by this host on Windows.
+    /// The caller shows it after initializing its UI or first preview image.
+    pub fn owned_tool(
+        event_loop: &ActiveEventLoop,
+        context: &Context,
+        owner: &Window,
+        title: String,
+        initial: [f64; 2],
+        minimum: [f64; 2],
+    ) -> anyhow::Result<Self> {
+        let attributes = crate::cli::with_desktop_id(Window::default_attributes())
+            .with_title(title)
+            .with_inner_size(winit::dpi::LogicalSize::new(initial[0], initial[1]))
+            .with_min_inner_size(winit::dpi::LogicalSize::new(minimum[0], minimum[1]))
+            .with_visible(false);
+        #[cfg(windows)]
+        let attributes = {
+            use winit::platform::windows::WindowAttributesExtWindows;
+            use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+            let RawWindowHandle::Win32(handle) = owner.window_handle()?.as_raw() else {
+                anyhow::bail!("host has no Win32 owner")
+            };
+            attributes.with_owner_window(handle.hwnd.get()).with_skip_taskbar(true)
+        };
+        #[cfg(target_os = "linux")]
+        let attributes = {
+            use winit::platform::x11::{WindowAttributesExtX11, WindowType};
+            let _ = owner;
+            attributes.with_x11_window_type(vec![WindowType::Utility])
+        };
+        #[cfg(not(any(windows, target_os = "linux")))]
+        let _ = owner;
+        let surface = Self::with_attributes(event_loop, context, attributes)?;
+        configure_tool_window(&surface.window)?;
+        Ok(surface)
     }
 
     pub fn event(&mut self, event: &WindowEvent) -> egui_winit::EventResponse {
@@ -120,6 +161,48 @@ impl SoftwareWindow {
             None
         }
     }
+}
+
+fn configure_tool_window(window: &Window) -> anyhow::Result<()> {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::{GetLastError, SetLastError};
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            GWL_EXSTYLE, GetWindowLongPtrW, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetWindowLongPtrW,
+            SetWindowPos, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
+        };
+        use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        let RawWindowHandle::Win32(handle) = window.window_handle()?.as_raw() else {
+            anyhow::bail!("tool surface has no Win32 window")
+        };
+        let hwnd = handle.hwnd.get() as windows_sys::Win32::Foundation::HWND;
+        // SAFETY: this hidden HWND was created by this event-loop thread; we
+        // change only its tool-window style before showing it. The owner was
+        // supplied at creation, never by parenting another process's window.
+        unsafe {
+            SetLastError(0);
+            let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            anyhow::ensure!(style != 0 || GetLastError() == 0, "could not read owned tool-window style");
+            SetLastError(0);
+            let previous = SetWindowLongPtrW(hwnd, GWL_EXSTYLE, (style | WS_EX_TOOLWINDOW as isize) & !(WS_EX_APPWINDOW as isize));
+            anyhow::ensure!(previous != 0 || GetLastError() == 0, "could not configure owned tool window");
+            anyhow::ensure!(
+                SetWindowPos(
+                    hwnd,
+                    std::ptr::null_mut(),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER
+                ) != 0,
+                "could not refresh owned tool-window frame"
+            );
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = window;
+    Ok(())
 }
 
 impl Drop for SoftwareWindow {

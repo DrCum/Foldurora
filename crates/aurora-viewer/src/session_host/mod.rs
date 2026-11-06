@@ -1,6 +1,12 @@
 //! Opt-in native session controller. Worlds, logins and GPU ownership remain
 //! in separately isolated workers; the host paints only its CPU interface.
 
+pub(crate) mod chat;
+pub(crate) mod chat_broker;
+pub(crate) mod chat_io;
+pub(crate) mod chat_transport;
+mod chat_ui;
+mod chat_window;
 mod native;
 pub(crate) mod profile;
 mod software;
@@ -49,6 +55,7 @@ pub fn run() -> anyhow::Result<()> {
         snapshot,
         ui: HostUi::default(),
         surface: None,
+        chat_windows: Vec::new(),
         error: None,
         next_poll: now,
         repaint: Some(now),
@@ -79,6 +86,7 @@ struct Shell {
     snapshot: Arc<HostSnapshot>,
     ui: HostUi,
     surface: Option<SoftwareWindow>,
+    chat_windows: Vec<chat_window::ChatWindow>,
     error: Option<String>,
     next_poll: Instant,
     repaint: Option<Instant>,
@@ -98,11 +106,15 @@ impl Shell {
         self.repaint = Some(Instant::now());
     }
 
-    fn action(&mut self, action: Action, viewport: Option<aurora_session::HostedViewport>) {
+    fn action(&mut self, event_loop: &ActiveEventLoop, action: Action, viewport: Option<aurora_session::HostedViewport>) {
         if self.closing.is_some() {
             return;
         }
         let result = match action {
+            Action::OpenChat(source) => {
+                self.open_chat(event_loop, source);
+                return;
+            }
             Action::OpenLogin(account) => self.controller.open_manual_login(account),
             Action::Activate(worker) => match viewport {
                 Some(viewport) => self.controller.activate(worker, viewport),
@@ -110,6 +122,7 @@ impl Shell {
             },
             Action::Detach(worker) => self.controller.detach(worker),
             Action::Close => {
+                self.chat_windows.clear();
                 self.close_region();
                 self.controller.shutdown();
                 self.closing = Some(Instant::now());
@@ -123,7 +136,7 @@ impl Shell {
                 // The broker's pending row can name the old renderer while
                 // the requested target is also a transaction participant.
                 Action::Detach(worker) => self.snapshot.active == Some(worker) || self.snapshot.pending.is_some(),
-                Action::Close => false,
+                Action::OpenChat(_) | Action::Close => false,
             };
             if affects_active {
                 // The IO thread has not seen the intent yet. Do not reopen
@@ -138,6 +151,39 @@ impl Shell {
         });
         self.notice_at = Some(Instant::now());
         self.request_repaint();
+    }
+
+    fn open_chat(&mut self, event_loop: &ActiveEventLoop, source: aurora_session::chat::ChatSource) {
+        if let Some(window) = self.chat_windows.iter().find(|window| window.source() == source) {
+            window.focus();
+            return;
+        }
+        let result = (|| {
+            anyhow::ensure!(self.chat_windows.len() < aurora_session::MAX_WORKERS, "chat window limit reached");
+            let owner = self.surface.as_ref().ok_or_else(|| anyhow::anyhow!("host window is unavailable"))?;
+            let chat = self
+                .snapshot
+                .chat
+                .iter()
+                .find(|chat| chat.source == source && chat_ui::eligible(chat))
+                .ok_or_else(|| anyhow::anyhow!("chat source is unavailable"))?;
+            let worker = self
+                .snapshot
+                .workers
+                .iter()
+                .find(|worker| worker.binding == source.binding())
+                .ok_or_else(|| anyhow::anyhow!("chat worker is unavailable"))?;
+            chat_window::ChatWindow::new(event_loop, &owner.window, worker, chat.clone())
+        })();
+        match result {
+            Ok(window) => self.chat_windows.push(window),
+            Err(error) => {
+                log::warn!("session host: could not open owned chat window: {error}");
+                self.ui.notice = Some(Notice::Error(transport::HostError::Unavailable));
+                self.notice_at = Some(Instant::now());
+                self.request_repaint();
+            }
+        }
     }
 
     fn render(&mut self, event_loop: &ActiveEventLoop) -> anyhow::Result<()> {
@@ -171,7 +217,7 @@ impl Shell {
         self.last_frame = Some(now);
         self.repaint = now.checked_add(delay);
         if let Some(action) = action {
-            self.action(action, viewport);
+            self.action(event_loop, action, viewport);
         }
         self.sync_native()?;
         Ok(())
@@ -228,8 +274,9 @@ impl Shell {
                     && worker.status.as_ref().is_some_and(|status| status.keyboard_focused)
             })
         });
-        self.controller
-            .set_workspace_foreground(surface.window.has_focus() || worker_focused);
+        self.controller.set_workspace_foreground(
+            surface.window.has_focus() || worker_focused || self.chat_windows.iter().any(|window| window.focused()),
+        );
         let viewport = surface.viewport(self.world, self.context.pixels_per_point());
         let visible = surface.window.is_visible() == Some(true) && surface.window.is_minimized() == Some(false);
         // A native resize is closed immediately, then waits for one real egui
@@ -351,6 +398,22 @@ impl ApplicationHandler for Shell {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        if let Some(index) = self.chat_windows.iter().position(|window| window.id() == id) {
+            match self.chat_windows[index].event(event_loop, &event, &self.controller) {
+                Ok(false) => {}
+                Ok(true) => {
+                    self.chat_windows.swap_remove(index);
+                }
+                Err(error) => {
+                    log::warn!("session host: owned chat surface closed after native error: {error}");
+                    self.chat_windows.swap_remove(index);
+                    self.ui.notice = Some(Notice::Error(transport::HostError::Unavailable));
+                    self.notice_at = Some(Instant::now());
+                    self.request_repaint();
+                }
+            }
+            return;
+        }
         let Some(surface) = &mut self.surface else { return };
         if surface.window.id() != id {
             return;
@@ -409,6 +472,11 @@ impl ApplicationHandler for Shell {
             return;
         }
         let mut next = self.next_poll;
+        for window in &mut self.chat_windows {
+            if let Some(repaint) = window.poll(&self.snapshot, self.closing.is_some(), now) {
+                next = next.min(repaint);
+            }
+        }
         if let Some(repaint) = self.repaint {
             let due = self.last_frame.map_or(repaint, |last| repaint.max(last + MIN_FRAME));
             if now >= due {
@@ -427,6 +495,7 @@ impl ApplicationHandler for Shell {
         self.close_region();
         self.controller.shutdown();
         // Drop clipboard/surface while the platform connection still lives.
+        self.chat_windows.clear();
         self.surface = None;
     }
 }

@@ -13263,6 +13263,29 @@ character-window-connecting = 接続中
 character-window-online = オンライン
 character-window-main-grid = Second Life
 
+# Account-bound session-host chat popouts
+host-chat-open = チャット
+host-chat-title = { $account } · { $grid } — チャット — { $viewer }
+host-chat-identity = { $account } · { $grid }
+host-chat-bound-help = 表示するワールドを切り替えても、このチャットのキャラクターは変わりません。
+host-chat-no-conversation = 会話を選択
+host-chat-unavailable = チャット接続を利用できません。キャラクターの再接続後にチャットを開き直してください。
+host-chat-restricted = このビューアーでは、読み取りまたは送信が制限されています。
+host-chat-history-gap = 以前のメッセージの一部は表示できません。
+host-chat-input = この会話へのメッセージ
+host-chat-send = 送信
+host-chat-compose-help = Ctrl+Enter で送信。入力したテキストをそのまま送信します。
+host-chat-draft-cleared = 会話または権限が変わったため、下書きを消去しました。
+host-chat-too-long = メッセージは UTF-8 で 1,023 バイトまでです。
+host-chat-invalid = 送信する前に、対応していない制御文字を削除してください。
+host-chat-queued = このキャラクターの送信待ちです。
+host-chat-accepted = ローカルで送信処理に渡しました。相手への到達は確認されていません。
+host-chat-uncertain = 送信結果を確認できません。再び送る前に会話を確認してください。
+host-chat-rejected = このビューアーはメッセージを送信しませんでした。
+host-chat-empty = まだライブメッセージはありません。
+host-chat-queue-busy = ローカルの送信待ちが混み合っています。下書きは保持されています。
+host-chat-queue-unavailable = チャットを利用できません。下書きは送信されていません。
+
 # Native character windows
 character-switch-title = キャラクター
 character-switch-description = キャラクターごとに別のビューアウィンドウでログインを維持します。起動中のウィンドウへ切り替えるか、保存済みキャラクターのログイン画面を開きます。ログイン操作はご自身で行ってください。

@@ -1,5 +1,5 @@
-//! The controller shows acknowledged local sessions only. No monitor/chat
-//! controls exist before their backends; opening a login never submits it.
+//! The controller shows acknowledged local sessions only. Chat is offered
+//! only for its authenticated live native backend; logins remain manual.
 
 use super::transport::{HostError, HostSnapshot, WorkerSummary};
 use crate::theme::Palette;
@@ -12,6 +12,7 @@ pub(super) enum Action {
     OpenLogin(Option<AccountKey>),
     Activate(WorkerId),
     Detach(WorkerId),
+    OpenChat(aurora_session::chat::ChatSource),
     Close,
 }
 
@@ -152,6 +153,26 @@ impl HostUi {
                                 ctx.data_mut(|data| data.insert_temp(Id::unique(("host_activate", id)), activate.rect));
                                 if activate.clicked() {
                                     action = Some(Action::Activate(id));
+                                }
+                                if let Some(chat) = snapshot
+                                    .chat
+                                    .iter()
+                                    .find(|chat| chat.source.binding() == worker.binding && super::chat_ui::eligible(chat))
+                                {
+                                    let response = widgets::action_button_if(
+                                        ui,
+                                        p,
+                                        "messages-filled",
+                                        aurora_i18n::tr!("host-chat-open"),
+                                        ActionKind::Flat,
+                                        vec2(0.0, 28.0),
+                                        !closing && !snapshot.stopped,
+                                    );
+                                    #[cfg(test)]
+                                    ctx.data_mut(|data| data.insert_temp(Id::unique(("host_chat_open", id)), response.rect));
+                                    if response.clicked() {
+                                        action = Some(Action::OpenChat(chat.source));
+                                    }
                                 }
                                 let detach = ui
                                     .add_enabled_ui(!closing && !snapshot.stopped, |ui| {
@@ -304,6 +325,8 @@ pub(super) fn same_snapshot(a: &HostSnapshot, b: &HostSnapshot) -> bool {
         && a.completed_request == b.completed_request
         && a.pending == b.pending
         && a.opening == b.opening
+        && a.chat.len() == b.chat.len()
+        && a.chat.iter().zip(&b.chat).all(|(a, b)| std::sync::Arc::ptr_eq(a, b))
         && a.accounts.len() == b.accounts.len()
         && a.accounts
             .iter()
@@ -391,6 +414,7 @@ fn notice_text(notice: Notice) -> &'static str {
         Notice::Error(HostError::Busy) => aurora_i18n::tr!("host-busy"),
         Notice::Error(HostError::Unsupported) => aurora_i18n::tr!("host-unavailable-help"),
         Notice::Error(HostError::Stopped) => aurora_i18n::tr!("host-stopped"),
+        Notice::Error(HostError::Unavailable) => aurora_i18n::tr!("host-chat-unavailable"),
     }
 }
 
@@ -575,6 +599,66 @@ mod tests {
         );
         snapshot.opening.push(account);
         assert_eq!(frames.click(&snapshot, Id::unique(("host_open", account)), true), None);
+    }
+
+    #[test]
+    fn host_chat_roster_button_requires_authenticated_live_exact_source_and_never_activates_world() {
+        use super::super::transport::HostChatSnapshot;
+        use aurora_session::chat::{ChatKey, ChatSource, Conversation, ConversationInfo, NativeChatPolicy};
+        use std::sync::Arc;
+        let mut snapshot = snapshot();
+        let worker = snapshot.workers[0].binding.worker.worker;
+        let source = ChatSource::try_from((snapshot.workers[0].binding, 1)).unwrap();
+        let mut chat = HostChatSnapshot {
+            source,
+            authenticated: false,
+            live: true,
+            conversations: vec![ConversationInfo {
+                policy: NativeChatPolicy {
+                    key: ChatKey {
+                        source,
+                        conversation: Conversation::Nearby,
+                    },
+                    revision: 1,
+                    lease_current: true,
+                    ready: true,
+                    can_read: true,
+                    can_send: true,
+                },
+                title: Label::new("Synthetic nearby").unwrap(),
+            }],
+            lines: Vec::new(),
+            receipts: Vec::new(),
+            gap: false,
+        };
+        snapshot.chat.push(Arc::new(chat.clone()));
+        let mut frames = Frames::new();
+        frames.show(&snapshot, Vec::new(), true);
+        assert!(
+            frames
+                .ctx
+                .data(|data| data.get_temp::<Rect>(Id::unique(("host_chat_open", worker))))
+                .is_none()
+        );
+        chat.authenticated = true;
+        snapshot.chat[0] = Arc::new(chat.clone());
+        assert_eq!(
+            frames.click(&snapshot, Id::unique(("host_chat_open", worker)), true),
+            Some(Action::OpenChat(source))
+        );
+        assert_eq!(snapshot.active, None);
+        chat.source.session.generation += 1;
+        chat.conversations[0].policy.key.source = chat.source;
+        snapshot.chat[0] = Arc::new(chat);
+        let mut frames = Frames::new();
+        frames.show(&snapshot, Vec::new(), true);
+        assert!(
+            frames
+                .ctx
+                .data(|data| data.get_temp::<Rect>(Id::unique(("host_chat_open", worker))))
+                .is_none(),
+            "new session metadata cannot authorize the old worker binding"
+        );
     }
 
     #[test]
