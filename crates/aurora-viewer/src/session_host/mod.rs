@@ -9,6 +9,7 @@ pub(crate) mod chat_transport;
 mod chat_ui;
 mod chat_window;
 mod native;
+mod preview_barrier;
 mod preview_broker;
 pub(crate) mod preview_io;
 mod preview_lane;

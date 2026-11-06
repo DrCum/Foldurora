@@ -70,6 +70,8 @@ pub(crate) struct HostSnapshot {
     pub can_preview: bool,
     pub preview_sources: Vec<PreviewSource>,
     pub previews: Vec<Arc<PreviewSnapshot>>,
+    pub preview_barrier_pending: bool,
+    pub preview_barrier_error: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -102,12 +104,13 @@ enum HostIntent {
         source: PreviewSource,
         config: Option<PreviewConfig>,
     },
+    CancelPreviewBarrier,
 }
 
 impl HostIntent {
     fn controls_presentation(&self) -> bool {
         match self {
-            Self::ChatSend { .. } | Self::Preview { .. } => false,
+            Self::ChatSend { .. } | Self::Preview { .. } | Self::CancelPreviewBarrier => false,
             Self::Open(_) | Self::Activate(_, _) | Self::Viewport(_) | Self::Park | Self::Detach(_) => true,
         }
     }
@@ -224,6 +227,9 @@ impl HostController {
             return Err(HostError::Unavailable);
         }
         self.send(HostIntent::Preview { source, config })
+    }
+    pub fn cancel_preview_barrier(&self) -> Result<u64, HostError> {
+        self.send(HostIntent::CancelPreviewBarrier)
     }
 
     pub fn send_chat(&self, key: ChatKey, policy_revision: u64, text: ChatText) -> Result<u64, HostError> {
@@ -828,6 +834,28 @@ struct PendingOpen {
     account: Option<AccountKey>,
     gate: OpenGate,
     reservation: Option<crate::characters::HostLaunchPermit>,
+    request: u64,
+}
+
+enum HeldAction {
+    Activate { binding: Binding, viewport: HostedViewport },
+    Viewport { binding: Binding, viewport: HostedViewport },
+    Warmup(PendingOpen),
+}
+
+impl HeldAction {
+    fn with_viewport(self, viewport: HostedViewport) -> Self {
+        match self {
+            Self::Activate { binding, .. } => Self::Activate { binding, viewport },
+            Self::Viewport { binding, .. } => Self::Viewport { binding, viewport },
+            warmup @ Self::Warmup(_) => warmup,
+        }
+    }
+}
+
+struct HeldRequest {
+    ticket: u64,
+    action: HeldAction,
 }
 
 #[derive(Clone, Copy)]
@@ -853,6 +881,10 @@ struct Broker {
     completed_request: u64,
     chat_listener: Option<super::chat_transport::Listener>,
     preview_listeners: Option<PreviewListeners>,
+    preview_barrier: super::preview_barrier::Barrier,
+    held: Option<HeldRequest>,
+    preview_barrier_error: bool,
+    viewport_request: u64,
 }
 
 struct PreviewListeners {
@@ -871,6 +903,160 @@ impl PreviewListeners {
 }
 
 impl Broker {
+    fn has_preview_authority(&self) -> bool {
+        self.children.iter().any(|child| child.preview.has_authority())
+    }
+
+    fn preview_cohort(&self) -> Result<Vec<super::preview_barrier::Participant>, HostError> {
+        let now = Instant::now();
+        let mut cohort = Vec::new();
+        for child in &self.children {
+            if !child.preview.has_authority() {
+                continue;
+            }
+            if child.exited || child.detached || child.last_seen.is_none_or(|seen| seen.elapsed() > REACHABLE) {
+                return Err(HostError::Unavailable);
+            }
+            let participant = child.preview.participant(now)?.ok_or(HostError::Unavailable)?;
+            if !self.coordinator.workers().any(|entry| {
+                entry.live && entry.binding == participant.source.binding() && entry.status.phase == Phase::Online && !entry.status.blocked
+            }) {
+                return Err(HostError::Unavailable);
+            }
+            cohort.push(participant);
+        }
+        Ok(cohort)
+    }
+
+    fn cancel_preview_action(&mut self) {
+        if let Some(held) = self.held.take() {
+            self.preview_barrier.cancel(held.ticket);
+        }
+        self.preview_barrier_error = false;
+        // Only already proved workers may resume optional work. An unacked
+        // participant stays retired; cancellation never invents quiescence.
+        for child in &mut self.children {
+            child.preview.resume_proven();
+        }
+    }
+
+    fn hold_preview_action(&mut self, ticket: u64, action: HeldAction) {
+        self.held = None;
+        self.preview_barrier_error = false;
+        let result = (|| -> Result<(), HostError> {
+            let cohort = self.preview_cohort()?;
+            let requests = self
+                .preview_barrier
+                .begin(ticket, &cohort, Instant::now())
+                .map_err(|_| HostError::Unavailable)?;
+            for request in requests {
+                let child = self
+                    .children
+                    .iter_mut()
+                    .find(|child| child.config.identity == request.participant.source.worker)
+                    .ok_or(HostError::Unavailable)?;
+                child.preview.suspend(request, Instant::now())?;
+            }
+            Ok(())
+        })();
+        if result.is_ok() {
+            self.held = Some(HeldRequest { ticket, action });
+        } else {
+            self.preview_barrier.cancel(ticket);
+            self.preview_barrier_error = true;
+        }
+    }
+
+    fn held_target_current(&self, action: &HeldAction) -> bool {
+        match action {
+            HeldAction::Activate { binding, .. } => self
+                .coordinator
+                .workers()
+                .any(|entry| entry.live && entry.binding == *binding && entry.status.phase == Phase::Online && !entry.status.blocked),
+            HeldAction::Viewport { binding, viewport } => {
+                self.coordinator.active().is_none_or(|active| active == binding.worker.worker)
+                    && self.viewport == Some(*viewport)
+                    && self.coordinator.workers().any(|entry| entry.live && entry.binding == *binding)
+            }
+            HeldAction::Warmup(open) => open.gate.can_launch(self.coordinator.active(), self.coordinator.busy()) && !self.park_requested,
+        }
+    }
+
+    fn advance_preview_action(&mut self, accounts: &[(SavedAccount, crate::login_accounts::Account)], now: u64) -> anyhow::Result<()> {
+        let Some(ticket) = self.held.as_ref().map(|held| held.ticket) else {
+            return Ok(());
+        };
+        let result = (|| -> Result<bool, HostError> {
+            let cohort = self.preview_cohort()?;
+            self.preview_barrier
+                .reconcile(ticket, &cohort, Instant::now())
+                .map_err(|_| HostError::Unavailable)?;
+            for child in &self.children {
+                if let Some(proof) = child.preview.suspension() {
+                    let request = super::preview_barrier::Request {
+                        participant: super::preview_barrier::Participant {
+                            source: proof.request.source,
+                            device_epoch: proof.request.device_epoch,
+                        },
+                        challenge: proof.request.challenge,
+                    };
+                    let ack = super::preview_barrier::Ack {
+                        intent_id: ticket,
+                        request,
+                        surface_epoch: proof.surface_epoch,
+                        completed_frame: proof.completed_frame,
+                    };
+                    self.preview_barrier
+                        .observe(ack, Instant::now())
+                        .map_err(|_| HostError::Unavailable)?;
+                }
+            }
+            if !self.preview_barrier.ready(ticket, Instant::now()) {
+                return match self.preview_barrier.tick(Instant::now()) {
+                    super::preview_barrier::Status::Failed { .. } => Err(HostError::Unavailable),
+                    _ => Ok(false),
+                };
+            }
+            if self.coordinator.busy() {
+                return Ok(false);
+            }
+            if !self.held.as_ref().is_some_and(|held| self.held_target_current(&held.action)) {
+                return Err(HostError::Unavailable);
+            }
+            // Reconcile the COMPLETE authoritative roster again immediately
+            // before consuming readiness, including loss after the final ack.
+            let cohort = self.preview_cohort()?;
+            self.preview_barrier
+                .reconcile(ticket, &cohort, Instant::now())
+                .map_err(|_| HostError::Unavailable)?;
+            Ok(self.preview_barrier.take_ready(ticket, Instant::now()))
+        })();
+        match result {
+            Ok(false) => return Ok(()),
+            Err(_) => {
+                self.preview_barrier.cancel(ticket);
+                self.held = None;
+                self.preview_barrier_error = true;
+                return Ok(());
+            }
+            Ok(true) => {}
+        }
+        let held = self.held.take().expect("readiness retains its exact held request");
+        match held.action {
+            HeldAction::Activate { binding, viewport } | HeldAction::Viewport { binding, viewport } => {
+                let effects = self.coordinator.activate(binding.worker.worker, Some(viewport), now)?;
+                self.viewport = Some(viewport);
+                self.viewport_dirty = false;
+                self.effects(effects)?;
+            }
+            HeldAction::Warmup(open) => self.launch_open(open, accounts, now)?,
+        }
+        for child in &mut self.children {
+            child.preview.resume_proven();
+        }
+        Ok(())
+    }
+
     fn effects(&mut self, effects: Vec<Effect>) -> io::Result<()> {
         for effect in effects {
             match effect {
@@ -954,10 +1140,21 @@ impl Broker {
                         account,
                         gate: OpenGate::Queued,
                         reservation: None,
+                        request: ticket,
                     });
                 }
             }
             HostIntent::Activate(worker, viewport) => {
+                if self.has_preview_authority() && !self.coordinator.busy() {
+                    let binding = self
+                        .coordinator
+                        .workers()
+                        .find(|entry| entry.binding.worker.worker == worker)
+                        .map(|entry| entry.binding)
+                        .ok_or(HostError::Unavailable)?;
+                    self.hold_preview_action(ticket, HeldAction::Activate { binding, viewport });
+                    return Ok(());
+                }
                 let effects = self.coordinator.activate(worker, Some(viewport), now)?;
                 self.viewport = Some(viewport);
                 self.viewport_dirty = false;
@@ -968,9 +1165,47 @@ impl Broker {
                     self.viewport = Some(viewport);
                     self.viewport_dirty = true;
                     self.active_viewport = None;
+                    self.viewport_request = ticket;
+                    if self.has_preview_authority() && self.held.is_some() {
+                        let previous = self.held.take().unwrap();
+                        let action = previous.action.with_viewport(viewport);
+                        if matches!(action, HeldAction::Warmup(_)) {
+                            self.held = Some(HeldRequest {
+                                ticket: previous.ticket,
+                                action,
+                            });
+                            return Ok(());
+                        }
+                        if !self.coordinator.busy() && self.coordinator.active().is_some() {
+                            let effects = self.coordinator.park_active(now)?;
+                            self.effects(effects)?;
+                        }
+                        self.viewport_dirty = false;
+                        self.hold_preview_action(ticket, action);
+                        return Ok(());
+                    }
+                    if self.has_preview_authority()
+                        && !self.coordinator.busy()
+                        && let Some(active) = self.coordinator.active()
+                    {
+                        let binding = self
+                            .coordinator
+                            .workers()
+                            .find(|entry| entry.binding.worker.worker == active)
+                            .map(|entry| entry.binding)
+                            .ok_or(HostError::Unavailable)?;
+                        // Geometry changes close the host hole immediately.
+                        // Park first so the old fitted rectangle can safely
+                        // disappear while the cohort proves GPU completion.
+                        let effects = self.coordinator.park_active(now)?;
+                        self.effects(effects)?;
+                        self.viewport_dirty = false;
+                        self.hold_preview_action(ticket, HeldAction::Viewport { binding, viewport });
+                    }
                 }
             }
             HostIntent::Park => {
+                self.cancel_preview_action();
                 self.active_viewport = None;
                 self.viewport = None;
                 self.viewport_dirty = false;
@@ -1019,6 +1254,7 @@ impl Broker {
                 }
                 child.preview.configure(source, config, ticket, Instant::now())?;
             }
+            HostIntent::CancelPreviewBarrier => self.cancel_preview_action(),
         }
         Ok(())
     }
@@ -1153,7 +1389,7 @@ impl Broker {
         // owned live world needs separately authenticated static metadata;
         // the receiver also refuses any unknown OS registry peer itself.
         let evidence_now = Instant::now();
-        let completed = (!busy)
+        let completed = (!busy && self.held.is_none())
             .then(|| {
                 self.children
                     .iter()
@@ -1220,6 +1456,10 @@ impl Broker {
     }
 
     fn reconcile(&mut self, accounts: &[(SavedAccount, crate::login_accounts::Account)], now: u64) -> anyhow::Result<()> {
+        self.advance_preview_action(accounts, now)?;
+        if self.held.is_some() {
+            return Ok(());
+        }
         if self.coordinator.busy() {
             return Ok(());
         }
@@ -1246,6 +1486,19 @@ impl Broker {
         if self.viewport_dirty
             && let (Some(worker), Some(viewport)) = (self.coordinator.active(), self.viewport)
         {
+            if self.has_preview_authority() {
+                let binding = self
+                    .coordinator
+                    .workers()
+                    .find(|entry| entry.binding.worker.worker == worker)
+                    .map(|entry| entry.binding)
+                    .ok_or(HostError::Unavailable)?;
+                let effects = self.coordinator.park_active(now)?;
+                self.effects(effects)?;
+                self.viewport_dirty = false;
+                self.hold_preview_action(self.viewport_request, HeldAction::Viewport { binding, viewport });
+                return Ok(());
+            }
             let effects = self.coordinator.activate(worker, Some(viewport), now)?;
             self.viewport_dirty = false;
             self.effects(effects)?;
@@ -1288,6 +1541,28 @@ impl Broker {
             open.gate.can_launch(self.coordinator.active(), self.coordinator.busy()),
             "worker launch requires an acknowledged parked renderer"
         );
+        if self.has_preview_authority() {
+            self.hold_preview_action(open.request, HeldAction::Warmup(open));
+            return Ok(());
+        }
+        self.launch_open(open, accounts, now)
+    }
+
+    fn launch_open(
+        &mut self,
+        open: PendingOpen,
+        accounts: &[(SavedAccount, crate::login_accounts::Account)],
+        now: u64,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            open.gate.can_launch(self.coordinator.active(), self.coordinator.busy()),
+            "worker warmup needs acknowledged parked worlds"
+        );
+        let account = open.account.and_then(|key| accounts.iter().find(|(saved, _)| saved.key == key));
+        anyhow::ensure!(
+            open.account.is_none() || account.is_some(),
+            "saved worker account is no longer available"
+        );
         let config = new_config(
             self.installation,
             self.host,
@@ -1309,6 +1584,7 @@ impl Broker {
     }
 
     fn fail_closed(&mut self, error: &dyn std::fmt::Display) {
+        self.cancel_preview_action();
         self.error = Some(error.to_string());
         self.active_viewport = None;
         self.opens.clear();
@@ -1382,6 +1658,8 @@ impl Broker {
                 .filter_map(|child| child.preview.metadata(Instant::now()).map(|peer| peer.cohort.source))
                 .collect(),
             previews: self.children.iter().filter_map(|child| child.preview.snapshot()).collect(),
+            preview_barrier_pending: self.held.is_some(),
+            preview_barrier_error: self.preview_barrier_error,
         }
     }
 }
@@ -1438,6 +1716,10 @@ fn host_loop(
                 None
             }
         },
+        preview_barrier: Default::default(),
+        held: None,
+        preview_barrier_error: false,
+        viewport_request: 0,
     };
     // Prepare a process-only reaper before the first child can be spawned.
     // After shutdown it refreshes cold launch permits and observes exits;
@@ -1453,6 +1735,7 @@ fn host_loop(
         broker.coordinator.set_workspace_foreground(foreground.load(Ordering::Acquire));
         if stop.load(Ordering::Acquire) && closing.is_none() {
             closing = Some(Instant::now() + CLOSE_WAIT);
+            broker.cancel_preview_action();
             broker.opens.clear();
             let effects = broker.coordinator.detach_all();
             if let Err(failure) = broker.effects(effects) {
@@ -1700,6 +1983,95 @@ mod tests {
         assert!(config.validate().is_err());
         let source = PreviewSource::new(status(&config).binding, config.lease_epoch).unwrap();
         assert!(!HostIntent::Preview { source, config: None }.controls_presentation());
+    }
+
+    #[test]
+    fn moving_or_resizing_during_a_preview_wait_keeps_the_target_and_retires_old_acknowledgments() {
+        use super::super::preview_barrier::{Ack, Barrier, Participant};
+        let config = config();
+        let binding = status(&config).binding;
+        let source = PreviewSource::new(binding, config.lease_epoch).unwrap();
+        let first = HostedViewport {
+            host_window: 7,
+            rect: aurora_session::PhysicalRect {
+                x: -900,
+                y: 40,
+                width: 640,
+                height: 360,
+            },
+        };
+        let latest = HostedViewport {
+            host_window: 7,
+            rect: aurora_session::PhysicalRect {
+                x: -350,
+                y: 90,
+                width: 960,
+                height: 540,
+            },
+        };
+        for action in [
+            HeldAction::Activate { binding, viewport: first },
+            HeldAction::Viewport { binding, viewport: first },
+        ] {
+            let action = action.with_viewport(latest);
+            assert!(
+                matches!(action,HeldAction::Activate {binding:target,viewport} | HeldAction::Viewport {binding:target,viewport}
+                if target==binding && viewport==latest)
+            );
+        }
+        let now = Instant::now();
+        let mut barrier = Barrier::default();
+        let cohort = [Participant { source, device_epoch: 1 }];
+        let old = barrier.begin(41, &cohort, now).unwrap()[0];
+        let new = barrier.begin(42, &cohort, now).unwrap()[0];
+        assert_ne!(old.challenge, new.challenge);
+        let old_ack = Ack {
+            intent_id: 41,
+            request: old,
+            surface_epoch: 1,
+            completed_frame: Some(6),
+        };
+        assert!(barrier.observe(old_ack, now).is_err());
+        assert!(!barrier.take_ready(41, now) && !barrier.take_ready(42, now));
+        barrier
+            .observe(
+                Ack {
+                    intent_id: 42,
+                    request: new,
+                    ..old_ack
+                },
+                now,
+            )
+            .unwrap();
+        barrier.reconcile(42, &cohort, now).unwrap();
+        assert!(barrier.take_ready(42, now));
+    }
+
+    #[test]
+    fn a_host_geometry_change_does_not_replace_a_held_manual_login_request() {
+        let action = HeldAction::Warmup(PendingOpen {
+            account: None,
+            gate: OpenGate::Ready,
+            reservation: None,
+            request: 73,
+        });
+        let viewport = HostedViewport {
+            host_window: 7,
+            rect: aurora_session::PhysicalRect {
+                x: 0,
+                y: 0,
+                width: 640,
+                height: 360,
+            },
+        };
+        assert!(matches!(
+            action.with_viewport(viewport),
+            HeldAction::Warmup(PendingOpen {
+                request: 73,
+                gate: OpenGate::Ready,
+                ..
+            })
+        ));
     }
 
     fn status(config: &WorkerConfig) -> Envelope {

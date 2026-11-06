@@ -102,6 +102,12 @@ struct PreviewScope {
     device_epoch: u64,
 }
 
+#[derive(Clone, Copy)]
+struct PendingPreviewSuspend {
+    request: super::preview_protocol::Suspend,
+    ticket: u64,
+}
+
 #[derive(Default)]
 struct PreviewFences {
     completed: Option<PreviewAuthority>,
@@ -158,6 +164,8 @@ pub(crate) struct WorkerBridge {
     chat: Option<super::chat_io::WorkerChannel>,
     preview_fences: PreviewFences,
     preview: Option<super::preview_lane::WorkerChannel>,
+    preview_suspend: Option<PendingPreviewSuspend>,
+    preview_suspended: Option<super::preview_protocol::Suspended>,
 }
 
 impl WorkerBridge {
@@ -215,6 +223,8 @@ impl WorkerBridge {
             chat,
             preview_fences: PreviewFences::default(),
             preview,
+            preview_suspend: None,
+            preview_suspended: None,
         }))
     }
 
@@ -380,7 +390,11 @@ impl WorkerBridge {
 
     fn preview_scope(&self) -> Option<PreviewScope> {
         self.preview_identity()
-            .filter(|_| preview_parked(self.guard.mode(), self.gate, self.admitted))
+            .filter(|_| {
+                preview_parked(self.guard.mode(), self.gate, self.admitted)
+                    && self.preview_suspend.is_none()
+                    && self.preview.as_ref().is_none_or(|preview| !preview.mailbox().is_suspended())
+            })
             .map(|(binding, lease_epoch, device_epoch)| PreviewScope {
                 binding,
                 lease_epoch,
@@ -441,14 +455,101 @@ impl WorkerBridge {
         Ok(true)
     }
 
+    /// Retire all optional work before a controller handoff/admission. Unlike
+    /// a world revoke this preserves the logical input owner and native window.
+    /// The current world stops submitting only until this ordered GPU fence
+    /// completes; the mailbox remains closed to old preview budgets afterward.
+    pub(crate) fn suspend_preview(
+        &mut self,
+        request: super::preview_protocol::Suspend,
+        renderer: &mut aurora_render::Renderer,
+    ) -> Result<Option<super::preview_protocol::Suspended>, aurora_render::SessionFenceError> {
+        use aurora_render::SessionFenceError as Error;
+        if request.validate().is_err() {
+            return Err(Error::StaleTicket);
+        }
+        let mailbox = self.preview_mailbox().ok_or(Error::Unsupported)?;
+        if !mailbox.is_suspended() || mailbox.pending_suspend() != Some(request) {
+            return Err(Error::StaleTicket);
+        }
+        let (binding, lease, device_epoch) = self.preview_identity().ok_or(Error::Unsupported)?;
+        if request.source.binding() != binding
+            || request.source.lease_epoch != lease
+            || request.device_epoch != device_epoch
+            || request.challenge == 0
+        {
+            return Err(Error::StaleTicket);
+        }
+        if !self.admitted || !matches!(self.gate, DisplayGate::Standby | DisplayGate::Active) {
+            return Err(Error::Busy);
+        }
+        if let Some(completed) = self.preview_suspended {
+            if completed.request == request {
+                return if renderer.session_boundary()?.surface_epoch == completed.surface_epoch {
+                    Ok(Some(completed))
+                } else {
+                    Err(Error::StaleTicket)
+                };
+            }
+            if completed.request.source == request.source && request.challenge <= completed.request.challenge {
+                return Err(Error::StaleTicket);
+            }
+        }
+        if self.preview_suspend.is_some_and(|pending| pending.request != request) {
+            let previous = self.preview_suspend.unwrap();
+            if previous.request.source == request.source && request.challenge <= previous.request.challenge {
+                return Err(Error::StaleTicket);
+            }
+            renderer.cancel_session_fence(previous.ticket);
+            self.preview_suspend = None;
+        }
+        if self.preview_suspend.is_none() {
+            // Init, Render, Release and this fence share the same render-thread
+            // rendezvous. An in-flight init must return before the fence can
+            // enter; its queue writes are therefore covered by the callback.
+            // The mailbox's suspension latch forbids any new optional jobs.
+            self.cancel_preview(renderer);
+            self.next_ticket = self.next_ticket.checked_add(1).ok_or(Error::StaleTicket)?;
+            renderer.request_session_fence(self.next_ticket)?;
+            self.preview_suspended = None;
+            self.preview_suspend = Some(PendingPreviewSuspend {
+                request,
+                ticket: self.next_ticket,
+            });
+        }
+        let pending = self.preview_suspend.unwrap();
+        let proof = match renderer.poll_session_fence(pending.ticket) {
+            Ok(Some(proof)) => proof,
+            Ok(None) => return Ok(None),
+            Err(error) => {
+                self.preview_suspend = None;
+                return Err(error);
+            }
+        };
+        self.preview_suspend = None;
+        if proof.surface_epoch != renderer.session_boundary()?.surface_epoch {
+            return Err(Error::StaleTicket);
+        }
+        if !mailbox.is_suspended() || mailbox.pending_suspend() != Some(request) {
+            return Err(Error::StaleTicket);
+        }
+        let completed = super::preview_protocol::Suspended {
+            request,
+            surface_epoch: proof.surface_epoch,
+            completed_frame: proof.frame,
+        };
+        self.preview_suspended = Some(completed);
+        Ok(Some(completed))
+    }
+
     pub fn world_allowed(&self) -> bool {
-        self.detached || !self.supported || self.gate.allows_world()
+        self.detached || !self.supported || (self.preview_suspend.is_none() && self.gate.allows_world())
     }
     pub fn submission_allowed(&self) -> bool {
-        self.detached || !self.supported || self.gate.allows_submission()
+        self.detached || !self.supported || (self.preview_suspend.is_none() && self.gate.allows_submission())
     }
     pub fn needs_prepared_frame(&self) -> bool {
-        !self.detached && matches!(self.gate, DisplayGate::Preparing { .. })
+        !self.detached && self.preview_suspend.is_none() && matches!(self.gate, DisplayGate::Preparing { .. })
     }
     pub fn hosted(&self) -> bool {
         !self.detached && self.guard.viewport().is_some()
@@ -506,6 +607,9 @@ impl WorkerBridge {
 
     fn cancel_fence(&mut self, renderer: &mut aurora_render::Renderer) {
         self.cancel_preview(renderer);
+        if let Some(pending) = self.preview_suspend.take() {
+            renderer.cancel_session_fence(pending.ticket);
+        }
         if let DisplayGate::Draining { ticket, .. } | DisplayGate::FrameFence { ticket, .. } = self.gate {
             renderer.cancel_session_fence(ticket);
         }
@@ -530,7 +634,10 @@ impl WorkerBridge {
         self.supported = cfg!(windows) && boundary.is_ok()
             || (cfg!(windows)
                 && (matches!(self.gate, DisplayGate::Draining { .. } | DisplayGate::FrameFence { .. })
-                    || preview_fence_busy(self.preview_fences.pending.is_some(), boundary.err())));
+                    || preview_fence_busy(
+                        self.preview_fences.pending.is_some() || self.preview_suspend.is_some(),
+                        boundary.err(),
+                    )));
         let current = native_window(window);
         let changed = self.window != 0 && current != self.window;
         self.window = current;
@@ -626,7 +733,9 @@ impl WorkerBridge {
                     "native viewport changed after preparation"
                 );
             }
-            if let Some(proof) = self.last_frame {
+            if let Some(proof) = self.last_frame
+                && self.preview_suspend.is_none()
+            {
                 anyhow::ensure!(
                     renderer.session_boundary()?.surface_epoch == proof.surface_epoch,
                     "render surface changed after preparation"

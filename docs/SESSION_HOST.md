@@ -79,9 +79,14 @@ compatibility is claimed.
   cannot share authentication proofs. Cached GPU statistics cannot renew a
   timing sample. Every peer is checked against fresh authenticated metadata and
   the real child PID, with unknown OS registry peers denied. Before enabling
-  controls, a cohort suspension barrier must drain outstanding preview/init GPU
-  work before any Prepare or new-login warmup. Stopping future budget messages
-  alone is insufficient. No monitor acceptance is claimed.
+  controls, complete and verify the cohort suspension barrier and aggregate
+  policy reservations. The barrier holds Prepare/new-login warmup until every
+  participant supplies its exact source/device/challenge GPU drain proof,
+  including pending initialization. A five-second timeout, loss or cancellation
+  cannot count as quiescence. Geometry changes park the old fitted world first;
+  cancellation can leave that connected world Standby, requiring Activate.
+  New targets and rectangles use fresh challenges. Stopping future budget
+  messages alone is insufficient. No monitor acceptance is claimed.
 
 ## Acceptance before recommending a build
 

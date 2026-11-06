@@ -39,11 +39,11 @@ impl Kind {
     fn outgoing(self, worker: bool, header: &Header) -> bool {
         matches!(
             (self, worker, header),
-            (Self::Control, false, Header::Subscribe(_) | Header::Probe(_))
+            (Self::Control, false, Header::Subscribe(_) | Header::Probe(_) | Header::Suspend(_))
                 | (
                     Self::Control,
                     true,
-                    Header::State(_) | Header::Probe(_) | Header::Sample(_) | Header::Peer(_)
+                    Header::State(_) | Header::Probe(_) | Header::Sample(_) | Header::Peer(_) | Header::Suspended(_)
                 )
                 | (Self::Image, true, Header::Image(_))
         )
@@ -174,6 +174,7 @@ struct Frame {
     payload: Vec<u8>,
     written: usize,
     authentication: bool,
+    authority: bool,
 }
 impl Frame {
     fn new(payload: Vec<u8>, authentication: bool, maximum: usize) -> Result<Self, Error> {
@@ -185,6 +186,7 @@ impl Frame {
             payload,
             written: 0,
             authentication,
+            authority: false,
         })
     }
 }
@@ -205,10 +207,24 @@ impl Framing {
         if priority || kind == Kind::Image {
             // A partial TCP frame must finish. Keep authentication proofs even
             // if the host queues its first subscription before they flush.
-            self.outgoing.retain(|old| old.authentication || old.written != 0);
+            self.outgoing.retain(|old| old.authentication || old.authority || old.written != 0);
         }
         let maximum = if kind == Kind::Image { 2 } else { MAX_CONTROL_QUEUE };
         if self.outgoing.len() >= maximum {
+            return Err(Error::Busy);
+        }
+        self.outgoing.push_back(frame);
+        Ok(())
+    }
+
+    fn queue_authority(&mut self, bytes: Vec<u8>, kind: Kind) -> Result<(), Error> {
+        let mut frame = Frame::new(bytes, false, kind.maximum())?;
+        frame.authority = true;
+        // A newer suspension retires an unsent older one, while a partial TCP
+        // frame must finish. Ordinary status replacement cannot erase this
+        // request/proof before it actually flushes.
+        self.outgoing.retain(|old| old.authentication || old.written != 0);
+        if self.outgoing.len() >= MAX_CONTROL_QUEUE {
             return Err(Error::Busy);
         }
         self.outgoing.push_back(frame);
@@ -268,7 +284,11 @@ impl Socket {
             return Err(Error::Direction);
         }
         let bytes = wire::encode(header, rgba).map_err(|_| Error::Malformed)?;
-        self.framing.queue(bytes, self.kind, priority)
+        if matches!(header, Header::Suspend(_) | Header::Suspended(_)) {
+            self.framing.queue_authority(bytes, self.kind)
+        } else {
+            self.framing.queue(bytes, self.kind, priority)
+        }
     }
 
     fn matches(&self, header: &Header) -> bool {
@@ -630,6 +650,22 @@ mod tests {
         assert_eq!(framing.outgoing.len(), 2);
         assert_eq!(framing.outgoing[0].payload, vec![1]);
         assert_eq!(framing.outgoing[1].payload, vec![4]);
+    }
+
+    #[test]
+    fn a_latest_status_never_erases_an_unsent_gpu_suspension_request_or_proof() {
+        let mut framing = Framing::default();
+        framing.queue_authority(vec![1], Kind::Control).unwrap();
+        for value in [2, 3, 4] {
+            framing.queue(vec![value], Kind::Control, true).unwrap();
+        }
+        assert_eq!(framing.outgoing.len(), 2);
+        assert!(framing.outgoing[0].authority);
+        assert_eq!(framing.outgoing[0].payload, vec![1]);
+        assert_eq!(framing.outgoing[1].payload, vec![4]);
+        framing.queue_authority(vec![5], Kind::Control).unwrap();
+        assert_eq!(framing.outgoing.len(), 1, "newer authority retires an entirely unsent request");
+        assert_eq!(framing.outgoing[0].payload, vec![5]);
     }
 
     fn connected(kind: Kind) -> (WorkerIo, HostIo) {

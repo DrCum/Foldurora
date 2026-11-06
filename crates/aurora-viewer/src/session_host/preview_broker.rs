@@ -2,6 +2,7 @@
 //! supplied by accepted control state; socket authentication is necessary but
 //! never sufficient to retain an image or renew a GPU budget.
 
+use super::preview_barrier::{Participant, Request as BarrierRequest};
 use super::preview_io::{PreviewCache, PreviewConfig, PreviewSnapshot};
 use super::preview_protocol::{self as wire, BudgetPermit, CohortReport, GpuSample, Header, Peer as NativePeer, PreviewSource, Probe};
 use super::preview_transport::{HostIo, Kind};
@@ -98,6 +99,9 @@ impl Evidence {
     fn peer_evidence(&self, now: Instant) -> Option<(NativePeer, Instant)> {
         self.metadata.filter(|(_, at)| current(*at, now))
     }
+    fn known_peer(&self, source: PreviewSource) -> Option<NativePeer> {
+        self.metadata.map(|(peer, _)| peer).filter(|peer| peer.cohort.source == source)
+    }
     fn completed(&self, now: Instant) -> Option<(GpuSample, Instant)> {
         self.sample
             .filter(|(sample, at)| current(*at, now) && self.peer(now) == Some(sample.peer))
@@ -134,6 +138,10 @@ pub(crate) struct Peer {
     next_subscription: Instant,
     budget_request: Option<Probe>,
     snapshot: Option<Arc<PreviewSnapshot>>,
+    ever_authorized: bool,
+    suspending: Option<wire::Suspend>,
+    suspended: Option<wire::Suspended>,
+    resume_after: Option<u64>,
 }
 
 impl Peer {
@@ -154,6 +162,10 @@ impl Peer {
             next_subscription: Instant::now(),
             budget_request: None,
             snapshot: None,
+            ever_authorized: false,
+            suspending: None,
+            suspended: None,
+            resume_after: None,
         }
     }
     pub fn set_control(&mut self, source: Option<PreviewSource>, live: bool, parked: bool, now: Instant) {
@@ -167,6 +179,9 @@ impl Peer {
             self.evidence.clear();
             self.budget_request = None;
             self.snapshot = None;
+            self.suspending = None;
+            self.suspended = None;
+            self.resume_after = None;
         }
         if !parked && self.parked {
             self.image = None;
@@ -185,7 +200,11 @@ impl Peer {
             && match kind {
                 Kind::Control => self.control.is_none(),
                 Kind::Image => {
-                    self.control.is_some() && self.image.is_none() && self.parked && self.config.is_some_and(|(_, config)| config.visible)
+                    self.suspending.is_none()
+                        && self.control.is_some()
+                        && self.image.is_none()
+                        && self.parked
+                        && self.config.is_some_and(|(_, config)| config.visible)
                 }
             }
     }
@@ -233,6 +252,7 @@ impl Peer {
                 visible: false,
                 challenge,
                 budget: None,
+                resume_after: self.resume_after,
             });
             if self.control.as_mut().is_some_and(|control| control.queue(&disabled).is_err()) {
                 self.disconnect();
@@ -261,6 +281,11 @@ impl Peer {
         let Some(control) = &mut self.control else {
             return;
         };
+        if let Some(request) = self.suspending
+            && self.suspended.is_none_or(|proof| proof.request != request)
+        {
+            let _ = control.queue(&Header::Suspend(request));
+        }
         if now >= self.next_probe
             && let Some(challenge) = self.evidence.next()
             && control.queue(&Header::Probe(Probe { source, challenge })).is_ok()
@@ -291,11 +316,21 @@ impl Peer {
                 Header::Probe(probe) => self.budget_request = Some(probe),
                 Header::State(state) => {
                     if let Some(cache) = &mut self.cache {
-                        if !self.parked && state.availability == wire::Availability::Live {
+                        if self.suspending.is_some() || (!self.parked && state.availability == wire::Availability::Live) {
                             cache.purge();
                         } else {
                             cache.receive_state(state, received);
                         }
+                    }
+                }
+                Header::Suspended(proof) => {
+                    if self.suspending == Some(proof.request)
+                        && proof.validate().is_ok()
+                        && self.evidence.known_peer(source).is_some_and(|peer| {
+                            peer.cohort.source == proof.request.source && peer.cohort.device_epoch == proof.request.device_epoch
+                        })
+                    {
+                        self.suspended = Some(proof);
                     }
                 }
                 _ => {}
@@ -315,6 +350,51 @@ impl Peer {
     pub fn take_budget_request(&mut self) -> Option<Probe> {
         self.budget_request.take()
     }
+    pub fn has_authority(&self) -> bool {
+        self.ever_authorized
+    }
+    pub fn participant(&self, _now: Instant) -> Result<Option<Participant>, HostError> {
+        if !self.ever_authorized {
+            return Ok(None);
+        }
+        let source = self
+            .source
+            .filter(|_| self.live && self.control.is_some())
+            .ok_or(HostError::Unavailable)?;
+        let peer = self.evidence.known_peer(source).ok_or(HostError::Unavailable)?;
+        Ok(Some(Participant {
+            source: peer.cohort.source,
+            device_epoch: peer.cohort.device_epoch,
+        }))
+    }
+    pub fn suspend(&mut self, request: BarrierRequest, now: Instant) -> Result<(), HostError> {
+        if self.participant(now)? != Some(request.participant) {
+            return Err(HostError::Unavailable);
+        }
+        self.suspending = Some(wire::Suspend {
+            source: request.participant.source,
+            device_epoch: request.participant.device_epoch,
+            challenge: request.challenge,
+        });
+        self.suspended = None;
+        self.resume_after = None;
+        self.image = None;
+        if let Some(cache) = &mut self.cache {
+            cache.purge();
+        }
+        self.publish(now);
+        Ok(())
+    }
+    pub fn suspension(&self) -> Option<wire::Suspended> {
+        self.suspended
+    }
+    pub fn resume_proven(&mut self) {
+        if let Some(proof) = self.suspended.filter(|proof| Some(proof.request) == self.suspending) {
+            self.resume_after = Some(proof.request.challenge);
+            self.suspending = None;
+            self.next_subscription = Instant::now();
+        }
+    }
     pub fn subscription(&mut self, request: Option<Probe>, budget: Option<BudgetPermit>, now: Instant) {
         let Some((revision, config)) = self.config else {
             return;
@@ -322,6 +402,9 @@ impl Peer {
         let Some(source) = self.source.filter(|_| self.live) else {
             return;
         };
+        if self.suspending.is_some() {
+            return;
+        }
         if request.is_none() && now < self.next_subscription {
             return;
         }
@@ -343,13 +426,17 @@ impl Peer {
             visible: config.visible,
             challenge,
             budget: budget.filter(|budget| request.is_some_and(|request| request.challenge == budget.request)),
+            resume_after: self.resume_after,
         });
         if control.queue(&header).is_ok() {
+            if matches!(&header,Header::Subscribe(subscription) if subscription.budget.is_some()) {
+                self.ever_authorized = true;
+            }
             self.next_subscription = now + PROBE_PERIOD;
         }
     }
     pub fn poll_image(&mut self, now: Instant) {
-        let Some(source) = self.source.filter(|_| self.live && self.parked) else {
+        let Some(source) = self.source.filter(|_| self.live && self.parked && self.suspending.is_none()) else {
             self.image = None;
             self.publish(now);
             return;
