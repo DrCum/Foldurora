@@ -9,6 +9,8 @@ pub(crate) mod chat_transport;
 mod chat_ui;
 mod chat_window;
 mod native;
+pub(crate) mod preview_io;
+pub(crate) mod preview_protocol;
 pub(crate) mod profile;
 mod software;
 pub(crate) mod transport;
