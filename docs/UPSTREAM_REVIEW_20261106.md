@@ -1,5 +1,7 @@
 # Upstream review — 6 November 2026
 
+Latest reviewed upstream: [`b962b2a759b2`](https://github.com/Aurora-Viewer/Aurora-Viewer/commit/b962b2a759b24856c2c12b75e98a50e463f888e5). A second isolated branch, `sync/upstream-safe-b962b2a7`, adds four intact commits to the original nine-candidate checkpoint `5cf34c58`; all thirteen still require integrated validation. The original branch and its running Windows checks are preserved.
+
 Upstream: [`Aurora-Viewer/Aurora-Viewer` at `fccd1629a67c`](https://github.com/Aurora-Viewer/Aurora-Viewer/commit/fccd1629a67c5ea091c05a881761ccd152a1c20f).
 Fork baseline: `f504342231006423d392224f1225bc08e9e32fb5`. The nine candidate commits below were cherry-picked intact with `-x` onto `sync/upstream-safe-20261106`; resulting code checkpoint: `9c853ef0c3c961b6cceb461b373882831bb8d0e5`.
 
@@ -20,6 +22,19 @@ No conflicts were resolved. Main and the feature checkpoints remain untouched. T
 | [`d981d28600a2`](https://github.com/Aurora-Viewer/Aurora-Viewer/commit/d981d28600a2cfd7753641d043e13c5681d43682) | fix(chat): the import at login follows the saving settings (#2540) | No unresolved dependency or semantic overlap found in static review; automated validation pending. |
 
 The exact candidate order is the table order. Demo-source reads use existing sealed-cache APIs; environment asset rights do not change production profile paths; the asset-ID display helper introduces its own consumers; script-save result producers and consumers are included together. Terrain sampling does not change the fork's camera or viewport units.
+
+## Second snapshot: four additional candidates
+
+The following commits were cherry-picked intact with `-x`, without conflicts, in this order. Code checkpoint: `221045101ba2239ccf02a980849e4d6b07bd5b73`. Static review and independent temporary-index checks were clean against both the nine-candidate baseline and frozen host `5dce5412`; this does not replace integrated builds/tests.
+
+| Upstream commit | Change | Semantic review |
+|---|---|---|
+| [`b30f7982a118`](https://github.com/Aurora-Viewer/Aurora-Viewer/commit/b30f7982a118d49e61b203a26a02b58e5ff9cb2a) | fix(ui): Linux stack snapshots no longer run on the small alternate signal stack (#2668) | Only TASKS and crash/linux.rs. No host/frame/viewport/startup dependency; fatal-signal SA_ONSTACK remains intact. |
+| [`d37702436d6b`](https://github.com/Aurora-Viewer/Aurora-Viewer/commit/d37702436d6b4808aa467f946d774eb4180c22a8) | refactor(avatar): bridge on per-session channels, gaze and RLVa version like the Legacy Viewer (#2662) | Settings v32 migration changes lookat.aim intentionally; disjoint from private config/cache-root hooks. Bridge/IK channel derivation and Rust+LSL consumers travel together; no session_host protocol or process identity changes. |
+| [`a86f1a3411af`](https://github.com/Aurora-Viewer/Aurora-Viewer/commit/a86f1a3411afb23662f2037e0856adcdaaf2128d) | refactor(world): pass-through and portals follow the land's build rights (#2663) | movement_exit return-type change carries its production caller and test updates. New land_rights helper and World methods included. Existing parcel_icons permission wrapper remains bool; no deferred drop-input API needed. No viewport ray/picking coordinate math altered. |
+| [`b962b2a759b2`](https://github.com/Aurora-Viewer/Aurora-Viewer/commit/b962b2a759b24856c2c12b75e98a50e463f888e5) | feat(avatar): add shared Camera and A-Pose editor controls (#2670) | Settings field/default plus all shape/wearable/preferences call sites included. Camera method cancels appearance animation only; world viewport projection/drag/ray math unchanged. Host standby skips this UI path, active camera remains process-local. |
+
+The fourteen deferrals below remain deferred. Their recorded textual paths describe the original nine-candidate simulation; no deferred patch was manually combined or partially extracted to create this later batch. New or naturally disappearing textual conflicts do not approve semantic overlap.
 
 ## Deferred for review
 
@@ -46,7 +61,8 @@ Deferred commits were not partially extracted. Picking, login/session ownership,
 
 - Candidate sequence: all nine applied without textual conflicts; resulting code tree matched the independent temporary-index simulation (`423a08a216d570546c279ab56ea74f10231da5dd`).
 - Static dependency and fork-overlap review: completed for the nine candidates.
-- Formatting, strict workspace/all-target Clippy, full workspace tests and a normal Linux viewer build: pending on this candidate batch.
+- Original nine-candidate checkpoint `5cf34c58`: formatting passed locally; exact-source Windows full tests/build/package are in progress.
+- Thirteen-candidate branch: formatting, strict workspace/all-target Clippy, full workspace tests and normal viewer builds remain pending.
 - Windows package/build and runtime checks: pending.
 - Grid-dependent acceptance: human testing only; no automated grid login performed.
 

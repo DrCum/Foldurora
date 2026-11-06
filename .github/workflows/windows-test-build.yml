@@ -6,7 +6,7 @@ name: Windows test build
 # retain that result for the human who will test it.
 on:
   push:
-    branches: [feat/overnight-integration, feat/workspace-followup, fix/character-gpu-coexistence, feat/viewport-ui-integration, sync/upstream-safe-20261106]
+    branches: [feat/overnight-integration, feat/workspace-followup, fix/character-gpu-coexistence, feat/viewport-ui-integration, sync/upstream-safe-20261106, sync/upstream-safe-b962b2a7]
   workflow_dispatch:
 
 permissions:
@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   windows:
-    if: github.ref == 'refs/heads/feat/overnight-integration' || github.ref == 'refs/heads/feat/workspace-followup' || github.ref == 'refs/heads/fix/character-gpu-coexistence' || github.ref == 'refs/heads/feat/viewport-ui-integration' || github.ref == 'refs/heads/sync/upstream-safe-20261106'
+    if: github.ref == 'refs/heads/feat/overnight-integration' || github.ref == 'refs/heads/feat/workspace-followup' || github.ref == 'refs/heads/fix/character-gpu-coexistence' || github.ref == 'refs/heads/feat/viewport-ui-integration' || github.ref == 'refs/heads/sync/upstream-safe-20261106' || github.ref == 'refs/heads/sync/upstream-safe-b962b2a7'
     runs-on: windows-latest
     timeout-minutes: 90
     defaults:
