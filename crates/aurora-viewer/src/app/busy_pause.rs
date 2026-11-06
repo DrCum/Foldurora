@@ -10,6 +10,11 @@
 //! one, the textures stay: the card is short of time, not of memory, and the
 //! world comes back sharp at once. What is left of the world is blurred
 //! and darkened; a notice over it and the window title say so. Not in the Legacy Viewer.
+//!
+//! A known shared viewer now pauses an eligible background world before its
+//! next packet, without waiting for two completed slow frames. This addresses
+//! observed multi-viewer contention; it does not establish the reset's cause.
+//! Shared-only pause releases after sustained peer absence as well as focus.
 
 use super::*;
 
@@ -20,13 +25,19 @@ const SLOW_MS: f32 = 150.0;
 /// Slow frames in a row before the pause: one long frame (a burst of
 /// uploads, a pipeline build) is not a busy card.
 const SLOW_FRAMES: u8 = 2;
+/// Two registry periods without a peer: one failed directory read must not
+/// suddenly submit a full background world onto a shared graphics card.
+const PEER_RELEASE: Duration = Duration::from_secs(4);
 
 /// Whether the 3D drawing is paused, see the module.
 #[derive(Debug, Default)]
 pub(super) struct BusyPause {
     /// Slow GPU frames in a row while behind.
     slow: u8,
-    paused: bool,
+    overloaded: bool,
+    shared: bool,
+    last_peer: Option<Instant>,
+    reported_shared: bool,
     /// The last GPU time counted: the renderer gives its last measure
     /// again each frame until a new one comes, and one slow frame seen
     /// twice is not two.
@@ -37,6 +48,32 @@ pub(super) struct BusyPause {
 }
 
 impl BusyPause {
+    /// Choose the shared-viewer guard before render resolution and draw
+    /// lists are built. Login peers and unknown memory use still count:
+    /// either can start a world before a slow GPU frame finishes.
+    fn prepare(&mut self, behind: bool, allowed: bool, peers: bool, now: Instant) {
+        if !behind || !allowed {
+            self.slow = 0;
+            self.overloaded = false;
+            self.shared = false;
+            self.last_peer = None;
+        } else {
+            if peers {
+                self.last_peer = Some(now);
+            }
+            self.shared = self.last_peer.is_some_and(|at| now.saturating_duration_since(at) < PEER_RELEASE);
+            if self.shared {
+                self.slow = 0;
+            }
+            if !self.shared {
+                self.last_peer = None;
+            }
+        }
+        if !self.shared {
+            self.reported_shared = false;
+        }
+    }
+
     /// One frame: `behind` the window has not the focus, `allowed` the
     /// setting is on and nothing needs the 3D drawn (a photo, a headset, a
     /// timed run), `gpu_ms` the GPU time the renderer measured last (the
@@ -44,25 +81,37 @@ impl BusyPause {
     /// is in front again: its own frames are then short and say nothing of
     /// the card. Returns whether the state changed.
     pub(super) fn update(&mut self, behind: bool, allowed: bool, gpu_ms: Option<f32>) -> bool {
-        let was = self.paused;
+        let was = self.paused();
         let new = gpu_ms.filter(|&ms| self.last_ms != Some(ms));
         if gpu_ms.is_some() {
             self.last_ms = gpu_ms;
         }
         if !behind || !allowed {
             self.slow = 0;
-            self.paused = false;
-        } else if !self.paused
+            self.overloaded = false;
+            self.shared = false;
+            self.last_peer = None;
+            self.reported_shared = false;
+        } else if !self.overloaded
+            && !self.shared
             && let Some(ms) = new
         {
             self.slow = if ms >= SLOW_MS { self.slow.saturating_add(1) } else { 0 };
-            self.paused = self.slow >= SLOW_FRAMES;
+            self.overloaded = self.slow >= SLOW_FRAMES;
         }
-        self.paused != was
+        self.paused() != was
     }
 
     pub(super) fn paused(&self) -> bool {
-        self.paused
+        self.overloaded || self.shared
+    }
+
+    fn shared_only(&self) -> bool {
+        self.shared && !self.overloaded
+    }
+
+    pub(super) fn note_shared_packet(&mut self) -> Option<bool> {
+        (self.shared && !std::mem::replace(&mut self.reported_shared, true)).then_some(self.overloaded)
     }
 }
 
@@ -81,7 +130,8 @@ impl App {
         self.scene.textures.drawing_paused() || self.busy_pause.paused()
     }
 
-    /// Every frame, after the render: the pause follows the GPU time.
+    /// Before the packet is built and after rendering: sharing needs no
+    /// completed GPU measurement; the slow-frame fallback uses each new one.
     pub(super) fn busy_pause_frame(&mut self, vr: bool) {
         let mut timed = self.capture.is_some() || self.frame_profile.enabled();
         let (mut behind, mut gpu_ms) = (!self.focused, self.last_render.gpu_ms);
@@ -91,14 +141,24 @@ impl App {
             (behind, gpu_ms, timed) = (true, Some(ms), false);
         }
         let allowed = self.settings.background_gpu_pause && !timed && !vr && !self.snapshots.drawing();
-        if self.busy_pause.update(behind, allowed, gpu_ms) {
+        let shared = self.in_world() && self.instances.sharing() && !self.instances.peers().list.is_empty();
+        let was = self.busy_pause.paused();
+        self.busy_pause.prepare(behind, allowed, shared, Instant::now());
+        self.busy_pause.update(behind, allowed, gpu_ms);
+        if was != self.busy_pause.paused() {
             if self.busy_pause.paused() {
-                log::warn!(
-                    "3D paused behind: the GPU frames take {:.0} ms, the card is busy with another program",
-                    gpu_ms.unwrap_or_default()
-                );
+                if self.busy_pause.shared_only() {
+                    log::info!(
+                        "3D paused behind: another viewer shares the card; protecting the next world frame without waiting for slow GPU measurements"
+                    );
+                } else {
+                    log::warn!(
+                        "3D paused behind: the GPU frames take {:.0} ms, the card is busy with another program",
+                        gpu_ms.unwrap_or_default()
+                    );
+                }
             } else {
-                log::info!("3D drawing resumed");
+                log::info!("3D drawing resumed at frame {}", self.frame_count);
             }
         }
     }
@@ -127,7 +187,12 @@ impl App {
             .interactable(false)
             .show(ctx, |ui| {
                 crate::ui::widgets::overlay(ui, p, egui::Margin::symmetric(16, 10), |ui| {
-                    ui.label(egui::RichText::new(aurora_i18n::tr!("busy-pause-notice")).color(p.amber));
+                    let text = if self.busy_pause.shared_only() {
+                        aurora_i18n::tr!("shared-viewer-pause-notice")
+                    } else {
+                        aurora_i18n::tr!("busy-pause-notice")
+                    };
+                    ui.label(egui::RichText::new(text).color(p.amber));
                 });
             });
     }
@@ -136,6 +201,79 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_shared_background_world_pauses_before_any_gpu_measurement_and_first_packet() {
+        let mut b = BusyPause::default();
+        let now = Instant::now();
+        b.prepare(true, true, true, now);
+        assert!(b.paused() && b.shared_only());
+        assert_eq!(b.note_shared_packet(), Some(false), "no reactive slow-frame latch is needed");
+        assert_eq!(b.note_shared_packet(), None, "one diagnostic per shared pause");
+        b.update(true, true, None);
+        assert!(b.paused());
+        b.update(true, true, Some(671.6));
+        b.update(true, true, Some(542.2));
+        assert!(
+            b.shared_only(),
+            "measurements returned during shared pause do not create a stale slow latch"
+        );
+    }
+
+    #[test]
+    fn transient_registry_misses_do_not_resume_but_sustained_absence_does() {
+        let mut b = BusyPause::default();
+        let t = Instant::now();
+        b.prepare(true, true, true, t);
+        b.prepare(true, true, false, t + Duration::from_secs(2));
+        assert!(b.paused(), "one missed discovery pass cannot submit the world again");
+        b.prepare(true, true, true, t + Duration::from_secs(3));
+        b.prepare(true, true, false, t + Duration::from_secs(6));
+        assert!(b.paused(), "a newly seen peer starts a fresh absence interval");
+        b.prepare(true, true, false, t + Duration::from_secs(7));
+        assert!(!b.paused(), "shared-only pause ends after sustained peer absence");
+        assert_eq!(b.note_shared_packet(), None);
+        b.prepare(true, true, true, t + Duration::from_secs(8));
+        assert_eq!(
+            b.note_shared_packet(),
+            Some(false),
+            "a later shared pause has its own packet diagnostic"
+        );
+    }
+
+    #[test]
+    fn focus_and_exemptions_release_shared_pause_immediately_and_reentry_is_protected() {
+        let t = Instant::now();
+        for (behind, allowed) in [(false, true), (true, false)] {
+            let mut b = BusyPause::default();
+            b.prepare(true, true, true, t);
+            assert!(b.paused());
+            b.prepare(behind, allowed, true, t + Duration::from_millis(1));
+            assert!(!b.paused());
+            b.prepare(true, true, false, t + Duration::from_millis(2));
+            assert!(!b.paused(), "exempt state cleared the old peer-absence grace");
+            b.prepare(true, true, true, t + Duration::from_millis(3));
+            assert!(b.paused(), "background reentry protects the first packet again");
+        }
+    }
+
+    #[test]
+    fn a_previous_overload_latch_survives_peer_exit_but_focus_still_releases_it() {
+        let mut b = BusyPause::default();
+        let t = Instant::now();
+        b.update(true, true, Some(400.0));
+        b.update(true, true, Some(410.0));
+        assert!(b.paused() && !b.shared_only());
+        b.prepare(true, true, true, t);
+        assert_eq!(b.note_shared_packet(), Some(true));
+        b.prepare(true, true, false, t + PEER_RELEASE);
+        assert!(
+            b.paused() && !b.shared_only(),
+            "existing overload protection retains its focus-based release"
+        );
+        b.prepare(false, true, false, t + PEER_RELEASE);
+        assert!(!b.paused());
+    }
 
     #[test]
     fn two_slow_frames_behind_pause_until_the_focus_comes_back() {

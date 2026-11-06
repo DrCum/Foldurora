@@ -1,5 +1,17 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Foldurora shared-GPU contention mitigation (user crash report, 2026-11-06;
+  no issue): source `81c167e2` passed offline checks, but live multi-character
+  testing lost graphics devices in background viewers with long GPU frames.
+  Memory exhaustion and the reset's underlying cause are not established.
+  Pause background world drawing before the next render packet when another
+  live viewer shares the card; preserve focus/photo/VR/setting exemptions and
+  separate reactive overload recovery. Verify first-packet geometry/draw gating,
+  peer expiry and isolated real-registry behavior. Human GPU coexistence
+  acceptance remains required; main and earlier checkpoints stay unmerged.
+  The user has confirmed that the multi-monitor world viewport works; the
+  optional viewport-contained interface is being implemented independently.
+
 - 🔧 Foldurora workspace follow-up (user continuation, 2026-11-06; no issue):
   keep the verified PR #2/source `62cdd4ea` checkpoint while correcting repeated
   Open feedback, adding readable account/grid/phase captions and gently recovering

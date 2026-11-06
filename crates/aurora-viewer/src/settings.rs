@@ -1239,8 +1239,9 @@ pub struct Settings {
     pub background_fps_cap: bool,
     pub background_fps_limit: u32,
     /// A window behind whose GPU frames crawl (another program in front
-    /// keeps the card busy) stops drawing its 3D until it has the focus
-    /// again, before Windows resets the card (app/busy_pause.rs). On by
+    /// keeps the card busy, or another viewer shares it) stops drawing its 3D
+    /// until focus returns; shared-only pause also ends after peer absence.
+    /// This reduces contention and reset risk (app/busy_pause.rs). On by
     /// default; not in the Legacy Viewer.
     pub background_gpu_pause: bool,
     /// Maximum live particles (0 = particles off).

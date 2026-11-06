@@ -8446,15 +8446,16 @@ impl App {
         self.scene.textures.set_window_state(self.focused, minimized);
         // (a demo or a timed run neither publishes nor reads, instances.rs)
         let timed = self.capture.is_some() || self.frame_profile.enabled();
+        let sharing = crate::instances::coexistence_enabled(self.demo, timed);
         self.instances.tick(
-            !self.demo && !timed,
+            sharing,
             crate::instances::Own {
                 usage: self.scene.textures.video_usage(),
                 active: self.focused && !minimized,
                 luid: self.scene.textures.card_luid(),
             },
         );
-        self.scene.textures.set_card_sharing(!self.demo && !timed);
+        self.scene.textures.set_card_sharing(sharing);
         self.scene.textures.set_peers(&self.instances.peers());
         aurora_render::frame_priority::apply();
         self.world.anti_spam.configure(self.settings.anti_spam);
@@ -8935,6 +8936,9 @@ impl App {
         self.viewfinder_frame(&mut gfx.renderer);
         self.photo_isolate_frame(&mut gfx.renderer);
         let photo = self.photo_frame(&mut gfx.renderer);
+        // A second viewer can occupy the card before a slow frame finishes.
+        // Select the pause before this packet's targets and world draw lists.
+        self.busy_pause_frame(gfx.renderer.vr_engaged());
         let viewport = self.world_viewport_for_size((w, h), gfx.renderer.vr_engaged());
         self.world_viewport = (viewport != aurora_render::WorldViewport::full((w, h))).then_some(viewport);
         let window_aspect = viewport.width as f32 / viewport.height as f32;
@@ -11064,6 +11068,16 @@ impl App {
         } else {
             &self.empty_lists
         };
+        if let Some(slow_latched) = self.busy_pause.note_shared_packet() {
+            log::info!(
+                "shared-viewer pause packet: frame {}, resolution divisor {}, world draws withheld {}, slow_latched {}, prior GPU ms {:?}",
+                self.frame_count,
+                fp.rlva_resolution_divisor,
+                std::ptr::eq(lists, &self.empty_lists),
+                slow_latched,
+                self.last_render.gpu_ms
+            );
+        }
         let stats = if self.demo && gfx.renderer.capture_request && std::env::var_os("AURORA_DEMO_RENDER_TEXTURE").is_some() {
             gfx.renderer.render_world_texture_capture(fp, lists)
         } else {
