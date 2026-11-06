@@ -80,10 +80,7 @@ impl App {
             Action::Zoom => {
                 if let Some((center, extent)) = self.scene.click_bounds(&self.world, idx) {
                     let object = crate::camera::pick_focus_object(&self.world, idx, now);
-                    let aspect = self.gfx.as_ref().map_or(1.0, |g| {
-                        let s = g.window.inner_size();
-                        s.width as f32 / s.height.max(1) as f32
-                    });
+                    let aspect = self.view_aspect();
                     self.camera
                         .zoom_object(center, extent, object, aspect, &mut self.world.agent, &self.settings.camera);
                 }

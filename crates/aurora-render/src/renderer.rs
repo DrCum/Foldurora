@@ -5272,7 +5272,8 @@ impl Backend {
         // (the render size is the tile's): cascades fitted to a tile, centred
         // on the view axis and as narrow as the tile, left the receivers of
         // the tiles off that axis outside them
-        let aspect = (self.config.width as f32 * f.photo_tile.x_axis.x) / (self.config.height.max(1) as f32 * f.photo_tile.y_axis.y);
+        let viewport = self.output_viewport();
+        let aspect = (viewport.width as f32 * f.photo_tile.x_axis.x) / (viewport.height as f32 * f.photo_tile.y_axis.y);
         let inv_view = f.view.inverse();
         let light_dir = -f.sun_dir.normalize_or(Vec3::Z);
         let mut out = [Mat4::IDENTITY; CASCADES];
