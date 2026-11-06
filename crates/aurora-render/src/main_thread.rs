@@ -187,6 +187,7 @@ pub struct Renderer {
     /// Desired window surface generation, carried by each frame packet.
     surface_epoch: u64,
     session_fences: Requests,
+    session_preview: crate::session_preview::Owner,
     vsync: bool,
     settings: RenderSettings,
     msaa_supported: Vec<u32>,
@@ -518,6 +519,7 @@ impl Renderer {
         .filter(|_| !crate::device_lost::DEMO_HANG_TAKEN.swap(true, std::sync::atomic::Ordering::Relaxed))
         .map(|frame| (frame, queue.clone()));
         let backend = Backend::new(BackendInit {
+            preview_atlas: None,
             vr: vr.clone(),
             gpu_frames: gpu_frames.clone(),
             device: device.clone(),
@@ -612,6 +614,7 @@ impl Renderer {
             frames: 0,
             surface_epoch: 1,
             session_fences: Requests::default(),
+            session_preview: crate::session_preview::Owner::default(),
             last_stats: RenderStats::default(),
             fresh: false,
             gpu_frames,
@@ -1207,6 +1210,7 @@ impl Renderer {
         ui: Option<crate::EguiFrame>,
         output: Option<wgpu::Texture>,
     ) -> RenderStats {
+        self.session_preview.invalidate();
         let t0 = Instant::now();
         let mut ui = ui;
         if let Some((frame, queue)) = &self.demo_hang
@@ -1338,6 +1342,7 @@ impl Renderer {
 
         // ---- to the backend
         let mut results: [Option<Box<FrameResult>>; 2] = [None, None];
+        let mut side_result = None;
         let mut waited = free_wait;
         let mut gone = false;
         match &mut self.host {
@@ -1348,8 +1353,11 @@ impl Renderer {
                         // (added to the wait before the packet: replaced,
                         // the back-pressure counted as the packet's work)
                         waited += s.waited;
-                        if let Some(Done::Frame(r)) = s.previous {
-                            results[0] = Some(r);
+                        if let Some(done) = s.previous {
+                            match done {
+                                Done::Frame(r) => results[0] = Some(r),
+                                other => side_result = Some(other),
+                            }
                         }
                     }
                     Err(_) => gone = true,
@@ -1378,6 +1386,9 @@ impl Renderer {
         }
         for r in results.into_iter().flatten() {
             self.apply(*r);
+        }
+        if let Some(done) = side_result {
+            self.apply_done(done);
         }
         if gone {
             self.fail();
@@ -1538,6 +1549,13 @@ impl Renderer {
             Done::Frame(result) => self.apply(*result),
             Done::SessionFence(reply) => self.session_fences.receive(reply),
             Done::Pick(_) => {}
+            Done::SessionPreview(reply) => {
+                if let Some(spent) = self.session_preview.receive(*reply)
+                    && self.spare.len() < SPARE_PACKETS
+                {
+                    self.spare.push(*spent);
+                }
+            }
         }
     }
 
@@ -1570,6 +1588,7 @@ impl Renderer {
     pub fn request_session_fence(&mut self, ticket: u64) -> Result<(), SessionFenceError> {
         self.session_fences_supported()?;
         self.session_fences.request(ticket)?;
+        self.session_preview.fence_requested(ticket);
         self.drive_session_fence()
     }
 
@@ -1579,12 +1598,17 @@ impl Renderer {
         self.session_fences_supported()?;
         self.session_fences.check(ticket)?;
         self.drive_session_fence()?;
-        self.session_fences.take(ticket)
+        let completed = self.session_fences.take(ticket)?;
+        if let Some(proof) = completed {
+            self.session_preview.fence_consumed(proof);
+        }
+        Ok(completed)
     }
 
     /// Release a host request during lease failure/detachment. Old callbacks
     /// retain their original identity; ordinary rendering can resume at once.
     pub fn cancel_session_fence(&mut self, ticket: u64) -> bool {
+        self.session_preview.invalidate();
         self.session_fences.cancel(ticket)
     }
 
@@ -1621,6 +1645,262 @@ impl Renderer {
             Err(_) => {
                 self.fail();
                 Err(SessionFenceError::RendererFailed)
+            }
+        }
+    }
+
+    /// Explicit opt-in backend, not a screenshot shortcut. Call only for an
+    /// admitted visible standby worker after consuming its quiescence fence.
+    /// Camera/vision policy must be current; unknown budgets and resource
+    /// backlogs defer the request before its journal can leave the main thread.
+    /// No native output, UI, HUD, picking or session-presentation proof is made.
+    /// Build CPU draw lists for `session_preview::projection` (or a conservative
+    /// enclosing frustum); GPU culling is adjusted to the preview automatically.
+    pub fn request_session_preview(
+        &mut self,
+        request: crate::session_preview::Request,
+        mut params: FrameParams,
+        lists: &DrawLists,
+    ) -> Result<(), crate::session_preview::Error> {
+        use crate::session_preview::{self as preview, Error};
+        self.preview_supported()?;
+        self.drive_session_preview()?;
+        let now = Instant::now();
+        self.session_preview.check(&request, now)?;
+        preview::validate_params(&params)?;
+        if request.admission.fence.surface_epoch != self.surface_epoch {
+            return Err(Error::NotAdmitted);
+        }
+        if !preview::memory_safe(self.video_memory.read_fresh(&self.device, Duration::from_millis(750))) {
+            return Err(Error::Budget);
+        }
+        if self.records.slot_count() > preview::MAX_SCENE_SLOTS
+            || self.records.faces.len() > preview::MAX_SCENE_SLOTS
+            || self.cull.objects.len() > preview::MAX_SCENE_SLOTS
+            || !preview::lists_ready(lists)
+            || self.uploads.pending_copies()
+            || self.writes.counts()[2] != 0
+            || self.writes.bytes() > preview::MAX_JOURNAL_BYTES
+            || !self.textures.session_preview_ready()
+            || !self.pick_requests.is_empty()
+            || !self.drawn_requests.is_empty()
+            || self.capture_request
+            || self.capture_scene
+            || self.snapshot_request.is_some()
+            || self.snapshot_sent
+            || self.histogram_request.is_some()
+        {
+            return Err(Error::SceneNotReady);
+        }
+        if self.session_preview.needs_init() {
+            let scene = self.scene_gpu();
+            let submitted = match &self.host {
+                Host::Thread { owner, .. } => owner.try_submit(Job::SessionPreview(preview::Job::Init {
+                    size: request.size,
+                    observed_at: request.admission.observed_at,
+                    scene: Box::new(scene),
+                })),
+                Host::Inline(_, _) => return Err(Error::Unsupported),
+            };
+            match submitted {
+                Ok(Some(submitted)) => {
+                    if let Some(done) = submitted.previous {
+                        self.apply_done(done);
+                    }
+                    self.session_preview.initializing();
+                }
+                Ok(None) => {}
+                Err(_) => {
+                    self.fail();
+                    return Err(Error::RendererFailed);
+                }
+            }
+            // A future call needs fresh admission after initialization. Its
+            // sequence/rate and all scene dirty ranges remain unconsumed.
+            return Err(Error::Busy);
+        }
+        let key = self.session_preview.key(&request);
+        // Build/strip before reserving the short rendezvous lock. Busy leaves
+        // the actual scene's dirty journal, uploads and frame number untouched.
+        let mut stripped = preview::world_lists(lists);
+        preview::strip(&mut params, &mut stripped, request.size)?;
+        let Self {
+            host,
+            records,
+            cull,
+            device,
+            writes,
+            uploads,
+            textures,
+            geometry,
+            palette_buffer,
+            prev_palette_buffer,
+            skin_bind_buffer,
+            bind_generation,
+            video_memory,
+            ..
+        } = self;
+        let mut build_error = None;
+        let submitted = match host {
+            Host::Inline(_, _) => return Err(Error::Unsupported),
+            Host::Thread { owner, .. } => owner.try_submit_with(|| {
+                records.flush(device, writes);
+                cull.objects.flush(device, writes);
+                cull.boxes.flush(device, writes);
+                if writes.counts()[2] != 0 || writes.bytes() > preview::MAX_JOURNAL_BYTES {
+                    build_error = Some(Error::SceneNotReady);
+                    return None;
+                }
+                if !preview::fresh(request.admission.observed_at, Instant::now()) {
+                    build_error = Some(Error::Stale);
+                    return None;
+                }
+                if !preview::memory_safe(video_memory.read_fresh(device, Duration::from_millis(750))) {
+                    build_error = Some(Error::Budget);
+                    return None;
+                }
+                let scene = scene_gpu(
+                    records,
+                    cull,
+                    textures,
+                    geometry,
+                    palette_buffer,
+                    prev_palette_buffer,
+                    skin_bind_buffer,
+                    *bind_generation,
+                );
+                let (width, height) = request.size.dimensions();
+                Some(Job::SessionPreview(preview::Job::Render {
+                    key,
+                    size: request.size,
+                    observed_at: request.admission.observed_at,
+                    packet: Box::new(FramePacket {
+                        output: None,
+                        index: request.sequence,
+                        writes: std::mem::take(writes),
+                        uploads: uploads.empty_preview_frame(),
+                        scene,
+                        params,
+                        lists: stripped,
+                        ui: None,
+                        surface: SurfaceState {
+                            epoch: 1,
+                            width,
+                            height,
+                            vsync: false,
+                        },
+                        settings: preview::settings(),
+                        hover: None,
+                        picks: Vec::new(),
+                        drawn: Vec::new(),
+                        capture: None,
+                        histogram: None,
+                        motion_cut: false,
+                        input_at: None,
+                    }),
+                }))
+            }),
+        };
+        match submitted {
+            Ok(Some(submitted)) => {
+                if let Some(done) = submitted.previous {
+                    self.apply_done(done);
+                }
+                self.session_preview.submitted(&request, Instant::now());
+                Ok(())
+            }
+            Ok(None) => Err(build_error.unwrap_or(Error::Busy)),
+            Err(_) => {
+                self.fail();
+                Err(Error::RendererFailed)
+            }
+        }
+    }
+
+    /// Polling schedules only an asynchronous map/poll, never another render.
+    /// Current policy is checked again before pixels can leave the renderer.
+    /// Service this on ordinary idle/network ticks independently of preview
+    /// FPS: late/congested readbacks over 250ms are dropped, not accumulated.
+    pub fn poll_session_preview(
+        &mut self,
+        admission: &crate::session_preview::Admission,
+    ) -> Result<Option<crate::session_preview::Frame>, crate::session_preview::Error> {
+        self.preview_supported()?;
+        if admission.fence.surface_epoch != self.surface_epoch {
+            self.cancel_session_preview();
+            return Err(crate::session_preview::Error::NotAdmitted);
+        }
+        if let Err(error) = self.session_preview.authorize(admission, Instant::now()) {
+            self.cancel_session_preview();
+            return Err(error);
+        }
+        self.drive_session_preview()?;
+        self.session_preview.take(admission, Instant::now())
+    }
+
+    /// Cancel/release without a device wait. Keep servicing this optional lane
+    /// while it retires, or normal rendering releases it before its next frame.
+    pub fn cancel_session_preview(&mut self) {
+        self.session_preview.invalidate();
+        let _ = self.drive_session_preview();
+    }
+
+    pub fn service_session_preview(&mut self) -> Result<(), crate::session_preview::Error> {
+        self.drive_session_preview()
+    }
+
+    fn preview_supported(&self) -> Result<(), crate::session_preview::Error> {
+        use crate::session_preview::Error;
+        if !self.threaded() || self.vr_engaged() {
+            return Err(Error::Unsupported);
+        }
+        #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+        if self.vr.wanted() {
+            return Err(Error::Unsupported);
+        }
+        if self.failed || self.lost.get() || self.surface_epoch == 0 {
+            return Err(Error::RendererFailed);
+        }
+        if self.session_fences.pending() {
+            return Err(Error::Busy);
+        }
+        Ok(())
+    }
+
+    fn drive_session_preview(&mut self) -> Result<(), crate::session_preview::Error> {
+        use crate::session_preview::Error;
+        self.preview_supported()?;
+        let ready = match &self.host {
+            Host::Thread { owner, .. } => owner.try_take_ready(),
+            Host::Inline(_, _) => return Err(Error::Unsupported),
+        };
+        match ready {
+            Ok(Some(done)) => self.apply_done(done),
+            Ok(None) => {}
+            Err(_) => {
+                self.fail();
+                return Err(Error::RendererFailed);
+            }
+        }
+        let Some(job) = self.session_preview.next_job() else {
+            return Ok(());
+        };
+        let submitted = match &self.host {
+            Host::Thread { owner, .. } => owner.try_submit(Job::SessionPreview(job)),
+            Host::Inline(_, _) => return Err(Error::Unsupported),
+        };
+        match submitted {
+            Ok(Some(submitted)) => {
+                if let Some(done) = submitted.previous {
+                    self.apply_done(done);
+                }
+                self.session_preview.handed();
+                Ok(())
+            }
+            Ok(None) => Ok(()),
+            Err(_) => {
+                self.fail();
+                Err(Error::RendererFailed)
             }
         }
     }
@@ -1671,19 +1951,24 @@ impl Renderer {
     /// queue (16 to 20 ms in a region that keeps it busy). What a click did
     /// before; kept to compare the two (AURORA_CLICK_PICK).
     pub fn pick_world(&mut self, x: f32, y: f32) -> Option<Vec3> {
+        self.session_preview.invalidate();
         let (w, h) = self.size;
         if x < 0.0 || y < 0.0 || x >= w as f32 || y >= h as f32 || self.last_viewport.local(x, y).is_none() || self.failed {
             return None;
         }
         let mut frame = None;
+        let mut side_result = None;
         let mut gone = false;
         let hit = match &mut self.host {
             Host::Inline(backend, _) => backend.pick_world(x, y),
             Host::Thread { owner, .. } => {
                 match owner.submit(Job::Pick { x, y }) {
                     Ok(s) => {
-                        if let Some(Done::Frame(r)) = s.previous {
-                            frame = Some(r);
+                        if let Some(done) = s.previous {
+                            match done {
+                                Done::Frame(r) => frame = Some(r),
+                                other => side_result = Some(other),
+                            }
                         }
                     }
                     Err(_) => gone = true,
@@ -1700,6 +1985,9 @@ impl Renderer {
         };
         if let Some(r) = frame {
             self.apply(*r);
+        }
+        if let Some(done) = side_result {
+            self.apply_done(done);
         }
         if gone {
             self.fail();

@@ -1549,6 +1549,9 @@ impl FrameTarget {
 /// The passes of a frame and all they own. Lives on the render thread, or
 /// in the `Renderer` itself with AURORA_RENDER_THREAD=0.
 pub(crate) struct Backend {
+    preview_adapter: wgpu::Adapter,
+    session_preview: Option<Box<crate::session_preview::View>>,
+    preview_mode: bool,
     device: wgpu::Device,
     queue: wgpu::Queue,
     /// Destroyed by hand in `Drop`, unless the device is lost.
@@ -1756,6 +1759,9 @@ struct XrWorld {
 /// What the main thread's `Renderer` creates the backend from.
 #[derive(Clone)]
 pub(crate) struct BackendInit {
+    /// Preview views share the main avatar atlas read-only and initialize
+    /// their reduced settings before allocating any size-dependent resources.
+    pub preview_atlas: Option<(wgpu::Texture, u32)>,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub surface: Arc<wgpu::Surface<'static>>,
@@ -2267,6 +2273,7 @@ impl Impostors {
         tex_layout: &wgpu::BindGroupLayout,
         samples: u32,
         ssr: bool,
+        shared_atlas: Option<(wgpu::Texture, u32)>,
     ) -> Impostors {
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("impostor atlas"),
@@ -2289,7 +2296,7 @@ impl Impostors {
                 },
             ],
         });
-        let atlas = Self::make_atlas(device, 1);
+        let (atlas, pages) = shared_atlas.unwrap_or_else(|| (Self::make_atlas(device, 1), 1));
         let bind_group = Self::bind_atlas(device, &layout, &atlas);
         let tile = wgpu::Extent3d {
             width: IMPOSTOR_TILE,
@@ -2330,7 +2337,7 @@ impl Impostors {
         Impostors {
             layout,
             atlas,
-            pages: 1,
+            pages,
             sprite_capacity: IMPOSTOR_TILES as usize,
             bind_group,
             scratch,
@@ -2682,9 +2689,16 @@ struct Ranges {
 impl Backend {
     /// Surface configuration, pipelines, targets and per-frame buffers.
     pub fn new(init: BackendInit) -> Result<Backend, RenderError> {
+        let preview_mode = init.preview_atlas.is_some();
+        let settings = if preview_mode {
+            crate::session_preview::settings()
+        } else {
+            RenderSettings::default()
+        };
         #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
         let xr_seed = init.xr.as_ref().map(|_| Box::new(init.clone()));
         let BackendInit {
+            preview_atlas,
             device,
             queue,
             surface,
@@ -2984,10 +2998,11 @@ impl Backend {
             mk_frame_buffer("water exterior uniforms"),
             mk_frame_buffer("probe irradiance capture uniforms"),
         ];
-        let probes = crate::probes::Probes::new(&device, RenderSettings::default().probe_slots);
+        let probes = crate::probes::Probes::new(&device, settings.probe_slots);
 
-        let shadow_size = 2048u32;
-        let shadow_view = Self::make_shadow_atlas(&device, shadow_size, 2);
+        let shadow_size = settings.shadow_resolution.max(1);
+        let shadow_count = settings.projector_shadow_limit;
+        let shadow_view = Self::make_shadow_atlas(&device, shadow_size, shadow_count);
         let shadow_merge = crate::shadow_merge::ShadowMerge::new(&device, &shadow_view, shadow_size, SHADOW_FORMAT);
         let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("shadow"),
@@ -3086,8 +3101,7 @@ impl Backend {
                     && gbuf_features.flags.sample_count_supported(*n)
             })
             .collect();
-        let msaa_samples = if msaa_supported.contains(&4) { 4 } else { 1 };
-        let settings = RenderSettings::default();
+        let msaa_samples = if !preview_mode && msaa_supported.contains(&4) { 4 } else { 1 };
         let bloom = crate::bloom::Bloom::new(&device, &post_layout);
         let pipelines = Self::make_pipelines(
             &device,
@@ -3166,8 +3180,17 @@ impl Backend {
         let occlusion = crate::occlusion::Occlusion::new(&device);
         let cull = GpuCull::new(&device);
         let motion_history = crate::motion_history::MotionHistory::new(&device);
-        let motion_debug = crate::motion_debug::asked().then(|| crate::motion_debug::MotionDebug::new(&device, config.format));
-        let impostors = Impostors::new(&device, &frame_layout, &records_layout, &tex_layout, msaa_samples, settings.ssr);
+        let motion_debug =
+            (!preview_mode && crate::motion_debug::asked()).then(|| crate::motion_debug::MotionDebug::new(&device, config.format));
+        let impostors = Impostors::new(
+            &device,
+            &frame_layout,
+            &records_layout,
+            &tex_layout,
+            msaa_samples,
+            settings.ssr,
+            preview_atlas,
+        );
         let particle_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("particles"),
             size: 4096 * std::mem::size_of::<ParticleInstance>() as u64,
@@ -3178,6 +3201,9 @@ impl Backend {
         let timer = timestamps.then(|| GpuTimer::new(&device, &queue));
 
         let mut r = Backend {
+            preview_adapter: adapter,
+            session_preview: None,
+            preview_mode,
             device,
             queue,
             surface: std::mem::ManuallyDrop::new(surface),
@@ -3240,7 +3266,7 @@ impl Backend {
             shadow_buffers,
             shadow_bind_groups,
             shadow_size,
-            shadow_count: 2,
+            shadow_count,
             shadow_merge,
             post_buffer,
             post_sampler,
@@ -5475,6 +5501,7 @@ impl Backend {
     fn result(&mut self, index: u64, stats: RenderStats, captured: Option<(u32, u32, Vec<u8>)>, spent: Spent) -> FrameResult {
         let snapshot = self.end_snapshot();
         FrameResult {
+            rendered: false,
             index,
             stats,
             hover: self.depth_pick.latest(),
@@ -5705,6 +5732,12 @@ impl Backend {
     }
 
     pub fn render(&mut self, packet: FramePacket) -> FrameResult {
+        if !self.preview_mode {
+            // Return to the native world without retaining an inactive view's
+            // resource handles or mapped readback. Its GPU work was fenced by
+            // the session bridge before normal presentation was admitted.
+            self.session_preview = None;
+        }
         #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
         if self.xr_world.is_none() && !self.vr.wanted() && self.vr.state() == crate::VrState::Stopping {
             self.vr.finish(false);
@@ -5731,6 +5764,144 @@ impl Backend {
             packet
         };
         self.render_view(packet)
+    }
+
+    pub fn session_preview(&mut self, job: crate::session_preview::Job) -> crate::session_preview::Reply {
+        use crate::session_preview::{Error, Job, Reply, View};
+        match job {
+            Job::Release => {
+                self.session_preview = None;
+                Reply::Released
+            }
+            Job::WarmPoll => self
+                .session_preview
+                .as_ref()
+                .map_or_else(|| Reply::InitFailed(Error::Stale), |view| view.warm_poll(&self.device, &self.lost)),
+            Job::Init { size, observed_at, scene } => {
+                if !crate::session_preview::fresh(observed_at, Instant::now()) {
+                    return Reply::InitFailed(Error::Stale);
+                }
+                if self.preview_mode || self.lost.get() {
+                    return Reply::InitFailed(Error::RendererFailed);
+                }
+                if let Some(view) = &self.session_preview {
+                    return view.warm_poll(&self.device, &self.lost);
+                }
+                let (width, height) = size.dimensions();
+                let init = BackendInit {
+                    preview_atlas: Some((self.impostors.atlas.clone(), self.impostors.pages)),
+                    device: self.device.clone(),
+                    queue: self.queue.clone(),
+                    surface: Arc::clone(&self.surface),
+                    external: true,
+                    vr: Arc::new(crate::vr_control::Control::new(false)),
+                    output_format: Some(self.config.format),
+                    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+                    xr: None,
+                    adapter: self.preview_adapter.clone(),
+                    width,
+                    height,
+                    world_viewport: None,
+                    vsync: false,
+                    timestamps: false,
+                    adapter_specific: false,
+                    gpu_cull: self.gpu_cull,
+                    tex_layout: self.tex_layout.clone(),
+                    scene: *scene,
+                    anim_clock: self.anim_clock,
+                    lost: self.lost.clone(),
+                    gpu_frames: Arc::new(crate::pacing::GpuFrames::new(false)),
+                };
+                match View::new(init, size) {
+                    Ok(view) => {
+                        // Initialization's tiny lookup uploads share the same
+                        // ordered queue/fence, but never stamp a surface proof.
+                        crate::device_lost::submit_tracked(&self.lost, &self.queue, 0, std::iter::empty());
+                        view.warm(&self.queue);
+                        self.session_preview = Some(Box::new(view));
+                        Reply::Warming
+                    }
+                    Err(error) => Reply::InitFailed(error),
+                }
+            }
+            Job::Poll(key) => self.session_preview.as_mut().map_or_else(
+                || Reply::Failed(key, Error::Stale, None),
+                |view| view.poll(key, &self.device, &self.lost),
+            ),
+            Job::Render {
+                key,
+                size,
+                observed_at,
+                packet,
+            } => {
+                let mut packet = *packet;
+                if !crate::session_preview::fresh(observed_at, Instant::now()) {
+                    return self.reject_session_preview(key, Error::Stale, packet);
+                }
+                let pages = packet
+                    .lists
+                    .impostor_sprites
+                    .iter()
+                    .filter(|sprite| sprite.tile & IMPOSTOR_PENDING == 0)
+                    .map(|sprite| (sprite.tile & !IMPOSTOR_FULLBRIGHT) / IMPOSTOR_TILES + 1)
+                    .max()
+                    .unwrap_or(1);
+                if self.preview_mode || self.lost.get() || pages > self.impostors.pages {
+                    return self.reject_session_preview(key, Error::SceneNotReady, packet);
+                }
+                if self
+                    .session_preview
+                    .as_ref()
+                    .is_none_or(|view| !matches!(view.warm_poll(&self.device, &self.lost), Reply::Warmed))
+                {
+                    return self.reject_session_preview(key, Error::Busy, packet);
+                }
+                // The atlas is an immutable asset input, not a second cache:
+                // previews never capture avatars or grow/write the main atlas.
+                let view = self.session_preview.as_mut().expect("preview just initialized");
+                view.backend.impostors.atlas = self.impostors.atlas.clone();
+                view.backend.impostors.pages = self.impostors.pages;
+                view.backend.impostors.bind_group =
+                    Impostors::bind_atlas(&self.device, &view.backend.impostors.layout, &self.impostors.atlas);
+                packet.settings = crate::session_preview::settings();
+                // A nonblocking poll or bind-group creation can still spend
+                // time in a driver. Authorize the actual view with a new clock.
+                if !crate::session_preview::fresh(observed_at, Instant::now()) {
+                    return self.reject_session_preview(key, Error::Stale, packet);
+                }
+                view.render(key, size, observed_at, packet, &self.device, &self.queue, &self.lost)
+            }
+        }
+    }
+
+    pub(crate) fn reject_session_preview(
+        &mut self,
+        key: crate::session_preview::Key,
+        error: crate::session_preview::Error,
+        mut packet: FramePacket,
+    ) -> crate::session_preview::Reply {
+        // These bounded buffer writes already left the scene's dirty ranges.
+        // Preserve them even when a view's atlas/backend is not ready. They
+        // never produce pixels or a surface/session proof.
+        if !self.lost.get() {
+            let mut sink = crate::writes::TrackedSink {
+                queue: &self.queue,
+                lost: &self.lost,
+                frame: key.sequence,
+            };
+            packet.writes.replay(&mut sink);
+            let commands = packet.uploads.take_commands();
+            crate::device_lost::submit_tracked(&self.lost, &self.queue, key.sequence, commands);
+            packet.uploads.after_submit();
+        }
+        crate::session_preview::Reply::Failed(
+            key,
+            error,
+            Some(Box::new(Spent {
+                writes: packet.writes,
+                lists: packet.lists,
+            })),
+        )
     }
 
     fn render_view(&mut self, packet: FramePacket) -> FrameResult {
@@ -6055,7 +6226,7 @@ impl Backend {
         self.show_ao_method();
         self.contact_now = self.contact_on(f.shadows);
         self.gtao_normals_now = self.targets.gtao_shown && gtao_mesh_normals_now();
-        self.motion_now = self.gtao_normals_now || self.taa.is_some();
+        self.motion_now = !self.preview_mode && (self.gtao_normals_now || self.taa.is_some());
         // nothing kept the matrices while nothing read the motion: the
         // first frame that reads it again starts the history again
         self.motion_cut |= self.motion_now && !self.motion_kept;
@@ -8882,7 +9053,9 @@ impl Backend {
         stats.water_reflection = do_water_refl;
         stats.mirror = mirror.is_some();
         let spent = Spent { writes, lists: draw_lists };
-        self.result(index, stats, captured, spent)
+        let mut result = self.result(index, stats, captured, spent);
+        result.rendered = true;
+        result
     }
 
     /// Copy the swapchain image to a readback buffer (frame captures).

@@ -109,7 +109,7 @@ const PROBE_INTERVAL: Duration = Duration::from_millis(250);
 /// The query runs without the cache lock. A stuck driver leaves the last
 /// budget available and cannot hold up a frame or the viewer's shutdown.
 struct BudgetSampler {
-    latest: Arc<parking_lot::Mutex<Option<(u64, u64)>>>,
+    latest: Arc<parking_lot::Mutex<Option<(u64, u64, std::time::Instant)>>>,
     stopped: Arc<AtomicBool>,
 }
 
@@ -122,9 +122,10 @@ impl BudgetSampler {
             let mut floor = BudgetFloor::default();
             let mut logged = None::<u64>;
             while !stop.load(Ordering::Acquire) {
+                let requested_at = std::time::Instant::now();
                 if let Some((raw, usage)) = query() {
                     let budget = floor.update(raw, std::time::Instant::now());
-                    *output.lock() = Some((budget, usage));
+                    *output.lock() = Some((budget, usage, requested_at));
                     if logged.is_none_or(|last| budget.abs_diff(last) >= BUDGET_LOG_STEP) {
                         logged = Some(budget);
                         log::info!(
@@ -146,7 +147,14 @@ impl BudgetSampler {
     }
 
     fn read(&self) -> Option<(u64, u64)> {
-        *self.latest.lock()
+        self.latest.lock().map(|(budget, usage, _)| (budget, usage))
+    }
+
+    fn read_fresh(&self, now: std::time::Instant, max_age: Duration) -> Option<(u64, u64)> {
+        self.latest
+            .try_lock()?
+            .filter(|(_, _, at)| now.checked_duration_since(*at).is_some_and(|age| age <= max_age))
+            .map(|(budget, usage, _)| (budget, usage))
     }
 }
 
@@ -185,14 +193,29 @@ impl VideoMemoryProbe {
     /// quarter second. A blocked query keeps the previous conservative
     /// budget; None until the first reading or when none is available.
     pub fn read(&self, device: &wgpu::Device) -> Option<VideoMemory> {
-        let (budget, usage) = self.sampler.read()?;
+        Some(self.with_sample(device, self.sampler.read()?))
+    }
+
+    /// Optional GPU work must not treat a blocked driver's old sample as a
+    /// fresh admission. Timestamp the query's start, including its latency;
+    /// this accessor never issues a native query or waits for the cache lock.
+    pub fn read_fresh(&self, device: &wgpu::Device, max_age: Duration) -> Option<VideoMemory> {
+        let raw = self.sampler.read_fresh(std::time::Instant::now(), max_age)?;
+        let mut sample = self.with_sample(device, raw);
+        // A diagnostic override may reduce this optional-work budget but
+        // cannot enlarge the physical driver's reported headroom.
+        sample.budget = sample.budget.min(raw.0);
+        Some(sample)
+    }
+
+    fn with_sample(&self, device: &wgpu::Device, (budget, usage): (u64, u64)) -> VideoMemory {
         let budget = forced_budget().unwrap_or(budget);
         // (wgpu's counters: a few atomics, no lock; every buffer counts,
         // those in system memory too, a few hundred MB at most)
         let live = device.get_internal_counters().hal;
         // (the texture pages in memory of their own are not in them)
         let allocated = (live.texture_memory.read() + live.buffer_memory.read()).max(0) as u64 + crate::dedicated::bytes();
-        Some(VideoMemory { budget, usage, allocated })
+        VideoMemory { budget, usage, allocated }
     }
 
     /// The card's identity for the system's adapter-wide counters (the LUID
@@ -324,6 +347,39 @@ mod tests {
     use std::time::{Duration, Instant};
 
     const MB: u64 = 1 << 20;
+
+    #[test]
+    fn preview_budget_freshness_rejects_old_future_and_contended_samples_without_changing_legacy_read() {
+        let now = Instant::now();
+        let sampler = BudgetSampler {
+            latest: Arc::new(parking_lot::Mutex::new(Some((8000 * MB, 4000 * MB, now)))),
+            stopped: Arc::new(AtomicBool::new(false)),
+        };
+        let age = Duration::from_millis(750);
+        assert_eq!(sampler.read_fresh(now + age, age), Some((8000 * MB, 4000 * MB)));
+        assert_eq!(sampler.read_fresh(now + age + Duration::from_nanos(1), age), None);
+        assert_eq!(sampler.read_fresh(now - Duration::from_nanos(1), age), None);
+        assert_eq!(
+            sampler.read(),
+            Some((8000 * MB, 4000 * MB)),
+            "ordinary readers retain their conservative cache"
+        );
+        let locked = sampler.latest.lock();
+        assert_eq!(sampler.read_fresh(now, age), None, "optional work never waits on the cache lock");
+        drop(locked);
+    }
+
+    #[test]
+    fn completed_slow_driver_query_is_not_a_fresh_preview_observation() {
+        let requested = Instant::now();
+        let completed = requested + Duration::from_secs(5);
+        let sampler = BudgetSampler {
+            latest: Arc::new(parking_lot::Mutex::new(Some((8000 * MB, 4000 * MB, requested)))),
+            stopped: Arc::new(AtomicBool::new(false)),
+        };
+        assert_eq!(sampler.read_fresh(completed, Duration::from_millis(750)), None);
+        assert_eq!(sampler.read(), Some((8000 * MB, 4000 * MB)));
+    }
 
     #[test]
     fn a_blocked_driver_query_cannot_block_cached_reads_or_shutdown() {

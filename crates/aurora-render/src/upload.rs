@@ -586,6 +586,18 @@ pub struct UploadQueue {
 }
 
 impl UploadQueue {
+    /// A preview never drains an unbounded asset/arena-copy backlog.
+    pub(crate) fn pending_copies(&self) -> bool {
+        self.encoder.is_some()
+    }
+
+    pub(crate) fn empty_preview_frame(&self) -> FrameUploads {
+        FrameUploads {
+            encoder: None,
+            recycle: Vec::new(),
+            returned: self.pool.returned.clone(),
+        }
+    }
     pub fn new(device: &wgpu::Device, small: bool) -> Self {
         UploadQueue {
             pool: StagingPool::new(device, small),
