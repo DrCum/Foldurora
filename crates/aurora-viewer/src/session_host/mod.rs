@@ -2,6 +2,8 @@
 //! in separately isolated workers; the host paints only its CPU interface.
 
 mod native;
+pub(crate) mod preview_io;
+pub(crate) mod preview_protocol;
 pub(crate) mod profile;
 mod software;
 pub(crate) mod startup;
