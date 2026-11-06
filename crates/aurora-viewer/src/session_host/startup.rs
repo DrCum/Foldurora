@@ -128,7 +128,7 @@ fn report_failure(stage: FailureStage, detail: &str, path: Option<&Path>) {
     {
         use windows_sys::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MB_SETFOREGROUND, MessageBoxW};
         let wide = |value: &str| value.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
-        let title = wide(&aurora_i18n::tr!("host-start-error-title"));
+        let title = wide(aurora_i18n::tr!("host-start-error-title"));
         let body = wide(&body);
         // SAFETY: both strings are terminated and live throughout this call.
         // This process owns the error dialog; no foreign console is touched.
