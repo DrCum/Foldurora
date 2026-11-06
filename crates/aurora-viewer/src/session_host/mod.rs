@@ -1,6 +1,7 @@
 //! Opt-in native session controller. Worlds, logins and GPU ownership remain
 //! in separately isolated workers; the host paints only its CPU interface.
 
+mod native;
 pub(crate) mod profile;
 mod software;
 pub(crate) mod transport;
@@ -54,6 +55,11 @@ pub fn run() -> anyhow::Result<()> {
         closing: None,
         notice_at: None,
         world: egui::Rect::NOTHING,
+        region: native::Region::default(),
+        transition: PresentationGate::default(),
+        requested_viewport: None,
+        park_requested: false,
+        layout_dirty: true,
     };
     log::info!("session host: CPU controller starting; worker worlds remain independent");
     event_loop.run_app(&mut app)?;
@@ -79,6 +85,11 @@ struct Shell {
     closing: Option<Instant>,
     notice_at: Option<Instant>,
     world: egui::Rect,
+    region: native::Region,
+    transition: PresentationGate,
+    requested_viewport: Option<aurora_session::HostedViewport>,
+    park_requested: bool,
+    layout_dirty: bool,
 }
 
 impl Shell {
@@ -98,14 +109,30 @@ impl Shell {
             },
             Action::Detach(worker) => self.controller.detach(worker),
             Action::Close => {
+                self.close_region();
                 self.controller.shutdown();
                 self.closing = Some(Instant::now());
                 self.request_repaint();
                 return;
             }
         };
+        if let Ok(request) = result {
+            let affects_active = match action {
+                Action::OpenLogin(_) | Action::Activate(_) => true,
+                // The broker's pending row can name the old renderer while
+                // the requested target is also a transaction participant.
+                Action::Detach(worker) => self.snapshot.active == Some(worker) || self.snapshot.pending.is_some(),
+                Action::Close => false,
+            };
+            if affects_active {
+                // The IO thread has not seen the intent yet. Do not reopen
+                // the old hole against a pre-intent snapshot in that interval.
+                self.transition.sent(request);
+                self.close_region();
+            }
+        }
         self.ui.notice = Some(match result {
-            Ok(()) => Notice::Queued,
+            Ok(_) => Notice::Queued,
             Err(error) => Notice::Error(error),
         });
         self.notice_at = Some(Instant::now());
@@ -113,24 +140,30 @@ impl Shell {
     }
 
     fn render(&mut self, event_loop: &ActiveEventLoop) -> anyhow::Result<()> {
-        let Some(surface) = &mut self.surface else { return Ok(()) };
+        let Some(surface) = &self.surface else { return Ok(()) };
         let size = surface.window.inner_size();
         if size.width == 0 || size.height == 0 {
             return Ok(());
         }
+        let native_viewport = (!self.layout_dirty)
+            .then(|| surface.viewport(self.world, self.context.pixels_per_point()))
+            .flatten();
+        let hosted = self.confirmed_active(native_viewport);
+        let native_ready = native_viewport.is_some();
+        let Some(surface) = &mut self.surface else { return Ok(()) };
         let raw = surface.raw_input();
-        let native_ready = surface.viewport(self.world, self.context.pixels_per_point()).is_some();
         let context = self.context.clone();
         let p = self.theme.palette();
         let mut action = None;
         let mut world = self.world;
         let output = context.run_ui(raw, |ui| {
-            let shown = self.ui.show(ui, &p, &self.snapshot, native_ready, self.closing.is_some());
+            let shown = self.ui.show(ui, &p, &self.snapshot, native_ready, hosted, self.closing.is_some());
             // A discarded egui pass must not duplicate a queued action.
             action = action.or(shown.action);
             world = shown.world;
         });
         self.world = world;
+        self.layout_dirty = false;
         let viewport = surface.viewport(world, context.pixels_per_point());
         let delay = surface.present(event_loop, &context, output, p.panel)?;
         let now = Instant::now();
@@ -139,6 +172,7 @@ impl Shell {
         if let Some(action) = action {
             self.action(action, viewport);
         }
+        self.sync_native()?;
         Ok(())
     }
 
@@ -160,6 +194,138 @@ impl Shell {
             self.notice_at = None;
             self.repaint = Some(now);
         }
+    }
+
+    fn confirmed_active(&self, viewport: Option<aurora_session::HostedViewport>) -> Option<aurora_session::WorkerId> {
+        presented_worker(
+            &self.snapshot,
+            viewport,
+            self.closing.is_some() || self.ui.close_prompt || self.transition.waiting(),
+        )
+    }
+
+    fn close_region(&mut self) {
+        if let Some(surface) = &self.surface
+            && let Err(error) = self.region.close(&surface.window)
+        {
+            // Destroying this owned window during shutdown also removes its
+            // region. Do not keep an inaccessible cutout after a native error.
+            log::warn!("session host: failed to restore controller region: {error}");
+            self.controller.shutdown();
+            self.closing.get_or_insert_with(Instant::now);
+        }
+    }
+
+    fn sync_native(&mut self) -> anyhow::Result<()> {
+        self.transition.observe(self.snapshot.completed_request);
+        let Some(surface) = &self.surface else { return Ok(()) };
+        let worker_focused = self.snapshot.active.is_some_and(|id| {
+            self.snapshot.workers.iter().any(|worker| {
+                worker.binding.worker.worker == id
+                    && worker.reachable
+                    && worker.binding.session.is_some()
+                    && worker.status.as_ref().is_some_and(|status| status.keyboard_focused)
+            })
+        });
+        self.controller
+            .set_workspace_foreground(surface.window.has_focus() || worker_focused);
+        let viewport = surface.viewport(self.world, self.context.pixels_per_point());
+        let visible = surface.window.is_visible() == Some(true) && surface.window.is_minimized() == Some(false);
+        // A native resize is closed immediately, then waits for one real egui
+        // layout before submitting the new world rectangle. Minimizing cannot
+        // wait for that frame, since no surface will be presented while hidden.
+        if self.layout_dirty && visible {
+            self.region.close(&surface.window)?;
+            return Ok(());
+        }
+        let confirmed = self.confirmed_active(viewport);
+        self.region.set(
+            &surface.window,
+            confirmed.and(viewport),
+            self.world,
+            self.context.pixels_per_point(),
+        )?;
+        if self.closing.is_some()
+            || self.snapshot.stopped
+            || self.snapshot.error.is_some()
+            || self.snapshot.pending.is_some()
+            || self.transition.waiting()
+        {
+            return Ok(());
+        }
+        if self.snapshot.active.is_none() {
+            self.park_requested = false;
+            self.requested_viewport = None;
+            return Ok(());
+        }
+        match viewport {
+            Some(viewport) => {
+                self.park_requested = false;
+                if self.snapshot.active_viewport != Some(viewport)
+                    && self.requested_viewport != Some(viewport)
+                    && self.controller.update_viewport(viewport).is_ok()
+                {
+                    self.requested_viewport = Some(viewport);
+                }
+            }
+            None => {
+                self.requested_viewport = None;
+                if !self.park_requested
+                    && let Ok(request) = self.controller.park_active()
+                {
+                    self.park_requested = true;
+                    self.transition.sent(request);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+fn presented_worker(
+    snapshot: &HostSnapshot,
+    viewport: Option<aurora_session::HostedViewport>,
+    covered: bool,
+) -> Option<aurora_session::WorkerId> {
+    if covered
+        || snapshot.stopped
+        || snapshot.error.is_some()
+        || !snapshot.can_activate
+        || snapshot.pending.is_some()
+        || viewport.is_none_or(|viewport| viewport.validate().is_err())
+        || snapshot.active_viewport != viewport
+    {
+        return None;
+    }
+    snapshot.active.filter(|id| {
+        snapshot
+            .workers
+            .iter()
+            .any(|worker| worker.binding.worker.worker == *id && ui::presentation_ready(worker))
+    })
+}
+
+/// A queued local intent is not an acknowledgment. Keep the prior world
+/// covered until the broker has processed that exact request, including an
+/// idempotent/no-op or rejected request that legitimately retains its old grant.
+#[derive(Default)]
+struct PresentationGate {
+    request: Option<u64>,
+}
+
+impl PresentationGate {
+    fn sent(&mut self, request: u64) {
+        self.request = Some(self.request.map_or(request, |previous| previous.max(request)));
+    }
+
+    fn observe(&mut self, completed: u64) {
+        if self.request.is_some_and(|request| completed >= request) {
+            self.request = None;
+        }
+    }
+
+    fn waiting(&self) -> bool {
+        self.request.is_some()
     }
 }
 
@@ -191,6 +357,7 @@ impl ApplicationHandler for Shell {
         if matches!(event, WindowEvent::CloseRequested) {
             // Closing the host is distinct from quitting any running viewer.
             self.ui.close_prompt = true;
+            self.close_region();
             self.request_repaint();
             return;
         }
@@ -202,6 +369,10 @@ impl ApplicationHandler for Shell {
             event,
             WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } | WindowEvent::Moved(_)
         ) {
+            self.close_region();
+            if matches!(event, WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. }) {
+                self.layout_dirty = true;
+            }
             self.request_repaint();
         }
         if matches!(event, WindowEvent::RedrawRequested) {
@@ -209,6 +380,7 @@ impl ApplicationHandler for Shell {
                 self.request_repaint();
             } else if let Err(error) = self.render(event_loop) {
                 self.error = Some(error.to_string());
+                self.close_region();
                 self.controller.shutdown();
                 event_loop.exit();
             }
@@ -217,7 +389,15 @@ impl ApplicationHandler for Shell {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         let now = Instant::now();
+        let native_poll = now >= self.next_poll;
         self.poll(now);
+        if native_poll && let Err(error) = self.sync_native() {
+            self.error = Some(error.to_string());
+            self.close_region();
+            self.controller.shutdown();
+            event_loop.exit();
+            return;
+        }
         if self
             .closing
             .is_some_and(|at| self.controller.stopped() || now.saturating_duration_since(at) >= CLOSE_GRACE)
@@ -243,8 +423,47 @@ impl ApplicationHandler for Shell {
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        self.close_region();
         self.controller.shutdown();
         // Drop clipboard/surface while the platform connection still lives.
         self.surface = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn queued_local_intent_cannot_reopen_previous_acknowledged_world() {
+        let mut gate = PresentationGate::default();
+        gate.sent(12);
+        gate.observe(11);
+        assert!(gate.waiting());
+        gate.observe(12);
+        assert!(!gate.waiting());
+    }
+
+    #[test]
+    fn idempotent_activation_and_duplicate_open_resolve_from_exact_broker_receipt() {
+        let mut gate = PresentationGate::default();
+        for request in [12, 13] {
+            gate.sent(request);
+            gate.observe(request - 1);
+            assert!(gate.waiting(), "an unchanged old grant cannot acknowledge a local request");
+            gate.observe(request);
+            assert!(!gate.waiting(), "broker no-op receipt does not require a viewport change");
+        }
+    }
+
+    #[test]
+    fn overlapping_local_intents_wait_for_the_latest_exact_fifo_receipt() {
+        let mut gate = PresentationGate::default();
+        gate.sent(12);
+        gate.sent(13);
+        gate.observe(12);
+        assert!(gate.waiting());
+        gate.observe(13);
+        assert!(!gate.waiting());
     }
 }

@@ -13246,6 +13246,7 @@ mm-margin-help = Percentage of the full viewer window reserved for panels. Oppos
 
 # Session host controller
 host-title = Session host
+host-cli-help = Open the experimental native session host; log in manually in separate viewer windows.
 host-manual-login-help = Open a viewer and log in there manually.
 host-search = Find a character or grid
 host-open-login = Open login

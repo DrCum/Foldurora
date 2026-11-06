@@ -13219,6 +13219,7 @@ mm-margin-help = パネル用の余白をウィンドウ全体の割合で指定
 
 # Session host controller
 host-title = セッションホスト
+host-cli-help = 実験的なネイティブセッションホストを開きます。各ビューアーの別ウィンドウで手動ログインしてください。
 host-manual-login-help = ビューアーを開き、そのウィンドウで手動ログインしてください。
 host-search = キャラクターやグリッドを検索
 host-open-login = ログイン画面を開く

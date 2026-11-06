@@ -132,7 +132,7 @@ impl Drop for SoftwareWindow {
 /// Absolute desktop pixels, including negative display origins. Round inward
 /// so a fractional-DPI worker cannot cover the controller's last chrome pixel.
 #[cfg(any(windows, test))]
-fn physical_viewport(host_window: u64, origin: (i32, i32), native: [u32; 2], area: Rect, scale: f32) -> Option<HostedViewport> {
+pub(super) fn physical_viewport(host_window: u64, origin: (i32, i32), native: [u32; 2], area: Rect, scale: f32) -> Option<HostedViewport> {
     if host_window == 0 || native.contains(&0) || !area.is_finite() || !area.is_positive() || !scale.is_finite() || scale <= 0.0 {
         return None;
     }

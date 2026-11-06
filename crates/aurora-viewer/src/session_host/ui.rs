@@ -35,7 +35,15 @@ pub(super) struct Output {
 }
 
 impl HostUi {
-    pub fn show(&mut self, ui: &mut egui::Ui, p: &Palette, snapshot: &HostSnapshot, native_ready: bool, closing: bool) -> Output {
+    pub fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        p: &Palette,
+        snapshot: &HostSnapshot,
+        native_ready: bool,
+        hosted: Option<WorkerId>,
+        closing: bool,
+    ) -> Output {
         let mut action = None;
         let ctx = ui.ctx().clone();
         let frame = widgets::overlay_frame(&ctx, p);
@@ -108,7 +116,7 @@ impl HostUi {
                                     .small()
                                     .color(if worker.reachable { p.muted } else { p.warn }),
                             );
-                            if snapshot.active == Some(id) {
+                            if hosted == Some(id) {
                                 ui.label(RichText::new(aurora_i18n::tr!("host-hosted")).small().color(p.success));
                             }
                             if snapshot.pending == Some(id) {
@@ -118,7 +126,13 @@ impl HostUi {
                                 ui.label(RichText::new(aurora_i18n::tr!("host-keyboard-focus")).small().color(p.teal));
                             }
                             ui.horizontal_wrapped(|ui| {
-                                let ready = !closing && !snapshot.stopped && snapshot.can_activate && native_ready && worker_ready(worker);
+                                let ready = !closing
+                                    && !snapshot.stopped
+                                    && snapshot.can_activate
+                                    && snapshot.pending.is_none()
+                                    && hosted != Some(id)
+                                    && native_ready
+                                    && activation_ready(worker);
                                 let activate = ui
                                     .add_enabled_ui(ready, |ui| {
                                         widgets::action_button(
@@ -207,9 +221,7 @@ impl HostUi {
                 ui.add_space((ui.available_height() * 0.22).max(10.0));
                 widgets::glyph(ui, "device-desktop", p.violet_pale, 40.0);
                 ui.add_space(12.0);
-                let active = snapshot
-                    .active
-                    .and_then(|id| snapshot.workers.iter().find(|worker| worker.binding.worker.worker == id));
+                let active = hosted.and_then(|id| snapshot.workers.iter().find(|worker| worker.binding.worker.worker == id));
                 ui.label(
                     RichText::new(active.map_or(aurora_i18n::tr!("host-no-hosted-session"), display_name))
                         .strong()
@@ -285,6 +297,8 @@ pub(super) fn same_snapshot(a: &HostSnapshot, b: &HostSnapshot) -> bool {
         && a.error == b.error
         && a.can_activate == b.can_activate
         && a.active == b.active
+        && a.active_viewport == b.active_viewport
+        && a.completed_request == b.completed_request
         && a.pending == b.pending
         && a.opening == b.opening
         && a.accounts.len() == b.accounts.len()
@@ -335,15 +349,21 @@ fn display_grid(worker: &WorkerSummary) -> &str {
         .unwrap_or(&worker.grid)
 }
 
-fn worker_ready(worker: &WorkerSummary) -> bool {
+fn activation_ready(worker: &WorkerSummary) -> bool {
     worker.reachable
         && worker.binding.session.is_some()
-        && worker.status.as_ref().is_some_and(|status| {
-            status.phase == Phase::Online
-                && !status.blocked
-                && status.native_window != 0
-                && status.last_frame.is_some_and(|frame| frame.validate().is_ok())
-        })
+        && worker
+            .status
+            .as_ref()
+            .is_some_and(|status| status.phase == Phase::Online && !status.blocked && status.native_window != 0)
+}
+
+pub(super) fn presentation_ready(worker: &WorkerSummary) -> bool {
+    activation_ready(worker)
+        && worker
+            .status
+            .as_ref()
+            .is_some_and(|status| status.last_frame.is_some_and(|frame| frame.validate().is_ok()))
 }
 
 fn status(worker: &WorkerSummary) -> &'static str {
@@ -422,29 +442,37 @@ mod tests {
     }
 
     #[test]
-    fn controller_activation_requires_live_bound_completed_unblocked_online_session() {
+    fn controller_activation_requires_live_bound_unblocked_online_session_and_presentation_requires_completed_frame() {
         let base = snapshot();
         let mut worker = base.workers[0].clone();
-        assert!(worker_ready(&worker));
+        assert!(activation_ready(&worker));
+        assert!(presentation_ready(&worker));
         worker.reachable = false;
-        assert!(!worker_ready(&worker));
+        assert!(!activation_ready(&worker));
         worker = base.workers[0].clone();
         worker.binding.session = None;
-        assert!(!worker_ready(&worker));
+        assert!(!activation_ready(&worker));
         for phase in [Phase::Login, Phase::Connecting, Phase::Disconnected] {
             worker = base.workers[0].clone();
             worker.status.as_mut().unwrap().phase = phase;
-            assert!(!worker_ready(&worker));
+            assert!(!activation_ready(&worker));
         }
         worker = base.workers[0].clone();
         worker.status.as_mut().unwrap().blocked = true;
-        assert!(!worker_ready(&worker));
+        assert!(!activation_ready(&worker));
         worker.status.as_mut().unwrap().blocked = false;
         worker.status.as_mut().unwrap().native_window = 0;
-        assert!(!worker_ready(&worker));
+        assert!(!activation_ready(&worker));
         worker.status.as_mut().unwrap().native_window = 7;
         worker.status.as_mut().unwrap().last_frame = None;
-        assert!(!worker_ready(&worker));
+        assert!(
+            activation_ready(&worker),
+            "first activation must be able to request its first prepared frame"
+        );
+        assert!(
+            !presentation_ready(&worker),
+            "a prepared/completed frame is still required before showing the world"
+        );
     }
 
     struct Frames {
@@ -484,7 +512,7 @@ mod tests {
                     ..Default::default()
                 },
                 |ui| {
-                    let shown = self.ui.show(ui, &p, snapshot, native_ready, false);
+                    let shown = self.ui.show(ui, &p, snapshot, native_ready, None, false);
                     action = action.or(shown.action);
                     assert!(shown.world.left() >= 260.0 && shown.world.top() >= 58.0);
                 },
@@ -529,6 +557,7 @@ mod tests {
         assert_eq!(frames.click(&snapshot, Id::unique(("host_activate", worker)), true), None);
         snapshot.can_activate = true;
         assert_eq!(frames.click(&snapshot, Id::unique(("host_activate", worker)), false), None);
+        snapshot.workers[0].status.as_mut().unwrap().last_frame = None;
         assert_eq!(
             frames.click(&snapshot, Id::unique(("host_activate", worker)), true),
             Some(Action::Activate(worker))
@@ -573,6 +602,57 @@ mod tests {
         worker.grid = "Saved Grid".into();
         assert_eq!(display_name(worker), "Saved Character");
         assert_eq!(display_grid(worker), "Saved Grid");
+    }
+
+    #[test]
+    fn host_presentation_requires_exact_native_ack_beyond_activation_eligibility() {
+        use aurora_session::{HostedViewport, PhysicalRect};
+        let mut snapshot = snapshot();
+        let worker = snapshot.workers[0].binding.worker.worker;
+        let viewport = HostedViewport {
+            host_window: 7,
+            rect: PhysicalRect {
+                x: -1600,
+                y: 80,
+                width: 1000,
+                height: 700,
+            },
+        };
+        snapshot.can_activate = true;
+        snapshot.active = Some(worker);
+        snapshot.active_viewport = Some(viewport);
+        let presented = super::super::presented_worker;
+        assert_eq!(presented(&snapshot, Some(viewport), false), Some(worker));
+        assert_eq!(
+            presented(&snapshot, Some(viewport), true),
+            None,
+            "modal/local intent covers the world"
+        );
+        assert_eq!(presented(&snapshot, None, false), None);
+        let moved = HostedViewport {
+            rect: PhysicalRect {
+                x: viewport.rect.x + 10,
+                ..viewport.rect
+            },
+            ..viewport
+        };
+        assert_eq!(
+            presented(&snapshot, Some(moved), false),
+            None,
+            "a live move needs a new exact acknowledgment"
+        );
+        snapshot.pending = Some(worker);
+        assert_eq!(presented(&snapshot, Some(viewport), false), None);
+        snapshot.pending = None;
+        snapshot.active_viewport = Some(moved);
+        assert_eq!(presented(&snapshot, Some(moved), false), Some(worker));
+        snapshot.workers[0].status.as_mut().unwrap().last_frame = None;
+        assert!(activation_ready(&snapshot.workers[0]));
+        assert_eq!(
+            presented(&snapshot, Some(moved), false),
+            None,
+            "no completed frame means no world cutout"
+        );
     }
 
     #[test]

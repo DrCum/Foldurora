@@ -13242,6 +13242,7 @@ mm-margin-help = Pourcentage de la fenêtre réservé aux panneaux. Les marges o
 
 # Session host controller
 host-title = Hôte de sessions
+host-cli-help = Ouvrir l’hôte de sessions natif expérimental ; connexion manuelle dans des fenêtres de visualisation distinctes.
 host-manual-login-help = Ouvrez un viewer et connectez-vous manuellement dans sa fenêtre.
 host-search = Rechercher un personnage ou une grille
 host-open-login = Ouvrir la connexion
