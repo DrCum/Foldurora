@@ -18,6 +18,7 @@ const GRID: &str = "Synthetic Grid";
 const RESIDENT: &str = "Synthetic Resident";
 const NEARBY_SENDER: &str = "Synthetic Nearby Sender";
 const DIRECT_TEXT: &str = "Synthetic inactive-character IM. A literal /ao off stays ordinary text.";
+const NEARBY_DRAFT: &str = "Synthetic Nearby draft retained while choosing an IM.";
 const SOURCE_DRAFT: &str = "SYNTHETIC_SOURCE_DRAFT_MUST_BE_PURGED";
 const PRIVACY_DRAFT: &str = "SYNTHETIC_PRIVACY_DRAFT_MUST_BE_PURGED";
 const REPLACEMENT_TEXT: &str = "SYNTHETIC_REPLACEMENT_TEXT_MUST_NOT_BE_DISPLAYED";
@@ -225,16 +226,26 @@ impl Frames {
     }
 
     fn select_direct(&mut self, snapshot: &HostChatSnapshot) {
+        self.select(snapshot, direct());
+    }
+
+    fn select(&mut self, snapshot: &HostChatSnapshot, conversation: Conversation) {
         assert!(self.click(snapshot, Id::unique("host_chat_combo_rect")).is_none());
-        assert!(self.click(snapshot, Id::unique(("host_chat_pick", direct()))).is_none());
+        assert!(self.click(snapshot, Id::unique(("host_chat_pick", conversation))).is_none());
         self.settle(snapshot);
-        assert_eq!(self.chat.key(), snapshot.conversations[1].policy.key);
+        assert_eq!(
+            self.chat.key(),
+            ChatKey {
+                source: snapshot.source,
+                conversation
+            }
+        );
     }
 
     fn type_text(&mut self, snapshot: &HostChatSnapshot, text: &str) {
         assert!(self.click(snapshot, Id::unique("host_chat_input_rect")).is_none());
         assert!(self.show(snapshot, vec![Event::Text(text.to_owned())]).is_none());
-        assert_eq!(self.chat.draft, text);
+        assert_eq!(self.chat.draft(), text);
     }
 
     fn capture(
@@ -268,7 +279,7 @@ impl Frames {
             .collect();
         let receipt_text = self.chat.receipt.map(|receipt| outcome_text(receipt.outcome));
         let warning_text = self.chat.warning.map(warning_text);
-        let draft_text = (!self.chat.draft.is_empty()).then_some(self.chat.draft.as_str());
+        let draft_text = (!self.chat.draft().is_empty()).then_some(self.chat.draft());
         let missing_text: Vec<_> = std::iter::once(identity.as_str())
             .chain(std::iter::once(title))
             .chain(senders.iter().copied())
@@ -312,7 +323,9 @@ impl Frames {
             "expected_warning_text": warning_text,
             "expected_draft_text": draft_text,
             "forbidden_text": forbidden,
-            "draft_empty": self.chat.draft.is_empty(),
+            "draft_empty": self.chat.draft().is_empty(),
+            "retained_draft_count": self.chat.drafts.len(),
+            "retained_text_bytes": self.chat.drafts.values().map(|draft| draft.text.len()).sum::<usize>(),
             "available": self.chat.available,
             "policy": self.chat.policy,
             "receipt": self.chat.receipt,
@@ -350,6 +363,7 @@ fn capture_layout(output: &Path, name: &str, logical: [u32; 2], scale: f32) -> V
         &[NEARBY_SENDER],
         &[DIRECT_TEXT],
     ));
+    frames.type_text(&snapshot, NEARBY_DRAFT);
     frames.select_direct(&snapshot);
     frames.type_text(&snapshot, "Synthetic literal draft: /ao off · Bonjour · こんにちは");
     records.push(frames.capture(
@@ -360,6 +374,20 @@ fn capture_layout(output: &Path, name: &str, logical: [u32; 2], scale: f32) -> V
         &[RESIDENT],
         &[NEARBY_SENDER],
     ));
+    frames.select(&snapshot, Conversation::Nearby);
+    assert_eq!(frames.chat.draft(), NEARBY_DRAFT);
+    assert!(frames.chat.warning.is_none());
+    records.push(frames.capture(
+        output,
+        &format!("{name}-02a-nearby-draft-restored"),
+        &snapshot,
+        &nearby,
+        &[NEARBY_SENDER],
+        &[DIRECT_TEXT, "Synthetic literal draft: /ao off · Bonjour · こんにちは"],
+    ));
+    frames.select_direct(&snapshot);
+    assert_eq!(frames.chat.draft(), "Synthetic literal draft: /ao off · Bonjour · こんにちは");
+    assert!(frames.chat.warning.is_none());
     let sent = frames
         .click(&snapshot, Id::unique("host_chat_send_rect"))
         .expect("explicit fixture click emits one typed action");
@@ -372,7 +400,7 @@ fn capture_layout(output: &Path, name: &str, logical: [u32; 2], scale: f32) -> V
         request: 42,
         outcome: SendOutcome::Pending,
     });
-    assert!(frames.chat.draft.is_empty());
+    assert!(frames.chat.draft().is_empty());
     records.push(frames.capture(output, &format!("{name}-03-queued"), &snapshot, RESIDENT, &[RESIDENT], &[]));
     assert_eq!(frames.chat.receipt.unwrap().outcome, SendOutcome::Pending);
     assert!(frames.click(&snapshot, Id::unique("host_chat_send_rect")).is_none());
@@ -387,7 +415,7 @@ fn capture_layout(output: &Path, name: &str, logical: [u32; 2], scale: f32) -> V
     let mut replacement_snapshot = self::snapshot(replacement);
     replacement_snapshot.lines[0].text = ChatText::new(REPLACEMENT_TEXT).unwrap();
     frames.settle(&replacement_snapshot);
-    assert!(frames.chat.draft.is_empty() && !frames.chat.available);
+    assert!(frames.chat.drafts.is_empty() && !frames.chat.available);
     records.push(frames.capture(
         output,
         &format!("{name}-05-source-replaced"),
@@ -410,7 +438,7 @@ fn capture_layout(output: &Path, name: &str, logical: [u32; 2], scale: f32) -> V
     restricted.lines.retain(|line| line.key.conversation != direct());
     restricted.gap = true;
     privacy.settle(&restricted);
-    assert!(privacy.chat.draft.is_empty());
+    assert!(privacy.chat.draft().is_empty());
     assert!(privacy.chat.policy.is_some_and(|policy| !policy.can_send && !policy.can_read));
     assert!(privacy.click(&restricted, Id::unique("host_chat_send_rect")).is_none());
     records.push(privacy.capture(
@@ -455,7 +483,7 @@ fn host_chat_cpu_visual_fixture() {
     }
     let mut records = capture_layout(&output, "normal", [640, 640], 1.0);
     records.extend(capture_layout(&output, "narrow-150pct", [380, 640], 1.5));
-    assert_eq!(records.len(), 12);
+    assert_eq!(records.len(), 14);
     let manifest = json!({
         "fixture": "actual ChatUi + SoftwareWindow CPU Painter; synthetic data only",
         "locale": language,
