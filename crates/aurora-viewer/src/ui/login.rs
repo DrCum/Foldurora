@@ -110,11 +110,46 @@ pub enum LoginAction {
     Login,
     Quit,
     CheckUpdates,
+    Characters,
     /// The cogwheel: the preferences window over the login screen.
     Preferences,
     /// The accessibility button beside it: the preferences on their
     /// Accessibility page.
     Accessibility,
+}
+
+/// Select catalogue metadata only. The usual login screen owns credential
+/// lookup and the human still presses Log in; no setting is saved here.
+pub(crate) fn select_saved_character(settings: &mut Settings, form: &mut LoginForm, id: &str) -> bool {
+    let index = crate::characters::valid_id(id)
+        .then(|| {
+            form.accounts
+                .iter()
+                .position(|account| crate::characters::account_id(account) == id)
+        })
+        .flatten();
+    if let Some(index) = index {
+        carousel::select(settings, form, index);
+        form.editing = false;
+        form.adding = false;
+        form.selection_shown_for = None;
+        true
+    } else {
+        // A removed or invalid target must not fall through to the profile
+        // this process inherited from the global last-used settings.
+        settings.username.clear();
+        form.password.clear();
+        form.stored = None;
+        form.stored_for = None;
+        form.mfa_token.clear();
+        form.mfa_authorization = None;
+        form.mfa_for = None;
+        form.pending_connect = None;
+        form.transition = None;
+        form.editing = true;
+        form.adding = true;
+        false
+    }
 }
 
 /// "Second Life client · Rust · <graphics API>" under the name (login
@@ -1307,5 +1342,60 @@ mod tests {
         assert!(!has_mask(&draw(REMEMBERED_PASSWORD_MASK, vec![])));
         assert_eq!(password, "replacement");
         assert!(!show_password);
+    }
+}
+
+#[cfg(test)]
+mod saved_character_tests {
+    use super::*;
+
+    #[test]
+    fn saved_character_selection_is_exact_grid_scoped_and_never_submits_or_saves() {
+        let mut settings = Settings::default();
+        let mut form = LoginForm::default();
+        for uri in [aurora_net::login::SL_MAIN_GRID, aurora_net::login::SL_BETA_GRID] {
+            form.accounts.push(crate::login_accounts::Account {
+                username: "synthetic".into(),
+                uri: uri.into(),
+                remember_password: false,
+                remember_mfa: false,
+                start_location: "home".into(),
+                start_region: String::new(),
+                agent: None,
+                last_place: None,
+            });
+        }
+        let target = crate::characters::account_id(&form.accounts[1]);
+        form.password = "synthetic-input".into();
+        form.stored = Some("synthetic-marker".into());
+        assert!(select_saved_character(&mut settings, &mut form, &target));
+        assert_eq!(settings.login_uri(), aurora_net::login::SL_BETA_GRID);
+        assert_eq!(settings.username, "synthetic");
+        assert_eq!(settings.start_location, "home");
+        assert!(form.password.is_empty());
+        assert!(form.stored.is_none());
+        assert!(!form.busy);
+        assert!(form.pending_connect.is_none());
+    }
+
+    #[test]
+    fn removed_or_invalid_character_does_not_inherit_another_account() {
+        for id in [crate::characters::identity("missing-grid", "synthetic"), "../wrong-account".into()] {
+            let mut settings = Settings {
+                username: "synthetic-previous".into(),
+                ..Default::default()
+            };
+            let mut form = LoginForm {
+                stored: Some("synthetic-marker".into()),
+                mfa_token: "synthetic-code".into(),
+                ..Default::default()
+            };
+            assert!(!select_saved_character(&mut settings, &mut form, &id));
+            assert!(settings.username.is_empty());
+            assert!(form.stored.is_none());
+            assert!(form.mfa_token.is_empty());
+            assert!(form.adding && form.editing);
+            assert!(!form.busy);
+        }
     }
 }

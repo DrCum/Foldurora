@@ -22,6 +22,7 @@ pub mod beacons;
 pub mod buy_currency;
 pub mod buy_land;
 pub mod call_invite;
+pub mod characters;
 pub mod chat;
 pub mod chat_bubbles;
 pub mod click_away_focus;

@@ -48,6 +48,7 @@ mod blender_shape;
 mod buy_currency;
 mod buy_land;
 mod camera_presets;
+mod characters;
 mod chat_commands;
 mod chat_import;
 mod click_pick;
@@ -823,6 +824,8 @@ pub struct App {
     busy_pause: busy_pause::BusyPause,
     /// The other viewers on this PC (instances.rs).
     instances: crate::instances::Instances,
+    characters: crate::characters::Manager,
+    characters_ui: ui::characters::CharactersUi,
     /// The Down key's latch (FSCrouchToggle).
     crouch_toggle: crate::movement::crouch_toggle::CrouchToggle,
     music_parcel_url: String,
@@ -1670,6 +1673,8 @@ impl App {
             gpu_stall: Default::default(),
             busy_pause: Default::default(),
             instances: crate::instances::Instances::new(),
+            characters: Default::default(),
+            characters_ui: Default::default(),
             crouch_toggle: Default::default(),
             music_parcel_url: String::new(),
             music_override: None,
@@ -5821,6 +5826,7 @@ impl App {
     /// Log out, save the window, layout, inventory cache and settings, exit.
     fn shutdown(&mut self, event_loop: &ActiveEventLoop) {
         self.instances.leave();
+        self.characters.leave();
         // closed while the graphics card still holds a frame, from its
         // notice or not: reported, and the next start offers the safe
         // graphics (app/gpu_stall.rs)
@@ -8422,6 +8428,7 @@ impl App {
     }
 
     fn frame(&mut self, event_loop: &ActiveEventLoop) {
+        self.tick_characters();
         // the input this frame reads came with the events just handled: its
         // time to the screen starts here (Performance › latency, pacing.rs)
         if let Some(g) = &mut self.gfx {
@@ -13099,6 +13106,7 @@ impl App {
             LoginAction::CheckUpdates => self.updater.check(self.net.runtime(), true),
             LoginAction::ReportBug => self.open_issue_chooser(),
             LoginAction::CopyVersion => self.copy_version(),
+            LoginAction::Characters => ui::widgets::toggle_floater(&self.egui_ctx, "characters", &mut self.characters_ui.open),
             LoginAction::SafeGraphics(choice) => self.safe_graphics_choice(choice),
             LoginAction::PhotoQualityOff(back_on) => self.photo_quality_off_answer(back_on),
             LoginAction::DismissDriverNotice => {
@@ -13219,6 +13227,7 @@ impl App {
             self.panels.appearance = true;
         }
         match a.bar {
+            BarAction::Characters => ui::widgets::toggle_floater(&self.egui_ctx, "characters", &mut self.characters_ui.open),
             BarAction::ImportStreamList => self.import_stream_list(),
             BarAction::ExportStreamList => self.export_stream_list(),
             BarAction::CheckUpdates => self.updater.check(self.net.runtime(), true),
@@ -14321,6 +14330,8 @@ impl App {
                 }
             });
         }
+        self.apply_startup_character();
+        let key = (self.settings.login_uri(), self.settings.username.trim().to_lowercase());
         if let Some(rx) = &self.login_form.portrait_rx {
             for (agent, image) in rx.try_iter() {
                 self.login_form.portraits.insert(
@@ -17308,6 +17319,7 @@ impl App {
             matches!(self.screen, Screen::Login) && !self.login_form.busy || self.demo,
             self.net.runtime(),
         );
+        self.show_characters(&ctx, &p);
         a.exit = self.exit_prompt.show(&ctx, &p, self.in_world());
         self.ui_parts.lap(Part::UiRest, t);
         a
