@@ -30,14 +30,14 @@ pub fn show(dir: &Path, record: super::Record, summary: super::summary::Summary)
     fonts::fallback::wait();
     fonts::apply(&context, &record.font);
     let icons = Icons::load(&context, None);
-    let trace = super::trace(dir);
+    let details = TechnicalDetails::new(super::trace(dir), &summary);
     let sending = Sending::new(dir, &record);
     let mut app = Recovery {
         dir: dir.to_owned(),
         record,
         context,
         icons,
-        trace,
+        details,
         painter: Default::default(),
         surface: None,
         window: None,
@@ -82,7 +82,7 @@ struct Recovery {
     record: super::Record,
     context: egui::Context,
     icons: Icons,
-    trace: String,
+    details: TechnicalDetails,
     painter: super::software::Painter,
     surface: Option<softbuffer::Surface<OwnedDisplayHandle, Arc<Window>>>,
     window: Option<Arc<Window>>,
@@ -98,6 +98,29 @@ struct Recovery {
     sending: Sending,
     // Bug report form (disabled, see main.rs):
     // bug_report: crate::ui::bug_report::BugReportUi,
+}
+
+/// A device loss can close cleanly without leaving a stack. Use the same
+/// sanitized summary already saved as public-report.md, never the raw log.
+struct TechnicalDetails {
+    text: String,
+    has_trace: bool,
+}
+
+impl TechnicalDetails {
+    fn new(trace: String, summary: &super::summary::Summary) -> Self {
+        let has_trace = !trace.trim().is_empty();
+        let text = if has_trace {
+            trace
+        } else {
+            format!("# {}\n\n{}", summary.title, summary.body)
+        };
+        Self { text, has_trace }
+    }
+
+    fn copy(&self, context: &egui::Context) {
+        context.copy_text(self.text.clone());
+    }
 }
 
 /// The report's way to GitHub: the Preferences choice of the crashed
@@ -254,15 +277,13 @@ impl Recovery {
                         {
                             self.action_error = Some(error.to_string());
                         }
-                        let copy = aurora_i18n::tr!("crash-copy-trace");
-                        if ui
-                            .add_enabled_ui(!self.trace.is_empty(), |ui| {
-                                widgets::action_button(ui, &p, "copy-filled", copy, ActionKind::Flat, small)
-                            })
-                            .inner
-                            .clicked()
-                        {
-                            self.context.copy_text(self.trace.clone());
+                        let copy = if self.details.has_trace {
+                            aurora_i18n::tr!("crash-copy-trace")
+                        } else {
+                            aurora_i18n::tr!("crash-copy-details")
+                        };
+                        if widgets::action_button(ui, &p, "copy-filled", copy, ActionKind::Flat, small).clicked() {
+                            self.details.copy(&self.context);
                             self.copied = true;
                         }
                     });
@@ -280,21 +301,25 @@ impl Recovery {
                             .max_height(height)
                             .min_scrolled_height(height)
                             .show(ui, |ui| {
-                                if self.trace.is_empty() {
-                                    ui.label(RichText::new(aurora_i18n::tr!("crash-no-trace")).color(p.muted));
-                                } else {
-                                    ui.add(
-                                        egui::Label::new(RichText::new(&self.trace).monospace().size(12.0))
-                                            .selectable(true)
-                                            .wrap_mode(egui::TextWrapMode::Extend),
-                                    );
+                                if !self.details.has_trace {
+                                    ui.label(RichText::new(aurora_i18n::tr!("crash-no-trace-details")).color(p.muted));
+                                    ui.add_space(8.0);
                                 }
+                                ui.add(
+                                    egui::Label::new(RichText::new(&self.details.text).monospace().size(12.0))
+                                        .selectable(true)
+                                        .wrap_mode(egui::TextWrapMode::Extend),
+                                );
                             });
                     });
                 ui.add_space(10.0);
                 ui.label(
-                    RichText::new(if self.copied {
+                    RichText::new(if self.copied && !self.details.has_trace {
+                        aurora_i18n::tr!("crash-details-copied")
+                    } else if self.copied {
                         aurora_i18n::tr!("crash-copied")
+                    } else if !self.details.has_trace {
+                        aurora_i18n::tr!("crash-private-details")
                     } else {
                         aurora_i18n::tr!("crash-private-trace")
                     })
@@ -702,6 +727,112 @@ impl ApplicationHandler for Recovery {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn copied_text(details: &TechnicalDetails) -> String {
+        let context = egui::Context::default();
+        let output = context.run(Default::default(), |context| details.copy(context));
+        let copies: Vec<_> = output
+            .platform_output
+            .commands
+            .into_iter()
+            .filter_map(|command| match command {
+                egui::OutputCommand::CopyText(text) => Some(text),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(copies.len(), 1);
+        copies.into_iter().next().unwrap()
+    }
+
+    #[test]
+    fn a_device_loss_without_a_trace_displays_and_copies_the_saved_summary() {
+        let dir = std::env::temp_dir().join(format!("aurora-crash-details-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        let record = super::super::Record {
+            schema: 1,
+            pid: 1,
+            process_started: 2,
+            started_unix: 1000,
+            version: "0.9.3+107.gabcdef012".into(),
+            commit: "abcdef0123456789".into(),
+            profile: "debug".into(),
+            language: "en".into(),
+            font: "Inter".into(),
+            font_scale: 1.0,
+            theme: Default::default(),
+            log_path: dir.join("PRIVATE_LOG_PATH.log"),
+            demo: true,
+            os: "Windows 11 (x86_64)".into(),
+            crash_reports: CrashReports::Never,
+        };
+        std::fs::write(dir.join("gpu-lost.txt"), []).unwrap();
+        std::fs::write(
+            dir.join("session.log"),
+            format!(
+                "[t INFO  aurora_render::main_thread] GPU: Test GPU (Vulkan, driver Test 1.2.3)\n\
+                 [t ERROR aurora_render::main_thread] GPU device lost (Unknown): PRIVATE_DRIVER_MESSAGE\n\
+                 [t ERROR aurora_render::main_thread] GPU work at the loss: {}\n\
+                 [t ERROR aurora_render::main_thread] wgpu error: Validation Error\n\n\
+                   In Queue::write_buffer, label = 'PRIVATE_BUFFER_LABEL'\n\
+                 [t WARN aurora_viewer::chat] PRIVATE_CHAT_MESSAGE\n",
+                aurora_render::GPU_WORK_NONE
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("alive.txt"),
+            "tick=1098\nscreen=world\nwindow_state=background\nloss_reason=unknown\nloss_seen_by=callback\n",
+        )
+        .unwrap();
+
+        let trace = super::super::trace(&dir);
+        assert!(trace.is_empty());
+        let summary = super::super::summary::build(&record, &dir);
+        let saved_report = format!("# {}\n\n{}", summary.title, summary.body);
+        let details = TechnicalDetails::new(trace, &summary);
+        assert!(!details.has_trace);
+        assert_eq!(details.text, saved_report);
+        assert_eq!(copied_text(&details), details.text);
+        for expected in [
+            "| Commit | abcdef0123456789 |",
+            "| Crash | GPU device lost |",
+            "| GPU | Test GPU (Vulkan, driver Test 1.2.3) |",
+            "| GPU work at the loss |",
+            "| GPU errors (first of each, in order) | Queue::write_buffer |",
+            "| Window state | background |",
+            "| GPU loss: reason given by wgpu | unknown |",
+        ] {
+            assert!(details.text.contains(expected), "missing {expected} in {}", details.text);
+        }
+        for private in [
+            "PRIVATE_DRIVER_MESSAGE",
+            "PRIVATE_BUFFER_LABEL",
+            "PRIVATE_CHAT_MESSAGE",
+            "PRIVATE_LOG_PATH",
+        ] {
+            assert!(!details.text.contains(private), "published {private}");
+        }
+        assert!(!opens_on_preview(record.crash_reports, false));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_recovered_trace_keeps_precedence_in_details_and_clipboard() {
+        let summary = super::super::summary::Summary {
+            title: "Saved summary".into(),
+            body: "Summary contents".into(),
+            gpu: None,
+        };
+        let trace = "Rust panic: test trace\n00 test_module+0x123\n";
+        let details = TechnicalDetails::new(trace.into(), &summary);
+        assert!(details.has_trace);
+        assert_eq!(details.text, trace);
+        assert_eq!(copied_text(&details), trace);
+
+        let whitespace = TechnicalDetails::new(" \n\t".into(), &summary);
+        assert!(!whitespace.has_trace);
+        assert_eq!(whitespace.text, "# Saved summary\n\nSummary contents");
+    }
 
     #[test]
     fn always_opens_on_the_report_to_publish_once() {
