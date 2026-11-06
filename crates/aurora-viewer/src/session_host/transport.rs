@@ -219,7 +219,7 @@ pub(super) fn current_installation() -> anyhow::Result<InstallationId> {
     )?)
 }
 
-pub(super) fn grid_key(uri: &str) -> Result<GridKey, aurora_session::Error> {
+pub(crate) fn grid_key(uri: &str) -> Result<GridKey, aurora_session::Error> {
     GridKey::from_bytes(Sha256::digest(uri.trim().as_bytes()).into())
 }
 
