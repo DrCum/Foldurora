@@ -10641,38 +10641,22 @@ impl App {
         let t_pass = Instant::now();
         let mut windows_ms = 0.0;
         self.demo_interface_viewport();
-        let requested_ui = self.settings.world_viewport.enabled
-            && self.settings.world_viewport.restrict_ui
-            && viewport != aurora_render::WorldViewport::full((w, h));
         let has_native_canvas = raw.screen_rect.is_some();
-        let interface_rect = raw
-            .screen_rect
-            .and_then(|screen| self.settings.world_viewport.interface_rect(viewport, (w, h), screen));
-        // A minimized native window supplies no new canvas; keep the last
-        // valid one, rather than briefly reflowing its saved floaters.
-        let restrict_ui =
-            requested_ui && (interface_rect.is_some() || raw.screen_rect.is_none() && ui::layout::restricted_canvas(&ctx).is_some());
-        if let Some(rect) = interface_rect {
-            raw.screen_rect = Some(rect);
-        }
         let mut full = ctx.run_ui(raw, |ui| {
-            if has_native_canvas && (requested_ui || ui::layout::restricted_canvas(ui.ctx()).is_some()) {
+            if has_native_canvas {
                 let native_canvas =
                     egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(w as f32, h as f32) / ui.ctx().pixels_per_point());
-                let expected = self
-                    .settings
-                    .world_viewport
-                    .interface_rect(viewport, (w, h), native_canvas)
-                    .unwrap_or(native_canvas);
                 // A pending egui zoom can rescale the previous canvas instead
                 // of taking this frame's RawInput rectangle. Wait one pass
                 // before laying out windows against a stale monitor's bounds.
-                if !ui::layout::canvas_matches(ui.ctx(), expected) {
+                if !ui::layout::canvas_matches(ui.ctx(), native_canvas) {
                     ui.ctx().request_repaint();
                     return;
                 }
             }
-            if ui::layout::begin_canvas(ui.ctx(), restrict_ui) {
+            ui::layout::begin_canvas(ui.ctx(), false);
+            let bounds = self.settings.world_viewport.toolbar_rect((w, h), ui.ctx().viewport_rect());
+            if ui::layout::set_toolbar_canvas(ui.ctx(), bounds) {
                 self.interface.last_room = None;
             }
             self.sound_cues.pass_start(ui.ctx());
@@ -15210,7 +15194,14 @@ impl App {
                 };
                 // the bars this frame: hidden with the interface (an edge
                 // brings the islands back) and in mouselook, like Firestorm's
-                let screen_rect = ctx.content_rect();
+                let mut toolbar_ui = ui::layout::toolbar_canvas(&ctx).map(|bounds| {
+                    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(bounds).layout(*ui.layout()));
+                    child.set_clip_rect(bounds);
+                    child
+                });
+                let ui = toolbar_ui.as_mut().unwrap_or(ui);
+                ui::layout::toolbar_layer(&ctx, ui.layer_id());
+                let screen_rect = ui::layout::toolbar_rect(&ctx);
                 let demo_hidden = if self.demo { ui::bars::demo::get().hidden } else { None };
                 let chrome = self.interface.bars(&ui::interface::Frame {
                     classic: classic_bars,
@@ -15477,7 +15468,13 @@ impl App {
                 } else if let Some((room, _)) = self.interface.last_room {
                     area = room;
                 }
-                ui::layout::set_work_area(ui.ctx(), area);
+                let native = ctx.content_rect();
+                let ordinary_area = if ui::layout::toolbar_canvas(&ctx).is_some() {
+                    egui::Rect::from_min_max(native.min + (area.min - screen_rect.min), native.max + (area.max - screen_rect.max))
+                } else {
+                    area
+                };
+                ui::layout::set_work_area(ui.ctx(), ordinary_area);
                 ui::chat::thumbnails::show(
                     ui,
                     &p,
@@ -15492,7 +15489,7 @@ impl App {
                 // the islands leave room between them, above and below: the
                 // windows move over the whole screen; the Legacy Viewer's
                 // bars are full width, the windows stay between them
-                ui::layout::set_move_area(ui.ctx(), if classic_bars { area } else { ui.ctx().content_rect() });
+                ui::layout::set_move_area(ui.ctx(), if classic_bars { ordinary_area } else { native });
                 let mut edges = ui::layout::Edges {
                     left: self.settings.windows_stop_left,
                     right: self.settings.windows_stop_right,
@@ -15699,8 +15696,11 @@ impl App {
                 // (a first-person VR entry is mouselook underneath: its
                 // crosshair and instructions stay off the desktop mirror)
                 if self.camera.mouselook() && !vr_active {
-                    let c = ctx.content_rect().center();
-                    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("xhair")));
+                    let world = self.world_clip_rect(ctx.pixels_per_point()).intersect(ctx.content_rect());
+                    let c = world.center();
+                    let painter = ctx
+                        .layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("xhair")))
+                        .with_clip_rect(world);
                     // LLToolGun::draw: in the middle of the world view; the
                     // grab tool that Alt brings draws none
                     if !self.alt_cursor.free() {
@@ -15717,7 +15717,7 @@ impl App {
                             .as_ref()
                             .map_or_else(|| aurora_i18n::tr!("keybinds-esc").to_string(), |b| b.label());
                         let text = aurora_i18n::tr!("app-mouselook-leave", key = key);
-                        let at = egui::pos2(c.x, bottom_top - 16.0);
+                        let at = egui::pos2(c.x, bottom_top.min(world.bottom()) - 16.0);
                         let font = egui::FontId::proportional(18.0);
                         let shadow = at + egui::vec2(1.0, 1.0);
                         painter.text(shadow, egui::Align2::CENTER_BOTTOM, &text, font.clone(), p.navy.gamma_multiply(0.6));

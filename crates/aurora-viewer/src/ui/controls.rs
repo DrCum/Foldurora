@@ -172,6 +172,7 @@ impl ControlsUi {
                     Pos2::new(60.0, 160.0),
                     size,
                 )
+                .viewport_control()
                 .auto_height()
                 .show(ctx, p, camera, |ui| classic_camera(ui, p, view, &mut out));
             }
@@ -183,6 +184,7 @@ impl ControlsUi {
                     Pos2::new(60.0, 400.0),
                     size,
                 )
+                .viewport_control()
                 .auto_height()
                 .show(ctx, p, movement, |ui| classic_movement(ui, p, view, &mut out));
             }
@@ -195,7 +197,7 @@ impl ControlsUi {
         }
         let mut open = *camera || *movement;
         if open {
-            let screen = ctx.content_rect();
+            let screen = super::layout::toolbar_rect(ctx);
             let minimized = widgets::floater_minimized(ctx, WINDOW);
             // minimized, the free camera names the window
             let title = match view.free {
@@ -208,6 +210,7 @@ impl ControlsUi {
                 Pos2::new(screen.left() + 24.0, screen.bottom() - 460.0),
                 Vec2::new(WIDTH, 420.0),
             )
+            .viewport_control()
             .fixed()
             .auto_height()
             .compact_when_minimized(COMPACT_WIDTH + 20.0)
@@ -1085,16 +1088,23 @@ fn classic_camera(ui: &mut egui::Ui, p: &Palette, view: &View, out: &mut Output)
     roll_controls(ui, p, view, out);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
-        egui::ComboBox::from_id_salt("camera_shots_classic")
-            .width(ui.available_width() - 52.0)
-            .selected_text(aurora_i18n::tr!("controls-use-preset"))
-            .show_ui(ui, |ui| {
-                for (i, shot) in view.shots.iter().enumerate() {
-                    if ui.selectable_label(false, &shot.name).clicked() {
-                        out.actions.push(ControlAction::UseShot(i));
-                    }
+        let choices = |ui: &mut egui::Ui| {
+            for (i, shot) in view.shots.iter().enumerate() {
+                if ui.selectable_label(false, &shot.name).clicked() {
+                    out.actions.push(ControlAction::UseShot(i));
                 }
-            });
+            }
+        };
+        if super::layout::toolbar_layer_bounds(ui.ctx(), ui.layer_id()).is_some() {
+            let button = egui::Button::new(aurora_i18n::tr!("controls-use-preset"))
+                .min_size(Vec2::new((ui.available_width() - 52.0).max(1.0), 20.0));
+            super::menu::button(ui, p, button, choices);
+        } else {
+            egui::ComboBox::from_id_salt("camera_shots_classic")
+                .width(ui.available_width() - 52.0)
+                .selected_text(aurora_i18n::tr!("controls-use-preset"))
+                .show_ui(ui, choices);
+        }
         if widgets::icon_button(ui, p, "restore", aurora_i18n::tr!("controls-reset-camera"), true) {
             out.actions.push(ControlAction::ResetCamera);
         }
@@ -1493,6 +1503,137 @@ fn key_rows(ui: &mut egui::Ui, p: &Palette, rows: &[(Vec<KeyPart>, &str)], gap: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn shown_viewport_controls(classic: bool, tab: Tab, restricted: bool, small: bool) -> (egui::Context, Rect, Vec<Rect>) {
+        use super::super::layout;
+        let ctx = egui::Context::default();
+        let theme = crate::theme::Theme::default();
+        theme.apply(&ctx, 1.0);
+        ctx.set_zoom_factor(1.2);
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        let p = theme.palette();
+        let keys = KeyBindings::default();
+        let view = View {
+            zoom: 0.5,
+            roll: 0.0,
+            preset: CameraPreset::Rear,
+            shots: &[],
+            flying: false,
+            always_run: false,
+            seated: false,
+            mouselook: false,
+            object_view: false,
+            keys: &keys,
+            free: None,
+        };
+        let settings = crate::world_viewport::ViewportSettings {
+            enabled: true,
+            restrict_ui: restricted,
+            left: if small { 50.0 } else { 25.0 },
+            right: if small { 30.0 } else { 10.0 },
+            top: if small { 30.0 } else { 15.0 },
+            bottom: if small { 45.0 } else { 20.0 },
+        };
+        let mut controls = ControlsUi::default();
+        let (mut camera, mut movement) = (classic || tab == Tab::Camera, classic || tab == Tab::Movement);
+        let ids = if classic {
+            vec![CLASSIC_CAMERA, CLASSIC_MOVEMENT]
+        } else {
+            vec![WINDOW]
+        };
+        let mut native = Rect::NOTHING;
+        for frame in 0..12 {
+            native = Rect::from_min_size(egui::pos2(7.0, 11.0), Vec2::new(3200.0, 2000.0) / (1.25 * ctx.zoom_factor()));
+            if frame == 4 && !restricted {
+                // Open native edges allow the initial bottom-anchored body
+                // to extend off-screen. Exercise an ordinary user position,
+                // as the snapshot fixture does, without changing that policy.
+                for (index, id) in ids.iter().enumerate() {
+                    widgets::move_floater(&ctx, id, native.min + Vec2::new(24.0, 80.0 + index as f32 * 400.0));
+                }
+            }
+            let mut raw = egui::RawInput {
+                screen_rect: Some(native),
+                time: Some(frame as f64 / 60.0),
+                ..Default::default()
+            };
+            raw.viewports.entry(raw.viewport_id).or_default().native_pixels_per_point = Some(1.25);
+            let mut output = ctx.run_ui(raw, |ui| {
+                layout::begin_canvas(ui.ctx(), false);
+                layout::set_toolbar_canvas(ui.ctx(), settings.toolbar_rect((3200, 2000), native));
+                layout::set_work_area(ui.ctx(), native);
+                layout::set_move_area(ui.ctx(), native);
+                layout::set_window_edges(ui.ctx(), layout::Edges::OPEN);
+                layout::frame(ui.ctx(), &p, false);
+                let actions = controls.show(ui.ctx(), &p, &mut camera, &mut movement, classic, &view);
+                assert!(
+                    actions.held.is_empty() && actions.actions.is_empty(),
+                    "opening controls must not drive the avatar/camera"
+                );
+            });
+            output.textures_delta.clear();
+        }
+        assert!((ctx.content_rect().min - native.min).abs().max_elem() < 1.0);
+        assert!((ctx.content_rect().max - native.max).abs().max_elem() < 1.0);
+        assert!(
+            layout::restricted_canvas(&ctx).is_none(),
+            "the native egui canvas must remain available to ordinary windows"
+        );
+        let rects = ids
+            .into_iter()
+            .map(|id| {
+                ctx.memory(|memory| memory.area_rect(egui::Id::unique(id)))
+                    .expect("actual controls window")
+            })
+            .collect();
+        let configured = crate::world_viewport::ViewportSettings {
+            restrict_ui: true,
+            ..settings
+        };
+        let bounds = configured.toolbar_rect((3200, 2000), native).expect("offset world viewport");
+        (ctx, bounds, rects)
+    }
+
+    #[test]
+    fn actual_camera_and_movement_windows_use_selective_bounds_in_both_layouts() {
+        for classic in [false, true] {
+            for tab in [Tab::Camera, Tab::Movement] {
+                for restricted in [false, true] {
+                    let (ctx, bounds, rects) = shown_viewport_controls(classic, tab, restricted, false);
+                    for rect in rects {
+                        assert!(ctx.content_rect().expand(1.0).contains_rect(rect), "{classic}/{tab:?}: {rect:?}");
+                        if restricted {
+                            assert!(
+                                bounds.expand(1.0).contains_rect(rect),
+                                "{classic}/{tab:?}: {rect:?} outside {bounds:?}"
+                            );
+                        } else {
+                            assert!(
+                                rect.left() < bounds.left() - 5.0,
+                                "disabled controls must keep the full workspace: {rect:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn actual_camera_and_movement_windows_fit_a_small_offset_viewport_with_open_edges() {
+        for classic in [false, true] {
+            for tab in [Tab::Camera, Tab::Movement] {
+                let (_, bounds, rects) = shown_viewport_controls(classic, tab, true, true);
+                assert!(bounds.width() < 640.0 && bounds.height() < 400.0);
+                for rect in rects {
+                    assert!(
+                        bounds.expand(1.0).contains_rect(rect),
+                        "{classic}/{tab:?}: {rect:?} outside small {bounds:?}"
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn a_long_roll_press_never_drags_or_snaps_its_floater() {

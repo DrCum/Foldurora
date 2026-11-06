@@ -386,13 +386,16 @@ fn menu_options(resp: &egui::Response, p: &Palette, st: &StatusInfo, action: &mu
 /// `body` draws there (in screen coordinates).
 pub(crate) fn area<R>(ctx: &egui::Context, p: &Palette, name: &'static str, rect: Rect, body: impl FnOnce(&mut egui::Ui) -> R) -> R {
     // (the windows keep their title clear of it: `layout::clear_of_islands`)
-    crate::ui::layout::island_drawn(ctx, rect);
+    let bounds = crate::ui::layout::toolbar_rect(ctx);
+    crate::ui::layout::island_drawn(ctx, rect.intersect(bounds));
     egui::Area::new(Id::unique(("bars_island", name)))
         .order(egui::Order::Middle)
         .fixed_pos(rect.min)
         .constrain(false)
         .fade_in(false)
         .show(ctx, |ui| {
+            crate::ui::layout::toolbar_layer(ctx, ui.layer_id());
+            ui.set_clip_rect(ui.clip_rect().intersect(bounds));
             ui.painter().add(crate::ui::widgets::island_shape(ui.ctx(), p, rect));
             ui.set_min_size(rect.size());
             body(ui)

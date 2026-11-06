@@ -12,14 +12,20 @@
   The user has confirmed that the multi-monitor world viewport works; the
   optional viewport-contained interface is being implemented independently.
 
-- 🔧 Optional viewport-bound interface (user request, 2026-11-06; no issue):
-  the human confirmed world placement works and asked to keep the viewer chrome
-  in that area too. Add the off-by-default Layout switch for toolbars, menus,
-  chat, dialogs and floaters, retaining absolute native pointer/world geometry.
-  Preserve anchors and automatically reduced expanded sizes; fall back to the
-  native UI below 640 × 400 logical units so Preferences remains reachable.
-  Seventeen offline geometry/egui regressions and `ui-*` demo modes are prepared;
-  integrated automated checks, captures and human UI acceptance are pending.
+- 🔧 Viewport-bound toolbars and camera controls (user correction, 2026-11-06;
+  no issue): the human rejected the blanket interface restriction in `f5043422`.
+  Keep toolbars/chrome and camera/snapshot controls in the configured world
+  viewport when the off-by-default Layout switch is enabled. Inventory,
+  Preferences, World Map, mini-map, chat and all ordinary floaters keep the full
+  native workspace and saved geometry, including earlier retained wide backups.
+  Keep snapshot output/full-frame rendering independent of control placement;
+  fit or scroll camera/snapshot controls in small viewports, regardless of normal
+  floater edge allowances. Retain the saved `restrict_ui` field for compatibility.
+  Real egui geometry/pointer regressions and `ui-tools-*` offline visual cases
+  are being prepared for both modes, toggles, restarts, offset viewports and
+  fractional DPI/zoom.
+  Automated checks, inspected captures and human native acceptance are pending;
+  prior blanket-interface checks do not validate this correction.
   This follow-up must include the separate multi-viewer GPU contention mitigation.
 
 - 🔧 Foldurora workspace follow-up (user continuation, 2026-11-06; no issue):

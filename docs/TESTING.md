@@ -4709,7 +4709,7 @@ both open states and the selection count. Capture at frame 620.
 
 | Variable | Effect |
 |---|---|
-| `AURORA_DEMO_VIEWPORT=left\|right\|inset\|scaled\|ui-left\|ui-right\|ui-inset\|ui-scaled\|ui-toggle` | Synthetic world and optional interface rectangles, without changing saved preferences |
+| `AURORA_DEMO_VIEWPORT=left\|right\|inset\|scaled\|ui-left\|ui-right\|ui-inset\|ui-scaled\|ui-toggle\|ui-tools-left\|ui-tools-right\|ui-tools-inset\|ui-tools-toggle` | Synthetic world rectangles and selective toolbar/camera bounds, without changing saved preferences |
 | `AURORA_DEMO_MONITOR_RECOVERY=removed\|partial\|drag\|native` | Live display-recovery policy fixtures or the native adapter on an isolated test desktop |
 | `AURORA_DEMO_CHARACTERS=1` | Opens Characters with synthetic account/session rows and inert actions |
 | `AURORA_DEMO_TOOLBAR=1` | Open the "Toolbar buttons" window; the bars mockup's custom state, side toolbars, labels. |
@@ -5068,14 +5068,18 @@ before (`amis`, `groupes`, `repere`, `historique`…) are still accepted.
   keep the world in that half of the native window. `inset` uses margins of
   25% left, 10% right, 15% top and 20% bottom; `scaled` adds 75% render scale.
   Capture after frame 660 and compare world aspect, labels, HUDs and picks with
-  the full-window demo. Floaters retain the full native canvas. Mouselook,
-  hidden UI, photos/viewfinder and VR temporarily use the full frame. These
+  the full-window demo. Floaters retain the full native canvas. Desktop mouselook
+  keeps the configured world viewport even when its interface is hidden. Photo
+  output, VR and hiding the interface outside mouselook temporarily use the full
+  frame. Native cursor confinement/capture requires separate acceptance. These
   scenarios change only in-memory demo settings.
   - `ui-left`, `ui-right`, `ui-inset` and `ui-scaled` also enable Preferences →
-    Layout → **Keep the interface inside the world viewport**. The default
-    remains off. Top/bottom/side toolbars, chat, menus, popups, dialogs and
-    floaters use the same absolute logical rectangle; world rendering and
-    pointer coordinates retain their physical native-window coordinates.
+    Layout → **Keep toolbars and camera controls inside the world viewport**.
+    The default remains off. Top/bottom/side toolbars, their menus, and
+    camera/snapshot controls use the configured world rectangle in absolute
+    logical points. Inventory, Preferences, World Map, mini-map, chat and other
+    ordinary floaters keep the full native canvas. World rendering and pointer
+    coordinates retain their physical native-window coordinates.
     Use `AURORA_WINDOW_SIZE=1600,1000`, `AURORA_UI_SCALE=1` and
     `AURORA_DEMO_CHARACTERS=1`, then capture after frame 700. `ui-right` puts
     the chrome on the right display; `ui-inset` exercises nonzero X and Y.
@@ -5083,21 +5087,40 @@ before (`amis`, `groupes`, `repere`, `historique`…) are still accepted.
     Repeat `ui-inset` with `AURORA_UI_SCALE=1.25` and
     `AURORA_DEMO_BARS=legacy` as well as the default islands to check both
     real toolbar layouts at a nonzero X/Y origin.
-  - `ui-toggle` starts with the interface in the right half, uses the full
-    interface canvas at frame 840 and restricts it again at 1080. Capture
-    `AURORA_CAPTURE_FRAMES=700,900,1180` to check that open floaters follow
-    their existing anchors and that automatically reduced expanded sizes
-    return on the wide canvas. Manual resize gestures replace that retained
-    size. Mouselook, hidden UI, photos/viewfinder and VR use the full interface
-    canvas temporarily and restore the restricted layout afterward.
-  - A viewport below **640 × 400 logical interface units** uses the full native
-    interface canvas, leaving the world rectangle unchanged and the checkbox
-    enabled. This keeps Preferences and reset controls reachable; widening the
-    viewport or reducing the interface scale automatically resumes restriction.
-    Check the threshold with fractional native DPI and interface zoom, and
-    minimize/restore without losing floater placement. The native OS caption,
+  - `ui-toggle` starts with toolbars and camera/snapshot controls in the right
+    half, disables this scope at frame 840 and enables it again at 1080. Capture
+    `AURORA_CAPTURE_FRAMES=700,900,1180`: ordinary windows must remain free across
+    the full native workspace in every frame, while controls follow the option.
+    Existing `ui-*` mode names remain available with this selective scope.
+  - `ui-tools-left`, `ui-tools-right` and `ui-tools-inset` use the corresponding
+    world geometry and open Inventory, Preferences, World Map, mini-map, camera
+    and snapshot controls. `ui-tools-toggle` uses the right-half geometry and
+    the same frame-840/1080 option changes as `ui-toggle`. These are offline
+    visual cases: inspect that bars and camera/snapshot controls stay in the
+    selected world rectangle while ordinary windows can sit outside it. Use the
+    window size, scale, toolbar layouts and capture frames above, then repeat
+    with `AURORA_UI_SCALE=1.25`. The scenarios do not change saved preferences.
+  - For pointer and persistence acceptance, open the same windows in both modes,
+    move Inventory/Preferences and both maps outside the world rectangle, resize
+    them there, and use their controls, menus and scrolling. Check toolbar menus
+    inside the viewport and ordinary-window menus beside their windows. Toggle
+    the option, minimize/restore and restart with it saved both on and off.
+    Full-workspace positions/sizes must survive, including wide backups retained
+    before the earlier blanket restriction fitted ordinary windows. A deliberate
+    manual resize replaces the retained size. Repeat with nonzero X/Y margins,
+    fractional native DPI and interface zoom.
+  - Make the viewport very small: camera/snapshot controls must fit or scroll
+    inside it with title and close controls reachable; Preferences and reset
+    controls remain available across the full workspace. Enable the ordinary
+    floater option that allows partial offscreen movement, then select full-frame
+    snapshot output. Neither may let camera/snapshot controls leave the configured
+    viewport. Desktop mouselook retains the configured world viewport; photo
+    output, VR and hiding the interface outside mouselook may use full-frame
+    rendering without changing the saved placement policy. The native OS caption,
     system file dialogs and separately detached native windows remain managed
-    by the operating system.
+    by the operating system. Automated, inspected visual and native-window
+    acceptance of this corrected scope is pending; earlier blanket-interface
+    validation does not cover it.
 - **`AURORA_DEMO_MONITOR_RECOVERY`** requires `AURORA_DEMO=1`. `removed`,
   `partial` and `drag` supply synthetic physical display/window rectangles
   to the ordinary recovery policy; the actual window never moves. Their
