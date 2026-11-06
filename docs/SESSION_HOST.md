@@ -45,7 +45,10 @@ compatibility is claimed.
   off the viewer frame path, and queues/messages have explicit bounds.
 - Private transport binds installation, controller, worker nonce, account,
   grid, session generation, sequence and lease. Window handles alone do not
-  authorize commands. Invalid replies must not renew a lease.
+  authorize commands. Invalid replies must not renew a lease. A worker that has
+  never reported status has a fixed five-minute startup deadline; its first
+  valid receipt arms the ordinary fifteen-second lease. No status means no
+  activation, and outgoing heartbeats cannot extend that startup deadline.
 - Profiles are isolated **per launch/session generation**. They do not yet keep
   stable per-character settings across restarts. Existing user settings and
   passwords are not copied into those profiles. The shared saved-account
@@ -57,7 +60,9 @@ compatibility is claimed.
   need integrated native checks. Minimize parks the active world; restoring the
   host currently requires explicit Activate. Device/window recreation detaches
   to an ordinary worker rather than automatically re-adopting it. Other
-  platforms leave unsupported presentation disabled.
+  platforms leave unsupported presentation disabled. Requesting fullscreen
+  first detaches the fitted worker so host geometry is not saved as the user's
+  ordinary window placement.
 - Reduced-resolution monitors and inactive-account chat are later stages;
   protocol/budget models alone are not those features.
 
