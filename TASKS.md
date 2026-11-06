@@ -12,8 +12,12 @@
   - ⬜ Complete and verify one visible taskbar host with safe active-world switching.
   - ⬜ Persistent account-bound worker settings across restarts; current profiles
     are isolated per launch and must not be described as persistent.
-  - ⬜ Read-only small render targets at 0.5/1/2/5 FPS, latest-only frames and a
-    shared budget; no full-resolution background capture shortcut.
+  - 🔧 Read-only small render targets at 0.5/1/2/5 FPS: source-bound private
+    control/image lanes, dedicated IO, latest image caches and fresh completed
+    GPU evidence are connected in a disabled prototype. Before enabling its
+    controls, implement a cohort suspension barrier with actual ordered GPU
+    drain acknowledgments before any Prepare/new-login warmup; then complete
+    integrated/native checks. No full-resolution background capture shortcut.
   - 🔧 Native inactive chat: connect optional private bootstrap keys, mutually
     authenticated memory-only sockets, dedicated bounded worker IO, source/lease
     broker caches, native restriction/ledger handling and CPU owned tool windows.

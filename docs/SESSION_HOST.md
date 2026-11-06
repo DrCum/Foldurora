@@ -72,8 +72,16 @@ compatibility is claimed.
   files, logs or process arguments. IO is separate from control, and native
   restrictions/account/lease are checked again at submission. Uncertain sends
   are not automatically retried, and policy gaps purge cached text/titles.
-- Reduced-resolution monitors are a later stage; protocol/budget models or an
-  uninvoked renderer backend alone are not that feature.
+- Reduced-resolution monitors remain disabled. Their private bootstrap, separate
+  control/image sockets, bounded worker IO, latest image caches and exact-source
+  GPU evidence are assembled as a prototype; the native caller/window cohort
+  and actual integration checks are separate. Host, worker and source purposes
+  cannot share authentication proofs. Cached GPU statistics cannot renew a
+  timing sample. Every peer is checked against fresh authenticated metadata and
+  the real child PID, with unknown OS registry peers denied. Before enabling
+  controls, a cohort suspension barrier must drain outstanding preview/init GPU
+  work before any Prepare or new-login warmup. Stopping future budget messages
+  alone is insufficient. No monitor acceptance is claimed.
 
 ## Acceptance before recommending a build
 

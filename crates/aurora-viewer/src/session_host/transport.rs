@@ -6,6 +6,8 @@
 //! PID nor a window handle can authorize a command.
 
 pub(crate) use super::chat_broker::HostChatSnapshot;
+use super::preview_io::{PreviewConfig, PreviewSnapshot};
+use super::preview_protocol::PreviewSource;
 use aurora_session::chat::{ChatKey, ChatSource, ChatText};
 use aurora_session::{
     AccountKey, Binding, Command, Coordinator, Effect, Envelope, Event, GridKey, HostId, HostNotice, HostedViewport, InstallationId,
@@ -30,6 +32,9 @@ const REACHABLE: Duration = Duration::from_secs(5);
 const CLOSE_WAIT: Duration = Duration::from_secs(2);
 const MAX_CONFIG: usize = 4096;
 const MAX_QUEUE: usize = 16;
+// Keep the prototype controls unavailable until the complete renderer/IO/UI
+// cohort has passed parent-owned integration and native acceptance checks.
+const PREVIEW_CAPABLE: bool = false;
 
 #[derive(Clone)]
 pub(crate) struct SavedAccount {
@@ -62,6 +67,9 @@ pub(crate) struct HostSnapshot {
     pub active_viewport: Option<HostedViewport>,
     pub completed_request: u64,
     pub chat: Vec<Arc<HostChatSnapshot>>,
+    pub can_preview: bool,
+    pub preview_sources: Vec<PreviewSource>,
+    pub previews: Vec<Arc<PreviewSnapshot>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -90,12 +98,16 @@ enum HostIntent {
         policy_revision: u64,
         text: ChatText,
     },
+    Preview {
+        source: PreviewSource,
+        config: Option<PreviewConfig>,
+    },
 }
 
 impl HostIntent {
     fn controls_presentation(&self) -> bool {
         match self {
-            Self::ChatSend { .. } => false,
+            Self::ChatSend { .. } | Self::Preview { .. } => false,
             Self::Open(_) | Self::Activate(_, _) | Self::Viewport(_) | Self::Park | Self::Detach(_) => true,
         }
     }
@@ -204,6 +216,16 @@ impl HostController {
         self.send(HostIntent::Detach(worker))
     }
 
+    pub fn set_preview(&self, source: PreviewSource, config: Option<PreviewConfig>) -> Result<u64, HostError> {
+        let snapshot = self.snapshot();
+        let known = snapshot.preview_sources.contains(&source)
+            || (config.is_none() && snapshot.previews.iter().any(|preview| preview.source == source));
+        if !snapshot.can_preview || !known {
+            return Err(HostError::Unavailable);
+        }
+        self.send(HostIntent::Preview { source, config })
+    }
+
     pub fn send_chat(&self, key: ChatKey, policy_revision: u64, text: ChatText) -> Result<u64, HostError> {
         let snapshot = self.snapshot();
         let allowed = snapshot.chat.iter().any(|chat| {
@@ -263,6 +285,14 @@ pub(super) struct ChatBootstrap {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub(super) struct PreviewBootstrap {
+    pub control_port: u16,
+    pub image_port: u16,
+    pub key: super::bridge_auth::BridgeSecret,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct WorkerConfig {
     pub version: u16,
     pub identity: WorkerIdentity,
@@ -274,6 +304,8 @@ pub(super) struct WorkerConfig {
     pub host_pid: u32,
     #[serde(default)]
     pub chat: Option<ChatBootstrap>,
+    #[serde(default)]
+    pub preview: Option<PreviewBootstrap>,
 }
 
 impl WorkerConfig {
@@ -285,6 +317,12 @@ impl WorkerConfig {
         anyhow::ensure!(
             self.chat.as_ref().is_none_or(|chat| chat.port != 0),
             "invalid private chat endpoint"
+        );
+        anyhow::ensure!(
+            self.preview
+                .as_ref()
+                .is_none_or(|preview| preview.control_port != 0 && preview.image_port != 0 && preview.control_port != preview.image_port),
+            "invalid private preview endpoints"
         );
         anyhow::ensure!(
             self.expected_account.is_some() == self.expected_grid.is_some(),
@@ -694,6 +732,7 @@ struct Child {
     label: String,
     grid: String,
     chat: super::chat_broker::Peer,
+    preview: super::preview_broker::Peer,
 }
 
 impl Child {
@@ -813,6 +852,22 @@ struct Broker {
     error: Option<String>,
     completed_request: u64,
     chat_listener: Option<super::chat_transport::Listener>,
+    preview_listeners: Option<PreviewListeners>,
+}
+
+struct PreviewListeners {
+    control: super::preview_transport::Listener,
+    image: super::preview_transport::Listener,
+    ports: (u16, u16),
+}
+
+impl PreviewListeners {
+    fn bind() -> io::Result<Self> {
+        let control = super::preview_transport::Listener::bind(super::preview_transport::Kind::Control)?;
+        let image = super::preview_transport::Listener::bind(super::preview_transport::Kind::Image)?;
+        let ports = (control.port()?, image.port()?);
+        Ok(Self { control, image, ports })
+    }
 }
 
 impl Broker {
@@ -841,6 +896,7 @@ impl Broker {
                         Message::Command(Command::Grant { .. }) => self.pending = Some(worker),
                         Message::Command(Command::Detach) => {
                             child.chat.set_control(None, false);
+                            child.preview.set_control(None, false, false, Instant::now());
                             child.granted = None;
                             if self.active_viewport.is_some_and(|active| active.worker == worker) {
                                 self.active_viewport = None;
@@ -944,6 +1000,25 @@ impl Broker {
                 }
                 child.chat.send(key, policy_revision, text, ticket, Instant::now())?;
             }
+            HostIntent::Preview { source, config } => {
+                anyhow::ensure!(PREVIEW_CAPABLE, HostError::Unavailable);
+                let child = self
+                    .children
+                    .iter_mut()
+                    .find(|child| child.config.identity == source.worker && child.config.lease_epoch == source.lease_epoch)
+                    .ok_or(HostError::Unavailable)?;
+                let live = !child.detached
+                    && !child.exited
+                    && child.last_seen.is_some_and(|seen| seen.elapsed() <= REACHABLE)
+                    && self.coordinator.workers().any(|entry| {
+                        entry.live && entry.binding == source.binding() && entry.status.phase == Phase::Online && !entry.status.blocked
+                    });
+                if !live {
+                    child.preview.set_control(None, false, false, Instant::now());
+                    anyhow::bail!(HostError::Unavailable);
+                }
+                child.preview.configure(source, config, ticket, Instant::now())?;
+            }
         }
         Ok(())
     }
@@ -1001,6 +1076,7 @@ impl Broker {
         let effects = self.coordinator.tick(now);
         self.effects(effects)?;
         self.poll_chat();
+        self.poll_preview();
         Ok(())
     }
 
@@ -1048,6 +1124,98 @@ impl Broker {
             }
             Ok(None) => {}
             Err(_) => log::warn!("session chat listener unavailable; control ownership is unchanged"),
+        }
+    }
+
+    fn poll_preview(&mut self) {
+        use super::preview_transport::Kind;
+        let now = Instant::now();
+        let busy = self.coordinator.busy();
+        let active = self.coordinator.active();
+        for child in &mut self.children {
+            let entry = self
+                .coordinator
+                .workers()
+                .find(|entry| entry.binding.worker == child.config.identity);
+            let live = !child.detached
+                && !child.exited
+                && child.last_seen.is_some_and(|seen| seen.elapsed() <= REACHABLE)
+                && entry.is_some_and(|entry| entry.live && entry.status.phase == Phase::Online && !entry.status.blocked);
+            let source = entry
+                .filter(|_| live)
+                .and_then(|entry| PreviewSource::new(entry.binding, child.config.lease_epoch).ok());
+            child
+                .preview
+                .set_control(source, live, !busy && active != Some(child.config.identity.worker), now);
+            child.preview.poll_control(now);
+        }
+        // Only an acknowledged active worker can supply timing. Every other
+        // owned live world needs separately authenticated static metadata;
+        // the receiver also refuses any unknown OS registry peer itself.
+        let evidence_now = Instant::now();
+        let completed = (!busy)
+            .then(|| {
+                self.children
+                    .iter()
+                    .find(|child| Some(child.config.identity.worker) == active)
+                    .and_then(|child| child.preview.sample(evidence_now))
+            })
+            .flatten();
+        let evidence: Vec<_> = self
+            .children
+            .iter()
+            .filter(|child| {
+                !child.exited
+                    && !child.detached
+                    && self
+                        .coordinator
+                        .workers()
+                        .any(|entry| entry.binding.worker == child.config.identity && entry.live && entry.status.phase == Phase::Online)
+            })
+            .map(|child| (child.config.identity.worker, child.preview.metadata_evidence(evidence_now)))
+            .collect();
+        for child in &mut self.children {
+            let request = child.preview.take_budget_request();
+            let budget = request.zip(completed).and_then(|(request, sample)| {
+                let peers: Option<Vec<_>> = evidence
+                    .iter()
+                    .filter(|(worker, _)| *worker != child.config.identity.worker)
+                    .map(|(_, peer)| *peer)
+                    .collect();
+                super::preview_broker::budget(request, sample, peers?, Instant::now())
+            });
+            child.preview.subscription(request, budget, now);
+            child.preview.poll_image(now);
+        }
+        let Some(listeners) = &mut self.preview_listeners else {
+            return;
+        };
+        for (kind, listener) in [(Kind::Control, &mut listeners.control), (Kind::Image, &mut listeners.image)] {
+            let permits: Vec<_> = self
+                .children
+                .iter()
+                .filter(|child| child.preview.accepting(kind))
+                .filter_map(|child| {
+                    child.config.preview.as_ref().map(|preview| super::bridge_auth::Permit {
+                        identity: child.config.identity,
+                        lease_epoch: child.config.lease_epoch,
+                        secret: preview.key.clone(),
+                    })
+                })
+                .collect();
+            match listener.poll(&permits) {
+                Ok(Some(io)) => {
+                    if let Some(child) = self
+                        .children
+                        .iter_mut()
+                        .find(|child| child.config.identity == io.identity() && child.config.lease_epoch == io.lease_epoch())
+                    {
+                        let _ = child.preview.attach(io, kind);
+                    }
+                }
+                Ok(None) => {}
+                Err(_) => log::warn!("session preview listener unavailable; native hosting is unchanged"),
+            }
         }
     }
 
@@ -1125,6 +1293,7 @@ impl Broker {
             self.host,
             account,
             self.chat_listener.as_ref().map(|listener| listener.port()),
+            self.preview_listeners.as_ref().map(|listeners| listeners.ports),
         )?;
         self.coordinator.register(config.identity.worker, config.lease_epoch, now)?;
         let worker = config.identity.worker;
@@ -1206,6 +1375,13 @@ impl Broker {
             active_viewport,
             completed_request: self.completed_request,
             chat: self.children.iter().filter_map(|child| child.chat.snapshot()).collect(),
+            can_preview: PREVIEW_CAPABLE && cfg!(windows) && !stopped && self.preview_listeners.is_some(),
+            preview_sources: self
+                .children
+                .iter()
+                .filter_map(|child| child.preview.metadata(Instant::now()).map(|peer| peer.cohort.source))
+                .collect(),
+            previews: self.children.iter().filter_map(|child| child.preview.snapshot()).collect(),
         }
     }
 }
@@ -1252,6 +1428,13 @@ fn host_loop(
             Ok(listener) => Some(listener),
             Err(_) => {
                 log::warn!("session chat listener could not start; native chat remains unavailable");
+                None
+            }
+        },
+        preview_listeners: match PreviewListeners::bind() {
+            Ok(listeners) => Some(listeners),
+            Err(_) => {
+                log::warn!("session preview listeners unavailable; native hosting is unchanged");
                 None
             }
         },
@@ -1326,6 +1509,7 @@ fn new_config(
     host: HostId,
     account: Option<&(SavedAccount, crate::login_accounts::Account)>,
     chat_port: Option<u16>,
+    preview_ports: Option<(u16, u16)>,
 ) -> anyhow::Result<WorkerConfig> {
     let config = WorkerConfig {
         version: PROTOCOL_VERSION,
@@ -1342,6 +1526,15 @@ fn new_config(
         host_pid: std::process::id(),
         chat: chat_port
             .map(|port| super::chat_transport::ChatSecret::random().map(|key| ChatBootstrap { port, key }))
+            .transpose()?,
+        preview: preview_ports
+            .map(|(control_port, image_port)| {
+                super::bridge_auth::BridgeSecret::random().map(|key| PreviewBootstrap {
+                    control_port,
+                    image_port,
+                    key,
+                })
+            })
             .transpose()?,
     };
     config.validate()?;
@@ -1373,6 +1566,7 @@ fn launch(
         session: None,
     };
     let chat = super::chat_broker::Peer::new(config.identity, config.lease_epoch);
+    let preview = super::preview_broker::Peer::new(config.identity, config.lease_epoch, process.id());
     Ok(Child {
         config,
         directory,
@@ -1391,6 +1585,7 @@ fn launch(
         label: account.map_or_else(String::new, |(saved, _)| saved.label.clone()),
         grid: account.map_or_else(String::new, |(saved, _)| saved.grid.clone()),
         chat,
+        preview,
     })
 }
 
@@ -1438,6 +1633,7 @@ mod tests {
             lease_epoch: 7,
             host_pid: std::process::id(),
             chat: None,
+            preview: None,
         }
     }
 
@@ -1481,6 +1677,29 @@ mod tests {
         assert_eq!(restored.chat.as_ref().unwrap().port, 12345);
         config.chat.as_mut().unwrap().port = 0;
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn private_preview_bootstrap_has_separate_redacted_key_and_fixed_distinct_endpoints() {
+        let mut config = config();
+        let mut old = serde_json::to_value(&config).unwrap();
+        old.as_object_mut().unwrap().remove("preview");
+        assert!(serde_json::from_value::<WorkerConfig>(old).unwrap().preview.is_none());
+        let key = serde_json::from_str::<super::super::bridge_auth::BridgeSecret>(&format!("\"{}\"", "09".repeat(32))).unwrap();
+        config.preview = Some(PreviewBootstrap {
+            control_port: 10001,
+            image_port: 10002,
+            key,
+        });
+        config.validate().unwrap();
+        assert!(!format!("{config:?}").contains(&"09".repeat(32)));
+        assert!(serde_json::to_vec(&config).unwrap().len() < MAX_CONFIG);
+        config.preview.as_mut().unwrap().image_port = 10001;
+        assert!(config.validate().is_err());
+        config.preview.as_mut().unwrap().image_port = 0;
+        assert!(config.validate().is_err());
+        let source = PreviewSource::new(status(&config).binding, config.lease_epoch).unwrap();
+        assert!(!HostIntent::Preview { source, config: None }.controls_presentation());
     }
 
     fn status(config: &WorkerConfig) -> Envelope {

@@ -157,6 +157,7 @@ pub(crate) struct WorkerBridge {
     last_receipt: Option<Instant>,
     chat: Option<super::chat_io::WorkerChannel>,
     preview_fences: PreviewFences,
+    preview: Option<super::preview_lane::WorkerChannel>,
 }
 
 impl WorkerBridge {
@@ -174,6 +175,20 @@ impl WorkerBridge {
                 Ok(channel) => Some(channel),
                 Err(_) => {
                     log::warn!("session chat IO could not start; native chat remains unavailable");
+                    None
+                }
+            }
+        });
+        let preview = startup.config.preview.as_ref().and_then(|preview| {
+            let permit = super::bridge_auth::Permit {
+                identity: startup.config.identity,
+                lease_epoch: startup.config.lease_epoch,
+                secret: preview.key.clone(),
+            };
+            match super::preview_lane::WorkerChannel::start(preview.control_port, preview.image_port, permit) {
+                Ok(channel) => Some(channel),
+                Err(_) => {
+                    log::warn!("session preview IO unavailable; native hosting is unchanged");
                     None
                 }
             }
@@ -199,6 +214,7 @@ impl WorkerBridge {
             last_receipt: None,
             chat,
             preview_fences: PreviewFences::default(),
+            preview,
         }))
     }
 
@@ -292,6 +308,7 @@ impl WorkerBridge {
             merge_effects(&mut effects, self.fail_closed());
         }
         self.sync_chat_source();
+        self.sync_preview_source();
         final_display_effects(effects, self.guard.mode())
     }
 
@@ -342,6 +359,23 @@ impl WorkerBridge {
         self.bound_session()
             .filter(|_| self.supported && !self.status.blocked)
             .map(|(binding, lease_epoch)| (binding, lease_epoch, self.device_epoch))
+    }
+
+    fn sync_preview_source(&self) {
+        if let Some(preview) = &self.preview {
+            let source = self
+                .preview_identity()
+                .and_then(|(binding, lease, _)| super::preview_protocol::PreviewSource::new(binding, lease).ok());
+            let expires = self
+                .last_receipt
+                .and_then(|received| received.checked_add(std::time::Duration::from_millis(aurora_session::LEASE_MILLIS)));
+            preview.set_source(source, expires);
+        }
+    }
+
+    pub(crate) fn preview_mailbox(&self) -> Option<std::sync::Arc<super::preview_io::PreviewMailbox>> {
+        self.preview_identity()?;
+        self.preview.as_ref().map(|preview| preview.mailbox())
     }
 
     fn preview_scope(&self) -> Option<PreviewScope> {
@@ -452,6 +486,9 @@ impl WorkerBridge {
         self.admitted = false;
         if let Some(chat) = &self.chat {
             chat.set_source(None, None);
+        }
+        if let Some(preview) = &self.preview {
+            preview.set_source(None, None);
         }
         WorkerEffects {
             release_input: true,
