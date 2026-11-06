@@ -12,6 +12,7 @@ pub(crate) const MAX_PACKET: usize = 14 + MAX_HEADER + MAX_RGBA;
 pub(crate) const CONTROL_FRESH: Duration = Duration::from_millis(750);
 pub(crate) const SAMPLE_FRESH: Duration = Duration::from_millis(500);
 pub(crate) const BUDGET_ROUND_TRIP: Duration = Duration::from_millis(250);
+pub(crate) const MAX_SUSPEND_CHALLENGE: u64 = u64::MAX >> 1;
 const MAGIC: &[u8; 8] = b"FLDPREV1";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -98,7 +99,7 @@ pub(crate) struct Suspend {
 impl Suspend {
     pub fn validate(self) -> Result<(), Error> {
         self.source.validate()?;
-        if self.device_epoch == 0 || self.challenge == 0 {
+        if self.device_epoch == 0 || self.challenge == 0 || self.challenge > MAX_SUSPEND_CHALLENGE {
             return Err(Error::Source);
         }
         Ok(())
@@ -485,5 +486,34 @@ mod tests {
         assert!(current(now, now + CONTROL_FRESH));
         assert!(!current(now, now + CONTROL_FRESH + Duration::from_nanos(1)));
         assert!(!current(now + Duration::from_nanos(1), now));
+    }
+
+    #[test]
+    fn preview_suspend_wire_nonce_fits_atomic_state_and_exhausts_without_wrapping() {
+        let last = Suspend {
+            source: source(),
+            device_epoch: 1,
+            challenge: MAX_SUSPEND_CHALLENGE,
+        };
+        assert!(last.validate().is_ok());
+        let bytes = encode(&Header::Suspend(last), &[]).unwrap();
+        assert_eq!(decode(&bytes).unwrap().0, Header::Suspend(last));
+        assert!(
+            Suspend {
+                challenge: MAX_SUSPEND_CHALLENGE + 1,
+                ..last
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            Suspend {
+                challenge: u64::MAX,
+                ..last
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(Suspend { challenge: 0, ..last }.validate().is_err());
     }
 }

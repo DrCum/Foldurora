@@ -74,9 +74,12 @@ pub(crate) struct PreviewMailbox {
     generation: AtomicU64,
     suspension: AtomicU64,
     highest_suspend: Mutex<Option<wire::Suspend>>,
+    suspend_tx: crossbeam_channel::Sender<wire::Suspend>,
+    suspend_rx: crossbeam_channel::Receiver<wire::Suspend>,
 }
 impl Default for PreviewMailbox {
     fn default() -> Self {
+        let (suspend_tx, suspend_rx) = crossbeam_channel::bounded(1);
         Self {
             pending: Mutex::new(Pending {
                 generation: 1,
@@ -85,6 +88,8 @@ impl Default for PreviewMailbox {
             generation: AtomicU64::new(1),
             suspension: AtomicU64::new(0),
             highest_suspend: Mutex::new(None),
+            suspend_tx,
+            suspend_rx,
         }
     }
 }
@@ -171,7 +176,7 @@ impl PreviewMailbox {
         }) {
             return false;
         }
-        let suspended = self.suspension.load(Ordering::Acquire);
+        let suspended = self.suspended_challenge();
         if p.suspended
             .is_some_and(|ack| ack.request.source == subscription.source && subscription.resume_after != Some(ack.request.challenge))
         {
@@ -216,7 +221,7 @@ impl PreviewMailbox {
         if suspended != 0
             && self
                 .suspension
-                .compare_exchange(suspended, 0, Ordering::AcqRel, Ordering::Acquire)
+                .compare_exchange((suspended << 1) | 1, suspended << 1, Ordering::AcqRel, Ordering::Acquire)
                 .is_err()
         {
             p.control = None;
@@ -521,26 +526,45 @@ impl PreviewMailbox {
         if request.validate().is_err() || self.generation() == 0 {
             return false;
         }
-        // This tiny metadata lock is separate from all producers/pixels. Keep
-        // the exact highest request after resume so old or conflicting scoped
-        // retransmissions cannot poison the currently completed resume token.
-        let Ok(mut highest) = self.highest_suspend.try_lock() else {
-            return false;
-        };
-        if let Some(old) = *highest {
-            if old.challenge > request.challenge || (old.challenge == request.challenge && old != request) {
+        // Highest nonce and retired/active bit share one atomic. Resume clears
+        // only that bit, so delayed older writers cannot regress or re-latch a
+        // completed newer barrier. The authenticated control lane is the sole
+        // command writer; the bounded channel preserves its exact first scope.
+        let first = loop {
+            let state = self.suspension.load(Ordering::Acquire);
+            let floor = state >> 1;
+            if floor > request.challenge {
                 return false;
             }
-            if old == request && !self.is_suspended() {
-                return true;
+            if floor == request.challenge {
+                break false;
+            }
+            if self
+                .suspension
+                .compare_exchange(state, (request.challenge << 1) | 1, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
+                break true;
+            }
+        };
+        if first {
+            // Retire before either producer OR metadata lock. Only the first
+            // receipt may publish this challenge's immutable exact scope; an
+            // equal but conflicting retransmission cannot replace it.
+            self.advance();
+            if let Err(crossbeam_channel::TrySendError::Full(value)) = self.suspend_tx.try_send(request) {
+                let _ = self.suspend_rx.try_recv();
+                if self.suspension.load(Ordering::Acquire) >> 1 == request.challenge {
+                    let _ = self.suspend_tx.try_send(value);
+                }
             }
         }
-        *highest = Some(request);
-        let old = self.suspension.swap(request.challenge, Ordering::AcqRel);
-        if old != request.challenge {
-            self.advance();
+        if self.suspend_scope() != Some(request) {
+            return false;
         }
-        drop(highest);
+        if !self.is_suspended() {
+            return true;
+        }
         let Ok(mut p) = self.pending.try_lock() else {
             return false;
         };
@@ -563,8 +587,8 @@ impl PreviewMailbox {
         if !self.is_suspended() {
             return None;
         }
-        let request = (*self.highest_suspend.try_lock().ok()?)?;
-        if request.challenge != self.suspension.load(Ordering::Acquire) {
+        let request = self.suspend_scope()?;
+        if request.challenge != self.suspended_challenge() {
             return None;
         }
         let complete = self
@@ -577,19 +601,14 @@ impl PreviewMailbox {
         if proof.validate().is_err() {
             return false;
         }
-        if self
-            .highest_suspend
-            .try_lock()
-            .ok()
-            .is_none_or(|scope| *scope != Some(proof.request))
-        {
+        if self.suspend_scope() != Some(proof.request) {
             return false;
         }
         let Ok(mut p) = self.pending.try_lock() else {
             return false;
         };
         self.renew(&mut p);
-        if self.suspension.load(Ordering::Acquire) != proof.request.challenge {
+        if self.suspended_challenge() != proof.request.challenge {
             return false;
         }
         p.suspend = Some(proof.request);
@@ -603,7 +622,20 @@ impl PreviewMailbox {
         self.current_pending()?.suspended
     }
     pub fn is_suspended(&self) -> bool {
-        self.suspension.load(Ordering::Acquire) != 0
+        self.suspension.load(Ordering::Acquire) & 1 != 0
+    }
+    fn suspend_scope(&self) -> Option<wire::Suspend> {
+        let mut scope = self.highest_suspend.try_lock().ok()?;
+        while let Ok(request) = self.suspend_rx.try_recv() {
+            if self.suspension.load(Ordering::Acquire) >> 1 == request.challenge {
+                *scope = Some(request);
+            }
+        }
+        scope.filter(|s| s.challenge == self.suspension.load(Ordering::Acquire) >> 1)
+    }
+    fn suspended_challenge(&self) -> u64 {
+        let state = self.suspension.load(Ordering::Acquire);
+        if state & 1 == 0 { 0 } else { state >> 1 }
     }
 }
 
@@ -946,16 +978,80 @@ mod tests {
 
     #[test]
     fn suspended_reconnected_worker_can_report_fresh_identity_without_reopening_render_budget() {
-        let mailbox=PreviewMailbox::default();let now=Instant::now();
-        let request=wire::Suspend {source:source(),device_epoch:2,challenge:10};
-        assert!(mailbox.receive_suspend(request));mailbox.disconnect();
-        let probe=Probe {source:source(),challenge:50};assert!(mailbox.receive_probe(probe,now));
-        let peer=Peer {cohort:Cohort {source:source(),device_epoch:2,pid:200},luid:42};
-        let report=wire::CohortReport {peer,challenge:probe.challenge};
-        mailbox.publish_peer(report);assert_eq!(mailbox.take_peer(now),Some(report));
-        assert!(mailbox.is_suspended());assert!(mailbox.control(now).is_none());
-        assert!(!mailbox.receive_subscription(control(1),now));
-        assert!(!mailbox.publish_state(state(1,1,Availability::Live)));
+        let mailbox = PreviewMailbox::default();
+        let now = Instant::now();
+        let request = wire::Suspend {
+            source: source(),
+            device_epoch: 2,
+            challenge: 10,
+        };
+        assert!(mailbox.receive_suspend(request));
+        mailbox.disconnect();
+        let probe = Probe {
+            source: source(),
+            challenge: 50,
+        };
+        assert!(mailbox.receive_probe(probe, now));
+        let peer = Peer {
+            cohort: Cohort {
+                source: source(),
+                device_epoch: 2,
+                pid: 200,
+            },
+            luid: 42,
+        };
+        let report = wire::CohortReport {
+            peer,
+            challenge: probe.challenge,
+        };
+        mailbox.publish_peer(report);
+        assert_eq!(mailbox.take_peer(now), Some(report));
+        assert!(mailbox.is_suspended());
+        assert!(mailbox.control(now).is_none());
+        assert!(!mailbox.receive_subscription(control(1), now));
+        assert!(!mailbox.publish_state(state(1, 1, Availability::Live)));
+    }
+
+    #[test]
+    fn first_suspend_retires_authority_even_when_exact_scope_metadata_lock_is_busy() {
+        let mailbox = PreviewMailbox::default();
+        let now = Instant::now();
+        mailbox.receive_subscription(control(1), now);
+        mailbox.publish_state(state(1, 1, Availability::Live));
+        mailbox.publish_image(header(1, 1, 1), pixels());
+        let request = wire::Suspend {
+            source: source(),
+            device_epoch: 2,
+            challenge: 10,
+        };
+        let held = mailbox.highest_suspend.lock().unwrap();
+        assert!(!mailbox.receive_suspend(request));
+        assert!(mailbox.is_suspended());
+        assert!(mailbox.control(now).is_none());
+        assert!(mailbox.image().is_none());
+        drop(held);
+        assert!(
+            !mailbox.receive_suspend(wire::Suspend {
+                device_epoch: 99,
+                ..request
+            }),
+            "conflicting equal nonce cannot replace the first immutable queued scope"
+        );
+        assert_eq!(mailbox.pending_suspend(), Some(request));
+        assert!(mailbox.receive_suspend(request));
+        assert!(mailbox.publish_suspended(wire::Suspended {
+            request,
+            surface_epoch: 3,
+            completed_frame: None
+        }));
+        assert!(mailbox.receive_subscription(
+            Subscription {
+                resume_after: Some(10),
+                ..control(2)
+            },
+            now
+        ));
+        assert!(!mailbox.is_suspended());
     }
 
     #[test]
