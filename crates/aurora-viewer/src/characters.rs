@@ -839,7 +839,11 @@ mod tests {
         // The supervisor still owns the OS account lock throughout this
         // simulated cold start, even after the original 30-second lease.
         assert!(refresh_reservation(&dir, &reservation, 123, 100 + LAUNCH_SECS + 1).unwrap());
-        assert!(scan(&dir, &[account.clone()], 100 + LAUNCH_SECS + 2).opening.contains(&account));
+        assert!(
+            scan(&dir, std::slice::from_ref(&account), 100 + LAUNCH_SECS + 2)
+                .opening
+                .contains(&account)
+        );
         assert!(matches!(
             open_character(&dir, Path::new("/never-launch-this-program"), &account, 100 + LAUNCH_SECS + 2),
             Ok(Notice::Opening)
