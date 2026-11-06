@@ -92,6 +92,8 @@ argument or in the switcher's discovery records.
    all belong to that window's account. Check Alt-Tab/taskbar captions show the
    selected account, short grid label and login/connecting/online phase; unread
    and render-pause indicators still appear. A custom `--title` remains in force.
+   Custom grids include a short identifier so endpoints sharing a name or host
+   remain distinguishable without displaying private URL details.
 2. Attempt to open the same saved account twice. Check the existing or starting
    session is used, repeated clicks report Opening or a neutral waiting notice,
    rather than a false failure,
