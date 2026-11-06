@@ -257,25 +257,25 @@ impl Peer {
             self.uncertain();
             changed = true;
         }
-        if now >= self.poll_at {
-            if let (Some(source), Some(sequence), Some(io)) = (self.source, self.sent.checked_add(1), self.io.as_mut()) {
-                let packet = ChatPacket {
-                    version: VERSION,
-                    source,
-                    sequence,
-                    reply_to: 0,
-                    message: ChatMessage::Command(ChatCommand::Poll {
-                        after_event: self.after_event,
-                    }),
-                };
-                match io.queue(&packet) {
-                    Ok(()) => {
-                        self.sent = sequence;
-                        self.poll_at = now + POLL;
-                    }
-                    Err(LaneError::Busy) => {}
-                    Err(_) => self.disconnect(),
+        if now >= self.poll_at
+            && let (Some(source), Some(sequence), Some(io)) = (self.source, self.sent.checked_add(1), self.io.as_mut())
+        {
+            let packet = ChatPacket {
+                version: VERSION,
+                source,
+                sequence,
+                reply_to: 0,
+                message: ChatMessage::Command(ChatCommand::Poll {
+                    after_event: self.after_event,
+                }),
+            };
+            match io.queue(&packet) {
+                Ok(()) => {
+                    self.sent = sequence;
+                    self.poll_at = now + POLL;
                 }
+                Err(LaneError::Busy) => {}
+                Err(_) => self.disconnect(),
             }
         }
         if changed {

@@ -72,7 +72,7 @@ impl<'de> Deserialize<'de> for ChatSecret {
             return Err(serde::de::Error::custom("invalid private session chat key"));
         }
         let mut bytes = [0; 32];
-        for (pair, byte) in text.as_bytes().chunks_exact(2).zip(&mut bytes) {
+        for (pair, byte) in text.as_bytes().as_chunks::<2>().0.iter().zip(&mut bytes) {
             let digit = |digit| match digit {
                 b'0'..=b'9' => Some(digit - b'0'),
                 b'a'..=b'f' => Some(digit - b'a' + 10),

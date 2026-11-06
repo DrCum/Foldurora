@@ -487,10 +487,10 @@ fn run(port: u16, permit: Permit, shared: Arc<Shared>) {
         }
         if present && lane.is_none() && retry.due(Instant::now()) {
             retry.attempted(Instant::now());
-            if let Ok(socket) = WorkerIo::connect(port, permit.clone()) {
-                if shared.current(revision) {
-                    lane = Some(socket);
-                }
+            if let Ok(socket) = WorkerIo::connect(port, permit.clone())
+                && shared.current(revision)
+            {
+                lane = Some(socket);
             }
             // Recheck stop/source after the potentially slow off-thread connect.
             continue;
@@ -536,10 +536,11 @@ fn run(port: u16, permit: Permit, shared: Arc<Shared>) {
                         if socket.ready() && connection.is_none() {
                             connection = shared.authenticated(revision);
                         }
-                        if let Some(connection) = connection {
-                            if !shared.stop.load(Ordering::Acquire) && shared.state().incoming(connection, packets).is_err() {
-                                failed = true;
-                            }
+                        if let Some(connection) = connection
+                            && !shared.stop.load(Ordering::Acquire)
+                            && shared.state().incoming(connection, packets).is_err()
+                        {
+                            failed = true;
                         }
                     }
                     Err(_) => failed = true,
