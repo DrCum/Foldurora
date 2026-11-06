@@ -2,8 +2,8 @@
 //! answers what my.secondlife.com and its storage answer to a photo post —
 //! the session cookie for the OpenID cookie, `snapshots/s3_upload_config`,
 //! the form's POST with its 303, and the address it leads to. It checks
-//! what Firestorm sends (cookies, the fields and their order) and keeps
-//! each post for the log and the tests.
+//! the profile's cookies, and the signed storage form's fields and order.
+//! Storage refuses session credentials; each post is kept for the tests.
 
 use parking_lot::Mutex;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -69,6 +69,7 @@ struct Request {
     method: String,
     target: String,
     cookies: Vec<String>,
+    authorization: bool,
     content_type: String,
     body: Vec<u8>,
 }
@@ -79,7 +80,7 @@ fn read_request(stream: &TcpStream) -> Option<Request> {
     input.read_line(&mut line).ok()?;
     let mut parts = line.split_whitespace();
     let (method, target) = (parts.next()?.to_owned(), parts.next()?.to_owned());
-    let (mut length, mut cookies, mut content_type) = (0usize, Vec::new(), String::new());
+    let (mut length, mut cookies, mut content_type, mut authorization) = (0usize, Vec::new(), String::new(), false);
     loop {
         let mut header = String::new();
         if input.read_line(&mut header).ok()? == 0 || header.trim().is_empty() {
@@ -92,6 +93,7 @@ fn read_request(stream: &TcpStream) -> Option<Request> {
         match name.trim().to_ascii_lowercase().as_str() {
             "content-length" => length = value.parse().ok()?,
             "cookie" => cookies.push(value),
+            "authorization" => authorization = true,
             "content-type" => content_type = value,
             _ => {}
         }
@@ -105,6 +107,7 @@ fn read_request(stream: &TcpStream) -> Option<Request> {
         method,
         target,
         cookies,
+        authorization,
         content_type,
         body,
     })
@@ -154,7 +157,7 @@ fn serve(mut stream: TcpStream, base: &str, posts: &Mutex<Vec<Posted>>, fail: bo
         // the storage: the form, answered by a 303 to success_action_redirect
         ("POST", "/s3") if r.content_type.contains("boundary=") => {
             let (fields, png) = parse_form(&r.body, &r.content_type);
-            let ok = fields == FIELDS && !png.is_empty();
+            let ok = fields == FIELDS && !png.is_empty() && r.cookies.is_empty() && !r.authorization;
             if let Some(last) = posts.lock().last_mut() {
                 last.fields = fields;
                 last.png = png;

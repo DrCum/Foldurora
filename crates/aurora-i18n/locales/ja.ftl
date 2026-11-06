@@ -7152,6 +7152,7 @@ session-land-script-info-failed = スクリプトの情報を取得できませ�
 session-land-no-attachment-resources = リージョンはAttachmentResourcesのケーパビリティを提供していません。
 ui-options-theme-json-layout-json-icons-reloaded-automatically = theme.json・layout.json・icons/‐自動的に再読み込みされます
 login-too-many-redirects = リダイレクトが多すぎます
+login-unsafe-address = ログイン先またはリダイレクトが拒否されました。グリッドのログイン先を確認してください。
 build-ui-floaters-transfer = 再販・譲渡
 fetch-transport-error = 転送エラー
 ui-debug-overlay-too-small = 小さすぎ

@@ -218,9 +218,8 @@ pub(super) struct Snapshots {
     /// change made in Preferences (renderer, draw distance sent to the
     /// region…).
     pub(super) settings_changed: bool,
-    /// The web profile's session cookie, for the OpenID cookie it was
-    /// asked with (getOpenIDCookieCoro gives it once per login).
-    web_auth: std::sync::Arc<parking_lot::Mutex<Option<(String, String)>>>,
+    /// The session cookie bound to its profile base and OpenID session.
+    web_auth: std::sync::Arc<parking_lot::Mutex<Option<profile::AuthCookie>>>,
     /// The demo's web profile.
     demo_profile: Option<profile::demo::Server>,
     demo: Option<DemoPhoto>,
@@ -797,19 +796,11 @@ impl App {
                 }
             }
             let server = self.snapshots.demo_profile.as_ref()?;
-            return Some(profile::Web {
-                profile: server.url.clone(),
-                openid: profile::demo::OPENID.into(),
-                user_agent,
-            });
+            return profile::Web::demo(server, user_agent).ok();
         }
         let login = self.world.login.as_ref()?;
         let base = profile::grid_web_profile(&self.settings.grid, &login.raw["web_profile_url"].to_string_value())?;
-        Some(profile::Web {
-            profile: profile::profile_url(&base)?,
-            openid: self.media.openid.raw()?,
-            user_agent,
-        })
+        profile::Web::new(&base, self.media.openid.raw()?, user_agent).ok()
     }
 
     /// What the window shows of a photo for the profile feed.
@@ -858,16 +849,12 @@ impl App {
                 Err(_) => return,
             };
             let _ = tx.send(ProfileStep::Encoded(png.len()));
-            let known = auth
-                .lock()
-                .as_ref()
-                .filter(|(openid, _)| *openid == web.openid)
-                .map(|(_, a)| a.clone());
+            let known = auth.lock().as_ref().filter(|a| a.matches(&web)).cloned();
             let cookie = match known {
                 Some(cookie) => cookie,
                 None => match profile::auth_cookie(&web).await {
                     Ok(cookie) => {
-                        *auth.lock() = Some((web.openid.clone(), cookie.clone()));
+                        *auth.lock() = Some(cookie.clone());
                         cookie
                     }
                     Err(e) => {

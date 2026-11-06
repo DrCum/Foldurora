@@ -7162,6 +7162,7 @@ session-land-script-info-failed = The script information could not be retrieved.
 session-land-no-attachment-resources = The region does not provide the AttachmentResources capability.
 ui-options-theme-json-layout-json-icons-reloaded-automatically = theme.json · layout.json · icons/ — reloaded automatically
 login-too-many-redirects = Too many redirects
+login-unsafe-address = The login address or redirect was refused. Check the grid's login address.
 build-ui-floaters-transfer = transfer
 fetch-transport-error = Transport error
 ui-debug-overlay-too-small = too small
