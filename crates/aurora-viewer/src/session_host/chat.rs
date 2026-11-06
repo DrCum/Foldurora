@@ -199,14 +199,15 @@ impl WorkerChat {
                 state.cursor = page.cursor;
             }
             if page.gap {
-                self.gap()?;
+                // Missing/cleared native history is ordinary loss, not a
+                // privacy revocation. A skipped event marks consumer history
+                // incomplete without purging other conversations or drafts.
+                self.event()?;
             }
             for line in page.lines.into_iter().take(SCAN_LINES) {
                 let event = self.event()?;
                 if self.lines.len() == MAX_RETAINED_LINES {
-                    if let Some(old) = self.lines.pop_front() {
-                        self.gap_through = self.gap_through.max(old.event);
-                    }
+                    self.lines.pop_front();
                 }
                 self.lines.push_back(ChatLine {
                     key: policy.key,
@@ -366,7 +367,7 @@ impl WorkerChat {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aurora_session::chat::{LineKind, SendRequest};
+    use aurora_session::chat::{ChatDrafts, ChatHistory, LineKind, SendRequest};
     use aurora_session::{
         AccountKey, ConversationId, GridKey, HostId, InstallationId, SessionId, SessionIdentity, WorkerId, WorkerIdentity,
     };
@@ -396,6 +397,8 @@ mod tests {
         revision: u64,
         readable: bool,
         entries: u64,
+        direct_entries: Option<u64>,
+        token: u64,
         initial: u64,
         largest_scan: Cell<usize>,
         submits: usize,
@@ -412,6 +415,8 @@ mod tests {
                 revision: 0,
                 readable: true,
                 entries: 0,
+                direct_entries: None,
+                token: 1,
                 initial: 0,
                 largest_scan: Cell::new(0),
                 submits: 0,
@@ -454,14 +459,29 @@ mod tests {
                 can_send: true,
                 can_read: self.readable,
                 initial: NativeCursor {
-                    token: 1,
+                    token: self.token,
                     next: self.initial,
                 },
             })
         }
-        fn lines(&self, _: Conversation, cursor: NativeCursor, limit: usize) -> NativePage {
+        fn lines(&self, conversation: Conversation, cursor: NativeCursor, limit: usize) -> NativePage {
             self.largest_scan.set(self.largest_scan.get().max(limit));
-            let end = cursor.next.saturating_add(limit as u64).min(self.entries);
+            let entries = if matches!(conversation, Conversation::Direct(_)) {
+                self.direct_entries.unwrap_or(self.entries)
+            } else {
+                self.entries
+            };
+            if cursor.token != self.token {
+                return NativePage {
+                    cursor: NativeCursor {
+                        token: self.token,
+                        next: entries,
+                    },
+                    gap: true,
+                    lines: Vec::new(),
+                };
+            }
+            let end = cursor.next.saturating_add(limit as u64).min(entries);
             let lines = (cursor.next..end)
                 .map(|_| NativeLine {
                     sender: Label::new("Synthetic sender").unwrap(),
@@ -471,7 +491,10 @@ mod tests {
                 })
                 .collect();
             NativePage {
-                cursor: NativeCursor { token: 1, next: end },
+                cursor: NativeCursor {
+                    token: self.token,
+                    next: end,
+                },
                 gap: false,
                 lines,
             }
@@ -508,6 +531,22 @@ mod tests {
             sequence,
             reply_to: 0,
             message: ChatMessage::Command(ChatCommand::Poll { after_event: 0 }),
+        }
+    }
+
+    fn retain_without_reset(history: &mut ChatHistory, policies: &mut BTreeMap<Conversation, NativeChatPolicy>, packets: &[ChatPacket]) {
+        for packet in packets {
+            match &packet.message {
+                ChatMessage::Event(ChatEvent::Conversation(info)) => {
+                    history.apply_policy(info.policy).unwrap();
+                    policies.insert(info.policy.key.conversation, info.policy);
+                }
+                ChatMessage::Event(ChatEvent::Line(line)) => {
+                    history.push(line.clone(), policies[&line.key.conversation]).unwrap();
+                }
+                ChatMessage::Event(ChatEvent::Gap { .. }) => panic!("ordinary history loss must not reset consumer policy or drafts"),
+                _ => {}
+            }
         }
     }
 
@@ -626,6 +665,70 @@ mod tests {
                 .iter()
                 .any(|packet| matches!(packet.message, ChatMessage::Event(ChatEvent::Conversation(ref info)) if !info.policy.can_read))
         );
+    }
+
+    #[test]
+    fn host_chat_backend_nearby_overflow_preserves_direct_policy_history_and_draft() {
+        let mut native = Native::new();
+        native.direct = true;
+        native.direct_entries = Some(1);
+        let mut backend = WorkerChat::default();
+        let mut history = ChatHistory::new(source(1)).unwrap();
+        let mut policies = BTreeMap::new();
+        let first = backend.handle(&mut native, &poll(source(1), 1)).unwrap();
+        retain_without_reset(&mut history, &mut policies, &first);
+        let direct = Conversation::Direct(ConversationId::from_bytes([7; 16]).unwrap());
+        let direct_policy = policies[&direct];
+        assert_eq!(history.lines(direct_policy).count(), 1);
+        let mut drafts = ChatDrafts::new(source(1)).unwrap();
+        let draft = ChatText::new("Synthetic inactive IM draft").unwrap();
+        drafts.set(direct_policy.key, draft.clone()).unwrap();
+
+        native.entries = 1024;
+        for _ in 0..40 {
+            backend.sync(&native).unwrap();
+        }
+        assert_eq!(backend.lines.len(), MAX_RETAINED_LINES);
+        assert!(backend.lines.iter().all(|line| line.key.conversation == Conversation::Nearby));
+        assert_eq!(backend.gap_through, 0);
+        let mut request = poll(source(1), 2);
+        request.message = ChatMessage::Command(ChatCommand::Poll { after_event: 1 });
+        let replies = backend.handle(&mut native, &request).unwrap();
+        assert!(replies.len() <= 11);
+        retain_without_reset(&mut history, &mut policies, &replies);
+        assert!(history.has_gap(), "skipped Nearby events still mark incomplete history");
+        assert_eq!(policies[&direct], direct_policy);
+        assert_eq!(backend.states[&direct].policy, direct_policy);
+        assert_eq!(history.lines(direct_policy).count(), 1);
+        assert_eq!(drafts.get(direct_policy.key), Some(&draft));
+    }
+
+    #[test]
+    fn host_chat_backend_native_cursor_reset_marks_loss_without_policy_reset() {
+        let mut native = Native::new();
+        native.entries = 1;
+        let mut backend = WorkerChat::default();
+        let mut history = ChatHistory::new(source(1)).unwrap();
+        let mut policies = BTreeMap::new();
+        let first = backend.handle(&mut native, &poll(source(1), 1)).unwrap();
+        retain_without_reset(&mut history, &mut policies, &first);
+        let policy = policies[&Conversation::Nearby];
+        assert!(!history.has_gap());
+
+        // Mirrors the native adapter's cleared/replaced LineClock token:
+        // the page skips to the current end and reports ordinary history loss.
+        native.token += 1;
+        backend.sync(&native).unwrap();
+        assert_eq!(backend.states[&Conversation::Nearby].cursor.token, native.token);
+        assert_eq!(backend.gap_through, 0);
+        native.entries += 1;
+        let mut request = poll(source(1), 2);
+        request.message = ChatMessage::Command(ChatCommand::Poll { after_event: 1 });
+        let replies = backend.handle(&mut native, &request).unwrap();
+        retain_without_reset(&mut history, &mut policies, &replies);
+        assert!(history.has_gap());
+        assert_eq!(policies[&Conversation::Nearby], policy);
+        assert_eq!(history.lines(policy).count(), 2);
     }
 
     #[test]
