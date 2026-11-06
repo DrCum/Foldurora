@@ -759,6 +759,7 @@ dependencies = [
  "reqwest",
  "resvg",
  "rfd",
+ "ring",
  "ron",
  "serde",
  "serde_json",
