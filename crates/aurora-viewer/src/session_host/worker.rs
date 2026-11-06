@@ -51,6 +51,9 @@ enum DisplayGate {
         through: u64,
     },
     Standby,
+    Fitting {
+        reply_to: u64,
+    },
     Settling {
         reply_to: u64,
         stable: u8,
@@ -66,10 +69,14 @@ enum DisplayGate {
     },
     Prepared,
     Active,
+    GeometryPending,
     Detached,
 }
 
 impl DisplayGate {
+    fn allows_input(self) -> bool {
+        matches!(self, Self::Active)
+    }
     fn allows_world(self) -> bool {
         matches!(self, Self::Preparing { .. } | Self::Active)
     }
@@ -241,7 +248,7 @@ impl WorkerBridge {
             || (self.status.keyboard_focused
                 && (self.status.phase == aurora_session::Phase::Login
                     || (matches!(self.gate, DisplayGate::Login) && self.status.phase == aurora_session::Phase::Connecting)
-                    || (self.guard.input_owned() && self.bound_session().is_some())))
+                    || (self.gate.allows_input() && self.guard.input_owned() && self.bound_session().is_some())))
     }
     /// Fresh local channel authority only. Standby is eligible for native chat,
     /// but a source never grants world rendering, keyboard input or focus.
@@ -296,7 +303,8 @@ impl WorkerBridge {
             if let Some(viewport) = self.guard.viewport() {
                 // Scheduling only. Never assign host focus to App.focused or
                 // use it as permission for movement, shortcuts or microphone.
-                return matches!(self.guard.mode(), WorkerMode::Preparing | WorkerMode::Active)
+                return self.gate.allows_world()
+                    && matches!(self.guard.mode(), WorkerMode::Preparing | WorkerMode::Active)
                     && native::workspace_foreground(viewport.host_window, self.window, self.config.host_pid);
             }
             self.guard.render_priority(keyboard_focused)
@@ -383,6 +391,7 @@ impl WorkerBridge {
             self.publish_status();
             return false;
         }
+        let geometry_was_pending = matches!(self.gate, DisplayGate::GeometryPending);
         let result = self.apply_display(effects, window, renderer);
         if let Err(error) = result {
             log::warn!("session presentation detached: {error}");
@@ -394,7 +403,9 @@ impl WorkerBridge {
             return true;
         }
         self.publish_status();
-        false
+        // Geometry drift can precede the broker's Revoke. Release held native
+        // input now, while retaining control IO for the fenced re-prepare.
+        !geometry_was_pending && matches!(self.gate, DisplayGate::GeometryPending)
     }
 
     fn publish_status(&self) {
@@ -429,21 +440,38 @@ impl WorkerBridge {
         }
         if effects.prepare {
             self.cancel_fence(renderer);
-            if let Some(viewport) = self.guard.viewport() {
-                self.presentation.fit(window, viewport, self.config.host_pid)?;
-            }
-            self.gate = DisplayGate::Settling {
+            self.presentation.hide(window);
+            self.gate = DisplayGate::Fitting {
                 reply_to: self.request_sequence,
-                stable: 0,
             };
         }
-        if matches!(self.gate, DisplayGate::Prepared | DisplayGate::Active) || effects.grant_input {
+        if matches!(
+            self.gate,
+            DisplayGate::Settling { .. }
+                | DisplayGate::Preparing { .. }
+                | DisplayGate::FrameFence { .. }
+                | DisplayGate::Prepared
+                | DisplayGate::Active
+                | DisplayGate::GeometryPending
+        ) {
             if let Some(viewport) = self.guard.viewport() {
-                anyhow::ensure!(
-                    self.presentation.matches(window, viewport, self.config.host_pid),
-                    "native viewport changed after preparation"
-                );
+                match self.presentation.state(window, viewport, self.config.host_pid)? {
+                    NativeState::WorkerChanged => anyhow::bail!("native worker viewport changed after preparation"),
+                    NativeState::HostChanged => {
+                        self.cancel_fence(renderer);
+                        self.gate = DisplayGate::GeometryPending;
+                        self.presentation.hide(window);
+                    }
+                    NativeState::Ready => {}
+                }
             }
+            if matches!(self.gate, DisplayGate::GeometryPending) {
+                // Even a drag back to the same rectangle needs a new broker
+                // revoke/fence/prepare. A late old Grant cannot show this frame.
+                return Ok(());
+            }
+        }
+        if matches!(self.gate, DisplayGate::Prepared | DisplayGate::Active) || effects.grant_input {
             if let Some(proof) = self.last_frame {
                 anyhow::ensure!(
                     renderer.session_boundary()?.surface_epoch == proof.surface_epoch,
@@ -475,6 +503,16 @@ impl WorkerBridge {
             native_order(window, viewport)?;
         }
         match self.gate {
+            DisplayGate::Fitting { reply_to } => {
+                if let Some(viewport) = self.guard.viewport()
+                    && !self.presentation.fit(window, viewport, self.config.host_pid)?
+                {
+                    // The controller may already be moving again. Keep the
+                    // old window hidden until a new exact viewport is usable.
+                    return Ok(());
+                }
+                self.gate = DisplayGate::Settling { reply_to, stable: 0 };
+            }
             DisplayGate::Draining { ticket, reply_to, through } => {
                 if renderer.poll_session_fence(ticket)?.is_some() {
                     if reply_to != 0 {
@@ -498,12 +536,6 @@ impl WorkerBridge {
                 }
             }
             DisplayGate::Settling { reply_to, stable } => {
-                if let Some(viewport) = self.guard.viewport() {
-                    anyhow::ensure!(
-                        self.presentation.matches(window, viewport, self.config.host_pid),
-                        "native viewport changed while preparing"
-                    );
-                }
                 let size = window.inner_size();
                 renderer.resize(size.width, size.height);
                 if stable < 1 {
@@ -684,19 +716,24 @@ struct NativePresentation {
     hidden: bool,
     #[cfg(windows)]
     saved: Option<native::Saved>,
+    #[cfg(windows)]
+    host_rect: Option<aurora_session::PhysicalRect>,
 }
 
 impl NativePresentation {
-    fn fit(&mut self, window: &winit::window::Window, viewport: aurora_session::HostedViewport, host_pid: u32) -> anyhow::Result<()> {
+    fn fit(&mut self, window: &winit::window::Window, viewport: aurora_session::HostedViewport, host_pid: u32) -> anyhow::Result<bool> {
         #[cfg(windows)]
         {
             if self.saved.is_none() {
                 self.saved = Some(native::save(window)?);
             }
-            native::fit(window, viewport, host_pid)?;
+            let Some(host_rect) = native::fit(window, viewport, host_pid)? else {
+                return Ok(false);
+            };
+            self.host_rect = Some(host_rect);
             self.hidden = true;
             window.set_visible(false);
-            Ok(())
+            Ok(true)
         }
         #[cfg(not(windows))]
         {
@@ -705,15 +742,20 @@ impl NativePresentation {
         }
     }
 
-    fn matches(&self, window: &winit::window::Window, viewport: aurora_session::HostedViewport, host_pid: u32) -> bool {
+    fn state(
+        &self,
+        window: &winit::window::Window,
+        viewport: aurora_session::HostedViewport,
+        host_pid: u32,
+    ) -> anyhow::Result<NativeState> {
         #[cfg(windows)]
         {
-            native::matches(window, viewport, host_pid)
+            native::state(window, viewport, host_pid, self.host_rect)
         }
         #[cfg(not(windows))]
         {
             let _ = (window, viewport, host_pid);
-            false
+            anyhow::bail!("native hosting is unsupported on this platform");
         }
     }
 
@@ -724,14 +766,42 @@ impl NativePresentation {
 
     fn restore(&mut self, window: &winit::window::Window) {
         #[cfg(windows)]
-        if let Some(saved) = self.saved.take() {
-            native::restore(window, saved);
+        {
+            self.host_rect = None;
+            if let Some(saved) = self.saved.take() {
+                native::restore(window, saved);
+            }
         }
         if self.hidden {
             window.set_minimized(false);
             window.set_visible(true);
             self.hidden = false;
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+enum NativeState {
+    Ready,
+    HostChanged,
+    WorkerChanged,
+}
+
+#[cfg(any(windows, test))]
+fn native_state(
+    host_before: Option<aurora_session::PhysicalRect>,
+    host_now: aurora_session::PhysicalRect,
+    worker_now: aurora_session::PhysicalRect,
+    viewport: aurora_session::HostedViewport,
+    client_size: [u32; 2],
+) -> NativeState {
+    if worker_now != viewport.rect || client_size != [viewport.rect.width, viewport.rect.height] {
+        NativeState::WorkerChanged
+    } else if host_before != Some(host_now) {
+        NativeState::HostChanged
+    } else {
+        NativeState::Ready
     }
 }
 
@@ -752,7 +822,7 @@ mod native {
             GW_HWNDNEXT, GW_OWNER, GWL_EXSTYLE, GWL_STYLE, GetClientRect, GetForegroundWindow, GetWindow, GetWindowLongPtrW, GetWindowRect,
             GetWindowThreadProcessId, IsWindow, IsZoomed, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
             SetWindowLongPtrW, SetWindowPos, WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
-            WS_OVERLAPPEDWINDOW, WS_POPUP,
+            WS_OVERLAPPEDWINDOW, WS_POPUP, WS_VISIBLE,
         },
     };
     use winit::{dpi::LogicalSize, platform::windows::WindowExtWindows, window::Window};
@@ -789,27 +859,32 @@ mod native {
         }
     }
 
-    pub(super) fn fit(window: &Window, viewport: aurora_session::HostedViewport, host_pid: u32) -> std::io::Result<()> {
+    pub(super) fn fit(
+        window: &Window,
+        viewport: aurora_session::HostedViewport,
+        host_pid: u32,
+    ) -> std::io::Result<Option<aurora_session::PhysicalRect>> {
         viewport.validate().map_err(std::io::Error::other)?;
         let hwnd = super::native_window(window) as HWND;
         let host = viewport.host_window as HWND;
-        let mut actual_pid = 0;
+        let host_rect = host_rect(viewport, host_pid)?;
         // SAFETY: foreign host HWND is queried only. Styles and placement are
         // changed exclusively on this process's own world window.
         unsafe {
-            if host_pid == 0
-                || host == hwnd
-                || IsWindow(host) == 0
-                || GetWindowThreadProcessId(host, &mut actual_pid) == 0
-                || actual_pid != host_pid
-            {
-                return Err(std::io::Error::other("host window does not belong to the configured controller"));
+            if host == hwnd {
+                return Err(std::io::Error::other("worker cannot host itself"));
             }
             if !GetWindow(hwnd, GW_OWNER).is_null() {
                 return Err(std::io::Error::other("worker world window has a native owner"));
             }
-            if !host_contains(viewport) {
-                return Err(std::io::Error::other("host moved or resized before preparation"));
+            if !super::contains_rect(
+                host_rect.x,
+                host_rect.y,
+                host_rect.width as i32,
+                host_rect.height as i32,
+                viewport.rect,
+            ) {
+                return Ok(None);
             }
             window.set_fullscreen(None);
             window.set_maximized(false);
@@ -845,16 +920,35 @@ mod native {
                 return Err(std::io::Error::last_os_error());
             }
         }
-        Ok(())
+        Ok(Some(host_rect))
     }
 
-    fn host_contains(viewport: aurora_session::HostedViewport) -> bool {
+    fn host_rect(viewport: aurora_session::HostedViewport, host_pid: u32) -> std::io::Result<aurora_session::PhysicalRect> {
         let host = viewport.host_window as HWND;
-        let mut rect: RECT = unsafe { std::mem::zeroed() };
-        let mut origin: POINT = unsafe { std::mem::zeroed() };
+        let mut rect = RECT::default();
+        let mut origin = POINT::default();
+        let mut actual_pid = 0;
         // SAFETY: read only the host's current physical desktop client area.
-        let valid = unsafe { GetClientRect(host, &mut rect) != 0 && ClientToScreen(host, &mut origin) != 0 };
-        valid && super::contains_rect(origin.x, origin.y, rect.right - rect.left, rect.bottom - rect.top, viewport.rect)
+        let valid = unsafe {
+            host_pid != 0
+                && IsWindow(host) != 0
+                && GetWindowThreadProcessId(host, &mut actual_pid) != 0
+                && actual_pid == host_pid
+                && GetClientRect(host, &mut rect) != 0
+                && ClientToScreen(host, &mut origin) != 0
+        };
+        if !valid {
+            return Err(std::io::Error::other("host window does not belong to the configured controller"));
+        }
+        let rect = aurora_session::PhysicalRect {
+            x: origin.x,
+            y: origin.y,
+            width: u32::try_from(rect.right - rect.left).map_err(std::io::Error::other)?,
+            height: u32::try_from(rect.bottom - rect.top).map_err(std::io::Error::other)?,
+        };
+        // A minimized controller may temporarily have an empty client. It is
+        // geometry drift, not disappearance or evidence of GPU completion.
+        Ok(rect)
     }
 
     pub(super) fn workspace_foreground(host: u64, worker: u64, host_pid: u32) -> bool {
@@ -884,27 +978,34 @@ mod native {
         Ok(())
     }
 
-    pub(super) fn matches(window: &Window, viewport: aurora_session::HostedViewport, host_pid: u32) -> bool {
+    pub(super) fn state(
+        window: &Window,
+        viewport: aurora_session::HostedViewport,
+        host_pid: u32,
+        host_before: Option<aurora_session::PhysicalRect>,
+    ) -> anyhow::Result<super::NativeState> {
         let hwnd = super::native_window(window) as HWND;
-        let host = viewport.host_window as HWND;
-        let mut actual_pid = 0;
-        let mut rect: RECT = unsafe { std::mem::zeroed() };
+        let host_now = host_rect(viewport, host_pid)?;
+        let mut rect = RECT::default();
         // SAFETY: query the configured host and this viewer's native rectangle.
-        let valid = unsafe {
-            IsWindow(host) != 0
-                && GetWindowThreadProcessId(host, &mut actual_pid) != 0
-                && actual_pid == host_pid
-                && GetWindowRect(hwnd, &mut rect) != 0
+        anyhow::ensure!(
+            unsafe { GetWindowRect(hwnd, &mut rect) != 0 },
+            "could not read native worker rectangle"
+        );
+        let worker_now = aurora_session::PhysicalRect {
+            x: rect.left,
+            y: rect.top,
+            width: u32::try_from(rect.right - rect.left)?,
+            height: u32::try_from(rect.bottom - rect.top)?,
         };
         let size = window.inner_size();
-        valid
-            && host_contains(viewport)
-            && rect.left == viewport.rect.x
-            && rect.top == viewport.rect.y
-            && rect.right - rect.left == viewport.rect.width as i32
-            && rect.bottom - rect.top == viewport.rect.height as i32
-            && size.width == viewport.rect.width
-            && size.height == viewport.rect.height
+        Ok(super::native_state(
+            host_before,
+            host_now,
+            worker_now,
+            viewport,
+            [size.width, size.height],
+        ))
     }
 
     pub(super) fn restore(window: &Window, saved: Saved) {
@@ -912,12 +1013,15 @@ mod native {
         if hwnd.is_null() {
             return;
         }
+        // save() runs after standby hides the window. Its WS_VISIBLE bit is
+        // not the desired standalone visibility, and winit caches that state.
+        // Force a real false -> true transition instead of a cached no-op.
+        window.set_visible(false);
         window.set_decorations(saved.style & WS_CAPTION as isize != 0);
-        window.set_skip_taskbar(false);
         window.set_min_inner_size(Some(LogicalSize::new(800, 560)));
         // SAFETY: restore only this process's own saved styles and geometry.
         unsafe {
-            SetWindowLongPtrW(hwnd, GWL_STYLE, saved.style);
+            SetWindowLongPtrW(hwnd, GWL_STYLE, saved.style & !(WS_VISIBLE as isize));
             SetWindowLongPtrW(hwnd, GWL_EXSTYLE, saved.extended);
             SetWindowPos(
                 hwnd,
@@ -933,6 +1037,8 @@ mod native {
         window.set_fullscreen(saved.fullscreen);
         window.set_minimized(false);
         window.set_visible(true);
+        window.set_skip_taskbar(false);
+        window.request_redraw();
     }
 }
 
@@ -1024,6 +1130,7 @@ mod tests {
                 through: 7,
             },
             DisplayGate::Standby,
+            DisplayGate::Fitting { reply_to: 5 },
             DisplayGate::Settling { reply_to: 5, stable: 0 },
             DisplayGate::FrameFence {
                 ticket: 2,
@@ -1031,7 +1138,9 @@ mod tests {
                 boundary,
             },
             DisplayGate::Prepared,
+            DisplayGate::GeometryPending,
         ] {
+            assert!(!gate.allows_input());
             assert!(!gate.allows_submission());
             assert!(!gate.allows_world());
         }
@@ -1039,6 +1148,58 @@ mod tests {
         assert!(!DisplayGate::Login.allows_world(), "manual login cannot warm up a full world");
         assert!(DisplayGate::Preparing { reply_to: 5, boundary }.allows_world());
         assert!(DisplayGate::Active.allows_world());
+        assert!(DisplayGate::Active.allows_input());
+    }
+
+    #[test]
+    fn host_drag_suspends_exact_worker_placement_without_accepting_native_worker_changes() {
+        let host = aurora_session::PhysicalRect {
+            x: -1900,
+            y: 80,
+            width: 1200,
+            height: 900,
+        };
+        let viewport = aurora_session::HostedViewport {
+            host_window: 17,
+            rect: aurora_session::PhysicalRect {
+                x: -1800,
+                y: 180,
+                width: 1000,
+                height: 700,
+            },
+        };
+        let size = [viewport.rect.width, viewport.rect.height];
+        assert_eq!(native_state(Some(host), host, viewport.rect, viewport, size), NativeState::Ready);
+        let moved = aurora_session::PhysicalRect { x: host.x + 10, ..host };
+        assert!(contains_rect(
+            moved.x,
+            moved.y,
+            moved.width as i32,
+            moved.height as i32,
+            viewport.rect
+        ));
+        assert_eq!(
+            native_state(Some(host), moved, viewport.rect, viewport, size),
+            NativeState::HostChanged,
+            "a small move invalidates placement even while the old rectangle still fits"
+        );
+        let resized_worker = aurora_session::PhysicalRect {
+            width: viewport.rect.width + 1,
+            ..viewport.rect
+        };
+        assert_eq!(
+            native_state(Some(host), moved, resized_worker, viewport, size),
+            NativeState::WorkerChanged,
+            "host movement cannot excuse an unexpected worker resize"
+        );
+        assert_eq!(
+            native_state(Some(host), host, viewport.rect, viewport, [size[0] - 1, size[1]]),
+            NativeState::WorkerChanged
+        );
+        // The guard may still retain the old Active mode until Revoke arrives.
+        // Its native display gate nevertheless withholds all three authorities.
+        let gate = DisplayGate::GeometryPending;
+        assert!(!gate.allows_input() && !gate.allows_world() && !gate.allows_submission());
     }
 
     #[test]

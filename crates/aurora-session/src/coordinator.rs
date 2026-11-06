@@ -257,6 +257,50 @@ impl Coordinator {
         Ok(vec![Effect::Send(message)])
     }
 
+    /// Native host movement invalidates placement even if it ends at the
+    /// original rectangle. Revoke and earn a new GPU proof instead of taking
+    /// activate's ordinary same-viewport shortcut. Repeated geometry changes
+    /// may supersede only a handoff involving this one binding, never a switch
+    /// between different characters or an explicit park/rollback.
+    pub fn refresh_viewport(&mut self, worker: WorkerId, viewport: HostedViewport, now_ms: u64) -> Result<Vec<Effect>, Error> {
+        viewport.validate()?;
+        self.now = self.now.max(now_ms);
+        let target = self.entries.get(&worker).ok_or(Error::Unavailable)?.roster.binding;
+        let old = if let Some(pending) = self.pending {
+            if pending.target != target
+                || pending.old.is_some_and(|old| old.binding != target)
+                || !matches!(pending.stage, Stage::RevokeOld | Stage::PrepareTarget | Stage::GrantTarget)
+            {
+                return Err(Error::Busy);
+            }
+            Active {
+                binding: target,
+                viewport: pending.viewport,
+            }
+        } else {
+            self.active.filter(|active| active.binding == target).ok_or(Error::Unavailable)?
+        };
+        if !self.ready(target) {
+            // A native modal/permission gap cannot leave a hidden Active
+            // worker renewed by heartbeats while a UI error stops refreshes.
+            return Ok(self.detach_all());
+        }
+        let activation = self.next_activation()?;
+        let mut pending = Pending {
+            old: Some(old),
+            target,
+            viewport: Some(viewport),
+            activation,
+            stage: Stage::RevokeOld,
+            sequence: 0,
+            deadline: self.now.saturating_add(STEP_MILLIS),
+            baseline: None,
+        };
+        let message = self.step(&mut pending)?;
+        self.pending = Some(pending);
+        Ok(vec![Effect::Send(message)])
+    }
+
     /// Park before launching another login/renderer. Only a fresh GPU-idle
     /// acknowledgment emits Parked; no timeout or refusal authorizes a launch.
     pub fn park_active(&mut self, now_ms: u64) -> Result<Vec<Effect>, Error> {

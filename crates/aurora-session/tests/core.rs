@@ -150,6 +150,141 @@ fn initial_activate(host: &mut Coordinator, peer: &mut Peer) {
 }
 
 #[test]
+fn native_geometry_refresh_requiesces_even_at_the_same_rect_and_rejects_superseded_proofs() {
+    let viewport = HostedViewport {
+        host_window: 17,
+        rect: PhysicalRect {
+            x: -1800,
+            y: 100,
+            width: 1000,
+            height: 700,
+        },
+    };
+    for delay_granted in [false, true] {
+        let mut peer = Peer::new(3);
+        let mut host = coordinator(&mut [&mut peer]);
+        let worker = peer.guard.binding().worker.worker;
+        let prepare = message(host.activate(worker, Some(viewport), 1).unwrap());
+        peer.accept(&prepare, 1);
+        let ready = peer.ready(&prepare, 11);
+        let grant = message(host.observe(&ready, 2).unwrap());
+        let reply = peer.accept(&grant, 2).reply.unwrap();
+        host.observe(&peer.envelope(reply), 3).unwrap();
+        assert!(host.activate(worker, Some(viewport), 4).unwrap().is_empty());
+
+        let revoke = message(host.refresh_viewport(worker, viewport, 5).unwrap());
+        assert!(matches!(revoke.message, Message::Command(Command::Revoke { .. })));
+        let effects = peer.accept(&revoke, 5).effects;
+        assert!(effects.release_input && effects.quiesce);
+        assert!(!peer.guard.render_owned());
+        assert!(peer.guard.quiesced(revoke.sequence, progress(12, 11)).unwrap().is_none());
+        assert!(host.tick(6).iter().all(|effect| !matches!(
+            effect,
+            Effect::Send(Envelope {
+                message: Message::Command(Command::Prepare { .. }),
+                ..
+            })
+        )));
+        let idle = peer.idle(&revoke, 12);
+        let prepare = message(host.observe(&idle, 7).unwrap());
+        assert!(matches!(prepare.message, Message::Command(Command::Prepare { viewport: Some(value), .. }) if value == viewport));
+        peer.accept(&prepare, 7);
+        let ready = peer.ready(&prepare, 12);
+        let (late, stale_grant) = if delay_granted {
+            let grant = message(host.observe(&ready, 8).unwrap());
+            let reply = peer.accept(&grant, 8).reply.unwrap();
+            (peer.envelope(reply), Some(grant))
+        } else {
+            (ready, None)
+        };
+
+        let moved = HostedViewport {
+            rect: PhysicalRect { x: -1600, ..viewport.rect },
+            ..viewport
+        };
+        let revoke = message(host.refresh_viewport(worker, moved, 9).unwrap());
+        assert_eq!(host.observe(&late, 9), Err(Error::Stale));
+        peer.accept(&revoke, 9);
+        if let Some(grant) = stale_grant {
+            assert_eq!(peer.guard.on_command(&grant, 9), Err(Error::Stale));
+            assert!(!peer.guard.render_owned());
+        }
+        let idle = peer.idle(&revoke, 12);
+        let prepare = message(host.observe(&idle, 10).unwrap());
+        assert!(matches!(prepare.message, Message::Command(Command::Prepare { viewport: Some(value), .. }) if value == moved));
+        peer.accept(&prepare, 10);
+        // Continue through the ordinary exact proof using the real request
+        // sequence, rather than treating a geometry timeout as readiness.
+        let ready = peer.ready(&prepare, 13);
+        let grant = message(host.observe(&ready, 11).unwrap());
+        let reply = peer.accept(&grant, 11).reply.unwrap();
+        assert_eq!(
+            host.observe(&peer.envelope(reply), 12).unwrap(),
+            vec![Effect::Notice(HostNotice::Switched(worker))]
+        );
+    }
+}
+
+#[test]
+fn native_geometry_refresh_cannot_replace_another_character_switch_or_explicit_park() {
+    let viewport = HostedViewport {
+        host_window: 17,
+        rect: PhysicalRect {
+            x: 0,
+            y: 0,
+            width: 800,
+            height: 600,
+        },
+    };
+    let mut first = Peer::new(3);
+    let mut second = Peer::new(4);
+    let mut host = coordinator(&mut [&mut first, &mut second]);
+    initial_activate(&mut host, &mut first);
+    let worker = first.guard.binding().worker.worker;
+    host.activate(second.guard.binding().worker.worker, Some(viewport), 1).unwrap();
+    first.status.blocked = true;
+    host.observe(&first.status(), 1).unwrap();
+    assert_eq!(host.refresh_viewport(worker, viewport, 2), Err(Error::Busy));
+    assert_eq!(
+        host.refresh_viewport(second.guard.binding().worker.worker, viewport, 2),
+        Err(Error::Busy)
+    );
+
+    let mut peer = Peer::new(5);
+    let mut host = coordinator(&mut [&mut peer]);
+    initial_activate(&mut host, &mut peer);
+    host.park_active(1).unwrap();
+    assert_eq!(
+        host.refresh_viewport(peer.guard.binding().worker.worker, viewport, 2),
+        Err(Error::Busy)
+    );
+}
+
+#[test]
+fn blocked_native_geometry_refresh_detaches_instead_of_stranding_a_hidden_active_worker() {
+    let viewport = HostedViewport {
+        host_window: 17,
+        rect: PhysicalRect {
+            x: 0,
+            y: 0,
+            width: 800,
+            height: 600,
+        },
+    };
+    let mut peer = Peer::new(3);
+    let mut host = coordinator(&mut [&mut peer]);
+    initial_activate(&mut host, &mut peer);
+    peer.status.blocked = true;
+    host.observe(&peer.status(), 1).unwrap();
+    let effects = host.refresh_viewport(peer.guard.binding().worker.worker, viewport, 2).unwrap();
+    let detach = message(effects);
+    assert!(matches!(detach.message, Message::Command(Command::Detach)));
+    assert!(peer.accept(&detach, 2).effects.restore_window);
+    assert_eq!(host.active(), None);
+    assert!(!host.busy());
+}
+
+#[test]
 fn wire_roundtrip_is_bounded_versioned_and_rejects_unknown_or_malformed_fields() {
     let binding = Binding {
         worker: identity(3),

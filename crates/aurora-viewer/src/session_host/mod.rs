@@ -68,6 +68,7 @@ pub fn run() -> anyhow::Result<()> {
         requested_viewport: None,
         park_requested: false,
         layout_dirty: true,
+        geometry_dirty: false,
     };
     log::info!("session host: CPU controller starting; worker worlds remain independent");
     event_loop.run_app(&mut app)?;
@@ -99,6 +100,7 @@ struct Shell {
     requested_viewport: Option<aurora_session::HostedViewport>,
     park_requested: bool,
     layout_dirty: bool,
+    geometry_dirty: bool,
 }
 
 impl Shell {
@@ -247,7 +249,7 @@ impl Shell {
         presented_worker(
             &self.snapshot,
             viewport,
-            self.closing.is_some() || self.ui.close_prompt || self.transition.waiting(),
+            self.closing.is_some() || self.ui.close_prompt || self.transition.waiting() || self.geometry_dirty,
         )
     }
 
@@ -296,12 +298,12 @@ impl Shell {
         if self.closing.is_some()
             || self.snapshot.stopped
             || self.snapshot.error.is_some()
-            || self.snapshot.pending.is_some()
-            || self.transition.waiting()
+            || (!self.geometry_dirty && (self.snapshot.pending.is_some() || self.transition.waiting()))
         {
             return Ok(());
         }
-        if self.snapshot.active.is_none() {
+        if self.snapshot.active.is_none() && self.snapshot.pending.is_none() {
+            self.geometry_dirty = false;
             self.park_requested = false;
             self.requested_viewport = None;
             return Ok(());
@@ -309,11 +311,13 @@ impl Shell {
         match viewport {
             Some(viewport) => {
                 self.park_requested = false;
-                if self.snapshot.active_viewport != Some(viewport)
+                if (self.geometry_dirty || self.snapshot.active_viewport != Some(viewport))
                     && self.requested_viewport != Some(viewport)
-                    && self.controller.update_viewport(viewport).is_ok()
+                    && let Ok(request) = self.controller.update_viewport(viewport)
                 {
+                    self.geometry_dirty = false;
                     self.requested_viewport = Some(viewport);
+                    self.transition.sent(request);
                 }
             }
             None => {
@@ -434,10 +438,21 @@ impl ApplicationHandler for Shell {
             WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } | WindowEvent::Moved(_)
         ) {
             self.close_region();
+            self.geometry_dirty = true;
+            self.requested_viewport = None;
             if matches!(event, WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. }) {
                 self.layout_dirty = true;
             }
             self.request_repaint();
+            // Windows title-bar dragging runs a modal native loop. Submit
+            // fresh movement geometry here; about_to_wait may run only after
+            // the drag ends. Resize still waits for the real egui layout.
+            if let Err(error) = self.sync_native() {
+                self.error = Some(error.to_string());
+                self.controller.shutdown();
+                event_loop.exit();
+                return;
+            }
         }
         if matches!(event, WindowEvent::RedrawRequested) {
             if self.last_frame.is_some_and(|last| last.elapsed() < MIN_FRAME) {

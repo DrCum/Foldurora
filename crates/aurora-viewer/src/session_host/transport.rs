@@ -901,11 +901,11 @@ impl Broker {
                 self.effects(effects)?;
             }
             HostIntent::Viewport(viewport) => {
-                if self.viewport != Some(viewport) {
-                    self.viewport = Some(viewport);
-                    self.viewport_dirty = true;
-                    self.active_viewport = None;
-                }
+                // Explicit native geometry events also invalidate a placement
+                // that happens to return to the original desktop rectangle.
+                self.viewport = Some(viewport);
+                self.viewport_dirty = true;
+                self.active_viewport = None;
             }
             HostIntent::Park => {
                 self.active_viewport = None;
@@ -1045,6 +1045,20 @@ impl Broker {
     }
 
     fn reconcile(&mut self, accounts: &[(SavedAccount, crate::login_accounts::Account)], now: u64) -> anyhow::Result<()> {
+        if self.viewport_dirty
+            && !self.park_requested
+            && self.opens.is_empty()
+            && let (Some(worker), Some(viewport)) = (self.coordinator.active().or(self.pending), self.viewport)
+        {
+            match self.coordinator.refresh_viewport(worker, viewport, now) {
+                Ok(effects) => {
+                    self.viewport_dirty = false;
+                    self.effects(effects)?;
+                }
+                Err(aurora_session::Error::Busy) => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
         if self.coordinator.busy() {
             return Ok(());
         }
@@ -1067,13 +1081,6 @@ impl Broker {
             if self.coordinator.busy() || !self.opens.is_empty() {
                 return Ok(());
             }
-        }
-        if self.viewport_dirty
-            && let (Some(worker), Some(viewport)) = (self.coordinator.active(), self.viewport)
-        {
-            let effects = self.coordinator.activate(worker, Some(viewport), now)?;
-            self.viewport_dirty = false;
-            self.effects(effects)?;
         }
         Ok(())
     }
