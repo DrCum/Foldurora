@@ -1,5 +1,16 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Combined Windows candidate (user request, 2026-11-06; no issue): preserve
+  final host/chat `32b29839`, merge viewport correction `c5076565`, and import
+  the sixteen previously selected upstream commits plus intact photo-roll
+  storage update `6ff95fb6`. Keep main, earlier checkpoints and unfinished
+  preview work separate. One effective viewport policy now keeps fitted workers'
+  world, toolbars and mouselook cursor on the full fitted canvas and restores
+  saved standalone margins after detach. Two regressions cover that transition.
+  Source review and formatting passed; combined Windows compilation, strict
+  checks, full tests, packaging and native acceptance remain pending. See the
+  current candidate section of [the test guide](docs/FOLDURORA.md).
+
 - 🔧 Foldurora session host (user request, 2026-11-06; no issue): opt-in CPU
   controller, isolated manual-login workers, typed lease/handoff state machine,
   private per-launch profiles, ordered GPU completion fences and Windows

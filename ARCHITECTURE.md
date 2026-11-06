@@ -1,5 +1,11 @@
 # Aurora Viewer architecture
 
+`App::effective_viewport_settings` shares the fitted-worker override between
+world rendering, toolbar placement and cursor capture. A fitted native window
+already occupies the controller's world area, so it uses full-canvas geometry;
+the saved standalone margins are retained for detach. The controller and chat
+popouts keep their separate CPU-painted egui contexts.
+
 The opt-in session controller starts before the ordinary viewer App/EventLoop.
 `session_host/{mod,software,ui}.rs` uses egui and the existing softbuffer CPU
 painter; it never initializes `aurora-render::Renderer`. `session_host/transport.rs`

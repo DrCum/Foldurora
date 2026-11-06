@@ -1,5 +1,90 @@
 # Foldurora workspace and character preview
 
+## Current combined Windows candidate — 6 November 2026
+
+Branch `build/windows-integration-20261106` combines final host/chat source
+`32b298392c7d40afd2d8cc96d0658041b69be985` and the complete viewport correction
+`c5076565a3777d27c436fe59d9713907533be0e8`. Main and the earlier checkpoint
+branches remain unchanged. This combined candidate is awaiting its own Windows
+checks and native acceptance; earlier packages do not validate the combined tree.
+Its exact source, check outcomes and build identity accompany each portable ZIP
+in `build-manifest.json` and the workflow logs.
+
+The controller and inactive-account Nearby/existing resident IM popouts are
+included. Preview monitors remain unavailable: their uncompiled caller/Scene/UI
+patch and aggregate-admission work are not part of this source. Worker profiles
+remain private per launch, and chat retains its existing source-bound single
+draft and uncertain-send behavior. These are not complete workspace/chat parity.
+
+Fitted workers use their full native rectangle for world rendering, toolbars
+and mouselook cursor capture. Their saved standalone viewport is restored after
+detach. Two new regressions cover nonzero saved X/Y margins and the ordinary,
+fitted and detached transitions. Shared transport, chat identity, private-file
+ownership, checked host logging and GPU/input handoff code remain unchanged.
+
+### Selected upstream changes
+
+All seventeen commits below were imported intact with provenance and without
+upstream conflict resolutions. The first sixteen were selected in the earlier
+isolated upstream checkpoint; the final photo-roll change is new in this review.
+
+| Original upstream commit | Change |
+| --- | --- |
+| `2944d8016715` | Shared demo-source reads |
+| `e8faf65ef9ec` | Source rights for settings/script/item editors |
+| `493b519114c3` | Inventory item names in IK projects |
+| `cae37649b415` | Shared dialog-name rules |
+| `6da2115bd3fe` | Shared asset-ID visibility rules |
+| `b4041f7a529f` | OpenSim inventory script-save result |
+| `ddb8a69c735e` | Neighbour-region terrain edges |
+| `224b01d79cda` | Media-filter exception for worn objects |
+| `d981d28600a2` | Login chat import follows saving preferences |
+| `b30f7982a118` | Linux stack snapshot stack selection |
+| `d37702436d6b` | Session-scoped bridge channels and gaze/RLVa rules |
+| `a86f1a3411af` | Land permissions for passage and portals |
+| `b962b2a759b2` | Appearance camera and A-Pose controls |
+| `85d488a95e23` | Pinned wgpu Vulkan descriptor-allocation fix |
+| `113afd8062db` | Asset-fetch ceiling explanation |
+| `7afa101cdc6e` | Background close for a stuck microphone |
+| `6ff95fb6dc9d` | Per-account/session photo-roll copies and stale-session sweep |
+
+Upstream review is frozen at `c6e52d1ffe06e59176a0d1ef951147d6b4a4340e`.
+New changes deferred from this snapshot:
+
+| Original upstream commit | Reason |
+| --- | --- |
+| `38bab7286b56` | GPU-memory budgeting conflicts with renderer/settings; requires joint ownership and budget review |
+| `f114ef820877` | FSR 3.1 conflicts with renderer sizing; full native output dimensions require viewport integration |
+| `1d0118d479ad` | README depends on the deferred FSR implementation |
+| `74d0a4edb36c` | TASKS conflict; self-contained runtime change can be reviewed in a later explicit resolution |
+| `037a71b4d351` | Selection-test and TASKS conflicts; picking/selection behavior needs joint review |
+| `f7d31f563e95` | Locale conflicts and changed GPU-recovery defaults overlap worker detach/recreation behavior |
+| `c6e52d1ffe06` | Clean text, but turns off existing inventory hover details and thumbnails by default; preserve current behavior for this candidate |
+
+The preceding eighteen deferrals, including asynchronous logging `4a613cd3`,
+remain deferred. Their reasons are preserved in the
+[earlier upstream ledger](https://github.com/DrCum/Foldurora/blob/a17185fd9b5d9eee1706d5634eba371a894d7711/docs/UPSTREAM_REVIEW_20261106.md)
+and [host logging review](https://github.com/DrCum/Foldurora/blob/dc17eb2706ef40f712974544786876cf8952ab0b/docs/handoff/UPSTREAM_FOURTH_REVIEW_20261106.txt).
+Only the feature-branch merge needed explicit resolutions: combine workflow
+branch lists, retain the corrected viewport task entry, and share the fitted
+world override across render/control/cursor paths. No upstream patch was split
+or forced through a conflict.
+
+### First native checks for this candidate
+
+Use isolated demo profiles first. Launch `aurora-viewer.exe --session-host` to
+test the controller; ordinary launch tests the standalone viewport. Verify
+nonzero X/Y viewport margins, toolbar/camera placement and freely movable
+Inventory/Preferences windows, then mouselook and detach with saved margins.
+Reproduce normal host Close/Cancel/Quit and forced host loss separately, on owned
+demo processes, while recording worker visibility/geometry and taskbar state.
+The earlier visibility trace was inconclusive. Test normal-cap frame pacing with
+worker focus and host-control focus; the previous 15-FPS fixture was intentional.
+Held movement/PTT, resize, mixed DPI, display removal and source-specific chat
+acceptance remain pending. Only the human performs real-grid login and tests.
+
+## Earlier preview checkpoints and general usage
+
 This preview brings the first two Folderstorm priorities into Aurora's Rust
 viewer: a world viewport for a window spanning several displays, and a native
 way to open and switch between characters. Each character keeps its own viewer
