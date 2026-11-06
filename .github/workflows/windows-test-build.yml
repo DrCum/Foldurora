@@ -1,0 +1,203 @@
+name: Windows test build
+
+# A portable test package for the isolated overnight branch. This workflow
+# never creates a tag or release and does not need a pull request. A build
+# remains downloadable when a check fails; its manifest and the failed job
+# retain that result for the human who will test it.
+on:
+  push:
+    branches: [feat/overnight-integration]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-test-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    if: github.ref == 'refs/heads/feat/overnight-integration'
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      CARGO_TERM_COLOR: never
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+      - name: Prepare logs
+        run: New-Item -ItemType Directory -Force .scratch/windows-test-build | Out-Null
+      - name: Rust stable
+        id: toolchain
+        run: |
+          ./.github/drop-extra-targets.ps1
+          rustup update stable --no-self-update
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          rustup component add rustfmt clippy
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $compiler = (& rustc --version).Trim()
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "compiler=$compiler" >> $env:GITHUB_OUTPUT
+      # The checks of scripts/check.ps1, with each outcome retained rather
+      # than stopping at the first failure. All use the default dev profile,
+      # so the checks, tests and viewer share one target folder and profile.
+      - name: PowerShell scripts (5.1 parser)
+        id: scripts
+        continue-on-error: true
+        run: |
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/check-scripts.ps1 2>&1 |
+            Tee-Object -FilePath .scratch/windows-test-build/scripts.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Formatting
+        id: format
+        continue-on-error: true
+        run: |
+          cargo fmt --all -- --check 2>&1 | Tee-Object -FilePath .scratch/windows-test-build/format.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Clippy (warnings are errors)
+        id: clippy
+        continue-on-error: true
+        run: |
+          cargo clippy --workspace --all-targets --locked -- -D warnings 2>&1 |
+            Tee-Object -FilePath .scratch/windows-test-build/clippy.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Full workspace tests
+        id: tests
+        continue-on-error: true
+        run: |
+          cargo test --workspace --locked --no-fail-fast 2>&1 |
+            Tee-Object -FilePath .scratch/windows-test-build/tests.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build the portable viewer
+        id: build
+        continue-on-error: true
+        run: |
+          cargo build --locked -p aurora-viewer --features xr-static-loader 2>&1 |
+            Tee-Object -FilePath .scratch/windows-test-build/build.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Package the exact commit
+        id: package
+        if: steps.build.outcome == 'success'
+        env:
+          EXPECTED_COMMIT: ${{ github.sha }}
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -ne $env:EXPECTED_COMMIT) {
+            throw 'The checkout no longer matches the requested commit.'
+          }
+          $dirty = git status --porcelain --untracked-files=no
+          if ($LASTEXITCODE -ne 0 -or $dirty) { throw 'Tracked source changed during the build.' }
+          $name = "Foldurora-test-$($actual.Substring(0, 12))-windows-x64"
+          $out = Join-Path '.scratch/windows-test-build' $name
+          ./scripts/package.ps1 -Exe target/debug/aurora-viewer.exe -Out $out
+          if ($LASTEXITCODE -ne 0) { throw 'Packaging failed.' }
+          "package_name=$name" >> $env:GITHUB_OUTPUT
+          "package_dir=$out" >> $env:GITHUB_OUTPUT
+      - name: Record results and build provenance
+        if: always()
+        env:
+          SOURCE_COMMIT: ${{ github.sha }}
+          SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}/tree/${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SCRIPTS_RESULT: ${{ steps.scripts.outcome }}
+          FORMAT_RESULT: ${{ steps.format.outcome }}
+          CLIPPY_RESULT: ${{ steps.clippy.outcome }}
+          TESTS_RESULT: ${{ steps.tests.outcome }}
+          BUILD_RESULT: ${{ steps.build.outcome }}
+          PACKAGE_RESULT: ${{ steps.package.outcome }}
+          PACKAGE_DIR: ${{ steps.package.outputs.package_dir }}
+          RUST_COMPILER: ${{ steps.toolchain.outputs.compiler }}
+        run: |
+          $checks = [ordered]@{
+            powershell_5_1 = $env:SCRIPTS_RESULT
+            formatting = $env:FORMAT_RESULT
+            clippy = $env:CLIPPY_RESULT
+            workspace_tests = $env:TESTS_RESULT
+          }
+          $manifest = [ordered]@{
+            schema = 1
+            commit = $env:SOURCE_COMMIT
+            source = $env:SOURCE_URL
+            workflow_run = $env:RUN_URL
+            built_at_utc = (Get-Date).ToUniversalTime().ToString('o')
+            target = 'x86_64-pc-windows-msvc'
+            compiler = $env:RUST_COMPILER
+            profile = 'dev'
+            features = @('xr-static-loader')
+            checks = $checks
+            all_checks_passed = @($checks.Values | Where-Object { $_ -ne 'success' }).Count -eq 0
+            build = $env:BUILD_RESULT
+            package = $env:PACKAGE_RESULT
+            human_validation = 'pending'
+            windows_gpu_and_multiple_monitors = 'pending'
+            grid_validation = 'pending'
+            performance_measurement = 'pending; development profile, without release LTO'
+          }
+          $json = $manifest | ConvertTo-Json -Depth 5
+          New-Item -ItemType Directory -Force .scratch/windows-test-build | Out-Null
+          $json | Set-Content .scratch/windows-test-build/build-manifest.json -Encoding utf8NoBOM
+          if ($env:PACKAGE_RESULT -eq 'success' -and $env:PACKAGE_DIR) {
+            $json | Set-Content (Join-Path $env:PACKAGE_DIR 'build-manifest.json') -Encoding utf8NoBOM
+          }
+          @(
+            '## Windows test build'
+            "Source: [$env:SOURCE_COMMIT]($env:SOURCE_URL)"
+            ''
+            '| Check | Outcome |'
+            '|---|---|'
+            "| PowerShell 5.1 parser | $env:SCRIPTS_RESULT |"
+            "| Formatting | $env:FORMAT_RESULT |"
+            "| Clippy | $env:CLIPPY_RESULT |"
+            "| Full workspace tests | $env:TESTS_RESULT |"
+            "| Windows build | $env:BUILD_RESULT |"
+            "| Package | $env:PACKAGE_RESULT |"
+            ''
+            'The package uses the development profile and includes its exact source commit and check results.'
+            'Human validation on Windows, multiple-monitor acceptance, grid tests and release-profile performance measurements are pending.'
+          ) | Add-Content $env:GITHUB_STEP_SUMMARY -Encoding utf8
+      - name: Archive the package
+        if: steps.package.outcome == 'success'
+        env:
+          PACKAGE_NAME: ${{ steps.package.outputs.package_name }}
+          PACKAGE_DIR: ${{ steps.package.outputs.package_dir }}
+        run: |
+          $zip = Join-Path '.scratch/windows-test-build' "$env:PACKAGE_NAME.zip"
+          Compress-Archive -LiteralPath $env:PACKAGE_DIR -DestinationPath $zip
+          $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $env:PACKAGE_NAME.zip" | Set-Content "$zip.sha256" -Encoding utf8NoBOM
+      - name: Upload test package and diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Foldurora-windows-test-${{ github.sha }}
+          path: |
+            .scratch/windows-test-build/*.zip
+            .scratch/windows-test-build/*.sha256
+            .scratch/windows-test-build/*.json
+            .scratch/windows-test-build/*.log
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+      - name: Require green checks
+        if: always()
+        env:
+          SCRIPTS_RESULT: ${{ steps.scripts.outcome }}
+          FORMAT_RESULT: ${{ steps.format.outcome }}
+          CLIPPY_RESULT: ${{ steps.clippy.outcome }}
+          TESTS_RESULT: ${{ steps.tests.outcome }}
+          BUILD_RESULT: ${{ steps.build.outcome }}
+          PACKAGE_RESULT: ${{ steps.package.outcome }}
+        run: |
+          $results = @($env:SCRIPTS_RESULT, $env:FORMAT_RESULT, $env:CLIPPY_RESULT,
+            $env:TESTS_RESULT, $env:BUILD_RESULT, $env:PACKAGE_RESULT)
+          if (@($results | Where-Object { $_ -ne 'success' }).Count) {
+            throw 'One or more checks failed or did not run. Inspect the manifest and logs.'
+          }
