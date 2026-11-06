@@ -55,6 +55,8 @@ struct Pending {
     generation: u64,
     control: Option<Control>,
     last_control: Option<(wire::PreviewSource, u64, u64)>,
+    suspend: Option<wire::Suspend>,
+    suspended: Option<wire::Suspended>,
     probes: VecDeque<(Probe, Instant)>,
     last_probe: Option<(Probe, Instant)>,
     budget_probes: VecDeque<(Probe, Instant)>,
@@ -70,6 +72,8 @@ struct Pending {
 pub(crate) struct PreviewMailbox {
     pending: Mutex<Pending>,
     generation: AtomicU64,
+    suspension: AtomicU64,
+    highest_suspend: Mutex<Option<wire::Suspend>>,
 }
 impl Default for PreviewMailbox {
     fn default() -> Self {
@@ -79,6 +83,8 @@ impl Default for PreviewMailbox {
                 ..Pending::default()
             }),
             generation: AtomicU64::new(1),
+            suspension: AtomicU64::new(0),
+            highest_suspend: Mutex::new(None),
         }
     }
 }
@@ -129,11 +135,15 @@ impl PreviewMailbox {
             let sequence = p.sequence;
             let last_sample = p.last_sample;
             let last_control = p.last_control;
+            let suspend = p.suspend;
+            let suspended = p.suspended;
             *p = Pending {
                 generation,
                 sequence,
                 last_sample,
                 last_control,
+                suspend,
+                suspended,
                 ..Pending::default()
             };
         }
@@ -161,6 +171,24 @@ impl PreviewMailbox {
         }) {
             return false;
         }
+        let suspended = self.suspension.load(Ordering::Acquire);
+        if p.suspended
+            .is_some_and(|ack| ack.request.source == subscription.source && subscription.resume_after != Some(ack.request.challenge))
+        {
+            return false;
+        }
+        if p.suspended.is_none() && subscription.resume_after.is_some() {
+            return false;
+        }
+        if suspended != 0
+            && p.suspended.is_none_or(|ack| {
+                ack.request.source != subscription.source
+                    || ack.request.challenge != suspended
+                    || subscription.resume_after != Some(suspended)
+            })
+        {
+            return false;
+        }
         let changed = p.control.as_ref().is_none_or(|old| {
             old.subscription.source != subscription.source
                 || old.subscription.revision != subscription.revision
@@ -185,6 +213,17 @@ impl PreviewMailbox {
             .control
             .as_ref()
             .map(|c| (c.subscription.source, c.subscription.revision, c.subscription.challenge));
+        if suspended != 0
+            && self
+                .suspension
+                .compare_exchange(suspended, 0, Ordering::AcqRel, Ordering::Acquire)
+                .is_err()
+        {
+            p.control = None;
+            p.state = None;
+            p.image = None;
+            return false;
+        }
         true
     }
 
@@ -210,6 +249,9 @@ impl PreviewMailbox {
     }
 
     pub fn control(&self, now: Instant) -> Option<Control> {
+        if self.is_suspended() {
+            return None;
+        }
         let p = self.current_pending()?;
         p.control.as_ref().filter(|c| wire::current(c.received_at, now)).cloned()
     }
@@ -241,6 +283,9 @@ impl PreviewMailbox {
     }
 
     pub fn budget_current(&self, control: &Control, now: Instant) -> bool {
+        if self.is_suspended() {
+            return false;
+        }
         if !wire::current(control.received_at, now) {
             return false;
         }
@@ -337,6 +382,9 @@ impl PreviewMailbox {
     }
 
     pub fn publish_state(&self, state: State) -> bool {
+        if self.is_suspended() {
+            return false;
+        }
         if wire::Header::State(state).validate().is_err() {
             return false;
         }
@@ -372,6 +420,9 @@ impl PreviewMailbox {
     }
 
     pub fn publish_image(&self, header: ImageHeader, rgba: Vec<u8>) -> bool {
+        if self.is_suspended() {
+            return false;
+        }
         if wire::Header::Image(header).validate().is_err() || rgba.len() != header.size.bytes() as usize {
             return false;
         }
@@ -449,14 +500,110 @@ impl PreviewMailbox {
             let sequence = p.sequence;
             let last_sample = p.last_sample;
             let last_control = p.last_control;
+            let suspend = p.suspend;
+            let suspended = p.suspended;
             *p = Pending {
                 generation,
                 sequence,
                 last_sample,
                 last_control,
+                suspend,
+                suspended,
                 ..Pending::default()
             };
         }
+    }
+
+    /// Retire optional authority before trying the producer lock. A false
+    /// result requires the IO lane to retain/retry this one bounded command;
+    /// the atomic latch has already forbidden any old budget or pixel callback.
+    pub fn receive_suspend(&self, request: wire::Suspend) -> bool {
+        if request.validate().is_err() || self.generation() == 0 {
+            return false;
+        }
+        // This tiny metadata lock is separate from all producers/pixels. Keep
+        // the exact highest request after resume so old or conflicting scoped
+        // retransmissions cannot poison the currently completed resume token.
+        let Ok(mut highest) = self.highest_suspend.try_lock() else {
+            return false;
+        };
+        if let Some(old) = *highest {
+            if old.challenge > request.challenge || (old.challenge == request.challenge && old != request) {
+                return false;
+            }
+            if old == request && !self.is_suspended() {
+                return true;
+            }
+        }
+        *highest = Some(request);
+        let old = self.suspension.swap(request.challenge, Ordering::AcqRel);
+        if old != request.challenge {
+            self.advance();
+        }
+        drop(highest);
+        let Ok(mut p) = self.pending.try_lock() else {
+            return false;
+        };
+        self.renew(&mut p);
+        if p.suspend.is_some_and(|old| old.challenge == request.challenge && old != request) {
+            return false;
+        }
+        if p.suspend != Some(request) {
+            p.suspended = None;
+        }
+        p.suspend = Some(request);
+        p.control = None;
+        p.image = None;
+        p.state = None;
+        p.budget_probes.clear();
+        p.last_probe = None;
+        true
+    }
+    pub fn pending_suspend(&self) -> Option<wire::Suspend> {
+        if !self.is_suspended() {
+            return None;
+        }
+        let request = (*self.highest_suspend.try_lock().ok()?)?;
+        if request.challenge != self.suspension.load(Ordering::Acquire) {
+            return None;
+        }
+        let complete = self
+            .current_pending()
+            .and_then(|p| p.suspended)
+            .is_some_and(|ack| ack.request == request);
+        (!complete).then_some(request)
+    }
+    pub fn publish_suspended(&self, proof: wire::Suspended) -> bool {
+        if proof.validate().is_err() {
+            return false;
+        }
+        if self
+            .highest_suspend
+            .try_lock()
+            .ok()
+            .is_none_or(|scope| *scope != Some(proof.request))
+        {
+            return false;
+        }
+        let Ok(mut p) = self.pending.try_lock() else {
+            return false;
+        };
+        self.renew(&mut p);
+        if self.suspension.load(Ordering::Acquire) != proof.request.challenge {
+            return false;
+        }
+        p.suspend = Some(proof.request);
+        if p.suspended.is_some_and(|old| old != proof) {
+            return false;
+        }
+        p.suspended = Some(proof);
+        true
+    }
+    pub fn suspended(&self) -> Option<wire::Suspended> {
+        self.current_pending()?.suspended
+    }
+    pub fn is_suspended(&self) -> bool {
+        self.suspension.load(Ordering::Acquire) != 0
     }
 }
 
@@ -610,6 +757,7 @@ mod tests {
             visible: true,
             challenge,
             budget: None,
+            resume_after: None,
         }
     }
     fn state(challenge: u64, epoch: u64, availability: Availability) -> State {
@@ -685,6 +833,129 @@ mod tests {
         assert!(!m.publish_state(state(1, 1, Availability::Live)));
         assert!(m.publish_state(state(2, 2, Availability::Restricted)));
         assert!(!m.publish_image(header(1, 1, 2), pixels()));
+    }
+
+    #[test]
+    fn preview_suspend_closes_budget_and_pixels_before_lock_and_needs_exact_gpu_ack_and_new_resume_subscription() {
+        let mailbox = PreviewMailbox::default();
+        let now = Instant::now();
+        mailbox.receive_subscription(control(1), now);
+        mailbox.publish_state(state(1, 1, Availability::Live));
+        mailbox.publish_image(header(1, 1, 1), pixels());
+        let request = wire::Suspend {
+            source: source(),
+            device_epoch: 2,
+            challenge: 10,
+        };
+        let held = mailbox.pending.lock().unwrap();
+        assert!(!mailbox.receive_suspend(request), "IO must retain a contended command");
+        assert!(mailbox.is_suspended());
+        assert!(mailbox.control(now).is_none());
+        drop(held);
+        assert!(mailbox.receive_suspend(request));
+        assert!(mailbox.image().is_none());
+        assert_eq!(mailbox.pending_suspend(), Some(request));
+        assert!(
+            !mailbox.receive_subscription(
+                Subscription {
+                    resume_after: Some(10),
+                    ..control(2)
+                },
+                now
+            ),
+            "IO receipt is not a GPU acknowledgement"
+        );
+        let proof = wire::Suspended {
+            request,
+            surface_epoch: 3,
+            completed_frame: Some(8),
+        };
+        assert!(!mailbox.publish_suspended(wire::Suspended {
+            request: wire::Suspend {
+                device_epoch: 9,
+                ..request
+            },
+            ..proof
+        }));
+        assert!(mailbox.publish_suspended(proof));
+        assert_eq!(mailbox.suspended(), Some(proof));
+        assert!(mailbox.pending_suspend().is_none());
+        assert!(!mailbox.receive_subscription(control(2), now), "old in-flight grants stay retired");
+        assert!(mailbox.receive_subscription(
+            Subscription {
+                resume_after: Some(10),
+                ..control(2)
+            },
+            now
+        ));
+        assert!(!mailbox.is_suspended());
+        assert!(
+            !mailbox.receive_subscription(control(3), now),
+            "a later callback without the completed resume token stays retired"
+        );
+        assert!(mailbox.receive_subscription(
+            Subscription {
+                resume_after: Some(10),
+                ..control(3)
+            },
+            now
+        ));
+        let next = wire::Suspend { challenge: 11, ..request };
+        assert!(mailbox.receive_suspend(next));
+        assert!(
+            !mailbox.publish_suspended(proof),
+            "previous completion cannot acknowledge the new barrier"
+        );
+        assert!(!mailbox.receive_subscription(
+            Subscription {
+                resume_after: Some(10),
+                ..control(4)
+            },
+            now
+        ));
+        assert!(mailbox.publish_suspended(wire::Suspended { request: next, ..proof }));
+        assert!(mailbox.receive_subscription(
+            Subscription {
+                resume_after: Some(11),
+                ..control(4)
+            },
+            now
+        ));
+        let generation = mailbox.generation();
+        assert!(
+            !mailbox.receive_suspend(request),
+            "old barrier replay after resume must not replace the completed floor"
+        );
+        assert!(
+            !mailbox.receive_suspend(wire::Suspend { device_epoch: 99, ..next }),
+            "same challenge with another device cannot poison the floor"
+        );
+        assert_eq!(mailbox.generation(), generation);
+        assert!(!mailbox.is_suspended());
+        assert!(mailbox.receive_suspend(next), "completed exact retransmission is idempotent");
+        assert!(!mailbox.is_suspended());
+        assert_eq!(mailbox.generation(), generation);
+        assert!(mailbox.receive_subscription(
+            Subscription {
+                resume_after: Some(11),
+                ..control(5)
+            },
+            now
+        ));
+    }
+
+    #[test]
+    fn suspended_reconnected_worker_can_report_fresh_identity_without_reopening_render_budget() {
+        let mailbox=PreviewMailbox::default();let now=Instant::now();
+        let request=wire::Suspend {source:source(),device_epoch:2,challenge:10};
+        assert!(mailbox.receive_suspend(request));mailbox.disconnect();
+        let probe=Probe {source:source(),challenge:50};assert!(mailbox.receive_probe(probe,now));
+        let peer=Peer {cohort:Cohort {source:source(),device_epoch:2,pid:200},luid:42};
+        let report=wire::CohortReport {peer,challenge:probe.challenge};
+        mailbox.publish_peer(report);assert_eq!(mailbox.take_peer(now),Some(report));
+        assert!(mailbox.is_suspended());assert!(mailbox.control(now).is_none());
+        assert!(!mailbox.receive_subscription(control(1),now));
+        assert!(!mailbox.publish_state(state(1,1,Availability::Live)));
     }
 
     #[test]
