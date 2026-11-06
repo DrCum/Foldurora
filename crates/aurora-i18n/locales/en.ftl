@@ -13374,3 +13374,14 @@ host-start-run-failed = The session host stopped because of an error.
 host-start-flush-failed = The session host could not finish writing its diagnostic log.
     { $error }
     Diagnostic log: { $path }
+
+# Persistent character profiles: a label never replaces the logged-in account.
+host-profile-select = Character profile for the next login
+host-profile-default = Character { $number }
+host-profile-occupied = In use
+host-profile-occupied-help = This profile still has a viewer open. Close that viewer before opening the profile again.
+host-profile-rename = Rename character profile
+host-profile-name-help = Up to 64 UTF-8 bytes. Leave empty to restore the numbered name. The logged-in account stays visible separately.
+host-profile-name-invalid = Use at most 64 UTF-8 bytes without control characters.
+host-profile-controller-busy = Another session host is already using these character profiles.
+host-profile-registry-missing = The character profile registry is missing, but profile folders already exist. They were preserved; restore the registry before reopening these profiles.

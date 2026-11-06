@@ -32,8 +32,18 @@ Startup/log failures remain visible through a controller-owned error dialog.
 
 Worker bootstrap validates the exact installation/host/worker nonce and a
 single-use private configuration before settings or cache initialization.
-`session_host/profile.rs` locks private per-launch/session-generation config,
-account and cache directories; these are not persistent per-character profiles.
+`session_host/slots.rs` owns five persistent, renameable profile slots in a
+bounded versioned private registry. Its background IO owner holds an exclusive
+controller registry lock and publishes a fresh controller stamp before probing
+or launching any slot. The parent checks the slot's profile lock before spawn;
+`session_host/profile.rs` takes that lifetime lock, then validates the current
+controller stamp before settings/cache initialization. A delayed child from a
+previous controller either owns the profile lock already or is refused by the
+new stamp. Detached workers retain the lock until process exit. Stable slot
+identity and labels never replace fresh worker/session/lease/chat authority.
+Legacy bootstraps without a slot retain their generated profiles. Missing
+registries cannot adopt preexisting stable slot directories, and malformed or
+newer registries are not rewritten. All registry and launch IO stays off frame.
 Shared saved-account metadata remains separate. Private worker cache keys do not
 read or replace the ordinary OS cache-key entry. No credentials or simulator
 session tokens are transported by the controller.

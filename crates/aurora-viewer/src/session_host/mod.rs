@@ -9,6 +9,7 @@ mod chat_ui;
 mod chat_window;
 mod native;
 pub(crate) mod profile;
+pub(crate) mod slots;
 mod software;
 pub(crate) mod startup;
 pub(crate) mod transport;
@@ -114,12 +115,13 @@ impl Shell {
         if self.closing.is_some() {
             return;
         }
-        let result = match action {
+        let result = match action.clone() {
             Action::OpenChat(source) => {
                 self.open_chat(event_loop, source);
                 return;
             }
-            Action::OpenLogin(account) => self.controller.open_manual_login(account),
+            Action::OpenLogin(account, slot) => self.controller.open_manual_login(account, slot),
+            Action::RenameSlot(slot, label) => self.controller.rename_slot(slot, label),
             Action::Activate(worker) => match viewport {
                 Some(viewport) => self.controller.activate(worker, viewport),
                 None => Err(transport::HostError::Unsupported),
@@ -137,11 +139,11 @@ impl Shell {
         };
         if let Ok(request) = result {
             let affects_active = match action {
-                Action::OpenLogin(_) | Action::Activate(_) => true,
+                Action::OpenLogin(_, _) | Action::Activate(_) => true,
                 // The broker's pending row can name the old renderer while
                 // the requested target is also a transaction participant.
                 Action::Detach(worker) => self.snapshot.active == Some(worker) || self.snapshot.pending.is_some(),
-                Action::OpenChat(_) | Action::Close => false,
+                Action::OpenChat(_) | Action::RenameSlot(_, _) | Action::Close => false,
             };
             if affects_active {
                 // The IO thread has not seen the intent yet. Do not reopen
@@ -256,7 +258,7 @@ impl Shell {
         presented_worker(
             &self.snapshot,
             viewport,
-            self.closing.is_some() || self.ui.close_prompt || self.transition.waiting() || self.geometry_dirty,
+            self.closing.is_some() || self.ui.modal_open() || self.transition.waiting() || self.geometry_dirty,
         )
     }
 

@@ -13347,3 +13347,14 @@ host-start-run-failed = エラーのためセッションホストが停止し�
 host-start-flush-failed = セッションホストの診断ログへの書き込みを完了できませんでした。
     { $error }
     診断ログ: { $path }
+
+# 永続的なキャラクタープロファイル。表示名とログイン中のアカウントは別です。
+host-profile-select = 次のログインに使うキャラクタープロファイル
+host-profile-default = キャラクター { $number }
+host-profile-occupied = 使用中
+host-profile-occupied-help = このプロファイルを使うビューアーが開いています。閉じてからプロファイルを開き直してください。
+host-profile-rename = キャラクタープロファイルの名前を変更
+host-profile-name-help = UTF-8で64バイト以内。空欄にすると番号付きの名前に戻ります。ログイン中のアカウントは別に表示されます。
+host-profile-name-invalid = 制御文字を含めず、UTF-8で64バイト以内にしてください。
+host-profile-controller-busy = 別のセッションホストがこれらのキャラクタープロファイルを使用しています。
+host-profile-registry-missing = キャラクタープロファイルの登録情報がありませんが、プロファイルフォルダーは存在します。フォルダーは保持されています。登録情報を復元してから開き直してください。

@@ -1,7 +1,8 @@
 //! Explicit production profiles for host workers. Selection happens before
 //! settings, cache initialization or any other worker profile writer starts.
 //! The shared account catalogue contains metadata; settings and account files
-//! belong to this exact session generation and are never copied from another.
+//! belong to an explicit persistent slot or a legacy session generation and
+//! are never copied from another profile.
 
 use sha2::{Digest, Sha256};
 use std::fs::File;
@@ -26,7 +27,13 @@ pub(crate) fn root() -> Option<&'static Path> {
 
 /// The only profile selector accepted by a worker. A config cannot supply an
 /// arbitrary directory or substitute the updater's isolated test installation.
-pub(super) fn activate(installation: &str, session: Uuid, generation: u64) -> anyhow::Result<()> {
+pub(super) fn activate(
+    installation: &str,
+    session: Uuid,
+    generation: u64,
+    slot: Option<super::slots::SlotId>,
+    controller: aurora_session::HostId,
+) -> anyhow::Result<()> {
     anyhow::ensure!(root().is_none(), "host worker profile was already selected");
     anyhow::ensure!(
         std::env::var_os("AURORA_UPDATE_TEST_ROOT").is_none() && aurora_updater::test_environment().is_none(),
@@ -42,14 +49,50 @@ pub(super) fn activate(installation: &str, session: Uuid, generation: u64) -> an
         installation == own_installation,
         "host worker profile belongs to another installation"
     );
-    let root = host_root()?.join(relative);
+    let root = match slot {
+        Some(slot) => slot_root(installation, slot)?,
+        None => host_root()?.join(relative),
+    };
     private_dir(&root)?;
     private_dir(&root.join("config"))?;
     private_dir(&root.join("cache"))?;
     let lock = profile_lock(&root)?;
+    if slot.is_some() {
+        // The new controller publishes its stamp before probing any slot.
+        // Check after taking the lifetime profile lock, before ACTIVE exposes
+        // paths to settings/cache initialization. A stale child cannot race
+        // a replacement controller into two writers.
+        super::slots::validate_controller(installation, controller)?;
+    }
     ACTIVE
         .set(Active { root, _lock: lock })
         .map_err(|_| anyhow::anyhow!("host worker profile was already selected"))
+}
+
+pub(super) fn slot_root(installation: &str, slot: super::slots::SlotId) -> io::Result<PathBuf> {
+    Ok(slots_root(installation)?.join(slot.number().to_string()))
+}
+
+pub(super) fn slots_root(installation: &str) -> io::Result<PathBuf> {
+    if !crate::characters::valid_id(installation) {
+        return Err(invalid("invalid persistent profile installation"));
+    }
+    Ok(host_root()?.join("profiles").join(installation).join("slots"))
+}
+
+pub(super) fn slot_available(installation: &str, slot: super::slots::SlotId) -> io::Result<bool> {
+    let root = slot_root(installation, slot)?;
+    private_dir(&root)?;
+    Ok(try_private_lock(&root.join("profile.lock"))?.is_some())
+}
+
+pub(super) fn try_private_lock(path: &Path) -> io::Result<Option<File>> {
+    let file = open_private_file(path, false)?;
+    match file.try_lock() {
+        Ok(()) => Ok(Some(file)),
+        Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+        Err(std::fs::TryLockError::Error(error)) => Err(error),
+    }
 }
 
 fn profile_relative(installation: &str, session: Uuid, generation: u64) -> io::Result<PathBuf> {
@@ -176,16 +219,23 @@ fn plain_directory(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn profile_lock(root: &Path) -> io::Result<File> {
+pub(super) fn profile_lock(root: &Path) -> io::Result<File> {
     let path = root.join("profile.lock");
     if let Ok(metadata) = std::fs::symlink_metadata(&path)
         && (!metadata.is_file() || metadata.file_type().is_symlink() || platform::is_reparse(&metadata))
     {
         return Err(invalid("host profile lock is not a plain file"));
     }
-    let file = open_private_file(&path, false)?;
-    file.try_lock().map_err(io::Error::other)?;
-    Ok(file)
+    lock_private(&path)
+}
+
+pub(super) fn lock_private(path: &Path) -> io::Result<File> {
+    try_private_lock(path)?.ok_or_else(|| io::Error::new(io::ErrorKind::WouldBlock, "private host file is locked"))
+}
+
+#[cfg(test)]
+pub(super) fn open_existing_private(path: &Path) -> io::Result<File> {
+    open_private_file(path, false)
 }
 
 /// The parent must already be private. Ownership is assigned at creation;

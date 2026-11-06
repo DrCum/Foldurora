@@ -13370,3 +13370,14 @@ host-start-run-failed = L’hôte de sessions s’est arrêté à cause d’une 
 host-start-flush-failed = L’hôte de sessions n’a pas pu terminer l’écriture de son journal de diagnostic.
     { $error }
     Journal de diagnostic : { $path }
+
+# Profils de personnage persistants : le nom du profil ne remplace pas le compte connecté.
+host-profile-select = Profil de personnage pour la prochaine connexion
+host-profile-default = Personnage { $number }
+host-profile-occupied = Utilisé
+host-profile-occupied-help = Une fenêtre utilise encore ce profil. Fermez-la avant de rouvrir le profil.
+host-profile-rename = Renommer le profil du personnage
+host-profile-name-help = 64 octets UTF-8 maximum. Laissez vide pour rétablir le nom numéroté. Le compte connecté reste affiché séparément.
+host-profile-name-invalid = Utilisez au plus 64 octets UTF-8, sans caractères de contrôle.
+host-profile-controller-busy = Un autre hôte de sessions utilise déjà ces profils de personnage.
+host-profile-registry-missing = Le registre des profils de personnage est absent, mais des dossiers de profil existent. Ils ont été conservés ; restaurez le registre avant de rouvrir ces profils.

@@ -35,6 +35,8 @@ pub(crate) fn initialize_startup(path: Option<&Path>) -> anyhow::Result<()> {
         &config.identity.installation.to_string(),
         uuid::Uuid::from_bytes(*config.session.as_bytes()),
         config.generation,
+        config.slot,
+        config.identity.host,
     )?;
     STARTUP
         .set(Startup { config, directory })

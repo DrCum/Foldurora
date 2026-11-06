@@ -1,15 +1,17 @@
 //! The controller shows acknowledged local sessions only. Chat is offered
 //! only for its authenticated live native backend; logins remain manual.
 
+use super::slots::{SlotId, SlotLabel, SlotSummary};
 use super::transport::{HostError, HostSnapshot, WorkerSummary};
 use crate::theme::Palette;
 use crate::ui::widgets::{self, ActionKind};
 use aurora_session::{AccountKey, MAX_WORKERS, Phase, WorkerId};
 use egui::{Id, Rect, RichText, TextEdit, vec2};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Action {
-    OpenLogin(Option<AccountKey>),
+    OpenLogin(Option<AccountKey>, Option<SlotId>),
+    RenameSlot(SlotId, SlotLabel),
     Activate(WorkerId),
     Detach(WorkerId),
     OpenChat(aurora_session::chat::ChatSource),
@@ -26,6 +28,8 @@ pub(super) enum Notice {
 pub(super) struct HostUi {
     selected: Option<WorkerId>,
     search: String,
+    selected_slot: Option<SlotId>,
+    rename: Option<(SlotId, String)>,
     pub close_prompt: bool,
     pub notice: Option<Notice>,
 }
@@ -36,6 +40,10 @@ pub(super) struct Output {
 }
 
 impl HostUi {
+    pub fn modal_open(&self) -> bool {
+        self.close_prompt || self.rename.is_some()
+    }
+
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
@@ -79,8 +87,10 @@ impl HostUi {
                         .char_limit(128),
                 );
                 ui.add_space(8.0);
-                if ui
-                    .add_enabled_ui(!closing && !snapshot.stopped, |ui| {
+                self.slot_picker(ui, p, snapshot, closing);
+                let login_slot = self.login_slot(snapshot);
+                let open = ui
+                    .add_enabled_ui(!closing && !snapshot.stopped && login_slot.is_some(), |ui| {
                         widgets::action_button(
                             ui,
                             p,
@@ -90,25 +100,30 @@ impl HostUi {
                             vec2(ui.available_width(), 32.0),
                         )
                     })
-                    .inner
-                    .clicked()
-                {
-                    action = Some(Action::OpenLogin(None));
+                    .inner;
+                #[cfg(test)]
+                ctx.data_mut(|data| data.insert_temp(Id::unique("host_slot_open"), open.rect));
+                if open.clicked() {
+                    action = Some(Action::OpenLogin(None, login_slot));
                 }
                 ui.add_space(10.0);
                 let query = self.search.trim().to_lowercase();
                 egui::ScrollArea::vertical().id_salt("session_host_rows").show(ui, |ui| {
                     widgets::organization_header(ui, p, aurora_i18n::tr!("host-running-sessions"));
                     let mut count = 0;
-                    for worker in snapshot
-                        .workers
-                        .iter()
-                        .take(MAX_WORKERS)
-                        .filter(|worker| matches(display_name(worker), display_grid(worker), &query))
-                    {
+                    for worker in snapshot.workers.iter().take(MAX_WORKERS).filter(|worker| {
+                        matches(display_name(worker), display_grid(worker), &query)
+                            || worker
+                                .slot
+                                .and_then(|id| snapshot.slots.iter().find(|slot| slot.id == id))
+                                .is_some_and(|slot| slot_name(slot).to_lowercase().contains(&query))
+                    }) {
                         count += 1;
                         let id = worker.binding.worker.worker;
                         ui.push_id(id.to_string(), |ui| {
+                            if let Some(slot) = worker.slot.and_then(|id| snapshot.slots.iter().find(|slot| slot.id == id)) {
+                                ui.label(RichText::new(slot_name(slot)).small().color(p.violet_pale));
+                            }
                             let label = display_name(worker);
                             let selected = self.selected == Some(id);
                             if widgets::navigation(ui, p, "user-filled", label, selected).clicked() {
@@ -212,7 +227,7 @@ impl HostUi {
                             ui.label(RichText::new(&account.grid).small().color(p.muted));
                             let opening = snapshot.opening.contains(&account.key);
                             let response = ui
-                                .add_enabled_ui(!closing && !snapshot.stopped && !opening, |ui| {
+                                .add_enabled_ui(!closing && !snapshot.stopped && !opening && login_slot.is_some(), |ui| {
                                     widgets::action_button(
                                         ui,
                                         p,
@@ -226,7 +241,7 @@ impl HostUi {
                             #[cfg(test)]
                             ctx.data_mut(|data| data.insert_temp(Id::unique(("host_open", account.key)), response.rect));
                             if response.clicked() {
-                                action = Some(Action::OpenLogin(Some(account.key)));
+                                action = Some(Action::OpenLogin(Some(account.key), login_slot));
                             }
                             if opening {
                                 ui.label(RichText::new(aurora_i18n::tr!("host-opening")).small().color(p.muted));
@@ -306,7 +321,138 @@ impl HostUi {
                 self.close_prompt = false;
             }
         }
+        if !closing && !snapshot.stopped {
+            action = self.rename_dialog(&ctx).or(action);
+        } else {
+            self.rename = None;
+        }
         Output { action, world }
+    }
+
+    fn login_slot(&self, snapshot: &HostSnapshot) -> Option<SlotId> {
+        self.selected_slot
+            .and_then(|id| snapshot.slots.iter().find(|slot| slot.id == id && slot.available))
+            .map(|slot| slot.id)
+    }
+
+    fn slot_picker(&mut self, ui: &mut egui::Ui, p: &Palette, snapshot: &HostSnapshot, closing: bool) {
+        if self.selected_slot.is_none() {
+            self.selected_slot = snapshot
+                .slots
+                .iter()
+                .find(|slot| slot.available)
+                .or(snapshot.slots.first())
+                .map(|slot| slot.id);
+        }
+        ui.label(RichText::new(aurora_i18n::tr!("host-profile-select")).small().color(p.muted));
+        let selected = self.selected_slot.and_then(|id| snapshot.slots.iter().find(|slot| slot.id == id));
+        let text = selected.map(slot_name).unwrap_or_default();
+        let width = ui.available_width();
+        let combo = egui::ComboBox::from_id_salt("host_profile_slot")
+            .selected_text(text)
+            .width(width)
+            .truncate()
+            .show_ui(ui, |ui| {
+                ui.set_max_width(width);
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+                for slot in snapshot.slots.iter().take(MAX_WORKERS) {
+                    let text = if slot.available {
+                        slot_name(slot)
+                    } else {
+                        format!("{} · {}", slot_name(slot), aurora_i18n::tr!("host-profile-occupied"))
+                    };
+                    let response = ui.selectable_value(&mut self.selected_slot, Some(slot.id), text);
+                    #[cfg(test)]
+                    ui.ctx()
+                        .data_mut(|data| data.insert_temp(Id::unique(("host_slot_pick", slot.id)), response.rect));
+                    #[cfg(not(test))]
+                    let _ = response;
+                }
+            });
+        #[cfg(test)]
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(Id::unique("host_slot_combo"), combo.response.rect));
+        #[cfg(not(test))]
+        let _ = combo;
+        let selected = self.selected_slot.and_then(|id| snapshot.slots.iter().find(|slot| slot.id == id));
+        ui.horizontal_wrapped(|ui| {
+            let rename = widgets::action_button_if(
+                ui,
+                p,
+                "pencil",
+                aurora_i18n::tr!("common-rename"),
+                ActionKind::Flat,
+                vec2(0.0, 28.0),
+                selected.is_some() && !closing && !snapshot.stopped,
+            );
+            #[cfg(test)]
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(Id::unique("host_slot_rename"), rename.rect));
+            if rename.clicked()
+                && let Some(slot) = selected
+            {
+                self.rename = Some((slot.id, slot.label.as_str().to_owned()));
+            }
+            if selected.is_some_and(|slot| !slot.available) {
+                ui.label(RichText::new(aurora_i18n::tr!("host-profile-occupied")).small().color(p.muted))
+                    .on_hover_text(aurora_i18n::tr!("host-profile-occupied-help"));
+            }
+        });
+        if let Some(error) = &snapshot.registry_error {
+            ui.label(RichText::new(error).small().color(p.danger));
+        }
+        ui.add_space(4.0);
+    }
+
+    fn rename_dialog(&mut self, ctx: &egui::Context) -> Option<Action> {
+        let (slot, draft) = self.rename.as_mut()?;
+        let mut close = false;
+        let mut action = None;
+        let dialog = widgets::Modal::new(Id::unique("host_profile_rename")).show(ctx, |ui| {
+            ui.set_max_width(380.0);
+            ui.label(RichText::new(aurora_i18n::tr!("host-profile-rename")).strong());
+            let edit = ui.add(
+                TextEdit::singleline(draft)
+                    .hint_text(aurora_i18n::tr!("common-name"))
+                    .char_limit(64),
+            );
+            #[cfg(test)]
+            ctx.data_mut(|data| data.insert_temp(Id::unique("host_slot_name"), edit.rect));
+            #[cfg(not(test))]
+            let _ = edit;
+            ui.label(aurora_i18n::tr!("host-profile-name-help"));
+            let label = SlotLabel::new(draft);
+            if label.is_err() {
+                ui.label(aurora_i18n::tr!("host-profile-name-invalid"));
+            }
+            ui.horizontal_wrapped(|ui| {
+                let cancel = ui.button(aurora_i18n::tr!("common-cancel"));
+                #[cfg(test)]
+                ctx.data_mut(|data| data.insert_temp(Id::unique("host_slot_cancel"), cancel.rect));
+                close |= cancel.clicked();
+                let save = ui.add_enabled(label.is_ok(), egui::Button::new(aurora_i18n::tr!("common-save")));
+                #[cfg(test)]
+                ctx.data_mut(|data| data.insert_temp(Id::unique("host_slot_save"), save.rect));
+                if save.clicked()
+                    && let Ok(label) = label
+                {
+                    action = Some(Action::RenameSlot(*slot, label));
+                    close = true;
+                }
+            });
+        });
+        if close || dialog.should_close() {
+            self.rename = None;
+        }
+        action
+    }
+}
+
+fn slot_name(slot: &SlotSummary) -> String {
+    if slot.label.as_str().is_empty() {
+        aurora_i18n::tr!("host-profile-default", number = i64::from(slot.id.number()))
+    } else {
+        slot.label.as_str().to_owned()
     }
 }
 
@@ -317,7 +463,9 @@ fn matches(label: &str, grid: &str, query: &str) -> bool {
 /// The IO thread may publish a fresh Arc for unchanged receipts. Only visible
 /// changes should repaint the full software surface, including on a large host.
 pub(super) fn same_snapshot(a: &HostSnapshot, b: &HostSnapshot) -> bool {
-    a.stopped == b.stopped
+    a.slots == b.slots
+        && a.registry_error == b.registry_error
+        && a.stopped == b.stopped
         && a.error == b.error
         && a.can_activate == b.can_activate
         && a.active == b.active
@@ -348,7 +496,12 @@ pub(super) fn same_snapshot(a: &HostSnapshot, b: &HostSnapshot) -> bool {
                 (None, None) => true,
                 _ => false,
             };
-            a.binding == b.binding && same_status && a.reachable == b.reachable && a.label == b.label && a.grid == b.grid
+            a.slot == b.slot
+                && a.binding == b.binding
+                && same_status
+                && a.reachable == b.reachable
+                && a.label == b.label
+                && a.grid == b.grid
         })
 }
 
@@ -429,12 +582,20 @@ mod tests {
     fn snapshot() -> HostSnapshot {
         let account = AccountKey::from_bytes([5; 32]).unwrap();
         HostSnapshot {
+            slots: SlotId::all()
+                .map(|id| SlotSummary {
+                    id,
+                    label: SlotLabel::default(),
+                    available: true,
+                })
+                .collect(),
             accounts: vec![SavedAccount {
                 key: account,
                 label: "Demo One".into(),
                 grid: "Example Grid".into(),
             }],
             workers: vec![WorkerSummary {
+                slot: Some(SlotId::try_from(0).unwrap()),
                 binding: Binding {
                     worker: WorkerIdentity {
                         installation: InstallationId::from_bytes([1; 32]).unwrap(),
@@ -540,7 +701,7 @@ mod tests {
                 },
                 |ui| {
                     let shown = self.ui.show(ui, &p, snapshot, native_ready, None, false);
-                    action = action.or(shown.action);
+                    action = action.take().or(shown.action);
                     assert!(shown.world.left() >= 260.0 && shown.world.top() >= 58.0);
                 },
             );
@@ -595,10 +756,70 @@ mod tests {
         );
         assert_eq!(
             frames.click(&snapshot, Id::unique(("host_open", account)), true),
-            Some(Action::OpenLogin(Some(account)))
+            Some(Action::OpenLogin(Some(account), Some(SlotId::try_from(0).unwrap())))
         );
         snapshot.opening.push(account);
         assert_eq!(frames.click(&snapshot, Id::unique(("host_open", account)), true), None);
+    }
+
+    #[test]
+    fn persistent_slot_picker_opens_exact_free_profile_and_rename_is_only_metadata() {
+        let mut snapshot = snapshot();
+        let first = SlotId::try_from(0).unwrap();
+        let last = SlotId::try_from(4).unwrap();
+        snapshot.slots[0].label = SlotLabel::new("Custom profile label").unwrap();
+        let actual = display_name(&snapshot.workers[0]).to_owned();
+        let binding = snapshot.workers[0].binding;
+        let mut frames = Frames::new();
+        assert_eq!(
+            frames.click(&snapshot, Id::unique("host_slot_open"), false),
+            Some(Action::OpenLogin(None, Some(first)))
+        );
+        assert_eq!(frames.click(&snapshot, Id::unique("host_slot_combo"), false), None);
+        assert_eq!(frames.click(&snapshot, Id::unique(("host_slot_pick", last)), false), None);
+        assert_eq!(frames.ui.selected_slot, Some(last));
+        assert_eq!(
+            frames.click(&snapshot, Id::unique("host_slot_open"), false),
+            Some(Action::OpenLogin(None, Some(last)))
+        );
+        snapshot.slots[4].available = false;
+        assert_eq!(
+            frames.click(&snapshot, Id::unique("host_slot_open"), false),
+            None,
+            "occupied profile cannot launch"
+        );
+        assert_eq!(frames.click(&snapshot, Id::unique("host_slot_rename"), false), None);
+        assert!(frames.ui.modal_open(), "rename dialog must cover the fitted native world");
+        frames.click(&snapshot, Id::unique("host_slot_name"), false);
+        frames.show(&snapshot, vec![egui::Event::Text("A different label 猫".into())], false);
+        assert_eq!(
+            frames.click(&snapshot, Id::unique("host_slot_save"), false),
+            Some(Action::RenameSlot(last, SlotLabel::new("A different label 猫").unwrap()))
+        );
+        assert!(!frames.ui.modal_open());
+        assert_eq!(display_name(&snapshot.workers[0]), actual);
+        assert_eq!(
+            snapshot.workers[0].binding, binding,
+            "labels never substitute native account identity"
+        );
+        assert_eq!(frames.click(&snapshot, Id::unique("host_slot_rename"), false), None);
+        frames.click(&snapshot, Id::unique("host_slot_name"), false);
+        frames.show(&snapshot, vec![egui::Event::Text("discard this".into())], false);
+        assert_eq!(frames.click(&snapshot, Id::unique("host_slot_cancel"), false), None);
+        assert!(!frames.ui.modal_open());
+    }
+
+    #[test]
+    fn profile_rename_save_rejects_multibyte_byte_overflow_and_cancel_has_no_action() {
+        let snapshot = snapshot();
+        let mut frames = Frames::new();
+        let slot = SlotId::try_from(0).unwrap();
+        frames.ui.rename = Some((slot, "猫".repeat(22)));
+        assert_eq!(frames.click(&snapshot, Id::unique("host_slot_save"), false), None);
+        assert!(frames.ui.modal_open(), "invalid UTF-8 byte length cannot publish a label");
+        assert_eq!(frames.click(&snapshot, Id::unique("host_slot_cancel"), false), None);
+        assert!(!frames.ui.modal_open());
+        assert_eq!(snapshot.slots[0].label, SlotLabel::default());
     }
 
     #[test]
@@ -708,6 +929,7 @@ mod tests {
         snapshot.can_activate = true;
         snapshot.active = Some(worker);
         snapshot.active_viewport = Some(viewport);
+        snapshot.registry_error = Some("Synthetic profile-label write failure".into());
         let presented = super::super::presented_worker;
         assert_eq!(presented(&snapshot, Some(viewport), false), Some(worker));
         assert_eq!(

@@ -1,5 +1,38 @@
 # Foldurora session host
 
+## Persistent character profiles checkpoint
+
+The source now provides five persistent slots in the profile selector above
+Open login. Select a profile, then open its ordinary manual login; saved-account
+Open actions also use that selected free profile. Rename changes its label,
+with at most 64 UTF-8 bytes and no control characters. An empty name restores
+Character 1 through Character 5. The actual ready account and grid remain shown
+separately. Renaming never changes login, session or chat ownership.
+
+Each slot retains its own settings/account files and private cache after the
+viewer exits. New slots begin with defaults. Earlier generated profiles and
+ordinary viewer settings are preserved and are not imported. The namespace
+still belongs to the canonical executable location: replacing that executable
+retains it, while a different portable/worktree location has separate slots.
+Only one controller owns the installation's registry at once. A detached
+viewer keeps its profile occupied until the process exits; close that normal
+viewer before reopening its profile. No unrelated viewer is adopted.
+
+The private registry is bounded, versioned and atomically replaced. If it is
+missing while stable profile directories exist, startup refuses to adopt them;
+restore the original registry before reopening. Corrupt/newer/nonprivate
+registries are refused without rewriting their data or permissions. No profile
+deletion, reset, migration, restart command or automatic login is supplied.
+
+Source tests cover storage identity, retention, lock/controller loss, stale
+bootstrap refusal, registry loss/version/privacy and actual egui profile
+selection/rename. This checkpoint still needs compiled/full checks and Windows
+acceptance: change one slot's preferences, close its viewer, reopen it and
+verify retention; repeat with another slot and custom names. Verify a second
+controller is refused, detached/live profiles remain occupied, startup errors
+preserve data, and every reopened login has new session/chat authority. Grid
+validation belongs to the human.
+
 This is an opt-in implementation in progress. The current source assembles a
 CPU controller, ordinary manual-login workers, private profiles, bounded local
 transport and GPU completion fences. The Windows presentation adapter is
@@ -54,9 +87,9 @@ compatibility is claimed.
   never reported status has a fixed five-minute startup deadline; its first
   valid receipt arms the ordinary fifteen-second lease. No status means no
   activation, and outgoing heartbeats cannot extend that startup deadline.
-- Profiles are isolated **per launch/session generation**. They do not yet keep
-  stable per-character settings across restarts. Existing user settings and
-  passwords are not copied into those profiles. The shared saved-account
+- The five explicitly selected profile slots persist across launches. Preserved
+  pre-slot bootstraps retain their old per-session/generated profile behavior.
+  Existing user settings and passwords are not copied into those profiles. The shared saved-account
   catalogue is used as metadata; private cache keys avoid the shared OS entry.
 - Windows transport, bootstrap-claim and profile-lock files receive an explicit
   current-user owner and private DACL at creation. A token's default owner can

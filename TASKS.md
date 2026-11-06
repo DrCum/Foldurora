@@ -1,5 +1,18 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Persistent character profiles (human request, 2026-11-06; no issue): add
+  five stable per-installation slots with renameable bounded labels and explicit
+  manual login, retaining settings/account files and isolated caches after
+  normal close/reopen. The IO controller owns a versioned private atomic
+  registry; worker profile locks survive detach/controller loss until actual
+  process exit. A fresh controller stamp rejects delayed old bootstraps before
+  writers initialize. Names remain separate from actual logged-in accounts;
+  session/worker/lease/chat authority is fresh on every opening. Preserve all
+  earlier generated profiles and ordinary settings. Source regressions cover
+  locks, registry loss/version/privacy, persistence, fresh authority and actual
+  egui selection/rename. Compilation, full checks and Windows acceptance are
+  pending. No restart, import, automatic login or preview monitors are added.
+
 - 🔧 Host chat draft retention (Folderstorm port, 2026-11-06; no issue): keep
   separate source/policy-bound Nearby and resident IM text/Undo state while
   navigating and closing/reopening a popout. Validate parked state while closed

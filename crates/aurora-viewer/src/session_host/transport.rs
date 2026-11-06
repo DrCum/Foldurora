@@ -6,6 +6,7 @@
 //! PID nor a window handle can authorize a command.
 
 pub(crate) use super::chat_broker::HostChatSnapshot;
+use super::slots::{Registry, SlotId, SlotLabel, SlotSummary};
 use aurora_session::chat::{ChatKey, ChatSource, ChatText};
 use aurora_session::{
     AccountKey, Binding, Command, Coordinator, Effect, Envelope, Event, GridKey, HostId, HostNotice, HostedViewport, InstallationId,
@@ -40,6 +41,7 @@ pub(crate) struct SavedAccount {
 
 #[derive(Clone)]
 pub(crate) struct WorkerSummary {
+    pub slot: Option<SlotId>,
     pub binding: Binding,
     pub status: Option<WorkerStatus>,
     pub reachable: bool,
@@ -49,6 +51,8 @@ pub(crate) struct WorkerSummary {
 
 #[derive(Clone, Default)]
 pub(crate) struct HostSnapshot {
+    pub slots: Vec<SlotSummary>,
+    pub registry_error: Option<String>,
     pub accounts: Vec<SavedAccount>,
     pub workers: Vec<WorkerSummary>,
     pub opening: Vec<AccountKey>,
@@ -80,7 +84,8 @@ impl std::fmt::Display for HostError {
 impl std::error::Error for HostError {}
 
 enum HostIntent {
-    Open(Option<AccountKey>),
+    Open(Option<AccountKey>, Option<SlotId>),
+    RenameSlot(SlotId, SlotLabel),
     Activate(WorkerId, HostedViewport),
     Viewport(HostedViewport),
     Park,
@@ -95,14 +100,21 @@ enum HostIntent {
 impl HostIntent {
     fn controls_presentation(&self) -> bool {
         match self {
-            Self::ChatSend { .. } => false,
-            Self::Open(_) | Self::Activate(_, _) | Self::Viewport(_) | Self::Park | Self::Detach(_) => true,
+            Self::ChatSend { .. } | Self::RenameSlot(_, _) => false,
+            Self::Open(_, _) | Self::Activate(_, _) | Self::Viewport(_) | Self::Park | Self::Detach(_) => true,
         }
     }
 }
 
-fn request_result(error: &mut Option<String>, controls_presentation: bool, result: anyhow::Result<()>) {
-    if controls_presentation {
+fn request_result(
+    error: &mut Option<String>,
+    controls_presentation: bool,
+    registry_error: Option<&mut Option<String>>,
+    result: anyhow::Result<()>,
+) {
+    if let Some(notice) = registry_error {
+        *notice = result.err().map(|error| error.to_string());
+    } else if controls_presentation {
         *error = result.err().map(|error| error.to_string());
     }
 }
@@ -172,8 +184,12 @@ impl HostController {
         self.snapshot.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
     }
 
-    pub fn open_manual_login(&self, account: Option<AccountKey>) -> Result<u64, HostError> {
-        self.send(HostIntent::Open(account))
+    pub fn open_manual_login(&self, account: Option<AccountKey>, slot: Option<SlotId>) -> Result<u64, HostError> {
+        self.send(HostIntent::Open(account, slot))
+    }
+
+    pub fn rename_slot(&self, slot: SlotId, label: SlotLabel) -> Result<u64, HostError> {
+        self.send(HostIntent::RenameSlot(slot, label))
     }
 
     pub fn activate(&self, worker: WorkerId, viewport: HostedViewport) -> Result<u64, HostError> {
@@ -268,6 +284,9 @@ pub(super) struct WorkerConfig {
     pub identity: WorkerIdentity,
     pub session: SessionId,
     pub generation: u64,
+    /// Missing in preserved pre-slot bootstraps: keep their generated profile.
+    #[serde(default)]
+    pub slot: Option<SlotId>,
     pub expected_account: Option<AccountKey>,
     pub expected_grid: Option<GridKey>,
     pub lease_epoch: u64,
@@ -379,7 +398,7 @@ pub(super) fn read_config(path: &Path) -> anyhow::Result<(WorkerConfig, PathBuf)
     Ok((config, directory))
 }
 
-fn read_json<T: DeserializeOwned>(path: &Path, limit: usize) -> io::Result<T> {
+pub(super) fn read_json<T: DeserializeOwned>(path: &Path, limit: usize) -> io::Result<T> {
     serde_json::from_slice(&read_bytes(path, limit)?).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "malformed session file"))
 }
 
@@ -779,6 +798,7 @@ impl OpenGate {
 }
 
 struct PendingOpen {
+    slot: SlotId,
     account: Option<AccountKey>,
     gate: OpenGate,
     reservation: Option<crate::characters::HostLaunchPermit>,
@@ -793,6 +813,10 @@ struct ActiveViewport {
 }
 
 struct Broker {
+    registry: Registry,
+    registry_error: Option<String>,
+    slot_available: [bool; MAX_WORKERS],
+    next_slot_scan: Instant,
     coordinator: Coordinator,
     installation: InstallationId,
     host: HostId,
@@ -882,17 +906,26 @@ impl Broker {
 
     fn intent(&mut self, intent: HostIntent, ticket: u64, now: u64) -> anyhow::Result<()> {
         match intent {
-            HostIntent::Open(account) => {
+            HostIntent::Open(account, requested) => {
                 if self.opens.len() >= MAX_QUEUE {
                     anyhow::bail!(HostError::Busy);
                 }
-                if !self.opens.iter().any(|open| open.account == account) {
+                if !self
+                    .opens
+                    .iter()
+                    .any(|open| account.is_some() && open.account == account || requested == Some(open.slot))
+                {
+                    let slot = self.choose_slot(requested)?;
                     self.opens.push_back(PendingOpen {
+                        slot,
                         account,
                         gate: OpenGate::Queued,
                         reservation: None,
                     });
                 }
+            }
+            HostIntent::RenameSlot(slot, label) => {
+                self.registry.rename(slot, label)?;
             }
             HostIntent::Activate(worker, viewport) => {
                 let effects = self.coordinator.activate(worker, Some(viewport), now)?;
@@ -1085,6 +1118,37 @@ impl Broker {
         Ok(())
     }
 
+    fn choose_slot(&self, requested: Option<SlotId>) -> anyhow::Result<SlotId> {
+        for slot in SlotId::all().filter(|slot| requested.is_none_or(|wanted| wanted == *slot)) {
+            if !self.opens.iter().any(|open| open.slot == slot)
+                && !self.children.iter().any(|child| !child.exited && child.config.slot == Some(slot))
+                && self.registry.available(slot)?
+            {
+                return Ok(slot);
+            }
+        }
+        anyhow::bail!(aurora_i18n::tr!("host-profile-occupied-help"))
+    }
+
+    fn scan_slots(&mut self) {
+        if Instant::now() < self.next_slot_scan {
+            return;
+        }
+        self.next_slot_scan = Instant::now() + HEARTBEAT;
+        for slot in SlotId::all() {
+            // Inaccessible/invalid private paths stay unavailable. Surface a
+            // refusal without repairing them or scanning ordinary profiles.
+            let available = match self.registry.available(slot) {
+                Ok(available) => available,
+                Err(error) => {
+                    self.registry_error = Some(error.to_string());
+                    false
+                }
+            };
+            self.slot_available[usize::from(u8::from(slot))] = available;
+        }
+    }
+
     fn open_next(&mut self, accounts: &[(SavedAccount, crate::login_accounts::Account)], now: u64) -> anyhow::Result<()> {
         let Some(mut open) = self.opens.pop_front() else { return Ok(()) };
         let account = open.account.and_then(|key| accounts.iter().find(|(saved, _)| saved.key == key));
@@ -1120,12 +1184,17 @@ impl Broker {
             open.gate.can_launch(self.coordinator.active(), self.coordinator.busy()),
             "worker launch requires an acknowledged parked renderer"
         );
-        let config = new_config(
+        // Recheck after the GPU park, immediately before process creation.
+        // The child takes the lifetime lock and validates the controller stamp
+        // before exposing profile paths to settings/cache initialization.
+        self.choose_slot(Some(open.slot))?;
+        let mut config = new_config(
             self.installation,
             self.host,
             account,
             self.chat_listener.as_ref().map(|listener| listener.port()),
         )?;
+        config.slot = Some(open.slot);
         self.coordinator.register(config.identity.worker, config.lease_epoch, now)?;
         let worker = config.identity.worker;
         match launch(config, account, open.reservation) {
@@ -1155,6 +1224,7 @@ impl Broker {
             .iter()
             .filter(|child| !child.detached)
             .map(|child| WorkerSummary {
+                slot: child.config.slot,
                 binding: child.binding,
                 status: child.status.clone(),
                 reachable: child.last_seen.is_some_and(|seen| seen.elapsed() <= REACHABLE),
@@ -1195,6 +1265,16 @@ impl Broker {
         opening.sort();
         opening.dedup();
         HostSnapshot {
+            registry_error: self.registry_error.clone(),
+            slots: SlotId::all()
+                .map(|id| SlotSummary {
+                    id,
+                    label: self.registry.label(id).clone(),
+                    available: self.slot_available[usize::from(u8::from(id))]
+                        && !self.opens.iter().any(|open| open.slot == id)
+                        && !self.children.iter().any(|child| !child.exited && child.config.slot == Some(id)),
+                })
+                .collect(),
             accounts: accounts.iter().map(|(saved, _)| saved.clone()).collect(),
             workers,
             opening,
@@ -1235,7 +1315,12 @@ fn host_loop(
             ));
         }
     }
+    let registry = Registry::open(installation, host)?;
     let mut broker = Broker {
+        registry,
+        registry_error: None,
+        slot_available: [false; MAX_WORKERS],
+        next_slot_scan: Instant::now(),
         coordinator: Coordinator::new(installation, host),
         installation,
         host,
@@ -1276,15 +1361,22 @@ fn host_loop(
                 broker.error = Some(failure.to_string());
             }
         }
+        broker.scan_slots();
         for request in rx.try_iter().take(MAX_QUEUE) {
             if closing.is_some() {
                 break;
             }
             let controls_presentation = request.intent.controls_presentation();
+            let registry_request = matches!(request.intent, HostIntent::RenameSlot(_, _));
             let result = broker.intent(request.intent, request.ticket, now);
-            // Chat failures belong to their exact request receipts/popout.
-            // They cannot cover the active world or clear a control failure.
-            request_result(&mut broker.error, controls_presentation, result);
+            // Metadata and chat errors cannot cover the acknowledged world or
+            // clear an unrelated presentation/control failure.
+            request_result(
+                &mut broker.error,
+                controls_presentation,
+                registry_request.then_some(&mut broker.registry_error),
+                result,
+            );
             broker.completed_request = request.ticket;
         }
         if let Err(failure) = broker.poll(now) {
@@ -1336,6 +1428,7 @@ fn new_config(
         },
         session: SessionId::from_bytes(*uuid::Uuid::new_v4().as_bytes())?,
         generation: 1,
+        slot: None,
         expected_account: account.map(|(saved, _)| saved.key),
         expected_grid: account.map(|(_, account)| grid_key(&account.uri)).transpose()?,
         lease_epoch: 1,
@@ -1434,12 +1527,105 @@ mod tests {
             },
             session: SessionId::from_bytes([3; 16]).expect("local session"),
             generation: 1,
+            slot: None,
             expected_account: Some(AccountKey::from_bytes([4; 32]).expect("account")),
             expected_grid: Some(GridKey::from_bytes([5; 32]).expect("grid")),
             lease_epoch: 7,
             host_pid: std::process::id(),
             chat: None,
         }
+    }
+
+    #[test]
+    fn reopening_a_persistent_slot_never_reuses_worker_session_or_chat_authority() {
+        let installation = current_installation().unwrap();
+        let host = HostId::from_bytes(*uuid::Uuid::new_v4().as_bytes()).unwrap();
+        let slot = SlotId::try_from(2).unwrap();
+        let mut first = new_config(installation, host, None, Some(45123)).unwrap();
+        let mut second = new_config(installation, host, None, Some(45123)).unwrap();
+        first.slot = Some(slot);
+        second.slot = Some(slot);
+        for config in [&mut first, &mut second] {
+            config.expected_account = Some(AccountKey::from_bytes([4; 32]).unwrap());
+            config.expected_grid = Some(GridKey::from_bytes([5; 32]).unwrap());
+        }
+        assert_ne!(first.identity.worker, second.identity.worker);
+        assert_ne!(first.session, second.session);
+        assert_ne!(first.directory().unwrap(), second.directory().unwrap());
+        let first_status = status(&first);
+        let second_status = status(&second);
+        assert!(!second.accepts(&first_status));
+        assert_ne!(
+            ChatSource::try_from((first_status.binding, first.lease_epoch)).unwrap(),
+            ChatSource::try_from((second_status.binding, second.lease_epoch)).unwrap(),
+            "slot identity cannot retain an earlier login's chat drafts or receipts"
+        );
+        let mut old = serde_json::to_value(&first).unwrap();
+        old.as_object_mut().unwrap().remove("slot");
+        assert!(serde_json::from_value::<WorkerConfig>(old).unwrap().slot.is_none());
+        let mut invalid = serde_json::to_value(&second).unwrap();
+        invalid["slot"] = serde_json::json!(MAX_WORKERS);
+        assert!(serde_json::from_value::<WorkerConfig>(invalid).is_err());
+    }
+
+    #[test]
+    fn broker_reserves_exact_slots_and_failed_bootstrap_preparation_releases_the_open_request() {
+        // A synthetic installation deliberately fails new_config validation
+        // before process creation. No user catalogue or viewer is accessed.
+        let installation = InstallationId::from_bytes(
+            [*uuid::Uuid::new_v4().as_bytes(), *uuid::Uuid::new_v4().as_bytes()]
+                .concat()
+                .try_into()
+                .unwrap(),
+        )
+        .unwrap();
+        let host = HostId::from_bytes(*uuid::Uuid::new_v4().as_bytes()).unwrap();
+        let mut broker = Broker {
+            registry: Registry::open(installation, host).unwrap(),
+            registry_error: None,
+            slot_available: [true; MAX_WORKERS],
+            next_slot_scan: Instant::now(),
+            coordinator: Coordinator::new(installation, host),
+            installation,
+            host,
+            children: Vec::new(),
+            opens: VecDeque::new(),
+            viewport: None,
+            viewport_dirty: false,
+            park_requested: false,
+            active_viewport: None,
+            pending: None,
+            error: None,
+            completed_request: 0,
+            chat_listener: None,
+        };
+        let slot = SlotId::try_from(1).unwrap();
+        broker.intent(HostIntent::Open(None, Some(slot)), 1, 0).unwrap();
+        broker.intent(HostIntent::Open(None, Some(slot)), 2, 0).unwrap();
+        assert_eq!(broker.opens.len(), 1, "repeated clicks cannot launch two writers in one slot");
+        broker.open_next(&[], 0).unwrap();
+        assert!(broker.open_next(&[], 0).is_err(), "foreign installation fails before launch");
+        assert!(broker.opens.is_empty());
+        assert!(broker.children.is_empty());
+        assert_eq!(broker.coordinator.workers().count(), 0);
+        assert_eq!(
+            broker.choose_slot(Some(slot)).unwrap(),
+            slot,
+            "failed preparation does not consume the slot"
+        );
+        let root = super::super::profile::slot_root(&installation.to_string(), slot).unwrap();
+        let lock = super::super::profile::profile_lock(&root).unwrap();
+        assert!(
+            broker.intent(HostIntent::Open(None, Some(slot)), 3, 0).is_err(),
+            "occupied profile is refused before parking/spawn"
+        );
+        assert!(broker.opens.is_empty());
+        drop(lock);
+        for _ in 0..MAX_WORKERS {
+            broker.intent(HostIntent::Open(None, None), 4, 0).unwrap();
+        }
+        assert_eq!(broker.opens.len(), MAX_WORKERS);
+        assert!(broker.intent(HostIntent::Open(None, None), 5, 0).is_err());
     }
 
     #[test]
@@ -1455,13 +1641,37 @@ mod tests {
             text: ChatText::new("synthetic literal").unwrap(),
         };
         let mut error = None;
-        request_result(&mut error, intent.controls_presentation(), Err(HostError::Unavailable.into()));
+        request_result(&mut error, intent.controls_presentation(), None, Err(HostError::Unavailable.into()));
         assert!(error.is_none());
         error = Some("existing control failure".into());
-        request_result(&mut error, intent.controls_presentation(), Ok(()));
+        request_result(&mut error, intent.controls_presentation(), None, Ok(()));
         assert_eq!(error.as_deref(), Some("existing control failure"));
-        request_result(&mut error, HostIntent::Park.controls_presentation(), Ok(()));
+        request_result(&mut error, HostIntent::Park.controls_presentation(), None, Ok(()));
         assert!(error.is_none());
+    }
+
+    #[test]
+    fn rename_success_and_failure_report_metadata_without_changing_control_error() {
+        let intent = HostIntent::RenameSlot(SlotId::try_from(0).unwrap(), SlotLabel::new("Synthetic label").unwrap());
+        assert!(!intent.controls_presentation());
+        let mut control_error = Some("retained presentation failure".into());
+        let mut metadata_error = Some("previous label failure".into());
+        request_result(
+            &mut control_error,
+            intent.controls_presentation(),
+            Some(&mut metadata_error),
+            Ok(()),
+        );
+        assert_eq!(control_error.as_deref(), Some("retained presentation failure"));
+        assert!(metadata_error.is_none());
+        request_result(
+            &mut control_error,
+            intent.controls_presentation(),
+            Some(&mut metadata_error),
+            Err(anyhow::anyhow!("synthetic label persistence failure")),
+        );
+        assert_eq!(control_error.as_deref(), Some("retained presentation failure"));
+        assert_eq!(metadata_error.as_deref(), Some("synthetic label persistence failure"));
     }
 
     #[test]
@@ -1656,9 +1866,9 @@ mod tests {
         let (sender, receiver) = bounded(1);
         let mut requests = RequestSender { sender, next: 1 };
         assert_eq!(requests.send(HostIntent::Park), Ok(1));
-        assert_eq!(requests.send(HostIntent::Open(None)), Err(HostError::Busy));
+        assert_eq!(requests.send(HostIntent::Open(None, None)), Err(HostError::Busy));
         assert_eq!(receiver.try_recv().expect("first intent").ticket, 1);
-        assert_eq!(requests.send(HostIntent::Open(None)), Ok(2));
+        assert_eq!(requests.send(HostIntent::Open(None, None)), Ok(2));
         assert_eq!(receiver.try_recv().expect("next intent").ticket, 2);
         drop(receiver);
         assert_eq!(requests.send(HostIntent::Park), Err(HostError::Stopped));
