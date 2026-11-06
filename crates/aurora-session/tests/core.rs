@@ -599,6 +599,70 @@ fn recreation_invalidates_prepared_grant_and_viewport_cannot_change_during_promo
 }
 
 #[test]
+fn parking_requires_exact_quiescence_before_authorizing_a_new_login() {
+    let mut alpha = Peer::new(3);
+    let mut host = coordinator(&mut [&mut alpha]);
+    assert!(host.park_active(0).unwrap().is_empty());
+    initial_activate(&mut host, &mut alpha);
+    let revoke = message(host.park_active(0).unwrap());
+    assert_eq!(host.active(), Some(worker_id(3)));
+    assert!(host.busy());
+    assert_eq!(host.park_active(0), Err(Error::Busy));
+    assert!(alpha.accept(&revoke, 0).effects.release_input);
+    assert!(alpha.guard.quiesced(revoke.sequence, progress(12, 11)).unwrap().is_none());
+    let mut premature = event(
+        alpha.guard.binding(),
+        9000,
+        revoke.sequence,
+        Event::Quiesced {
+            activation: alpha.guard.activation(),
+            progress: progress(12, 11),
+        },
+    );
+    assert_eq!(host.observe(&premature, 0), Err(Error::Stale));
+    premature.message = Message::Event(Event::Quiesced {
+        activation: alpha.guard.activation() + 1,
+        progress: progress(12, 12),
+    });
+    assert_eq!(host.observe(&premature, 0), Err(Error::Stale));
+    let idle = alpha.idle(&revoke, 12);
+    assert_eq!(
+        host.observe(&idle, 0).unwrap(),
+        vec![Effect::Notice(HostNotice::Parked(worker_id(3)))]
+    );
+    assert_eq!(host.active(), None);
+    assert!(!host.busy());
+    assert!(!alpha.guard.input_owned());
+    assert!(host.park_active(0).unwrap().is_empty());
+}
+
+#[test]
+fn parking_failure_never_emits_parked_and_standby_detachment_does_not_promote_anyone() {
+    let (mut alpha, mut beta) = (Peer::new(3), Peer::new(4));
+    let mut host = coordinator(&mut [&mut alpha, &mut beta]);
+    initial_activate(&mut host, &mut alpha);
+    let detach = message(host.detach(worker_id(4)).unwrap());
+    assert_eq!(detach.binding.worker.worker, worker_id(4));
+    assert!(matches!(detach.message, Message::Command(Command::Detach)));
+    assert_eq!(host.active(), Some(worker_id(3)));
+    assert!(host.detach(worker_id(4)).unwrap().is_empty());
+    let _revoke = host.park_active(0).unwrap();
+    let timeout = host.tick(12_000);
+    assert!(timeout.contains(&Effect::Notice(HostNotice::Failed)));
+    assert!(!timeout.iter().any(|effect| matches!(effect, Effect::Notice(HostNotice::Parked(_)))));
+    assert_eq!(host.active(), None);
+    assert!(!host.busy());
+    assert!(host.workers().all(|entry| !entry.live));
+
+    let mut alpha = Peer::new(3);
+    let mut host = coordinator(&mut [&mut alpha]);
+    initial_activate(&mut host, &mut alpha);
+    let detached = host.detach(worker_id(3)).unwrap();
+    assert!(detached.contains(&Effect::Notice(HostNotice::Detached)));
+    assert_eq!(host.active(), None);
+}
+
+#[test]
 fn preview_admission_reserves_pending_rates_and_never_renders_a_promoted_or_stale_source() {
     let demand = PreviewDemand {
         requested: Some(PreviewRate::Five),

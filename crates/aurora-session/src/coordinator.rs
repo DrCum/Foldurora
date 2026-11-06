@@ -18,6 +18,7 @@ pub struct RosterEntry {
 pub enum HostNotice {
     Switched(WorkerId),
     RolledBack(WorkerId),
+    Parked(WorkerId),
     Blocked(WorkerId),
     Expired(WorkerId),
     Detached,
@@ -52,6 +53,7 @@ struct Active {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Stage {
+    ParkOld,
     RevokeOld,
     PrepareTarget,
     GrantTarget,
@@ -74,7 +76,7 @@ struct Pending {
 impl Pending {
     fn receiver(self) -> Binding {
         match self.stage {
-            Stage::RevokeOld | Stage::PrepareOld | Stage::GrantOld => self.old.map_or(self.target, |old| old.binding),
+            Stage::ParkOld | Stage::RevokeOld | Stage::PrepareOld | Stage::GrantOld => self.old.map_or(self.target, |old| old.binding),
             _ => self.target,
         }
     }
@@ -253,13 +255,55 @@ impl Coordinator {
         Ok(vec![Effect::Send(message)])
     }
 
+    /// Park before launching another login/renderer. Only a fresh GPU-idle
+    /// acknowledgment emits Parked; no timeout or refusal authorizes a launch.
+    pub fn park_active(&mut self, now_ms: u64) -> Result<Vec<Effect>, Error> {
+        if self.pending.is_some() {
+            return Err(Error::Busy);
+        }
+        self.now = self.now.max(now_ms);
+        let Some(old) = self.active else { return Ok(Vec::new()) };
+        let activation = self.next_activation()?;
+        let mut pending = Pending {
+            old: Some(old),
+            target: old.binding,
+            viewport: old.viewport,
+            activation,
+            stage: Stage::ParkOld,
+            sequence: 0,
+            deadline: self.now.saturating_add(STEP_MILLIS),
+            baseline: None,
+        };
+        let message = self.step(&mut pending)?;
+        self.pending = Some(pending);
+        Ok(vec![Effect::Send(message)])
+    }
+
+    /// A standby process can detach independently. Detaching an active or
+    /// transaction participant returns all peers to ordinary windows rather
+    /// than guessing which outstanding grant may already have been applied.
+    pub fn detach(&mut self, worker: WorkerId) -> Result<Vec<Effect>, Error> {
+        let entry = self.entries.get(&worker).ok_or(Error::Unavailable)?;
+        if !entry.roster.live {
+            return Ok(Vec::new());
+        }
+        if self.active() == Some(worker) || self.pending.is_some_and(|p| p.involves(worker)) {
+            return Ok(self.detach_all());
+        }
+        let message = self.send(worker, Command::Detach)?;
+        if let Some(entry) = self.entries.get_mut(&worker) {
+            entry.roster.live = false;
+        }
+        Ok(vec![Effect::Send(message)])
+    }
+
     fn step(&mut self, pending: &mut Pending) -> Result<Envelope, Error> {
         let receiver = pending.receiver();
         if !self.ready(receiver) {
             return Err(Error::Unavailable);
         }
         let command = match pending.stage {
-            Stage::RevokeOld | Stage::RevokeTarget => Command::Revoke {
+            Stage::ParkOld | Stage::RevokeOld | Stage::RevokeTarget => Command::Revoke {
                 activation: pending.activation,
             },
             Stage::PrepareTarget | Stage::PrepareOld => {
@@ -334,7 +378,7 @@ impl Coordinator {
             }
             let valid = match (pending.stage, event) {
                 (_, Event::Rejected { .. }) => true,
-                (Stage::RevokeOld | Stage::RevokeTarget, Event::Quiesced { progress, .. }) => {
+                (Stage::ParkOld | Stage::RevokeOld | Stage::RevokeTarget, Event::Quiesced { progress, .. }) => {
                     progress.quiescent()
                         && entry.roster.status.last_frame.is_none_or(|last| {
                             progress.device_epoch > last.device_epoch
@@ -393,6 +437,11 @@ impl Coordinator {
             return Ok(self.failed_step());
         }
         pending.stage = match (pending.stage, event) {
+            (Stage::ParkOld, Event::Quiesced { progress, .. }) if progress.quiescent() => {
+                self.active = None;
+                self.pending = None;
+                return Ok(vec![Effect::Notice(HostNotice::Parked(worker))]);
+            }
             (Stage::RevokeOld, Event::Quiesced { progress, .. }) if progress.quiescent() => {
                 self.active = None;
                 Stage::PrepareTarget
