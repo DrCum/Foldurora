@@ -153,8 +153,9 @@ impl Frames {
         }
     }
 
-    fn show(&mut self, snapshot: &HostChatSnapshot, events: Vec<Event>) -> Option<SendDraft> {
+    fn show(&mut self, snapshot: &HostChatSnapshot, mut events: Vec<Event>) -> Option<SendDraft> {
         self.frame += 1;
+        events.insert(0, Event::ModifiersChanged(egui::Modifiers::NONE));
         let screen = Rect::from_min_size(Pos2::ZERO, vec2(self.logical[0] as f32, self.logical[1] as f32));
         let mut raw = egui::RawInput {
             screen_rect: Some(screen),
