@@ -14,6 +14,11 @@
     consoles. Preserve help/version and ordinary viewer startup, report failures
     visibly, and verify startup ordering/file failure/creation flags. Native
     Windows taskbar and shared-terminal acceptance remain pending.
+  - 🔧 Windows private-file ownership: assign the current user as owner when
+    creating transport, bootstrap-claim and profile-lock files; the token's
+    default owner can be a group despite a private inherited DACL. Keep strict
+    existing-file rejection and no-follow/exclusive creation. Native validation
+    and workspace checks remain pending.
   - ⬜ Complete and verify one visible taskbar host with safe active-world switching.
   - ⬜ Persistent account-bound worker settings across restarts; current profiles
     are isolated per launch and must not be described as persistent.

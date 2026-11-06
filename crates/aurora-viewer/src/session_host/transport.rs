@@ -327,14 +327,7 @@ fn publish(path: &Path, bytes: &[u8]) -> io::Result<()> {
     super::profile::private_dir(parent)?;
     let temporary = parent.join(format!(".{}.tmp", uuid::Uuid::new_v4()));
     let result = (|| {
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
-        }
-        let mut file = options.open(&temporary)?;
+        let mut file = super::profile::create_private_file(&temporary)?;
         file.write_all(bytes)?;
         drop(file);
         super::profile::validate_private_file(&temporary)?;

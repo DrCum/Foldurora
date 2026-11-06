@@ -4,7 +4,9 @@
 //! belong to this exact session generation and are never copied from another.
 
 use sha2::{Digest, Sha256};
-use std::fs::{File, OpenOptions};
+use std::fs::File;
+#[cfg(any(not(windows), test))]
+use std::fs::OpenOptions;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
@@ -181,25 +183,41 @@ fn profile_lock(root: &Path) -> io::Result<File> {
     {
         return Err(invalid("host profile lock is not a plain file"));
     }
-    let mut options = OpenOptions::new();
-    options.read(true).write(true).create(true).truncate(false);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
-    }
+    let file = open_private_file(&path, false)?;
+    file.try_lock().map_err(io::Error::other)?;
+    Ok(file)
+}
+
+/// The parent must already be private. Ownership is assigned at creation;
+/// Windows' default TokenOwner can be a group even with a user-only inherited ACL.
+pub(super) fn create_private_file(path: &Path) -> io::Result<File> {
+    open_private_file(path, true)
+}
+
+fn open_private_file(path: &Path, create_new: bool) -> io::Result<File> {
     #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        options.custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT);
-    }
-    let file = options.open(path)?;
+    let file = platform::open_private_file(path, create_new)?;
+    #[cfg(not(windows))]
+    let file = {
+        let mut options = OpenOptions::new();
+        options
+            .read(!create_new)
+            .write(true)
+            .create(!create_new)
+            .create_new(create_new)
+            .truncate(false);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+        }
+        options.open(path)?
+    };
     let metadata = file.metadata()?;
     if !metadata.is_file() || platform::is_reparse(&metadata) {
-        return Err(invalid("host profile lock is not a plain file"));
+        return Err(invalid("host file is not a plain file"));
     }
-    platform::validate_file(&root.join("profile.lock"), &metadata)?;
-    file.try_lock().map_err(io::Error::other)?;
+    platform::validate_file(path, &metadata)?;
     Ok(file)
 }
 
@@ -251,10 +269,14 @@ mod platform {
     use std::mem::size_of;
     use std::os::windows::ffi::OsStrExt;
     use std::os::windows::fs::MetadataExt;
+    use std::os::windows::io::FromRawHandle;
     use std::ptr::null_mut;
-    use windows_sys::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, HANDLE};
+    use windows_sys::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::Security::*;
-    use windows_sys::Win32::Storage::FileSystem::{CreateDirectoryW, FILE_ALL_ACCESS, FILE_ATTRIBUTE_REPARSE_POINT};
+    use windows_sys::Win32::Storage::FileSystem::{
+        CREATE_NEW, CreateDirectoryW, CreateFileW, FILE_ALL_ACCESS, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT,
+        FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_ALWAYS,
+    };
     use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
     // SECURITY_DESCRIPTOR_REVISION / ACCESS_ALLOWED_ACE_TYPE from winnt.h.
@@ -283,24 +305,32 @@ mod platform {
         Ok(vec![0; (bytes as usize).div_ceil(size_of::<usize>())])
     }
 
-    fn current_user() -> io::Result<Vec<usize>> {
+    fn token_information(kind: TOKEN_INFORMATION_CLASS) -> io::Result<Vec<usize>> {
         let mut handle = null_mut();
         // SAFETY: output is valid and TOKEN_QUERY only reads this process's identity.
         check(unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut handle) })?;
         let token = Token(handle);
         let mut bytes = 0;
         // SAFETY: a null buffer with zero size queries the required byte length.
-        unsafe { GetTokenInformation(token.0, TokenUser, null_mut(), 0, &mut bytes) };
+        unsafe { GetTokenInformation(token.0, kind, null_mut(), 0, &mut bytes) };
         let mut data = storage(bytes)?;
         // SAFETY: aligned data has at least the queried capacity, and bytes is writable.
-        check(unsafe { GetTokenInformation(token.0, TokenUser, data.as_mut_ptr().cast(), bytes, &mut bytes) })?;
+        check(unsafe { GetTokenInformation(token.0, kind, data.as_mut_ptr().cast(), bytes, &mut bytes) })?;
         Ok(data)
     }
 
-    pub(super) fn private_directory(path: &Path) -> io::Result<()> {
+    fn current_user() -> io::Result<Vec<usize>> {
+        token_information(TokenUser)
+    }
+
+    fn with_private_security<T>(
+        path: &Path,
+        directory: bool,
+        create: impl FnOnce(*const u16, &SECURITY_ATTRIBUTES, PSID) -> io::Result<T>,
+    ) -> io::Result<T> {
         let name: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
         if name[..name.len() - 1].contains(&0) {
-            return Err(invalid("host directory contains a nul"));
+            return Err(invalid("host path contains a nul"));
         }
         let mut user = current_user()?;
         // SAFETY: successful TokenUser query initialized an aligned TOKEN_USER in user.
@@ -313,13 +343,13 @@ mod platform {
         let mut descriptor = SECURITY_DESCRIPTOR::default();
         let sd = (&mut descriptor as *mut SECURITY_DESCRIPTOR).cast::<c_void>();
         // SAFETY: all buffers are aligned, live, writable and sized for these APIs;
-        // the only allow ACE names this process's user, inherited by files/children.
+        // the only allow ACE names this process's user; directories pass it on.
         unsafe {
             check(InitializeAcl(acl, acl_size, ACL_REVISION))?;
             check(AddAccessAllowedAceEx(
                 acl,
                 ACL_REVISION,
-                OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE,
+                if directory { OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE } else { 0 },
                 FILE_ALL_ACCESS,
                 sid,
             ))?;
@@ -333,15 +363,62 @@ mod platform {
             lpSecurityDescriptor: sd,
             bInheritHandle: 0,
         };
-        // SAFETY: name is nul-terminated and the descriptor/ACL/SID outlive the call.
-        if unsafe { CreateDirectoryW(name.as_ptr(), &attributes) } == 0 {
-            let error = io::Error::last_os_error();
-            if error.raw_os_error() != Some(ERROR_ALREADY_EXISTS as i32) {
-                return Err(error);
+        create(name.as_ptr(), &attributes, sid)
+    }
+
+    pub(super) fn private_directory(path: &Path) -> io::Result<()> {
+        with_private_security(path, true, |name, attributes, sid| {
+            // SAFETY: the nul-terminated name and descriptor/ACL/SID outlive the call.
+            if unsafe { CreateDirectoryW(name, attributes) } == 0 {
+                let error = io::Error::last_os_error();
+                if error.raw_os_error() != Some(ERROR_ALREADY_EXISTS as i32) {
+                    return Err(error);
+                }
             }
-        }
-        plain_directory(path)?;
-        verify_security(name.as_ptr(), sid, true)
+            plain_directory(path)?;
+            verify_security(name, sid, true)
+        })
+    }
+
+    pub(super) fn open_private_file(path: &Path, create_new: bool) -> io::Result<File> {
+        with_private_security(path, false, |name, attributes, _| {
+            // SECURITY_ATTRIBUTES gives NEW files the TokenUser owner, independent
+            // of TokenOwner. OPEN_ALWAYS ignores it for an existing lock; the
+            // caller must still reject that file's existing owner/ACL/reparse state.
+            // SAFETY: all inputs outlive the call. Sharing/access match OpenOptions;
+            // no truncation or following an existing reparse point is allowed.
+            let handle = unsafe {
+                CreateFileW(
+                    name,
+                    if create_new { GENERIC_WRITE } else { GENERIC_READ | GENERIC_WRITE },
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    attributes,
+                    if create_new { CREATE_NEW } else { OPEN_ALWAYS },
+                    FILE_FLAG_OPEN_REPARSE_POINT,
+                    null_mut(),
+                )
+            };
+            if handle == INVALID_HANDLE_VALUE {
+                return Err(io::Error::last_os_error());
+            }
+            // SAFETY: CreateFileW returned a valid, uniquely owned, non-inheritable
+            // file handle, transferred once into File so it closes on every exit.
+            Ok(unsafe { File::from_raw_handle(handle) })
+        })
+    }
+
+    #[cfg(test)]
+    pub(super) fn default_owner_is_current_user() -> io::Result<bool> {
+        let user = current_user()?;
+        let owner = token_information(TokenOwner)?;
+        // SAFETY: successful token queries initialized both aligned structures;
+        // the SIDs remain within their respective live backing allocations.
+        Ok(unsafe {
+            EqualSid(
+                (*user.as_ptr().cast::<TOKEN_USER>()).User.Sid,
+                (*owner.as_ptr().cast::<TOKEN_OWNER>()).Owner,
+            ) != 0
+        })
     }
 
     pub(super) fn validate_directory(path: &Path) -> io::Result<()> {
@@ -383,13 +460,14 @@ mod platform {
             check(GetSecurityDescriptorOwner(sd, &mut owner, &mut defaulted))?;
             check(GetSecurityDescriptorDacl(sd, &mut present, &mut acl, &mut defaulted))?;
             check(GetSecurityDescriptorControl(sd, &mut control, &mut revision))?;
-            if owner.is_null()
-                || EqualSid(owner, sid) == 0
-                || present == 0
-                || acl.is_null()
-                || (directory && control & SE_DACL_PROTECTED == 0)
-            {
-                return Err(invalid("host directory owner or protected DACL does not match"));
+            if owner.is_null() || EqualSid(owner, sid) == 0 {
+                return Err(invalid("host path owner does not match this user"));
+            }
+            if present == 0 || acl.is_null() {
+                return Err(invalid("host path private DACL is missing"));
+            }
+            if directory && control & SE_DACL_PROTECTED == 0 {
+                return Err(invalid("host directory DACL is not protected"));
             }
             let mut information = ACL_SIZE_INFORMATION::default();
             check(GetAclInformation(
@@ -461,6 +539,7 @@ mod platform {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
     #[test]
     fn profile_path_binds_installation_session_and_generation() {
@@ -511,24 +590,74 @@ mod tests {
         std::fs::remove_dir_all(root).expect("cleanup");
     }
 
+    #[test]
+    fn private_file_creation_is_exclusive_and_existing_files_are_not_truncated() {
+        let root = temporary_root();
+        let path = root.join("command.json");
+        let mut file = create_private_file(&path).expect("private file creation");
+        file.write_all(b"retained contents").expect("write private file");
+        drop(file);
+        assert_eq!(
+            create_private_file(&path).expect_err("existing file is never replaced").kind(),
+            io::ErrorKind::AlreadyExists
+        );
+        drop(open_private_file(&path, false).expect("open without changing owner or permissions"));
+        assert_eq!(std::fs::read(&path).expect("unchanged contents"), b"retained contents");
+        std::fs::remove_dir_all(root).expect("cleanup");
+    }
+
     #[cfg(windows)]
     #[test]
-    fn created_windows_directories_and_inherited_files_are_private() {
+    fn created_windows_directories_and_explicitly_owned_files_are_private() {
         let root = temporary_root();
         private_descendants(&root, Path::new("channel")).expect("protected private child");
         let path = root.join("channel/command.json");
-        let file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-            .expect("inherited private file");
-        platform::validate_file(&path, &file.metadata().expect("file metadata")).expect("owner-only inherited file");
+        let file = create_private_file(&path).expect("explicitly owned private file");
+        platform::validate_file(&path, &file.metadata().expect("file metadata")).expect("owner-only file");
         drop(file);
         // A directory created by some other path must not be silently adopted
         // or have its access policy rewritten by host startup.
         let inherited = root.join("inherited");
         std::fs::create_dir(&inherited).expect("unprotected inherited directory");
         assert!(platform::private_directory(&inherited).is_err());
+        std::fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn inherited_windows_file_ownership_is_checked_without_repairing_existing_files() {
+        let root = temporary_root();
+        let path = root.join("default-owner.json");
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .expect("default-owner file");
+        file.write_all(b"retained contents").expect("test file contents");
+        let metadata = file.metadata().expect("file metadata");
+        drop(file);
+        // Elevated tokens can default new objects to a group owner. Inheriting
+        // the user-only parent DACL must never bypass the independent owner check.
+        let same_owner = platform::default_owner_is_current_user().expect("default owner identity");
+        let validation = platform::validate_file(&path, &metadata);
+        let reopened = open_private_file(&path, false);
+        if same_owner {
+            validation.expect("same-user inherited file remains valid");
+            drop(reopened.expect("existing private file"));
+        } else {
+            for error in [
+                validation.expect_err("group owner is rejected"),
+                reopened.expect_err("existing owner is not repaired"),
+            ] {
+                assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+                assert_eq!(error.to_string(), "host path owner does not match this user");
+            }
+            assert!(
+                platform::validate_file(&path, &metadata).is_err(),
+                "existing owner remains unchanged"
+            );
+        }
+        assert_eq!(std::fs::read(&path).expect("unchanged file contents"), b"retained contents");
         std::fs::remove_dir_all(root).expect("cleanup");
     }
 

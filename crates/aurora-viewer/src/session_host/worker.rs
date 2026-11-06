@@ -29,14 +29,7 @@ pub(crate) fn initialize_startup(path: Option<&Path>) -> anyhow::Result<()> {
     );
     // A bootstrap belongs to one process launch only. Claim it before even
     // activating its profile, so a replay cannot write into a live profile.
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
-    }
-    let claim = options.open(directory.join("consumed"))?;
+    let claim = super::profile::create_private_file(&directory.join("consumed"))?;
     drop(claim);
     super::profile::activate(
         &config.identity.installation.to_string(),

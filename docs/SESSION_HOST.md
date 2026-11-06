@@ -58,6 +58,10 @@ compatibility is claimed.
   stable per-character settings across restarts. Existing user settings and
   passwords are not copied into those profiles. The shared saved-account
   catalogue is used as metadata; private cache keys avoid the shared OS entry.
+- Windows transport, bootstrap-claim and profile-lock files receive an explicit
+  current-user owner and private DACL at creation. A token's default owner can
+  be a group, even under a private directory. Existing files keep their original
+  security policy and are rejected if their owner or ACL does not match.
 - GPU fence completion proves submitted work completed and presentation was
   issued. It does not prove physical display scanout. Inline rendering and XR
   cannot currently provide this host fence contract.
