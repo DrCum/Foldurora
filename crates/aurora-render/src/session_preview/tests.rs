@@ -150,6 +150,47 @@ fn initialization_needs_new_fresh_admission_without_consuming_frame_sequence() {
 }
 
 #[test]
+fn canceled_slow_preview_initialization_and_late_warm_reply_cannot_restore_render_authority() {
+    let now = Instant::now();
+    let (mut owner, admission) = ready(now);
+    owner.initializing(); // Init is held by the ordered render worker.
+    owner.invalidate(); // Cohort Suspend arrives before the constructor returns.
+    assert_eq!(owner.authorize(&admission, now), Err(Error::NotAdmitted));
+    owner.receive(Reply::Warming);
+    assert!(matches!(owner.next_job(), Some(Job::Release)));
+    // A callback/late warm reply carries no queue or authorization capability.
+    owner.receive(Reply::Warmed);
+    assert!(matches!(owner.next_job(), Some(Job::Release)));
+    assert_eq!(owner.check(&request(admission, 1), now), Err(Error::NotAdmitted));
+    owner.handed();
+    owner.receive(Reply::Released);
+    assert!(owner.next_job().is_none());
+    assert!(owner.ready.is_none());
+    assert_eq!(owner.check(&request(admission, 1), now), Err(Error::NotAdmitted));
+    // Only a separately requested/consumed ordered fence may arm a new epoch.
+    let proof = SessionCompletion {
+        ticket: 99,
+        ..admission.fence
+    };
+    owner.fence_requested(proof.ticket);
+    owner.fence_consumed(proof);
+    assert_eq!(
+        owner.check(
+            &request(
+                Admission {
+                    fence: proof,
+                    epoch: 2,
+                    ..admission
+                },
+                1
+            ),
+            now
+        ),
+        Ok(())
+    );
+}
+
+#[test]
 fn busy_requests_drop_and_only_the_latest_completed_frame_is_kept() {
     let now = Instant::now();
     let (mut owner, a) = ready(now);

@@ -87,6 +87,39 @@ pub(crate) struct CohortReport {
     pub peer: Peer,
     pub challenge: u64,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Suspend {
+    pub source: PreviewSource,
+    pub device_epoch: u64,
+    pub challenge: u64,
+}
+impl Suspend {
+    pub fn validate(self) -> Result<(), Error> {
+        self.source.validate()?;
+        if self.device_epoch == 0 || self.challenge == 0 {
+            return Err(Error::Source);
+        }
+        Ok(())
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Suspended {
+    pub request: Suspend,
+    pub surface_epoch: u64,
+    pub completed_frame: Option<u64>,
+}
+impl Suspended {
+    pub fn validate(self) -> Result<(), Error> {
+        self.request.validate()?;
+        if self.surface_epoch == 0 {
+            return Err(Error::Source);
+        }
+        Ok(())
+    }
+}
 impl CohortReport {
     pub fn validate(self) -> Result<(), Error> {
         self.peer.cohort.validate()?;
@@ -161,12 +194,13 @@ pub(crate) struct Subscription {
     pub visible: bool,
     pub challenge: u64,
     pub budget: Option<BudgetPermit>,
+    pub resume_after: Option<u64>,
 }
 
 impl Subscription {
     pub fn validate(&self) -> Result<(), Error> {
         self.source.validate()?;
-        if self.revision == 0 || self.challenge == 0 {
+        if self.revision == 0 || self.challenge == 0 || self.resume_after == Some(0) {
             return Err(Error::Sequence);
         }
         if let Some(budget) = &self.budget {
@@ -231,6 +265,8 @@ pub(crate) enum Header {
     Probe(Probe),
     Sample(GpuSample),
     Peer(CohortReport),
+    Suspend(Suspend),
+    Suspended(Suspended),
 }
 
 impl Header {
@@ -242,6 +278,8 @@ impl Header {
             Self::Probe(p) => p.source,
             Self::Sample(s) => s.peer.cohort.source,
             Self::Peer(p) => p.peer.cohort.source,
+            Self::Suspend(s) => s.source,
+            Self::Suspended(s) => s.request.source,
         }
     }
     pub fn validate(&self) -> Result<(), Error> {
@@ -253,6 +291,8 @@ impl Header {
             Self::Probe(p) if p.challenge != 0 => Ok(()),
             Self::Sample(s) => s.validate(),
             Self::Peer(p) => p.validate(),
+            Self::Suspend(s) => s.validate(),
+            Self::Suspended(s) => s.validate(),
             _ => Err(Error::Sequence),
         }
     }

@@ -532,6 +532,22 @@ mod tests {
         );
     }
 
+    #[test]
+    fn ordered_fence_cannot_overtake_a_running_preview_initialization_job() {
+        // The real Init and SessionFence use this exact one-job rendezvous.
+        // Holding Init here models a slow constructor without a driver/sleep.
+        let (owner, worker) = handoff::<u32, u32>();
+        assert!(owner.try_submit(1).unwrap().is_some());
+        assert_eq!(worker.next().unwrap().0, 1);
+        assert!(owner.try_submit(2).unwrap().is_none(), "fence cannot queue before Init completes");
+        worker.complete(1);
+        let fence = owner.try_submit(2).unwrap().unwrap();
+        assert_eq!(fence.previous, Some(1));
+        assert_eq!(worker.next().unwrap().0, 2);
+        worker.complete(2);
+        assert_eq!(owner.try_take_ready().unwrap(), Some(2));
+    }
+
     /// Wait for a state the other thread reaches, without assuming how long
     /// the scheduler takes to run it (CI runners and busy PCs can hold a
     /// thread back for tens of milliseconds).
