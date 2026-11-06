@@ -58,7 +58,10 @@ impl HostUi {
                         ui.label(RichText::new(aurora_i18n::tr!("host-manual-login-help")).small().color(p.muted));
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if widgets::action_button(ui, p, "x", aurora_i18n::tr!("host-close"), ActionKind::Flat, vec2(0.0, 30.0)).clicked() {
+                        let close = widgets::action_button(ui, p, "x", aurora_i18n::tr!("host-close"), ActionKind::Flat, vec2(0.0, 30.0));
+                        #[cfg(test)]
+                        ctx.data_mut(|data| data.insert_temp(Id::unique("host_request_close"), close.rect));
+                        if close.clicked() {
                             self.close_prompt = true;
                         }
                     });
@@ -653,6 +656,27 @@ mod tests {
             None,
             "no completed frame means no world cutout"
         );
+    }
+
+    #[test]
+    fn controller_header_close_click_keeps_its_modal_open_across_following_passes() {
+        let snapshot = snapshot();
+        let mut frames = Frames::new();
+        assert_eq!(frames.click(&snapshot, Id::unique("host_request_close"), true), None);
+        assert!(frames.ui.close_prompt, "the opening pointer release must not dismiss the new modal");
+        for _ in 0..4 {
+            assert_eq!(frames.show(&snapshot, Vec::new(), true), None);
+            assert!(
+                frames.ui.close_prompt,
+                "the close confirmation must survive discarded/following UI passes"
+            );
+            assert!(
+                frames
+                    .ctx
+                    .data(|data| data.get_temp::<Rect>(Id::unique("host_confirm_close")))
+                    .is_some()
+            );
+        }
     }
 
     #[test]
