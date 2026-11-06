@@ -1,12 +1,48 @@
 # Foldurora workspace and character preview
 
+## Host movement and dropdown follow-up
+
+Branch `fix/host-move-and-dropdowns` starts from combined Windows source
+`d10473efff52ceaea2d7b22d111319b0efc4f28e`. That earlier source passed its local
+Windows checks (7,791 tests, zero failures, 49 ignored), but human testing found
+an expanding main menu and a controller-move/detach recovery failure. Those
+results do not validate this follow-up; its own check outcomes and exact source
+belong in its build manifest.
+
+Searchable toolbar menus keep their content width, with available vertical
+room for long results. Host movement now suspends old placement and requires
+fresh rendering proof through the normal handoff. Detached windows force a real
+visibility transition, then regain their taskbar entry and request redraw.
+If a modal or unavailable worker prevents refresh, the safe fallback restores
+ordinary windows. Minimizing during an outstanding refresh may also detach;
+this is distinct from ordinary minimize/restore requiring Activate.
+
+Linux validation: 7,825 workspace tests passed and 49 were ignored. The only
+failure was the previously recorded software-Vulkan terrain ramp precision
+check (`0.59764713` versus `0.5984283`); it is outside these changes. All seven
+new menu/host regressions passed. Formatting and workspace/all-target Linux
+Clippy passed (`-D warnings -A dead-code`, retaining the existing platform
+allowance). Demo capture and Windows results must be recorded separately;
+these checks do not establish native recovery.
+
+Native acceptance must cover two demo workers: drag the controller repeatedly
+and back to its original position, switch after the drag, resize, then test
+minimize/restore, explicit detach, normal host Close and host loss separately.
+Recovered windows must be visible, responsive and taskbar-listed, at their real
+client size without stale smaller contents and black margins. Test held-input
+release and exact source-specific chat without replay after these transitions.
+The separate graphics-device-loss report during standalone character switching
+remains unproven; this follow-up is not a claim to fix that driver/device failure.
+
 ## Current combined Windows candidate — 6 November 2026
 
 Branch `build/windows-integration-20261106` combines final host/chat source
 `32b298392c7d40afd2d8cc96d0658041b69be985` and the complete viewport correction
 `c5076565a3777d27c436fe59d9713907533be0e8`. Main and the earlier checkpoint
-branches remain unchanged. This combined candidate is awaiting its own Windows
-checks and native acceptance; earlier packages do not validate the combined tree.
+branches remain unchanged. Its local Windows checks passed (7,791 tests,
+zero failures, 49 ignored), as did build and portable packaging. Human testing
+confirmed toolbar containment and freely placed floaters, and found the menu
+and host bugs addressed by the follow-up above. Native acceptance is incomplete.
 Its exact source, check outcomes and build identity accompany each portable ZIP
 in `build-manifest.json` and the workflow logs.
 
@@ -152,6 +188,12 @@ retain full-workspace anchors and sizes, including wide geometry retained before
 the earlier blanket restriction fitted them to the viewport. An explicit manual
 resize replaces the retained size. The native title bar, system dialogs and
 separately detached native windows remain operating-system windows.
+
+Toolbar dropdowns and their submenus keep their normal content width inside
+the allowed viewport; they do not stretch to fill it. Long menus and filtered
+search results can use the available height and scroll. Check the searchable
+main menu after its first frame, open a submenu by hovering, and repeat after
+changing the viewport and after detaching a hosted worker.
 
 Check these cases in the offline demo first, then in the user's normal session:
 

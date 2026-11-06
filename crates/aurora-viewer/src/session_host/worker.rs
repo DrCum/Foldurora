@@ -471,13 +471,13 @@ impl WorkerBridge {
                 return Ok(());
             }
         }
-        if matches!(self.gate, DisplayGate::Prepared | DisplayGate::Active) || effects.grant_input {
-            if let Some(proof) = self.last_frame {
-                anyhow::ensure!(
-                    renderer.session_boundary()?.surface_epoch == proof.surface_epoch,
-                    "render surface changed after preparation"
-                );
-            }
+        if (matches!(self.gate, DisplayGate::Prepared | DisplayGate::Active) || effects.grant_input)
+            && let Some(proof) = self.last_frame
+        {
+            anyhow::ensure!(
+                renderer.session_boundary()?.surface_epoch == proof.surface_epoch,
+                "render surface changed after preparation"
+            );
         }
         if effects.grant_input {
             self.gate = DisplayGate::Active;

@@ -1,5 +1,16 @@
 # Aurora Viewer architecture
 
+Native host movement closes the controller cutout immediately and requests
+`Coordinator::refresh_viewport`, which earns a new revoke/drain/prepare/grant
+sequence even when a drag ends at its original rectangle. Only same-worker
+geometry refreshes can supersede one another; a different-character handoff,
+park or rollback retains its existing ordering. A worker's `GeometryPending`
+display gate hides the old placement and withholds input, rendering and GPU
+submission while control IO continues. Host-client movement is distinct from
+an unexpected worker-window change or a lost host identity. Restoration forces
+winit's cached visibility through hidden before replacing saved native styles,
+then shows the standalone window and restores its taskbar entry last.
+
 `App::effective_viewport_settings` shares the fitted-worker override between
 world rendering, toolbar placement and cursor capture. A fitted native window
 already occupies the controller's world area, so it uses full-canvas geometry;

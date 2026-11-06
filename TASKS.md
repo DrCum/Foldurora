@@ -1,5 +1,27 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Host title-bar move and standalone recovery (human test report,
+  2026-11-06; no issue): the active worker detached after the controller moved,
+  then remained unresponsive without a taskbar entry after host closure. Treat
+  host geometry changes as suspended placement pending the ordinary revoke,
+  GPU-drain and fresh prepare/grant sequence, including repeated moves back to
+  the same rectangle. Keep other-character and explicit park transitions intact.
+  Restore the native visibility cache before showing a detached window, then
+  restore taskbar presence and request redraw. Busy/modal fallback returns
+  workers to ordinary windows; minimizing mid-refresh may conservatively detach.
+  Source review, formatting, Linux Clippy and all four new host regressions
+  passed; Windows native acceptance is pending. The
+  separate standalone-switch device-loss report has no established root cause.
+
+- 🔧 Compact viewport toolbar menus (human test report, 2026-11-06; no issue):
+  correct the combined candidate's searchable dropdown expanding to the entire
+  allowed viewport after its sizing pass. Preserve measured menu width while
+  keeping the full allowed height for long submenu/search results. Exercise
+  actual search fields, rows, pointer-opened submenus, offset/fractional-DPI
+  canvases, reopening and fitted-worker/standalone transitions. Source diagnosis
+  reproduced the width growth; formatting, Linux Clippy and all three new menu
+  regressions passed. Demo capture and Windows native acceptance are pending.
+
 - 🔧 Combined Windows candidate (user request, 2026-11-06; no issue): preserve
   final host/chat `32b29839`, merge viewport correction `c5076565`, and import
   the sixteen previously selected upstream commits plus intact photo-roll
@@ -7,8 +29,9 @@
   preview work separate. One effective viewport policy now keeps fitted workers'
   world, toolbars and mouselook cursor on the full fitted canvas and restores
   saved standalone margins after detach. Two regressions cover that transition.
-  Source review and formatting passed; combined Windows compilation, strict
-  checks, full tests, packaging and native acceptance remain pending. See the
+  Combined Windows compilation, strict checks, all 7,791 tests and packaging
+  passed (49 ignored). Human testing found the follow-up bugs above; native
+  acceptance remains incomplete. See the
   current candidate section of [the test guide](docs/FOLDURORA.md).
 
 - 🔧 Foldurora session host (user request, 2026-11-06; no issue): opt-in CPU
