@@ -218,13 +218,14 @@ impl SnapshotUi {
     ) -> Vec<Action> {
         let mut out = Vec::new();
         self.looks.hover = None;
-        let screen = ctx.content_rect();
+        let screen = super::layout::toolbar_rect(ctx);
         let mut full = false;
         let full_tip = aurora_i18n::tr!("photo-full-frame");
         if classic {
             // a window of its own, placed and moved like Firestorm's floater
             let size = Vec2::new(WIDTH + CLASSIC_PREVIEW + 8.0, CLASSIC_PREVIEW + 160.0);
             Floater::new(CLASSIC_WINDOW, aurora_i18n::tr!("photo-title"), screen.center() - size * 0.5, size)
+                .viewport_control()
                 .auto_height()
                 .action("maximize", full_tip, &mut full)
                 .show(ctx, p, open, |ui| self.body_classic(ui, p, s, fov, default_fov, view, &mut out));
@@ -235,6 +236,7 @@ impl SnapshotUi {
                 Pos2::new(screen.right() - WIDTH - 24.0, screen.top() + 64.0),
                 Vec2::new(WIDTH, 640.0),
             )
+            .viewport_control()
             .fixed()
             .auto_height()
             .action("maximize", full_tip, &mut full)
@@ -273,7 +275,7 @@ impl SnapshotUi {
         let before = s.clone();
         // the settings scroll between the preview and the shutter, which
         // stay in sight on a short screen
-        let room = (ui.ctx().content_rect().height() - 470.0).max(150.0);
+        let room = (super::layout::toolbar_rect(ui.ctx()).height() - 470.0).max(150.0);
         egui::ScrollArea::vertical()
             .id_salt("photo_settings")
             .max_height(room)
@@ -868,6 +870,7 @@ impl SnapshotUi {
         let mut out = Vec::new();
         let screen = ctx.content_rect();
         let frame = fit(screen, photo.0 as f32 / photo.1.max(1) as f32);
+        let controls = super::layout::toolbar_rect(ctx);
         let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::unique("photo_full_frame")));
         let mask = p.navy.gamma_multiply(0.62);
         for r in outside(screen, frame) {
@@ -877,7 +880,7 @@ impl SnapshotUi {
         guide_lines(&painter, frame, s.guide, p.ink.gamma_multiply(0.55));
 
         let tag = |id: &str, pos: Pos2, align: egui::Align2, icon: &str, text: String| {
-            egui::Area::new(egui::Id::unique(id))
+            widgets::viewport_area(ctx, egui::Id::unique(id))
                 .order(egui::Order::Foreground)
                 .pivot(align)
                 .fixed_pos(pos)
@@ -894,27 +897,30 @@ impl SnapshotUi {
         let label = s.aspect.short().unwrap_or(aurora_i18n::tr!("photo-aspect-window"));
         tag(
             "photo_full_size",
-            screen.left_top() + Vec2::new(12.0, 12.0),
+            controls.left_top() + Vec2::new(12.0, 12.0),
             egui::Align2::LEFT_TOP,
             "aspect-ratio-filled",
             format!("{label} · {} × {}", photo.0, photo.1),
         );
         tag(
             "photo_full_exit",
-            screen.right_top() + Vec2::new(-12.0, 12.0),
+            controls.right_top() + Vec2::new(-12.0, 12.0),
             egui::Align2::RIGHT_TOP,
             "x",
             aurora_i18n::tr!("photo-exit-full-frame").to_string(),
         );
 
         let before = s.clone();
-        egui::Area::new(egui::Id::unique("photo_full_strip"))
+        widgets::viewport_area(ctx, egui::Id::unique("photo_full_strip"))
             .order(egui::Order::Foreground)
             .pivot(egui::Align2::CENTER_BOTTOM)
-            .fixed_pos(Pos2::new(screen.center().x, screen.bottom() - 14.0))
+            .fixed_pos(Pos2::new(controls.center().x, controls.bottom() - 14.0))
+            .constrain_to(controls)
             .show(ctx, |ui| {
+                ui.set_max_width((controls.width() - 24.0).max(1.0));
+                ui.set_clip_rect(ui.clip_rect().intersect(controls));
                 widgets::overlay(ui, p, egui::Margin::symmetric(10, 8), |ui| {
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         ui.spacing_mut().item_spacing.x = 4.0;
                         for a in [
                             Aspect::Window,

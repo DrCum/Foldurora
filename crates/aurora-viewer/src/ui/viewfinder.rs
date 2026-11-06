@@ -515,6 +515,7 @@ impl Viewfinder {
         let before = s.clone();
         let light_before = panel.light;
         let screen = ctx.content_rect();
+        let controls = crate::ui::layout::toolbar_rect(ctx);
         let display = s.viewfinder.display;
         let full = display == Display::Full;
         let shows = display != Display::Hidden;
@@ -537,20 +538,20 @@ impl Viewfinder {
         }
 
         // the on-screen controls (lens ring, AF choices, camera pad)
-        let ctl = shows && !self.menu && self.controls_shown(ctx, s, screen, f.now);
+        let ctl = shows && !self.menu && self.controls_shown(ctx, s, controls, f.now);
         let pad = ctl && s.viewfinder.pad;
         if full {
-            self.top_bar(ctx, p, &back, screen, s, panel, f, &mut out);
+            self.top_bar(ctx, p, &back, controls, s, panel, f, &mut out);
         }
         self.af_point(ctx, p, &front, s, f);
         // (the last photo's card takes its place while it shows)
         let card = f.now < self.review_until && f.review.is_some();
         if shows && !self.hinted && !self.menu && !self.help && !card {
-            hint(ctx, p, screen, if ctl { 156.0 } else { 128.0 }, ctl && !pad);
+            hint(ctx, p, controls, if ctl { 156.0 } else { 128.0 }, ctl && !pad);
         }
         if let Some((text, error, until)) = &self.message {
             if f.now < *until {
-                message(ctx, p, screen, text, *error);
+                message(ctx, p, controls, text, *error);
             } else {
                 self.message = None;
             }
@@ -558,14 +559,14 @@ impl Viewfinder {
         let manual = s.dof.focus == PhotoFocus::Manual;
         let active = matches!(self.af.phase, Phase::Hunt | Phase::Fail) || (self.af.recent(f.now) && shows);
         if ctl {
-            self.ring_deck(ctx, p, screen, s, panel, fov, f, &mut out);
+            self.ring_deck(ctx, p, controls, s, panel, fov, f, &mut out);
         } else if !self.menu && (manual || active || full) {
-            self.scale(ctx, p, &front, screen, s, f);
+            self.scale(ctx, p, &front, controls, s, f);
         }
         if shows {
-            self.bottom_bar(ctx, p, &back, screen, s, panel, fov, f, ctl, &mut out);
-            self.dock(ctx, p, screen, s, panel, f, &mut out);
-        } else if ghost_disp(ctx, p, screen) {
+            self.bottom_bar(ctx, p, &back, controls, s, panel, fov, f, ctl, &mut out);
+            self.dock(ctx, p, controls, s, panel, f, &mut out);
+        } else if ghost_disp(ctx, p, controls) {
             s.viewfinder.display = display.next();
         }
         // just hidden: say how it comes back, a little longer than a
@@ -575,7 +576,7 @@ impl Viewfinder {
         }
         self.shown_display = Some(display);
         if pad {
-            self.camera_pad(ctx, p, screen, f, &mut out);
+            self.camera_pad(ctx, p, controls, f, &mut out);
         } else {
             self.pad = Pad::default();
         }
@@ -592,10 +593,10 @@ impl Viewfinder {
         // over the camera pad when it shows); the last photo's card centred
         // over the lens and aperture controls
         if shows && !self.menu {
-            self.reel_tray(ctx, p, screen, s, f, if pad { 300.0 } else { 132.0 }, &mut out);
+            self.reel_tray(ctx, p, controls, s, f, if pad { 300.0 } else { 132.0 }, &mut out);
         }
         if f.now < self.review_until && !self.menu {
-            let (rect, clicked) = review(ctx, p, screen, f, if ctl { 156.0 } else { 128.0 });
+            let (rect, clicked) = review(ctx, p, controls, f, if ctl { 156.0 } else { 128.0 });
             self.card_rect = rect;
             // clicked: its photo in the quick view at once, no flight (the
             // tray shows it behind)
@@ -613,29 +614,29 @@ impl Viewfinder {
             self.fly = Some((f.now, from));
         }
         self.fly_to_tray(ctx, p, f);
-        self.countdown(ctx, p, screen, f.now);
+        self.countdown(ctx, p, controls, f.now);
         if self.menu {
-            self.quick_menu(ctx, p, screen, s, panel, f, &mut out);
+            self.quick_menu(ctx, p, controls, s, panel, f, &mut out);
         }
         if self.help {
-            self.help_panel(ctx, p, screen, f);
+            self.help_panel(ctx, p, controls, f);
         }
         if self.drawer {
-            self.drawer(ctx, p, screen, s, panel, fov, default_fov, view, &mut out);
+            self.drawer(ctx, p, controls, s, panel, fov, default_fov, view, &mut out);
         }
         if self.looks {
-            self.looks_panel(ctx, p, screen, s, panel, &mut out);
+            self.looks_panel(ctx, p, controls, s, panel, &mut out);
         }
         if self.light {
-            self.light_panel(ctx, p, screen, panel, view, &mut out);
+            self.light_panel(ctx, p, controls, panel, view, &mut out);
         }
         if self.isolate {
             self.isolate_picking(ctx, p, frame, f, &mut out);
-            self.isolate_panel(ctx, p, screen, f, &mut out);
+            self.isolate_panel(ctx, p, controls, f, &mut out);
         }
         if self.presets {
             self.preset_picking(ctx, p, frame, f, &mut out);
-            self.presets_panel(ctx, p, screen, f, &mut out);
+            self.presets_panel(ctx, p, controls, f, &mut out);
         } else {
             self.preset_form.picking = false;
         }
@@ -691,7 +692,7 @@ impl Viewfinder {
             Color32::TRANSPARENT,
         );
         // (the AF mode and area are the bottom bar's, once)
-        egui::Area::new(Id::unique("vf_top_left"))
+        crate::ui::widgets::viewport_area(ctx, Id::unique("vf_top_left"))
             .order(Order::Foreground)
             .fade_in(false)
             .fixed_pos(screen.left_top() + Vec2::new(GAP, 12.0))
@@ -727,7 +728,7 @@ impl Viewfinder {
             });
 
         // what the photo will be: each a switch, a click for the next value
-        egui::Area::new(Id::unique("vf_top_right"))
+        crate::ui::widgets::viewport_area(ctx, Id::unique("vf_top_right"))
             .order(Order::Foreground)
             .fade_in(false)
             .pivot(Align2::RIGHT_TOP)
@@ -835,7 +836,7 @@ impl Viewfinder {
             *y += 24.0;
         };
         // (the time of day is a switch too)
-        egui::Area::new(Id::unique("vf_time"))
+        crate::ui::widgets::viewport_area(ctx, Id::unique("vf_time"))
             .order(Order::Foreground)
             .fade_in(false)
             .pivot(Align2::LEFT_CENTER)
@@ -931,7 +932,7 @@ impl Viewfinder {
             shadow_text(back, p, Pos2::new(x, y), Align2::LEFT_CENTER, &keys, regular(12.0), p.muted);
             // put away from where it is read (the quick menu brings it back)
             y += 24.0;
-            let hide = egui::Area::new(Id::unique("vf_hints_hide"))
+            let hide = crate::ui::widgets::viewport_area(ctx, Id::unique("vf_hints_hide"))
                 .order(Order::Foreground)
                 .fade_in(false)
                 .pivot(Align2::LEFT_CENTER)
@@ -1315,7 +1316,7 @@ impl Viewfinder {
             );
         } else {
             // the depth of field off: a click turns it on
-            egui::Area::new(Id::unique("vf_all_sharp"))
+            crate::ui::widgets::viewport_area(ctx, Id::unique("vf_all_sharp"))
                 .order(Order::Foreground)
                 .fade_in(false)
                 .pivot(Align2::RIGHT_TOP)
@@ -1329,7 +1330,7 @@ impl Viewfinder {
         }
 
         // the dials
-        egui::Area::new(Id::unique("vf_dials"))
+        crate::ui::widgets::viewport_area(ctx, Id::unique("vf_dials"))
             .order(Order::Foreground)
             .fade_in(false)
             .pivot(Align2::CENTER_BOTTOM)
@@ -1522,7 +1523,7 @@ impl Viewfinder {
         f: &Frame,
         out: &mut Vec<Out>,
     ) {
-        egui::Area::new(Id::unique("vf_dock"))
+        crate::ui::widgets::viewport_area(ctx, Id::unique("vf_dock"))
             .order(Order::Foreground)
             .fade_in(false)
             .pivot(Align2::RIGHT_CENTER)
@@ -1699,7 +1700,7 @@ impl Viewfinder {
             ctx.request_repaint();
         }
         let mut asked = Vec::new();
-        let area = egui::Area::new(id)
+        let area = crate::ui::widgets::viewport_area(ctx, id)
             .order(Order::Foreground)
             .fade_in(false)
             .movable(true)
@@ -1796,7 +1797,7 @@ impl Viewfinder {
     ) {
         let cols = 9.0;
         let width = (screen.width() - 2.0 * GAP - 120.0).min(1300.0);
-        egui::Area::new(Id::unique("vf_menu"))
+        crate::ui::widgets::viewport_area(ctx, Id::unique("vf_menu"))
             .order(Order::Foreground)
             .fade_in(false)
             .pivot(Align2::CENTER_BOTTOM)
@@ -1842,7 +1843,7 @@ impl Viewfinder {
 
     /// The keys and the mouse, in a panel in the middle.
     fn help_panel(&mut self, ctx: &egui::Context, p: &Palette, screen: Rect, f: &Frame) {
-        egui::Area::new(Id::unique("vf_help"))
+        crate::ui::widgets::viewport_area(ctx, Id::unique("vf_help"))
             .order(Order::Foreground)
             .fade_in(false)
             .pivot(Align2::CENTER_CENTER)
@@ -1996,7 +1997,7 @@ impl Viewfinder {
         view: &View,
         out: &mut Vec<Out>,
     ) {
-        egui::Area::new(Id::unique("vf_drawer"))
+        crate::ui::widgets::viewport_area(ctx, Id::unique("vf_drawer"))
             .order(Order::Foreground)
             .fade_in(false)
             .pivot(Align2::RIGHT_TOP)
@@ -2050,7 +2051,7 @@ fn brackets(painter: &egui::Painter, c: Pos2, scale: f32, stroke: Stroke, shadow
 
 /// The first hint: how to focus and take the photo.
 fn hint(ctx: &egui::Context, p: &Palette, screen: Rect, bottom: f32, pad_hint: bool) {
-    egui::Area::new(Id::unique("vf_hint"))
+    crate::ui::widgets::viewport_area(ctx, Id::unique("vf_hint"))
         .order(Order::Foreground)
         .fade_in(false)
         .interactable(false)
@@ -2081,7 +2082,7 @@ fn hint(ctx: &egui::Context, p: &Palette, screen: Rect, bottom: f32, pad_hint: b
 /// area keeps the size of the last message, and a longer one wrapped into
 /// it would stand as a column of syllables.
 fn message(ctx: &egui::Context, p: &Palette, screen: Rect, text: &str, error: bool) {
-    egui::Area::new(Id::unique("vf_message"))
+    crate::ui::widgets::viewport_area(ctx, Id::unique("vf_message"))
         .order(Order::Foreground)
         .fade_in(false)
         .interactable(false)
@@ -2104,7 +2105,7 @@ fn ghost_disp(ctx: &egui::Context, p: &Palette, screen: Rect) -> bool {
         .zip(ctx.pointer_hover_pos())
         .is_some_and(|(r, pos)| r.contains(pos));
     let mut clicked = false;
-    egui::Area::new(id)
+    crate::ui::widgets::viewport_area(ctx, id)
         .order(Order::Foreground)
         .fade_in(false)
         .pivot(Align2::RIGHT_BOTTOM)
@@ -2137,7 +2138,7 @@ fn review(ctx: &egui::Context, p: &Palette, screen: Rect, f: &Frame, bottom: f32
     };
     let mut picture = None;
     let mut clicked = false;
-    egui::Area::new(Id::unique("vf_review"))
+    crate::ui::widgets::viewport_area(ctx, Id::unique("vf_review"))
         .order(Order::Foreground)
         .fade_in(false)
         .pivot(Align2::CENTER_BOTTOM)

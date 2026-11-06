@@ -39,7 +39,7 @@ impl Viewfinder {
     /// The panel, left of the dock.
     pub(super) fn isolate_panel(&mut self, ctx: &egui::Context, p: &Palette, screen: Rect, f: &Frame, out: &mut Vec<Out>) {
         let iso = f.isolation;
-        egui::Area::new(Id::unique("vf_isolate"))
+        crate::ui::widgets::viewport_area(ctx, Id::unique("vf_isolate"))
             .order(Order::Foreground)
             .fade_in(false)
             .pivot(Align2::RIGHT_CENTER)
@@ -162,7 +162,7 @@ impl Viewfinder {
         if !f.isolation.picking {
             return;
         }
-        egui::Area::new(Id::unique("vf_isolate_pick"))
+        crate::ui::widgets::viewport_area(ctx, Id::unique("vf_isolate_pick"))
             .order(Order::Middle)
             .fade_in(false)
             .fixed_pos(frame.min)

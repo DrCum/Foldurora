@@ -223,6 +223,7 @@ fn title_in_reach(
     area: egui::Rect,
     asked: Option<egui::Pos2>,
     sized: Option<Vec2>,
+    bounds: Option<egui::Rect>,
 ) -> Option<egui::Pos2> {
     use super::layout::{TITLE_BAR_H, TITLE_GRIP, clear_of_islands, edges_for, islands, keep_title_in};
     let state = egui::AreaState::load(ctx, id).filter(|s| s.size.is_some());
@@ -231,7 +232,7 @@ fn title_in_reach(
         .or_else(|| state.as_ref().and_then(|s| s.size))
         .unwrap_or(egui::vec2(TITLE_GRIP, TITLE_BAR_H));
     let pos = asked.or_else(|| state.as_ref().map(|s| s.left_top_pos()))?;
-    let edges = edges_for(ctx, id);
+    let edges = bounds.map_or_else(|| edges_for(ctx, id), |_| super::layout::Edges::default());
     let mut kept = keep_title_in(area, pos, size, edges);
     if !ctx.input(|i| i.pointer.any_down()) {
         kept = clear_of_islands(area, kept, size, edges, &islands(ctx));
@@ -245,6 +246,11 @@ struct CanvasSize {
     retained: bool,
 }
 
+fn fit_rect(room: egui::Rect, rect: egui::Rect) -> egui::Rect {
+    let size = rect.size().max(Vec2::splat(1.0)).min(room.size());
+    egui::Rect::from_min_size(fit_in(room, rect.min, size), size)
+}
+
 fn saved_canvas_size(ctx: &egui::Context, id: egui::Id) -> Option<Vec2> {
     ctx.data_mut(|data| data.get_persisted::<Vec2>(id.with("viewport_unrestricted_size")))
         .filter(|size| size.is_finite() && size.x > 0.0 && size.y > 0.0)
@@ -252,7 +258,15 @@ fn saved_canvas_size(ctx: &egui::Context, id: egui::Id) -> Option<Vec2> {
 
 /// A viewport is a temporary layout limit, not a request to forget an
 /// expanded floater or map. A manual resize replaces that retained size.
-fn canvas_size(ctx: &egui::Context, id: egui::Id, expanded: Vec2, room: egui::Rect, resizing: bool, expanding: bool) -> CanvasSize {
+fn canvas_size(
+    ctx: &egui::Context,
+    id: egui::Id,
+    expanded: Vec2,
+    room: egui::Rect,
+    resizing: bool,
+    expanding: bool,
+    restricted: bool,
+) -> CanvasSize {
     let key = id.with("viewport_unrestricted_size");
     if resizing {
         ctx.data_mut(|data| data.remove::<Vec2>(key));
@@ -260,7 +274,7 @@ fn canvas_size(ctx: &egui::Context, id: egui::Id, expanded: Vec2, room: egui::Re
     }
     let saved = saved_canvas_size(ctx, id);
     let fits = |size: Vec2| size.x <= room.width() + 0.5 && size.y <= room.height() + 0.5;
-    if super::layout::restricted_canvas(ctx).is_some() {
+    if restricted {
         // Expanding a minimized bar: its measured size is the compact one,
         // while `expanded` still holds the original wide-canvas geometry.
         let size = if expanding {
@@ -380,6 +394,7 @@ pub struct Floater<'a> {
     partial_outside: bool,
     /// A chat window: it stays in immersive mode (`hide_windows`).
     chat: bool,
+    viewport_control: bool,
 }
 
 impl<'a> Floater<'a> {
@@ -412,11 +427,19 @@ impl<'a> Floater<'a> {
             cascade: None,
             partial_outside: false,
             chat: false,
+            viewport_control: false,
         }
     }
 
     pub fn fixed(mut self) -> Self {
         self.resizable = false;
+        self
+    }
+
+    /// Camera/photo controls use the selected world area. Ordinary floaters
+    /// always retain the native workspace and its saved placement policy.
+    pub(crate) fn viewport_control(mut self) -> Self {
+        self.viewport_control = true;
         self
     }
 
@@ -601,9 +624,31 @@ impl<'a> Floater<'a> {
         let expanded = ctx.data_mut(|d| d.get_persisted::<Vec2>(expanded_id)).unwrap_or(self.default_size);
         let restore = ctx.data_mut(|d| d.remove_temp::<bool>(restore_id)).unwrap_or(false);
         let resizable = self.resizable && !minimized;
+        let bounds = self.viewport_control.then(|| super::layout::toolbar_canvas(ctx)).flatten();
+        let backup_id = window_id.with("viewport_control_unrestricted_rect");
+        let restore_rect = if self.viewport_control && bounds.is_some() {
+            if ctx.data_mut(|d| d.get_persisted::<(egui::Rect, egui::Rect)>(backup_id)).is_none() {
+                let size = saved_canvas_size(ctx, window_id).unwrap_or(expanded);
+                if let Some(rect) = super::layout::unrestricted_rect(ctx, window_id, size) {
+                    let native_room = super::layout::move_area(ctx);
+                    ctx.data_mut(|d| d.insert_persisted(backup_id, (rect, native_room)));
+                }
+            }
+            None
+        } else if self.viewport_control {
+            ctx.data_mut(|d| d.get_persisted::<(egui::Rect, egui::Rect)>(backup_id))
+                .map(|(rect, room)| {
+                    ctx.data_mut(|d| d.remove::<(egui::Rect, egui::Rect)>(backup_id));
+                    super::layout::reanchor(ctx, window_id);
+                    super::layout::restore_window_size(ctx, window_id, rect.size());
+                    super::layout::anchored_rect(rect, room, super::layout::move_area(ctx))
+                })
+        } else {
+            None
+        };
         // The windows live between the bars (`layout::work_area`): none
         // opens larger than that room, nor outside it.
-        let work = super::layout::work_area(ctx);
+        let work = bounds.unwrap_or_else(|| super::layout::work_area(ctx));
         self.min_size = self.min_size.min(work.size());
         self.default_size = self.default_size.min(work.size());
         self.default_pos = fit_in(work, self.default_pos, self.default_size);
@@ -619,7 +664,15 @@ impl<'a> Floater<'a> {
         let mut still_too_tall = false;
         let resize_drag = resizable.then(|| resize::Drag::prepare(ctx, window_id, self.min_size)).flatten();
         let canvas = if resizable {
-            canvas_size(ctx, window_id, expanded, work, resize_drag.is_some(), restore)
+            canvas_size(
+                ctx,
+                window_id,
+                expanded,
+                work,
+                resize_drag.is_some(),
+                restore,
+                bounds.is_some() || super::layout::restricted_canvas(ctx).is_some(),
+            )
         } else {
             CanvasSize {
                 restore: None,
@@ -644,6 +697,12 @@ impl<'a> Floater<'a> {
             .frame(frame)
             .default_pos(self.default_pos)
             .resizable(false);
+        if bounds.is_some() {
+            let body = (work.size() - Vec2::new(22.0, 12.0)).max(Vec2::splat(1.0));
+            self.default_size = self.default_size.min(body);
+            self.min_size = self.min_size.min(body);
+            w = w.max_size(body);
+        }
         if self.auto_height && !minimized {
             w = w.auto_sized().min_width(self.default_size.x).max_width(self.default_size.x);
         } else if self.resizable && !minimized {
@@ -664,6 +723,8 @@ impl<'a> Floater<'a> {
             ));
         } else if let Some(size) = opening.as_ref().and_then(|o| o.size).filter(|_| !self.auto_height) {
             w = w.fixed_size(size);
+        } else if let Some(rect) = restore_rect.filter(|_| !self.auto_height) {
+            w = w.fixed_size(rect.size().min(work.size()));
         } else if let Some(size) = canvas.restore {
             w = w.fixed_size(size);
         } else if restore && !self.auto_height {
@@ -680,18 +741,18 @@ impl<'a> Floater<'a> {
         }
         // the viewer window changed size: the floater follows its edges;
         // a placement asked this frame and a resize in progress come after
-        let slot = super::layout::slot(ctx, window_id);
+        let slot = super::layout::slot_in(ctx, window_id, bounds);
         let slot = if canvas.retained { slot.keep_anchor() } else { slot };
         if opening.is_some() {
             super::layout::reanchor(ctx, window_id);
         }
-        let mut asked = opening.as_ref().map(|o| o.pos).or(slot.pos);
+        let mut asked = restore_rect.map(|r| r.min).or_else(|| opening.as_ref().map(|o| o.pos)).or(slot.pos);
         // A window moves anywhere in the room the bars leave it
         // (`layout::move_area`: the whole screen with the islands, between
         // the Legacy Viewer's bars otherwise), past the edges the user lets
         // it cross, its title bar within reach (`layout::reach`); a window
         // dragged with its group has the group's limits.
-        let room = super::layout::move_area(ctx);
+        let room = bounds.unwrap_or_else(|| super::layout::move_area(ctx));
         // the edge dragged snaps to the other windows and to the work area
         let resized = resize_drag.map(|drag| {
             let rect = on_pixels(
@@ -699,18 +760,19 @@ impl<'a> Floater<'a> {
                 super::layout::resizing(ctx, p, window_id, drag.rect(), drag.edges(), drag.minimum()),
             );
             // a window of fixed shape: the snapped rect brought back to it
-            match self.aspect {
+            let rect = match self.aspect {
                 Some((ratio, chrome)) => on_pixels(
                     ctx,
                     super::layout::fit_aspect_window(ctx, drag.keep_aspect(rect, ratio, chrome), ratio, chrome),
                 ),
                 None => super::layout::fit_window(ctx, rect),
-            }
+            };
+            bounds.map_or(rect, |bounds| fit_rect(bounds, rect))
         });
         let size = egui::AreaState::load(ctx, window_id)
             .and_then(|s| s.size)
             .unwrap_or(self.default_size);
-        let edges = super::layout::edges_for(ctx, window_id);
+        let edges = bounds.map_or_else(|| super::layout::edges_for(ctx, window_id), |_| super::layout::Edges::default());
         // While an edge is dragged the drag keeps the window in its bounds
         // and its title in reach (`title_in_reach` below): egui would
         // constrain the asked position with the last frame's size, and a
@@ -735,13 +797,17 @@ impl<'a> Floater<'a> {
         // Whatever places the window, its title bar stays in reach: egui
         // lets a window larger than its limits slide out of them by what it
         // has in excess, title first.
-        if let Some(pos) = title_in_reach(ctx, window_id, room, asked, resized.map(|r| r.size())) {
+        if let Some(pos) = title_in_reach(ctx, window_id, room, asked, resized.map(|r| r.size()), bounds) {
             w = w.current_pos(pos);
         }
         // `steady_size`: once shown, the body in the window's exact rect
         let held = self.steady_size && resizable && egui::AreaState::load(ctx, window_id).is_some_and(|s| s.size.is_some());
         let mut glass_slot = None;
         let response = w.show(ctx, |outer| {
+            if let Some(bounds) = bounds {
+                super::layout::toolbar_layer(ctx, outer.layer_id());
+                outer.set_clip_rect(outer.clip_rect().intersect(bounds));
+            }
             glass_slot = Some((outer.painter().clone(), outer.painter().add(egui::Shape::Noop)));
             let held = held.then(|| outer.available_rect_before_wrap());
             let mut held_ui = held.map(|rect| {
@@ -924,10 +990,15 @@ impl<'a> Floater<'a> {
                         ui.add_space(5.0);
                     }
                 }
-                if scrolls {
+                if scrolls || bounds.is_some() {
                     let above = ui.cursor().top() - ui.max_rect().top();
-                    let room = (work.height() - above - BODY_CHROME).max(MIN_SCROLLED_BODY);
-                    let shown = egui::ScrollArea::vertical().id_salt("floater_body").max_height(room).show(ui, body);
+                    let room = (work.height() - above - BODY_CHROME).max(if bounds.is_some() { 1.0 } else { MIN_SCROLLED_BODY });
+                    let scroll = if bounds.is_some() {
+                        egui::ScrollArea::both().max_width((work.width() - 22.0).max(1.0))
+                    } else {
+                        egui::ScrollArea::vertical()
+                    };
+                    let shown = scroll.id_salt("floater_body").max_height(room).show(ui, body);
                     still_too_tall = shown.content_size.y > room + 0.5;
                     out = Some(shown.inner);
                 } else {
@@ -1008,6 +1079,73 @@ impl<'a> Floater<'a> {
     }
 }
 
+pub(crate) struct ViewportArea {
+    area: egui::Area,
+    bounds: Option<egui::Rect>,
+}
+
+/// Photo viewfinder controls have explicit bounds while their guides and
+/// snapshot pixels continue to use the selected output frame.
+pub(crate) fn viewport_area(ctx: &egui::Context, id: egui::Id) -> ViewportArea {
+    let bounds = super::layout::toolbar_canvas(ctx);
+    let mut area = egui::Area::new(id);
+    if let Some(bounds) = bounds {
+        area = area.constrain_to(bounds);
+    }
+    ViewportArea { area, bounds }
+}
+
+impl ViewportArea {
+    pub(crate) fn order(mut self, order: egui::Order) -> Self {
+        self.area = self.area.order(order);
+        self
+    }
+    pub(crate) fn pivot(mut self, pivot: egui::Align2) -> Self {
+        self.area = self.area.pivot(pivot);
+        self
+    }
+    pub(crate) fn fixed_pos(mut self, pos: egui::Pos2) -> Self {
+        self.area = self.area.fixed_pos(pos);
+        self
+    }
+    pub(crate) fn current_pos(mut self, pos: egui::Pos2) -> Self {
+        self.area = self.area.current_pos(pos);
+        self
+    }
+    pub(crate) fn movable(mut self, movable: bool) -> Self {
+        self.area = self.area.movable(movable);
+        self
+    }
+    pub(crate) fn fade_in(mut self, fade: bool) -> Self {
+        self.area = self.area.fade_in(fade);
+        self
+    }
+    pub(crate) fn interactable(mut self, interactable: bool) -> Self {
+        self.area = self.area.interactable(interactable);
+        self
+    }
+    pub(crate) fn constrain_to(mut self, bounds: egui::Rect) -> Self {
+        self.area = self.area.constrain_to(bounds);
+        self
+    }
+    pub(crate) fn show<R>(self, ctx: &egui::Context, body: impl FnOnce(&mut egui::Ui) -> R) -> egui::InnerResponse<R> {
+        self.area.show(ctx, |ui| {
+            if let Some(bounds) = self.bounds {
+                super::layout::toolbar_layer(ctx, ui.layer_id());
+                ui.set_max_size(bounds.size());
+                ui.set_clip_rect(ui.clip_rect().intersect(bounds));
+                egui::ScrollArea::both()
+                    .max_width(bounds.width())
+                    .max_height(bounds.height())
+                    .show(ui, body)
+                    .inner
+            } else {
+                body(ui)
+            }
+        })
+    }
+}
+
 /// A window without a title bar, dragged by its whole surface (the
 /// mini-map): `frame` around `body`, which fills it. Like a floater it is
 /// placed by the layout (`layout::Slot`), snaps to the other windows when
@@ -1040,7 +1178,7 @@ pub(crate) fn bare_window(
     } else {
         resize::Drag::prepare(ctx, window_id, min_size)
     };
-    let canvas = canvas_size(ctx, window_id, expanded, room, drag.is_some(), false);
+    let canvas = canvas_size(ctx, window_id, expanded, room, drag.is_some(), false, restricted);
     let mut w = egui::Window::new(title)
         .id(window_id)
         .title_bar(false)

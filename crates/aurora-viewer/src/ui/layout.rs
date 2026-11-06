@@ -253,6 +253,79 @@ pub(crate) fn restricted_canvas(ctx: &egui::Context) -> Option<Rect> {
     ctx.data(|d| d.get_temp::<Option<Rect>>(canvas_bounds_id())).flatten()
 }
 
+fn toolbar_canvas_id() -> Id {
+    Id::unique("layout_toolbar_canvas")
+}
+
+/// Chrome has its own placement rectangle; egui's root canvas and ordinary
+/// windows always keep the full native workspace.
+pub(crate) fn set_toolbar_canvas(ctx: &egui::Context, bounds: Option<Rect>) -> bool {
+    let previous = toolbar_canvas(ctx);
+    ctx.data_mut(|d| d.insert_temp(toolbar_canvas_id(), bounds));
+    if previous == bounds {
+        return false;
+    }
+    ctx.stop_dragging();
+    ctx.input_mut(|input| input.pointer = Default::default());
+    windows(ctx, |windows| {
+        windows.control_rooms.retain(|_, room| {
+            if let Some(bounds) = bounds {
+                *room = bounds;
+                true
+            } else {
+                false
+            }
+        });
+        windows.live.followed = None;
+    });
+    true
+}
+
+pub(crate) fn toolbar_canvas(ctx: &egui::Context) -> Option<Rect> {
+    ctx.data(|d| d.get_temp::<Option<Rect>>(toolbar_canvas_id())).flatten()
+}
+
+pub(crate) fn toolbar_rect(ctx: &egui::Context) -> Rect {
+    toolbar_canvas(ctx).unwrap_or_else(|| ctx.content_rect())
+}
+
+pub(crate) fn toolbar_layer(ctx: &egui::Context, layer: egui::LayerId) {
+    if toolbar_canvas(ctx).is_none() {
+        return;
+    }
+    let frame = ctx.cumulative_frame_nr();
+    ctx.data_mut(|data| {
+        let layers = data.get_temp_mut_or_default::<(u64, Vec<egui::LayerId>)>(Id::unique("toolbar_layers"));
+        if layers.0 != frame {
+            *layers = (frame, Vec::new());
+        }
+        if !layers.1.contains(&layer) {
+            layers.1.push(layer);
+        }
+    });
+}
+
+pub(crate) fn toolbar_layer_bounds(ctx: &egui::Context, layer: egui::LayerId) -> Option<Rect> {
+    let bounds = toolbar_canvas(ctx)?;
+    ctx.data(|data| data.get_temp::<(u64, Vec<egui::LayerId>)>(Id::unique("toolbar_layers")))
+        .filter(|(frame, layers)| *frame == ctx.cumulative_frame_nr() && layers.contains(&layer))
+        .map(|_| bounds)
+}
+
+pub(crate) fn unrestricted_rect(ctx: &egui::Context, id: Id, size: Vec2) -> Option<Rect> {
+    let room = move_area(ctx);
+    windows(ctx, |windows| {
+        windows.placed.get(&id.value()).map(|placed| {
+            let position = placed.anchor.map_or(placed.rect.min, |anchor| anchor.position(room, size));
+            Rect::from_min_size(position, size)
+        })
+    })
+}
+
+pub(crate) fn anchored_rect(rect: Rect, old_room: Rect, room: Rect) -> Rect {
+    Rect::from_min_size(Anchor::nearest(old_room, rect).position(room, rect.size()), rect.size())
+}
+
 /// Bars can consume the whole height of a very small world rectangle.
 /// Keep a finite, positive placement area even then; egui clips to the canvas.
 fn bounded_area(ctx: &egui::Context, area: Rect) -> Rect {
@@ -638,6 +711,10 @@ struct Windows {
     links: BTreeSet<snap::Link>,
     #[serde(skip)]
     live: Live,
+    /// Only camera/photo controls use these explicit rooms. Never replace
+    /// the shared workspace while following or saving another window.
+    #[serde(skip)]
+    control_rooms: BTreeMap<u64, Rect>,
 }
 
 impl Windows {
@@ -653,6 +730,7 @@ impl Windows {
         let point = Anchor::nearest(room, block).point;
         for id in members {
             if let Some(placed) = self.placed.get_mut(&id) {
+                let room = self.control_rooms.get(&id).copied().unwrap_or(room);
                 placed.anchor = Some(Anchor::new(point, room, placed.rect));
             }
         }
@@ -717,6 +795,8 @@ fn windows<R>(ctx: &egui::Context, read: impl FnOnce(&mut Windows) -> R) -> R {
 #[must_use = "report the window with Slot::shown"]
 pub(crate) struct Slot {
     id: Id,
+    screen: Rect,
+    room: Rect,
     /// egui knew the size of the window before this frame. It does not on
     /// the first frame of a window, shown or restored from the layout: that
     /// frame only measures it, and its rect is not one to record.
@@ -734,12 +814,34 @@ pub(crate) struct Slot {
 
 /// The slot of window `id` (the id given to `egui::Window::id`).
 pub(crate) fn slot(ctx: &egui::Context, id: Id) -> Slot {
-    let screen = ctx.content_rect();
-    let room = move_area(ctx);
+    slot_in(ctx, id, None)
+}
+
+pub(crate) fn slot_in(ctx: &egui::Context, id: Id, bounds: Option<Rect>) -> Slot {
+    let screen = bounds.unwrap_or_else(|| ctx.content_rect());
+    let room = bounds.unwrap_or_else(|| move_area(ctx));
     let sized = egui::AreaState::load(ctx, id).is_some_and(|s| s.size.is_some());
     let key = id.value();
     let (pos, limits, preserve_anchor) = windows(ctx, |w| {
-        let followed = usable(screen).then(|| w.follow(key, screen, room)).flatten();
+        if let Some(bounds) = bounds {
+            w.control_rooms.insert(key, bounds);
+        } else {
+            w.control_rooms.remove(&key);
+        }
+        let followed = if bounds.is_some() {
+            w.placed
+                .get(&key)
+                .filter(|old| old.screen != screen || old.room != Some(room))
+                .and_then(|old| {
+                    let anchor = old
+                        .anchor
+                        .unwrap_or_else(|| Anchor::nearest(old.room.unwrap_or(old.screen), old.rect));
+                    let position = anchor.position(room, old.rect.size());
+                    position.is_finite().then_some(position)
+                })
+        } else {
+            usable(screen).then(|| w.follow(key, screen, room)).flatten()
+        };
         let preserve_anchor = followed.is_some() || !sized || w.live.settle.contains_key(&key);
         let limits = w.live.limits.filter(|(window, _)| *window == key).map(|(_, limits)| limits);
         let mut pos = w.live.places.remove(&key).or(followed);
@@ -755,11 +857,13 @@ pub(crate) fn slot(ctx: &egui::Context, id: Id) -> Slot {
     });
     Slot {
         id,
+        screen,
+        room,
         sized,
         preserve_anchor,
         initial_anchor: None,
         pos,
-        limits: limits.map(|limits| bounded_area(ctx, limits)),
+        limits: bounds.or_else(|| limits.map(|limits| bounded_area(ctx, limits))),
     }
 }
 
@@ -792,9 +896,9 @@ impl Slot {
 
     /// The window was shown at `rect`; `minimized`: reduced to its title.
     pub(crate) fn shown(self, ctx: &egui::Context, rect: Rect, minimized: bool) {
-        let screen = ctx.content_rect();
-        let room = move_area(ctx);
-        let partial_outside = partial_outside(ctx, self.id);
+        let screen = self.screen;
+        let room = self.room;
+        let partial_outside = self.screen == ctx.content_rect() && partial_outside(ctx, self.id);
         windows(ctx, |w| {
             let key = self.id.value();
             let recorded = w.placed.get(&key).copied();
@@ -892,7 +996,7 @@ pub(crate) fn frame(ctx: &egui::Context, p: &Palette, snap_enabled: bool) {
 /// refuse one (`min_size` grows then, and the snap is no longer offered).
 pub(crate) fn resizing(ctx: &egui::Context, p: &Palette, id: Id, rect: Rect, edges: snap::Edges, min_size: Vec2) -> Rect {
     let (alt, time, released) = ctx.input(|i| (i.modifiers.alt, i.time, !i.pointer.primary_down()));
-    let area = work_area(ctx);
+    let area = windows(ctx, |windows| windows.control_rooms.get(&id.value()).copied()).unwrap_or_else(|| work_area(ctx));
     let request = gesture::ResizeRequest {
         window: id.value(),
         rect,

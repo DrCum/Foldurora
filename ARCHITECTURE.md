@@ -41,16 +41,21 @@ margin normalization and projection/pick conversion. `world_viewport.rs` holds
 the disabled-by-default saved settings, and `app/multi_monitor.rs` selects the
 effective view, including temporary full-frame modes. The renderer allocates
 world targets at that view's size, composes them into its output rectangle and
-clips HUD/selection overlays. The optional `restrict_ui` setting supplies egui
-with that rectangle in absolute logical points through `RawInput::screen_rect`,
-using the integration's current DPI/zoom. Native pointer and world coordinates
-stay unchanged. `ui/layout.rs` refreshes the cached bar room, follows existing
-anchors and bounds move/resize paths; shared floaters retain automatically
-reduced expanded sizes for the next wide canvas. A viewport below 640 × 400
-logical units falls back to the native interface canvas so reset controls remain
-reachable. Full-frame modes use it temporarily too. Pending egui zoom cannot
-record window geometry against the old canvas. `world_viewport/interface_tests.rs`
-exercises real egui input, popups, anchors, scaling and size restoration offline.
+clips HUD/selection overlays. egui keeps the full native `RawInput::screen_rect`.
+The optional saved `restrict_ui` field now selects explicit toolbar/chrome bounds
+and per-window bounds for camera/snapshot controls, in absolute logical points
+using the integration's current DPI/zoom. Ordinary floaters, including Inventory,
+Preferences, World Map and mini-map, retain the native workspace for layout,
+movement, resizing and input. Native pointer and world coordinates stay unchanged.
+Control placement uses the configured world rectangle independently of temporary
+full-frame rendering and snapshot output. Small control areas fit or scroll their
+contents rather than replacing their bounds with the full window; ordinary
+floater edge allowances do not loosen camera/snapshot bounds. Shared floaters
+preserve saved full-workspace geometry and restore wide size/anchor backups from
+earlier automatic fitting. Pending egui zoom cannot record window geometry against
+the old canvas. `world_viewport/interface_tests.rs` covers real egui geometry,
+pointer input, popups, anchors, scaling and size restoration offline; the selective
+scope correction still requires its automated and native visual checks.
 `build::geom::Cam` carries the matching origin and extent for manipulation.
 
 `characters.rs::Manager` keeps heartbeat, discovery, focus requests and launch

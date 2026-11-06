@@ -171,14 +171,24 @@ pub fn distinct_surface(ui: &Ui) {
 /// Right-click menu of a widget (replaces `Response::context_menu`).
 /// Returns whether the menu is open.
 pub fn context_menu(resp: &egui::Response, p: &Palette, body: impl FnOnce(&mut Ui)) -> bool {
-    context_menu_popup(Popup::context_menu(resp), p, body)
+    context_menu_popup(
+        Popup::context_menu(resp),
+        p,
+        super::layout::toolbar_layer_bounds(&resp.ctx, resp.layer_id),
+        body,
+    )
 }
 
 /// [`context_menu`] of a widget that also opens a [`dropdown`] on a left
 /// click: the right-click menu needs an id of its own (egui keys both on
 /// the widget's).
 pub fn context_menu_of_button(resp: &egui::Response, p: &Palette, body: impl FnOnce(&mut Ui)) -> bool {
-    context_menu_popup(Popup::context_menu(resp).id(resp.id.with("context_menu")), p, body)
+    context_menu_popup(
+        Popup::context_menu(resp).id(resp.id.with("context_menu")),
+        p,
+        super::layout::toolbar_layer_bounds(&resp.ctx, resp.layer_id),
+        body,
+    )
 }
 
 /// [`context_menu_of_button`] that `also` opens at the pointer: a right
@@ -189,7 +199,7 @@ pub fn context_menu_also(resp: &egui::Response, p: &Palette, also: bool, body: i
     if also {
         popup = popup.open_memory(egui::SetOpenCommand::Bool(true));
     }
-    context_menu_popup(popup, p, body)
+    context_menu_popup(popup, p, super::layout::toolbar_layer_bounds(&resp.ctx, resp.layer_id), body)
 }
 
 /// A context menu owned by a containing view instead of a transient row.
@@ -201,6 +211,7 @@ pub fn context_menu_at(ui: &Ui, id: Id, pos: egui::Pos2, p: &Palette, body: impl
             .layout(egui::Layout::top_down_justified(egui::Align::Min))
             .open_memory(None),
         p,
+        super::layout::toolbar_layer_bounds(ui.ctx(), ui.layer_id()),
         body,
     )
 }
@@ -229,19 +240,18 @@ pub(crate) fn window_geometry_changed(ctx: &egui::Context) {
     Popup::close_all(ctx);
 }
 
-fn context_menu_popup(popup: Popup<'_>, p: &Palette, body: impl FnOnce(&mut Ui)) -> bool {
+fn context_menu_popup(popup: Popup<'_>, p: &Palette, bounds: Option<egui::Rect>, body: impl FnOnce(&mut Ui)) -> bool {
     if dismiss_on_window_change(popup.ctx()) {
         return false;
     }
     // below-right of the pointer like the world menu, pushed back into the
     // window by the area's constraint instead of flipping above it
-    popup
+    let popup = popup
         .align(egui::RectAlign::BOTTOM_START)
         .align_alternatives(&[])
         .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
-        .style(style(p))
-        .show(body)
-        .is_some()
+        .style(style(p));
+    show_scoped(popup, bounds, body)
 }
 
 /// Menu opened by a click on the widget `resp` (a "more actions" button, a
@@ -272,7 +282,14 @@ pub fn dropdown_placed(
     } else {
         close
     };
-    placed(Popup::menu(resp), p, close, place, body)
+    placed(
+        Popup::menu(resp),
+        p,
+        close,
+        place,
+        super::layout::toolbar_layer_bounds(&resp.ctx, resp.layer_id),
+        body,
+    )
 }
 
 /// [`dropdown_placed`] opened by its caller instead of by a click on
@@ -290,7 +307,14 @@ pub fn dropdown_held(
         return false;
     }
     let popup = Popup::menu(resp).open_memory(open.then_some(egui::SetOpenCommand::Bool(true)));
-    placed(popup, p, PopupCloseBehavior::CloseOnClickOutside, place, body)
+    placed(
+        popup,
+        p,
+        PopupCloseBehavior::CloseOnClickOutside,
+        place,
+        super::layout::toolbar_layer_bounds(&resp.ctx, resp.layer_id),
+        body,
+    )
 }
 
 fn placed(
@@ -298,6 +322,7 @@ fn placed(
     p: &Palette,
     close: PopupCloseBehavior,
     place: Option<(egui::RectAlign, f32)>,
+    bounds: Option<egui::Rect>,
     body: impl FnOnce(&mut Ui),
 ) -> bool {
     use egui::containers::menu::MenuConfig;
@@ -307,12 +332,62 @@ fn placed(
     if let Some((align, gap)) = place {
         popup = popup.align(align).gap(gap);
     }
-    popup
+    let popup = popup
         .close_behavior(close)
         .style(style(p))
-        .info(egui::UiStackInfo::new(egui::UiKind::Menu).with_tag_value(MenuConfig::MENU_CONFIG_TAG, config))
-        .show(body)
-        .is_some()
+        .info(egui::UiStackInfo::new(egui::UiKind::Menu).with_tag_value(MenuConfig::MENU_CONFIG_TAG, config));
+    show_scoped(popup, bounds, body)
+}
+
+fn scoped_body<R>(ui: &mut Ui, bounds: Option<egui::Rect>, body: impl FnOnce(&mut Ui) -> R) -> R {
+    if let Some(bounds) = bounds {
+        super::layout::toolbar_layer(ui.ctx(), ui.layer_id());
+        let size = (bounds.size() - Vec2::splat(18.0)).max(Vec2::splat(1.0));
+        ui.set_max_size(size);
+        ui.set_clip_rect(ui.clip_rect().intersect(bounds));
+        egui::ScrollArea::both().max_width(size.x).max_height(size.y).show(ui, body).inner
+    } else {
+        body(ui)
+    }
+}
+
+fn show_scoped(mut popup: Popup<'_>, bounds: Option<egui::Rect>, body: impl FnOnce(&mut Ui)) -> bool {
+    if let Some(bounds) = bounds {
+        if let Some(rect) = popup.get_popup_rect() {
+            let size = rect.size().min(bounds.size());
+            let position = rect.min.clamp(bounds.min, (bounds.max - size).max(bounds.min));
+            popup = popup
+                .at_position(position)
+                .align(egui::RectAlign::BOTTOM_START)
+                .align_alternatives(&[])
+                .gap(0.0);
+        }
+    }
+    popup.show(|ui| scoped_body(ui, bounds, body)).is_some()
+}
+
+/// Keep egui's submenu keyboard/hover hierarchy. Only its popup anchor moves;
+/// the visible row's hit rectangle and identity stay where they were drawn.
+fn scoped_submenu_anchor(ui: &Ui, response: &egui::Response) -> egui::Response {
+    let mut response = response.clone();
+    let Some(bounds) = super::layout::toolbar_layer_bounds(ui.ctx(), ui.layer_id()) else {
+        return response;
+    };
+    let frame = egui::Frame::menu(ui.style());
+    let gap = frame.total_margin().sum().x * 0.5 + egui::containers::menu::MenuConfig::find(ui).submenu_gap;
+    let mut probe = response.clone();
+    probe.interact_rect = probe.interact_rect.expand2(Vec2::new(0.0, frame.total_margin().sum().y * 0.5));
+    let popup = Popup::from_response(&probe)
+        .id(egui::containers::menu::SubMenu::id_from_widget_id(response.id))
+        .kind(PopupKind::Menu)
+        .align(egui::RectAlign::RIGHT_START)
+        .gap(gap);
+    if let Some(rect) = popup.get_popup_rect() {
+        let size = rect.size().min(bounds.size());
+        let min = rect.min.clamp(bounds.min, (bounds.max - size).max(bounds.min));
+        response.interact_rect = response.interact_rect.translate(min - rect.min);
+    }
+    response
 }
 
 /// `button` opening a [`dropdown`] that closes on any click, like a stock
@@ -738,7 +813,9 @@ pub(crate) fn editable_submenu(
             }
         });
     }
-    submenu.show(ui, response, body);
+    let anchor = scoped_submenu_anchor(ui, response);
+    let bounds = super::layout::toolbar_layer_bounds(ui.ctx(), ui.layer_id());
+    submenu.show(ui, &anchor, |ui| scoped_body(ui, bounds, body));
     if click_only {
         egui::containers::menu::MenuState::from_ui(ui, |state, _| {
             if state.open_item == Some(hover_guard) {
@@ -914,7 +991,9 @@ pub fn submenu_heading(ui: &mut Ui, p: &Palette, icon: &str, label: &str, enable
     let open = enabled && Popup::is_id_open(ui.ctx(), egui::containers::menu::SubMenu::id_from_widget_id(id));
     let resp = row(ui, p, icon, label, enabled, End::Caret, open);
     if enabled {
-        egui::containers::menu::SubMenu::new().show(ui, &resp, body);
+        let anchor = scoped_submenu_anchor(ui, &resp);
+        let bounds = super::layout::toolbar_layer_bounds(ui.ctx(), ui.layer_id());
+        egui::containers::menu::SubMenu::new().show(ui, &anchor, |ui| scoped_body(ui, bounds, body));
     }
     resp
 }

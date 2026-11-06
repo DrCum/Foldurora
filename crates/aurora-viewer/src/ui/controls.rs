@@ -172,6 +172,7 @@ impl ControlsUi {
                     Pos2::new(60.0, 160.0),
                     size,
                 )
+                .viewport_control()
                 .auto_height()
                 .show(ctx, p, camera, |ui| classic_camera(ui, p, view, &mut out));
             }
@@ -183,6 +184,7 @@ impl ControlsUi {
                     Pos2::new(60.0, 400.0),
                     size,
                 )
+                .viewport_control()
                 .auto_height()
                 .show(ctx, p, movement, |ui| classic_movement(ui, p, view, &mut out));
             }
@@ -195,7 +197,7 @@ impl ControlsUi {
         }
         let mut open = *camera || *movement;
         if open {
-            let screen = ctx.content_rect();
+            let screen = super::layout::toolbar_rect(ctx);
             let minimized = widgets::floater_minimized(ctx, WINDOW);
             // minimized, the free camera names the window
             let title = match view.free {
@@ -208,6 +210,7 @@ impl ControlsUi {
                 Pos2::new(screen.left() + 24.0, screen.bottom() - 460.0),
                 Vec2::new(WIDTH, 420.0),
             )
+            .viewport_control()
             .fixed()
             .auto_height()
             .compact_when_minimized(COMPACT_WIDTH + 20.0)

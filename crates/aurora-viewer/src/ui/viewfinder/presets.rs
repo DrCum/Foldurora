@@ -77,7 +77,7 @@ fn preset_tip(shot: &CameraShot) -> String {
 impl Viewfinder {
     /// The panel, left of the dock.
     pub(super) fn presets_panel(&mut self, ctx: &egui::Context, p: &Palette, screen: Rect, f: &Frame, out: &mut Vec<Out>) {
-        egui::Area::new(Id::unique("vf_presets"))
+        crate::ui::widgets::viewport_area(ctx, Id::unique("vf_presets"))
             .order(Order::Foreground)
             .fade_in(false)
             .pivot(Align2::RIGHT_CENTER)
@@ -290,7 +290,7 @@ impl Viewfinder {
         if !self.preset_form.picking {
             return;
         }
-        egui::Area::new(Id::unique("vf_preset_pick"))
+        crate::ui::widgets::viewport_area(ctx, Id::unique("vf_preset_pick"))
             .order(Order::Middle)
             .fade_in(false)
             .fixed_pos(frame.min)
