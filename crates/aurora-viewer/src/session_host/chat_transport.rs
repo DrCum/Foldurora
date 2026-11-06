@@ -489,9 +489,10 @@ impl Socket {
         Ok(packet)
     }
 
-    fn packets(&mut self, budget: &mut Budget) -> Result<Vec<ChatPacket>, LaneError> {
-        let mut packets = Vec::with_capacity(MAX_PACKETS);
-        while budget.packets != 0 {
+    fn packets(&mut self, budget: &mut Budget, maximum: usize) -> Result<Vec<ChatPacket>, LaneError> {
+        let maximum = maximum.min(MAX_PACKETS);
+        let mut packets = Vec::with_capacity(maximum);
+        while budget.packets != 0 && packets.len() < maximum {
             match self.read(budget)? {
                 ReadState::Frame => packets.push(self.packet()?),
                 ReadState::Pending => break,
@@ -683,7 +684,7 @@ impl HostIo {
         let result = (|| {
             let mut budget = Budget::new();
             self.socket.write(&mut budget, MAX_PACKETS / 2)?;
-            let packets = self.socket.packets(&mut budget)?;
+            let packets = self.socket.packets(&mut budget, MAX_PACKETS)?;
             self.socket.write(&mut budget, MAX_PACKETS)?;
             Ok(packets)
         })();
@@ -732,7 +733,14 @@ impl WorkerIo {
     }
 
     pub fn poll(&mut self) -> Result<Vec<ChatPacket>, LaneError> {
-        let result = self.poll_inner();
+        self.poll_bounded(MAX_PACKETS)
+    }
+
+    /// Socket writes/authentication continue even when the app's inbound queue
+    /// is full. Limiting reads to available room avoids dropping mutation
+    /// commands or deadlocking their outgoing receipts behind that full queue.
+    pub fn poll_bounded(&mut self, maximum_incoming: usize) -> Result<Vec<ChatPacket>, LaneError> {
+        let result = self.poll_inner(maximum_incoming.min(MAX_PACKETS));
         if result.is_err() {
             self.ready = false;
             self.socket.close();
@@ -740,7 +748,7 @@ impl WorkerIo {
         result
     }
 
-    fn poll_inner(&mut self) -> Result<Vec<ChatPacket>, LaneError> {
+    fn poll_inner(&mut self, maximum_incoming: usize) -> Result<Vec<ChatPacket>, LaneError> {
         if !self.ready && self.began.elapsed() >= HANDSHAKE_DEADLINE {
             return Err(LaneError::Authentication);
         }
@@ -784,7 +792,7 @@ impl WorkerIo {
                 return Ok(Vec::new());
             }
         }
-        let packets = self.socket.packets(&mut budget)?;
+        let packets = self.socket.packets(&mut budget, maximum_incoming)?;
         self.socket.write(&mut budget, MAX_PACKETS)?;
         Ok(packets)
     }
@@ -1140,6 +1148,51 @@ mod tests {
         );
         worker.queue(&next).expect("same caller sequence remains available after Busy");
         assert_eq!(worker.queue(&next), Err(LaneError::Sequence));
+    }
+
+    #[test]
+    fn chat_lane_zero_incoming_room_still_flushes_responses_without_reading_commands() {
+        let (_, mut host, mut worker) = connected();
+        let permit = permit();
+        for sequence in 1..=MAX_QUEUE as u64 {
+            host.queue(&packet(&permit, sequence, Side::Host)).expect("queued commands");
+            worker.queue(&packet(&permit, sequence, Side::Worker)).expect("queued responses");
+        }
+        // Model an App whose incoming queue is full and whose pending native
+        // receipts must drain before it can process another command. A zero
+        // read allowance must not prevent those outgoing receipts from moving.
+        let mut responses = Vec::new();
+        let deadline = Instant::now() + HANDSHAKE_DEADLINE;
+        while responses.len() < MAX_QUEUE {
+            responses.extend(host.poll().expect("host sends commands and receives responses"));
+            assert!(
+                worker
+                    .poll_bounded(0)
+                    .expect("write progress with full application input")
+                    .is_empty()
+            );
+            assert_eq!(worker.socket.framing.reader.received, 0);
+            assert!(Instant::now() < deadline, "full application input blocked outgoing responses");
+            std::thread::yield_now();
+        }
+        assert!(worker.socket.framing.outgoing.is_empty());
+        assert_eq!(
+            responses.iter().map(|packet| packet.sequence).collect::<Vec<_>>(),
+            (1..=MAX_QUEUE as u64).collect::<Vec<_>>()
+        );
+
+        let mut commands = Vec::new();
+        while commands.len() < MAX_QUEUE {
+            let batch = worker.poll_bounded(1).expect("one available input slot");
+            assert!(batch.len() <= 1);
+            commands.extend(batch);
+            assert!(Instant::now() < deadline, "bounded input failed to resume");
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            commands.iter().map(|packet| packet.sequence).collect::<Vec<_>>(),
+            (1..=MAX_QUEUE as u64).collect::<Vec<_>>()
+        );
     }
 
     #[test]
