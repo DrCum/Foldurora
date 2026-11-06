@@ -43,6 +43,7 @@ pub(crate) enum Error {
     NotHidden,
     NotApplied,
     NotDrained,
+    NotRetired,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -98,8 +99,8 @@ impl Entry {
 /// Entries remain as bounded per-worker tombstones after retirement. No loss,
 /// reconnect or device change evicts a worker's source/revision high-water.
 /// New generations replace that same slot only after explicit hidden retirement.
-/// Capacity limits lifetime distinct worker IDs; callers must report Capacity
-/// rather than silently evicting a retired identity and losing replay checks.
+/// Verified reclamation can explicitly free a clean slot; unknown or uncertain
+/// workers still consume bounded capacity and cannot be silently evicted.
 pub(crate) struct Ledger {
     entries: Vec<Entry>,
 }
@@ -115,6 +116,9 @@ impl Default for Ledger {
 impl Ledger {
     /// True means a new policy was fully admitted at its exact requested rate.
     /// False is an exact duplicate. Rejection changes neither charge nor policy.
+    /// Caller must first verify the fresh live authenticated roster and full
+    /// current binding. Reclaimed IDs have no ledger tombstone, so stale wire
+    /// replies or GUI rows must never be allowed to submit a request here.
     pub fn request(&mut self, policy: Policy) -> Result<bool, Error> {
         if !policy.valid() {
             return Err(Error::InvalidPolicy);
@@ -274,6 +278,30 @@ impl Ledger {
         let changed = !entry.retired;
         entry.retired = true;
         Ok(changed)
+    }
+
+    /// Explicitly forget only an exact confirmed hidden, retired, GPU-drained
+    /// policy with zero desired/pending/history charge. Intervening loss,
+    /// reconnect or device changes must first be marked uncertain by the caller.
+    /// Only after success may the broker retire this peer's ever-authority flag
+    /// or drop its clean exited child. No IO/disconnect event is a drain proof.
+    pub fn reclaim_retired(&mut self, policy: Policy) -> Result<bool, Error> {
+        let index = self.exact_index(policy)?;
+        let entry = self.entries[index];
+        if entry.policy.rate.is_some() {
+            return Err(Error::NotHidden);
+        }
+        if !entry.applied {
+            return Err(Error::NotApplied);
+        }
+        if !entry.drained || entry.retained != 0 || entry.reserved() != 0 {
+            return Err(Error::NotDrained);
+        }
+        if !entry.retired {
+            return Err(Error::NotRetired);
+        }
+        self.entries.remove(index);
+        Ok(true)
     }
 
     pub fn reservation(&self, source: PreviewSource) -> Option<Reservation> {
@@ -646,5 +674,97 @@ mod tests {
         assert_eq!(ledger.applied(policy(4, 1, None)), Err(Error::UnknownSource));
         assert_eq!(ledger.total_half_fps(), 1);
         assert_eq!(ledger.entries.len(), 1);
+    }
+
+    #[test]
+    fn preview_policy_explicitly_reclaims_clean_retired_slot_for_a_sixth_worker() {
+        let mut ledger = Ledger::default();
+        let configured: Vec<_> = (1..=MAX_WORKERS as u8)
+            .map(|worker| policy(worker, 1, Some(PreviewRate::One)))
+            .collect();
+        for configured in &configured {
+            ledger.request(*configured).expect("full five-worker cohort");
+            ledger.applied(*configured).expect("native policy applied");
+        }
+        let mut hidden = Vec::new();
+        for configured in configured {
+            let close = next(configured, None);
+            ledger.request(close).expect("hidden requested");
+            ledger.applied(close).expect("native hidden applied");
+            ledger.drained(close).expect("actual captured GPU drain");
+            ledger.retire_drained(close).expect("explicit retirement");
+            hidden.push(close);
+        }
+        assert_eq!(ledger.entries.len(), MAX_WORKERS);
+        assert_eq!(ledger.total_half_fps(), 0);
+        let sixth = policy(9, 1, Some(PreviewRate::Five));
+        assert_eq!(ledger.request(sixth), Err(Error::Capacity), "no automatic tombstone eviction");
+        assert_eq!(ledger.reclaim_retired(hidden[0]), Ok(true));
+        assert_eq!(ledger.entries.len(), MAX_WORKERS - 1);
+        assert_eq!(ledger.request(sixth), Ok(true));
+        assert_eq!(ledger.entries.len(), MAX_WORKERS);
+        assert_eq!(ledger.total_half_fps(), 10);
+        let current = ledger.reservation(sixth.source);
+        assert_eq!(ledger.applied(hidden[0]), Err(Error::UnknownSource));
+        assert_eq!(ledger.drained(hidden[0]), Err(Error::UnknownSource));
+        assert_eq!(ledger.reservation(sixth.source), current);
+        assert_eq!(ledger.total_half_fps(), 10);
+    }
+
+    #[test]
+    fn preview_policy_reclamation_rejects_unknown_uncertain_and_unconfirmed_work() {
+        let mut ledger = Ledger::default();
+        let visible = policy(3, 1, Some(PreviewRate::One));
+        let hidden = next(visible, None);
+        assert_eq!(ledger.reclaim_retired(hidden), Err(Error::UnknownSource));
+        ledger.request(visible).expect("visible reservation");
+        assert_eq!(ledger.reclaim_retired(visible), Err(Error::NotHidden));
+        ledger.request(hidden).expect("hidden request");
+        assert_eq!(ledger.reclaim_retired(hidden), Err(Error::NotApplied));
+        ledger.applied(hidden).expect("native hidden policy");
+        assert_eq!(ledger.reclaim_retired(hidden), Err(Error::NotDrained));
+        assert_eq!(ledger.total_half_fps(), 2);
+        ledger.drained(hidden).expect("actual captured GPU drain");
+        assert_eq!(ledger.reclaim_retired(hidden), Err(Error::NotRetired));
+        ledger.retire_drained(hidden).expect("explicit retirement");
+        ledger.uncertain(hidden.source).expect("disconnect or device uncertainty");
+        assert_eq!(ledger.reclaim_retired(hidden), Err(Error::NotApplied));
+        assert_eq!(ledger.entries.len(), 1);
+        ledger.applied(hidden).expect("fresh native confirmation");
+        assert_eq!(ledger.reclaim_retired(hidden), Err(Error::NotDrained));
+        ledger.drained(hidden).expect("new actual GPU drain");
+        assert_eq!(ledger.reclaim_retired(hidden), Err(Error::NotRetired));
+        ledger.retire_drained(hidden).expect("fresh explicit retirement");
+        assert_eq!(ledger.reclaim_retired(hidden), Ok(true));
+        assert!(ledger.entries.is_empty());
+    }
+
+    #[test]
+    fn preview_policy_forgotten_source_replies_cannot_release_a_fresh_live_binding() {
+        let mut ledger = Ledger::default();
+        let old = policy(3, 1, Some(PreviewRate::Five));
+        ledger.request(old).expect("old reservation");
+        let hidden = next(old, None);
+        ledger.request(hidden).expect("old hidden policy");
+        ledger.applied(hidden).expect("hidden native acknowledgement");
+        ledger.drained(hidden).expect("actual old GPU drain");
+        ledger.retire_drained(hidden).expect("explicit retirement");
+        ledger.reclaim_retired(hidden).expect("verified clean reclamation");
+        assert_eq!(ledger.applied(old), Err(Error::UnknownSource));
+        assert_eq!(ledger.drained(hidden), Err(Error::UnknownSource));
+        assert_eq!(ledger.reclaim_retired(hidden), Err(Error::UnknownSource));
+
+        // The broker, not an old wire reply or GUI row, verified this fresh
+        // authenticated live binding before submitting its new policy request.
+        let mut live = next(hidden, Some(PreviewRate::One));
+        live.source.session.generation += 1;
+        ledger.request(live).expect("fresh roster-validated binding");
+        let current = ledger.reservation(live.source);
+        assert_eq!(ledger.applied(old), Err(Error::Binding));
+        assert_eq!(ledger.drained(hidden), Err(Error::Binding));
+        assert_eq!(ledger.retire_drained(hidden), Err(Error::Binding));
+        assert_eq!(ledger.reclaim_retired(hidden), Err(Error::Binding));
+        assert_eq!(ledger.reservation(live.source), current);
+        assert_eq!(ledger.total_half_fps(), 2);
     }
 }
