@@ -342,7 +342,12 @@ fn placed(
 fn scoped_body<R>(ui: &mut Ui, bounds: Option<egui::Rect>, body: impl FnOnce(&mut Ui) -> R) -> R {
     if let Some(bounds) = bounds {
         super::layout::toolbar_layer(ui.ctx(), ui.layer_id());
-        let size = (bounds.size() - Vec2::splat(18.0)).max(Vec2::splat(1.0));
+        let mut size = (bounds.size() - Vec2::splat(18.0)).max(Vec2::splat(1.0));
+        // Bounds limit the popup; retain the width egui measured from its
+        // contents so search fields and justified rows do not fill the world.
+        if !ui.is_sizing_pass() {
+            size.x = size.x.min(ui.max_rect().width());
+        }
         ui.set_max_size(size);
         ui.set_clip_rect(ui.clip_rect().intersect(bounds));
         egui::ScrollArea::both().max_width(size.x).max_height(size.y).show(ui, body).inner

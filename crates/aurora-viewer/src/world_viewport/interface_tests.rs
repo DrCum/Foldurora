@@ -42,11 +42,15 @@ struct Interface {
     wide: bool,
     locked_map: bool,
     menus: bool,
+    ordinary_menus: bool,
+    extra_menu_rows: usize,
     buttons: [Rect; 4],
     clicks: [usize; 4],
     top: Rect,
     bottom: Rect,
     toolbar_popup: Rect,
+    toolbar_submenu: Rect,
+    toolbar_submenu_row: Rect,
     ordinary_popup: Rect,
 }
 
@@ -73,11 +77,15 @@ impl Interface {
             wide,
             locked_map: false,
             menus: false,
+            ordinary_menus: true,
+            extra_menu_rows: 0,
             buttons: [Rect::NOTHING; 4],
             clicks: [0; 4],
             top: Rect::NOTHING,
             bottom: Rect::NOTHING,
             toolbar_popup: Rect::NOTHING,
+            toolbar_submenu: Rect::NOTHING,
+            toolbar_submenu_row: Rect::NOTHING,
             ordinary_popup: Rect::NOTHING,
         };
         this.frames(5);
@@ -115,6 +123,7 @@ impl Interface {
 
     fn show(&mut self, events: Vec<egui::Event>, has_screen: bool) {
         self.frame += 1;
+        self.toolbar_submenu = Rect::NOTHING;
         let native = self.native_rect();
         let chrome = self.settings.toolbar_rect(Self::NATIVE, native);
         let screen = if self.legacy_canvas { chrome.unwrap_or(native) } else { native };
@@ -146,10 +155,30 @@ impl Interface {
                     let response = ui.button("Toolbar menu");
                     if self.menus {
                         menu::dropdown_held(&response, &p, true, None, |ui| {
-                            ui.set_min_size(vec2(130.0, 70.0));
-                            ui.label("Toolbar item");
-                            self.toolbar_popup = ui.min_rect();
+                            menu::searchable(ui, &p, |ui| {
+                                let mut submenu_shown = false;
+                                let row = menu::submenu_heading(ui, &p, "user", "Me", true, |ui| {
+                                    submenu_shown = true;
+                                    menu::item(ui, &p, "home", "Go home");
+                                    menu::item(ui, &p, "map", "World map");
+                                    for index in 0..self.extra_menu_rows {
+                                        menu::item(ui, &p, "home", &format!("Go home {index}"));
+                                    }
+                                });
+                                if submenu_shown && row.rect.is_positive() {
+                                    self.toolbar_submenu = ctx
+                                        .memory(|memory| memory.area_rect(egui::containers::menu::SubMenu::id_from_widget_id(row.id)))
+                                        .expect("toolbar submenu area");
+                                }
+                                self.toolbar_submenu_row = row.rect;
+                                menu::item(ui, &p, "message", "Communicate");
+                                menu::item(ui, &p, "world", "World");
+                                menu::item(ui, &p, "help", "Help");
+                            });
                         });
+                        self.toolbar_popup = ctx
+                            .memory(|memory| memory.area_rect(egui::Popup::default_response_id(&response)))
+                            .expect("toolbar dropdown area");
                     }
                 })
                 .response
@@ -176,7 +205,7 @@ impl Interface {
                     let response = ui.button("Activate ordinary window");
                     self.buttons[index] = response.rect;
                     clicked[index] |= response.clicked();
-                    if self.menus && index == 0 {
+                    if self.menus && self.ordinary_menus && index == 0 {
                         menu::dropdown_held(&response, &p, true, None, |ui| {
                             ui.set_min_size(vec2(130.0, 70.0));
                             ui.label("Inventory item");
@@ -345,6 +374,86 @@ fn selective_viewport_toolbar_popups_are_bounded_while_inventory_popups_keep_the
         f.ordinary_popup.left() < f.bounds().left() - 5.0,
         "ordinary popup was trapped inside the world"
     );
+}
+
+#[test]
+fn selective_viewport_searchable_menu_keeps_content_width_when_scoped_or_hosted() {
+    for (dpi, zoom) in [(1.0, 1.0), (1.25, 1.2)] {
+        let mut f = Interface::new(dpi, zoom);
+        let saved = inset();
+        f.menus = true;
+        f.ordinary_menus = false;
+        for (restricted, hosted) in [(false, false), (true, false), (true, true), (true, false)] {
+            f.settings = ViewportSettings {
+                restrict_ui: restricted,
+                ..saved.clone()
+            }
+            .for_hosted_worker(hosted);
+            f.frames(3);
+            for _ in 0..6 {
+                f.frames(1);
+                let popup = f.toolbar_popup;
+                assert!(
+                    (180.0..350.0).contains(&popup.width()),
+                    "dpi={dpi}, zoom={zoom}, restricted={restricted}, hosted={hosted}: content menu grew to {popup:?}"
+                );
+                assert!(f.bounds().expand(1.0).contains_rect(popup));
+            }
+            egui::Popup::close_all(&f.ctx);
+            f.menus = false;
+            f.frames(2);
+            f.menus = true;
+        }
+    }
+}
+
+#[test]
+fn selective_viewport_searchable_submenu_keeps_content_width_and_pointer_navigation() {
+    for (dpi, zoom) in [(1.0, 1.0), (1.25, 1.2)] {
+        let mut f = Interface::new(dpi, zoom);
+        f.settings.restrict_ui = true;
+        f.menus = true;
+        f.ordinary_menus = false;
+        f.frames(8);
+        let at = f.toolbar_submenu_row.center();
+        f.show(vec![egui::Event::PointerMoved(at)], true);
+        f.frames(40);
+        assert!(f.toolbar_submenu.is_positive(), "pointer hover must open the real submenu");
+        for _ in 0..6 {
+            f.frames(1);
+            assert!((180.0..350.0).contains(&f.toolbar_submenu.width()));
+            assert!(f.bounds().expand(1.0).contains_rect(f.toolbar_submenu));
+            assert!((180.0..350.0).contains(&f.toolbar_popup.width()));
+        }
+    }
+}
+
+#[test]
+fn selective_viewport_searchable_menus_can_grow_vertically_for_long_results() {
+    for filtered in [false, true] {
+        let mut f = Interface::new(1.0, 1.0);
+        f.settings.restrict_ui = true;
+        f.menus = true;
+        f.ordinary_menus = false;
+        f.extra_menu_rows = 40;
+        f.frames(8);
+        assert!(f.toolbar_popup.height() < 350.0, "unfiltered root contains only headings");
+        if filtered {
+            f.show(vec![egui::Event::Text("home".into())], true);
+            f.frames(8);
+        } else {
+            let at = f.toolbar_submenu_row.center();
+            f.show(vec![egui::Event::PointerMoved(at)], true);
+            f.frames(40);
+        }
+        let popup = if filtered { f.toolbar_popup } else { f.toolbar_submenu };
+        assert!(
+            popup.height() > 800.0,
+            "filtered={filtered}: long results must use available height: {popup:?}"
+        );
+        assert!((180.0..350.0).contains(&popup.width()));
+        assert!(f.bounds().expand(1.0).contains_rect(popup));
+    }
 }
 
 #[test]
