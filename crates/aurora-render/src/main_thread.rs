@@ -268,7 +268,8 @@ pub struct Renderer {
 impl Renderer {
     /// Create the renderer on the native graphics backend for the given window, on
     /// the GPU `gpu` asks for (`adapter_choice::Wanted`: empty for the
-    /// automatic choice).
+    /// automatic choice). The initial world viewport avoids allocating full
+    /// desktop-sized world targets before a saved workspace's first frame.
     ///
     /// The surface is made from the window's raw handles and does not keep
     /// the window alive: after a device loss the surface is abandoned, never
@@ -276,7 +277,14 @@ impl Renderer {
     /// the old window open behind a new one. The renderer's host keeps
     /// `window` instead, dropped after the backend, or kept by a render
     /// thread left behind in the driver (`render_thread::KeepAlive`).
-    pub fn new<W>(window: Arc<W>, width: u32, height: u32, vsync: bool, gpu: &str) -> Result<Renderer, RenderError>
+    pub fn new<W>(
+        window: Arc<W>,
+        width: u32,
+        height: u32,
+        vsync: bool,
+        gpu: &str,
+        viewport: Option<crate::WorldViewport>,
+    ) -> Result<Renderer, RenderError>
     where
         W: wgpu::rwh::HasWindowHandle + wgpu::rwh::HasDisplayHandle + Send + Sync + 'static,
     {
@@ -518,6 +526,7 @@ impl Renderer {
             adapter,
             width,
             height,
+            world_viewport: viewport,
             vsync,
             timestamps,
             adapter_specific,
@@ -585,7 +594,7 @@ impl Renderer {
             can_capture,
             output_format,
             anim_clock,
-            last_viewport: crate::WorldViewport::full((width, height)),
+            last_viewport: viewport.map_or_else(|| crate::WorldViewport::full((width, height)), |v| v.fitted((width, height))),
             last_inv_vp: Mat4::IDENTITY,
             last_view: Mat4::IDENTITY,
             hover_request: None,

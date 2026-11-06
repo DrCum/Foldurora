@@ -3917,6 +3917,7 @@ impl App {
         let at = egui::pos2(self.cursor_pos.0 / ppp, self.cursor_pos.1 / ppp);
         let (alt, ctrl) = self.mouse_alt_ctrl();
         matches!(self.screen, Screen::World)
+            && self.world_pointer_inside()
             && !self.camera.mouselook()
             && !alt
             && !ctrl
@@ -3950,6 +3951,7 @@ impl App {
             || self.mouse_mode != MouseMode::None
             || self.camera.mouselook()
             || !(focus_tool || alt)
+            || !self.world_pointer_inside()
             || ctx.is_pointer_over_egui()
             || ctx.egui_wants_pointer_input()
         {
@@ -17413,6 +17415,9 @@ impl ApplicationHandler for App {
         if self.gfx.is_some() {
             return;
         }
+        if std::env::var_os("AURORA_DEMO").is_some() {
+            self.demo_world_viewport();
+        }
         // captures keep a fixed, predictable window
         let capture = self.capture.is_some();
         let (mut w, mut h) = (self.settings.window_width.max(800), self.settings.window_height.max(600));
@@ -17532,7 +17537,6 @@ impl ApplicationHandler for App {
         });
         if std::env::var_os("AURORA_DEMO").is_some() {
             self.demo = true;
-            self.demo_world_viewport();
             if let Ok(modes) = std::env::var("AURORA_DEMO_VOICE_PREFS") {
                 for mode in modes.split(',') {
                     let a = &mut self.settings.audio;

@@ -597,10 +597,10 @@ pub fn steps(spec: &str, frame: u64, tool: &BuildTool, world: &World, s: &BuildS
         .then(|| std::env::var("AURORA_DEMO_BUILD_EDGE").ok())
         .flatten()
         .and_then(|v| match v.as_str() {
-            "left" => Some((1.0, y_start(tool))),
-            "right" => Some((tool.cam.width - 1.0, y_start(tool))),
-            "top" => Some((x_start(tool), 1.0)),
-            "bottom" => Some((x_start(tool), tool.cam.height - 1.0)),
+            "left" => Some((tool.cam.area[0] + 1.0, y_start(tool))),
+            "right" => Some((tool.cam.area[2] - 1.0, y_start(tool))),
+            "top" => Some((x_start(tool), tool.cam.area[1] + 1.0)),
+            "bottom" => Some((x_start(tool), tool.cam.area[3] - 1.0)),
             _ => None,
         });
     // The close view animates for up to one second. A press while it is

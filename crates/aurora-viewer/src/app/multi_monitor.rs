@@ -25,13 +25,7 @@ impl App {
     }
 
     pub(super) fn world_viewport_for_size(&self, size: (u32, u32), vr: bool) -> aurora_render::WorldViewport {
-        if !matches!(self.screen, Screen::World)
-            || self.camera.mouselook()
-            || self.interface.hidden
-            || self.panels.snapshot
-            || self.snapshots.capturing.is_some()
-            || vr
-        {
+        if self.camera.mouselook() || self.interface.hidden || self.panels.snapshot || self.snapshots.capturing.is_some() || vr {
             return aurora_render::WorldViewport::full(size);
         }
         self.settings.world_viewport.viewport(size)
@@ -40,5 +34,12 @@ impl App {
     pub(super) fn world_pointer_inside(&self) -> bool {
         self.world_viewport
             .is_none_or(|view| view.local(self.cursor_pos.0, self.cursor_pos.1).is_some())
+    }
+
+    pub(super) fn world_clip_rect(&self, ppp: f32) -> egui::Rect {
+        self.world_viewport.map_or(egui::Rect::EVERYTHING, |view| {
+            let [left, top, right, bottom] = view.area();
+            egui::Rect::from_min_max(egui::pos2(left / ppp, top / ppp), egui::pos2(right / ppp, bottom / ppp))
+        })
     }
 }

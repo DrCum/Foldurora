@@ -54,7 +54,9 @@ impl App {
         if std::env::var("AURORA_GPU_START_FAIL").is_ok_and(|mode| mode != "lost") {
             return Err(aurora_render::RenderError::NoAdapter("AURORA_GPU_START_FAIL".into()));
         }
-        let renderer = Renderer::new(window.clone(), size.width, size.height, self.settings.vsync, &gpu)?;
+        let viewport = self.world_viewport_for_size((size.width, size.height), false);
+        let viewport = (viewport != aurora_render::WorldViewport::full((size.width, size.height))).then_some(viewport);
+        let renderer = Renderer::new(window.clone(), size.width, size.height, self.settings.vsync, &gpu, viewport)?;
         log::info!(
             "renderer ready: {} via {} ({} texture slots in {} pages at most, GPU timers: {})",
             renderer.info.name,

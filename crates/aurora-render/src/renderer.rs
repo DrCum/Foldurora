@@ -1762,6 +1762,7 @@ pub(crate) struct BackendInit {
     pub adapter: wgpu::Adapter,
     pub width: u32,
     pub height: u32,
+    pub world_viewport: Option<crate::WorldViewport>,
     pub vsync: bool,
     /// The device has TIMESTAMP_QUERY (GPU timers).
     pub timestamps: bool,
@@ -2693,6 +2694,7 @@ impl Backend {
             adapter,
             width,
             height,
+            world_viewport,
             vsync,
             timestamps,
             adapter_specific,
@@ -3102,6 +3104,10 @@ impl Backend {
         lost_at_start(&lost, &surface)?;
         let glow = Glow::new(&device, &post_layout);
         let smaa = Smaa::new(&device, &queue, [&post_layout, &bloom.post_layout], format);
+        let initial_viewport = world_viewport.map_or_else(
+            || crate::WorldViewport::full((config.width, config.height)),
+            |v| v.fitted((config.width, config.height)),
+        );
         let targets = Self::make_targets(
             &device,
             &post_layout,
@@ -3110,8 +3116,8 @@ impl Backend {
             &glow.views[1],
             &gtao,
             &contact,
-            config.width,
-            config.height,
+            initial_viewport.width,
+            initial_viewport.height,
             msaa_samples,
             &settings,
         );
@@ -3240,7 +3246,7 @@ impl Backend {
             rlva_spheres: None,
             motion_debug,
             rlva_overlays: None,
-            world_viewport: None,
+            world_viewport,
             rlva_resolution_divisor: 1,
             rlva_scaled: None,
             smaa,
@@ -5547,6 +5553,7 @@ impl Backend {
                 init.xr = None;
                 init.width = session.width;
                 init.height = session.height;
+                init.world_viewport = None;
                 init.output_format = Some(self.config.format);
                 init.scene = packet.scene.clone();
                 // Eye backends own independent depth, visibility, exposure and temporal history.
