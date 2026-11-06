@@ -76,13 +76,14 @@ impl Cam {
     /// zoom and viewport as the HUD renderer and triangle picking.
     pub fn for_hud(view: aurora_render::HudView, ppp: f32) -> Self {
         let view_proj = view.matrix();
+        let [width, height] = view.area_size();
         Self {
             hud: Some(view),
             eye: Vec3::new(view.min_x - 1.0, 0.0, 0.0),
             view_proj,
             inv_view_proj: view_proj.inverse(),
-            width: view.width,
-            height: view.height,
+            width,
+            height,
             area: [0.0, 0.0, view.width, view.height],
             ppp: ppp.max(0.1),
             ..Self::default()
@@ -322,8 +323,18 @@ mod tests {
         for size in [[1280, 720], [720, 1280]] {
             for zoom in [1.0, 0.5, 0.1] {
                 let full = aurora_render::HudView::new(size, zoom, -3.0, 7.0);
-                for view in [full, full.in_area([0.0, 29.0, size[0] as f32, size[1] as f32])] {
+                for view in [
+                    full,
+                    full.in_area([0.0, 29.0, size[0] as f32, size[1] as f32]),
+                    full.in_area([
+                        size[0] as f32 * 0.25,
+                        size[1] as f32 * 0.15,
+                        size[0] as f32 * 0.9,
+                        size[1] as f32 * 0.8,
+                    ]),
+                ] {
                     let cam = Cam::for_hud(view, 2.0);
+                    assert_eq!([cam.width, cam.height], view.area_size());
                     for p in [Vec3::ZERO, Vec3::new(5.0, 0.3, -0.4)] {
                         let a = cam.project_px(p).unwrap();
                         let b = cam.project_px(p + Vec3::Y * cam.meters_for_pixels(p, 50.0)).unwrap();
