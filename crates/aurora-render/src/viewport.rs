@@ -104,10 +104,7 @@ impl WorldViewport {
         if pixel.0 < self.x || pixel.1 < self.y || pixel.0 - self.x >= self.width || pixel.1 - self.y >= self.height {
             return (u32::MAX, u32::MAX);
         }
-        (
-            ((u64::from(pixel.0 - self.x) * u64::from(scene.0)) / u64::from(self.width)) as u32,
-            ((u64::from(pixel.1 - self.y) * u64::from(scene.1)) / u64::from(self.height)) as u32,
-        )
+        crate::rlva::resolution::pixel((pixel.0 - self.x, pixel.1 - self.y), self.size(), scene)
     }
 
     pub fn project(self, ndc: [f32; 2]) -> [f32; 2] {

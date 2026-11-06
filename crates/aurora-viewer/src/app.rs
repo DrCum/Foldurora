@@ -17459,7 +17459,21 @@ impl ApplicationHandler for App {
         if let (Some(m), false) = (&monitor, capture) {
             let sf = m.scale_factor();
             let (mw, mh) = (m.size().width as f64 / sf, m.size().height as f64 / sf);
-            if !self.settings.world_viewport.enabled && w as f64 >= mw * 0.95 && h as f64 >= mh * 0.9 {
+            let displays: Vec<_> = event_loop
+                .available_monitors()
+                .map(|m| {
+                    let (p, s) = (m.position(), m.size());
+                    [
+                        i64::from(p.x),
+                        i64::from(p.y),
+                        i64::from(p.x) + i64::from(s.width),
+                        i64::from(p.y) + i64::from(s.height),
+                    ]
+                })
+                .collect();
+            let unavailable_span =
+                self.settings.world_viewport.enabled && !crate::world_viewport::span_fits_displays((w, h), sf, &displays);
+            if unavailable_span || (!self.settings.world_viewport.enabled && w as f64 >= mw * 0.95 && h as f64 >= mh * 0.9) {
                 w = (mw * 0.8) as u32;
                 h = (mh * 0.8) as u32;
                 let p = m.position();
