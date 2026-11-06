@@ -10,6 +10,11 @@ pub fn page(cx: &mut Cx, tab: usize) {
         0 => {
             cx.group(tr!("mm-world-viewport"), |cx| {
                 cx.toggle(tr!("mm-enable"), tr!("mm-enable-help"), &field!(world_viewport.enabled));
+                cx.toggle(
+                    tr!("mm-restrict-ui"),
+                    tr!("mm-restrict-ui-help"),
+                    &field!(world_viewport.restrict_ui),
+                );
                 cx.row(tr!("mm-presets"), tr!("mm-presets-help"), &field!(world_viewport), |ui, s| {
                     let mut changed = false;
                     ui.horizontal_wrapped(|ui| {
@@ -22,7 +27,10 @@ pub fn page(cx: &mut Cx, tab: usize) {
                             changed = true;
                         }
                         if ui.button(tr!("mm-full-window")).clicked() {
-                            s.world_viewport = Default::default();
+                            s.world_viewport = crate::world_viewport::ViewportSettings {
+                                restrict_ui: s.world_viewport.restrict_ui,
+                                ..Default::default()
+                            };
                             changed = true;
                         }
                     });

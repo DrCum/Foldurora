@@ -4709,7 +4709,7 @@ both open states and the selection count. Capture at frame 620.
 
 | Variable | Effect |
 |---|---|
-| `AURORA_DEMO_VIEWPORT=left\|right\|inset\|scaled` | Synthetic multi-monitor world rectangle, without changing saved preferences |
+| `AURORA_DEMO_VIEWPORT=left\|right\|inset\|scaled\|ui-left\|ui-right\|ui-inset\|ui-scaled\|ui-toggle` | Synthetic world and optional interface rectangles, without changing saved preferences |
 | `AURORA_DEMO_MONITOR_RECOVERY=removed\|partial\|drag\|native` | Live display-recovery policy fixtures or the native adapter on an isolated test desktop |
 | `AURORA_DEMO_CHARACTERS=1` | Opens Characters with synthetic account/session rows and inert actions |
 | `AURORA_DEMO_TOOLBAR=1` | Open the "Toolbar buttons" window; the bars mockup's custom state, side toolbars, labels. |
@@ -5071,6 +5071,33 @@ before (`amis`, `groupes`, `repere`, `historique`…) are still accepted.
   the full-window demo. Floaters retain the full native canvas. Mouselook,
   hidden UI, photos/viewfinder and VR temporarily use the full frame. These
   scenarios change only in-memory demo settings.
+  - `ui-left`, `ui-right`, `ui-inset` and `ui-scaled` also enable Preferences →
+    Layout → **Keep the interface inside the world viewport**. The default
+    remains off. Top/bottom/side toolbars, chat, menus, popups, dialogs and
+    floaters use the same absolute logical rectangle; world rendering and
+    pointer coordinates retain their physical native-window coordinates.
+    Use `AURORA_WINDOW_SIZE=1600,1000`, `AURORA_UI_SCALE=1` and
+    `AURORA_DEMO_CHARACTERS=1`, then capture after frame 700. `ui-right` puts
+    the chrome on the right display; `ui-inset` exercises nonzero X and Y.
+    Combine with `AURORA_DEMO_OPTIONS=layout` to inspect the translated switch.
+    Repeat `ui-inset` with `AURORA_UI_SCALE=1.25` and
+    `AURORA_DEMO_BARS=legacy` as well as the default islands to check both
+    real toolbar layouts at a nonzero X/Y origin.
+  - `ui-toggle` starts with the interface in the right half, uses the full
+    interface canvas at frame 840 and restricts it again at 1080. Capture
+    `AURORA_CAPTURE_FRAMES=700,900,1180` to check that open floaters follow
+    their existing anchors and that automatically reduced expanded sizes
+    return on the wide canvas. Manual resize gestures replace that retained
+    size. Mouselook, hidden UI, photos/viewfinder and VR use the full interface
+    canvas temporarily and restore the restricted layout afterward.
+  - A viewport below **640 × 400 logical interface units** uses the full native
+    interface canvas, leaving the world rectangle unchanged and the checkbox
+    enabled. This keeps Preferences and reset controls reachable; widening the
+    viewport or reducing the interface scale automatically resumes restriction.
+    Check the threshold with fractional native DPI and interface zoom, and
+    minimize/restore without losing floater placement. The native OS caption,
+    system file dialogs and separately detached native windows remain managed
+    by the operating system.
 - **`AURORA_DEMO_MONITOR_RECOVERY`** requires `AURORA_DEMO=1`. `removed`,
   `partial` and `drag` supply synthetic physical display/window rectangles
   to the ordinary recovery policy; the actual window never moves. Their

@@ -339,12 +339,14 @@ impl App {
     /// Synthetic display layouts for offline demo captures; never saved.
     pub(super) fn demo_world_viewport(&mut self) {
         let Ok(mode) = std::env::var("AURORA_DEMO_VIEWPORT") else { return };
-        match mode.as_str() {
+        let (mode, restrict_ui) = mode.strip_prefix("ui-").map_or((mode.as_str(), false), |mode| (mode, true));
+        match mode {
             "left" => self.settings.world_viewport.half(false),
-            "right" => self.settings.world_viewport.half(true),
+            "right" | "toggle" => self.settings.world_viewport.half(true),
             "inset" | "scaled" => {
                 self.settings.world_viewport = crate::world_viewport::ViewportSettings {
                     enabled: true,
+                    restrict_ui,
                     left: 25.0,
                     right: 10.0,
                     top: 15.0,
@@ -355,6 +357,17 @@ impl App {
                 }
             }
             _ => {}
+        }
+        self.settings.world_viewport.restrict_ui = restrict_ui;
+    }
+
+    pub(super) fn demo_interface_viewport(&mut self) {
+        if self.demo && std::env::var("AURORA_DEMO_VIEWPORT").is_ok_and(|mode| mode == "ui-toggle") {
+            let restricted = !(840..1080).contains(&self.frame_count);
+            if self.settings.world_viewport.restrict_ui != restricted {
+                self.settings.world_viewport.restrict_ui = restricted;
+                log::info!("demo viewport interface: restricted={restricted} frame={}", self.frame_count);
+            }
         }
     }
 

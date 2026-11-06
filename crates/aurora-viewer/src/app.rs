@@ -10640,7 +10640,41 @@ impl App {
         let mut library_drop = None;
         let t_pass = Instant::now();
         let mut windows_ms = 0.0;
+        self.demo_interface_viewport();
+        let requested_ui = self.settings.world_viewport.enabled
+            && self.settings.world_viewport.restrict_ui
+            && viewport != aurora_render::WorldViewport::full((w, h));
+        let has_native_canvas = raw.screen_rect.is_some();
+        let interface_rect = raw
+            .screen_rect
+            .and_then(|screen| self.settings.world_viewport.interface_rect(viewport, (w, h), screen));
+        // A minimized native window supplies no new canvas; keep the last
+        // valid one, rather than briefly reflowing its saved floaters.
+        let restrict_ui =
+            requested_ui && (interface_rect.is_some() || raw.screen_rect.is_none() && ui::layout::restricted_canvas(&ctx).is_some());
+        if let Some(rect) = interface_rect {
+            raw.screen_rect = Some(rect);
+        }
         let mut full = ctx.run_ui(raw, |ui| {
+            if has_native_canvas && (requested_ui || ui::layout::restricted_canvas(ui.ctx()).is_some()) {
+                let native_canvas =
+                    egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(w as f32, h as f32) / ui.ctx().pixels_per_point());
+                let expected = self
+                    .settings
+                    .world_viewport
+                    .interface_rect(viewport, (w, h), native_canvas)
+                    .unwrap_or(native_canvas);
+                // A pending egui zoom can rescale the previous canvas instead
+                // of taking this frame's RawInput rectangle. Wait one pass
+                // before laying out windows against a stale monitor's bounds.
+                if !ui::layout::canvas_matches(ui.ctx(), expected) {
+                    ui.ctx().request_repaint();
+                    return;
+                }
+            }
+            if ui::layout::begin_canvas(ui.ctx(), restrict_ui) {
+                self.interface.last_room = None;
+            }
             self.sound_cues.pass_start(ui.ctx());
             // before any field reads its keys: Ctrl+W is the frontmost window's
             ui::close_key::begin(ui.ctx());

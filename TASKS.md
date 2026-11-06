@@ -12,6 +12,16 @@
   The user has confirmed that the multi-monitor world viewport works; the
   optional viewport-contained interface is being implemented independently.
 
+- 🔧 Optional viewport-bound interface (user request, 2026-11-06; no issue):
+  the human confirmed world placement works and asked to keep the viewer chrome
+  in that area too. Add the off-by-default Layout switch for toolbars, menus,
+  chat, dialogs and floaters, retaining absolute native pointer/world geometry.
+  Preserve anchors and automatically reduced expanded sizes; fall back to the
+  native UI below 640 × 400 logical units so Preferences remains reachable.
+  Seventeen offline geometry/egui regressions and `ui-*` demo modes are prepared;
+  integrated automated checks, captures and human UI acceptance are pending.
+  This follow-up must include the separate multi-viewer GPU contention mitigation.
+
 - 🔧 Foldurora workspace follow-up (user continuation, 2026-11-06; no issue):
   keep the verified PR #2/source `62cdd4ea` checkpoint while correcting repeated
   Open feedback, adding readable account/grid/phase captions and gently recovering

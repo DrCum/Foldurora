@@ -20,7 +20,7 @@ drafts while that validation is pending, as authorized for this preview.
 
 | Folderstorm capability | Aurora foundation | This pass |
 | --- | --- | --- |
-| World viewport across displays | One native winit window; world targets composed before egui | Custom world rectangle with consistent rendering, camera, HUD and input coordinates; gentle live recovery on Windows/X11 |
+| World viewport across displays | One native winit window; world targets composed before egui | Custom world rectangle with consistent rendering, camera, HUD and input coordinates; optional viewport-bound interface; Windows recovery policy; live X11 recovery remains unaccepted |
 | Several character sessions | Saved-account carousel; separate network/world per process; cross-process GPU fair sharing and background frame cap | Native Characters panel, existing-session focus, explicit manual-login opening, repeated-Open feedback and readable account/grid/phase captions |
 | Named workspaces, bars and window arrangements | Saved native floater geometry and toolbar controls | Follow-up after viewport and character acceptance |
 | Assistant inventory, appearance, camera and workspace tools | Native typed inventory, appearance and camera actions | Follow-up: a bounded permission-aware adapter; no generic input injection |
@@ -44,6 +44,21 @@ The remaining area holds normal Inventory,
 chat, map and other floaters. Those floaters remain inside this native window.
 They are not separate operating-system windows.
 
+To keep the controls beside the world, enable **Keep the interface inside the
+world viewport** in the same section. Toolbars, menus, chat, dialogs and floaters
+then use the world's logical bounds, including its top/left offset. Leave it off
+for the wider panel workspace. Existing floater anchors follow the change;
+automatically reduced expanded sizes return with the wide canvas, while an
+explicit manual resize replaces that retained size. The setting is off by default
+and survives placement presets and restarts.
+
+Below 640 × 400 logical interface units, the interface uses the full native
+window so Preferences/reset controls remain reachable. The world stays in its
+custom rectangle, the option stays enabled, and restriction resumes automatically
+when the viewport becomes large enough. Mouselook, hidden UI, photos/viewfinder
+and VR temporarily use the full interface canvas. The native title bar, system
+dialogs and separately detached native windows remain operating-system windows.
+
 Check these cases in the offline demo first, then in the user's normal session:
 
 1. Put the world in the left and right halves, then use nonzero top and left
@@ -58,7 +73,7 @@ Check these cases in the offline demo first, then in the user's normal session:
 5. Try unequal display sizes, negative desktop coordinates and different DPI
    scales. Remove or disable the secondary display, restart, and confirm the
    main window can be recovered on an attached display.
-6. On Windows/X11, change or remove a display while the viewer is running. If
+6. On Windows, change or remove a display while the viewer is running. If
    the whole normal window becomes inaccessible, expect a recovery attempt after
    at least three stable seconds. Its size is preserved when it fits; an oversized
    window requests 80% of the nearest surviving display, subject to native minimum
@@ -67,6 +82,14 @@ Check these cases in the offline demo first, then in the user's normal session:
    maximized, fullscreen or VR window. It must stay untouched. After an excluded
    state ends, recovery gets a fresh grace period; an already reachable layout
    clears the pending recovery.
+8. Toggle **Keep the interface inside the world viewport** with Inventory,
+   Conversations, Characters and the mini-map open. Check top/bottom/side bars,
+   chat, tooltips, context menus, dialogs and keyboard focus. Resize a floater
+   against the world edge, including a fixed-aspect media window. Toggle back
+   and check placement and retained sizes; minimize/restore and restart.
+9. Use both nonzero top/left margins and fractional DPI/interface zoom. Make the
+   viewport very narrow: the full native interface must remain usable for
+   changing or resetting it. Expand it again to resume restriction.
 
 A native window has one current DPI scale. A spanning-window implementation
 does not provide independent per-display scaling for its floaters. Separate
@@ -75,8 +98,11 @@ implementation.
 
 Live recovery arms only after a display topology/DPI change; ordinary manual
 placement does not arm it. Missing geometry or unknown/stale native input state
-prevents movement. This bounded native guard supports Windows and X11; macOS and
-Wayland leave the window alone when reliable position or hold state is unavailable.
+prevents movement. Windows physical-display acceptance remains required. The
+owned Xvfb/RandR fixture exposed stale winit monitor lists, so live X11 recovery
+is not accepted at this checkpoint; fresh sampling is isolated on a separate
+branch. macOS and Wayland leave the window alone when reliable native state is
+unavailable.
 
 ## Character testing
 
@@ -87,11 +113,17 @@ The contention mitigation pauses an unfocused world before drawing when another
 live viewer shares the graphics card, using the existing **Pause background 3D
 on a shared or overloaded card** preference. Chat, sound and the session keep
 running. Focus resumes the world immediately. Shared-only pause also ends after
-four seconds without peers; a transient registry read failure cannot resume a
-heavy frame. Known different GPUs are excluded; unknown GPU identities count
+four seconds after the first observed empty peer snapshot; a transient registry
+read failure or a long frame gap cannot immediately resume a heavy frame.
+Known different GPUs are excluded; unknown GPU identities count
 conservatively. Photos, VR, capture/profile runs and the setting's opt-out retain
 their exemptions. The underlying reset cause remains unconfirmed; a person
 still needs to accept simultaneous sessions on the affected hardware.
+
+Restart **all** participating viewers from the replacement build before testing
+the mitigation. A newly launched child cannot update the pause policy inside
+an older process that is still running. Keep the earlier ZIPs separately for
+comparison; they have not passed this simultaneous-session acceptance.
 
 Open **Me → Characters**, or use the users icon on the login screen. Use the
 Characters panel to select an existing session or open a saved
