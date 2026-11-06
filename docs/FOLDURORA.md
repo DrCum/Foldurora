@@ -1,5 +1,32 @@
 # Foldurora workspace and character preview
 
+## Five persistent profiles integration candidate
+
+Branch `feat/persistent-profiles-and-chat` combines the host/menu fixes,
+conversation-draft retention and crash details with five stable character
+profiles. The profile selector above **Open login** chooses the settings/cache
+slot; **Rename** changes only its label. Empty labels display Character 1 through
+Character 5. The actual logged-in account and grid remain shown separately.
+
+Profiles belong to the canonical executable location. Closing and reopening the
+host at that location keeps each slot's settings and private cache. Replacing
+the executable there keeps the namespace; another portable/worktree directory
+starts a separate group. Earlier generated profiles and ordinary settings remain
+untouched. New slots start with defaults; no automatic migration is performed.
+
+A detached viewer keeps its profile occupied until its process exits. Closing
+the controller alone does not make that profile free. A replacement worker gets
+fresh session/chat authority, so reopening the same slot cannot inherit old
+drafts or receipts. Only one controller owns this installation's private registry.
+See [the profile and acceptance guide](SESSION_HOST.md) for corruption/ownership
+refusals and the required native close/reopen, contention and persistence checks.
+
+This source is a test candidate. Its own build manifest and logs record compiled
+checks; native Windows and human grid acceptance remain separate.
+Linux full-workspace tests reported 7,846 passes, 49 ignored and the unchanged
+terrain precision failure. All 21 new profile/draft/diagnostic regressions passed,
+as did formatting and Clippy with the existing Linux dead-code allowance.
+
 ## Conversation drafts and usable crash details
 
 Branch `feat/host-conversation-drafts` follows the frozen host/menu source

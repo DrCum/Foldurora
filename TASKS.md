@@ -10,8 +10,10 @@
   session/worker/lease/chat authority is fresh on every opening. Preserve all
   earlier generated profiles and ordinary settings. Source regressions cover
   locks, registry loss/version/privacy, persistence, fresh authority and actual
-  egui selection/rename. Compilation, full checks and Windows acceptance are
-  pending. No restart, import, automatic login or preview monitors are added.
+  egui selection/rename. Integrated Linux tests and Clippy passed for the new
+  behavior; the full run has the documented unchanged terrain precision failure.
+  Native Windows persistence/contention acceptance is pending. No restart, import,
+  automatic login or preview monitors are added.
 
 - 🔧 Host chat draft retention (Folderstorm port, 2026-11-06; no issue): keep
   separate source/policy-bound Nearby and resident IM text/Undo state while

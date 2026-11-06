@@ -26,7 +26,9 @@ deletion, reset, migration, restart command or automatic login is supplied.
 
 Source tests cover storage identity, retention, lock/controller loss, stale
 bootstrap refusal, registry loss/version/privacy and actual egui profile
-selection/rename. This checkpoint still needs compiled/full checks and Windows
+selection/rename. Integrated Linux tests and Clippy passed for the new behavior;
+the full run retains the documented software-GPU terrain precision failure.
+This checkpoint still needs Windows
 acceptance: change one slot's preferences, close its viewer, reopen it and
 verify retention; repeat with another slot and custom names. Verify a second
 controller is refused, detached/live profiles remain occupied, startup errors

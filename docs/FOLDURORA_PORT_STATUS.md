@@ -27,8 +27,8 @@ Permission or source loss purges affected text and editor undo state. Local queu
 rejection retains text; admitted/uncertain sends are never automatically replayed.
 This does not add a shared sender selector, group chat or persistence across restarts.
 
-A separate small fix is being prepared for the crash window: when no stack is
-available, show and copy the sanitized diagnostic summary already generated as
+A small crash-window fix also shows and copies, when no stack is available,
+the sanitized diagnostic summary already generated as
 `public-report.md`. It adds no collection, transmission or GPU-recovery change.
 
 The combined changes passed Linux formatting, workspace/all-target Clippy with
@@ -36,15 +36,22 @@ the existing platform allowance, and all eleven new regressions. Full tests:
 7,836 passed, one unchanged software-Vulkan terrain precision failure, 49 ignored.
 The EN/FR/JA CPU fixture generated 42 captures; the changed draft-restoration
 screens were inspected at normal and narrow/150% sizes. Native acceptance remains
-separate. A source-reviewed five-slot implementation is being integrated as the
-next candidate; it will receive its own exact-source checks before use.
+separate.
+
+The next combined branch is `feat/persistent-profiles-and-chat`, including the
+source-reviewed five-slot implementation from `d08441453aa756b7b5668a4d5f21edf20e036d04`.
+Its Linux full-workspace run reported 7,846 passes, the one unchanged terrain
+precision failure and 49 ignored. All 21 new profile/draft/diagnostic regressions
+passed, along with Clippy using the existing Linux allowance. Actual CPU controller
+captures and native Windows evidence are recorded separately with the candidate.
+No native profile-persistence acceptance is inferred from the earlier builds.
 
 ## Port order and dependencies
 
 | Feature | Current gap | Next concrete work |
 | --- | --- | --- |
-| Five stable, renameable character slots | Host profiles are private per launch, so settings/cache do not survive controller restarts under a stable slot. | Add a five-slot private registry and stable profile selector, retaining fresh session/lease identities and exclusive profile ownership through detach/host death. Start new profiles from defaults; preserve old generated profiles. |
-| Per-character/per-conversation drafts | Existing popouts clear text on conversation changes and drop state on Close. | Complete and verify the current memory-only retention checkpoint. |
+| Five stable, renameable character slots | Implemented in the current source; compiled/native acceptance pending. Earlier candidates used per-launch profiles. | Verify five-slot persistence and labels, exclusive ownership through detach/host death, and fresh session authority on reopen. New profiles start with defaults; old generated profiles are preserved. |
+| Per-character/per-conversation drafts | Memory-only navigation and Close/reopen retention is implemented and passed synthetic checks. | Native popout focus/reopen and human grid routing/restrictions remain to be checked. |
 | Shared chat and Attention | Source-bound popouts exist; shared sender selection and explicit review/mark-read/dismiss behavior are incomplete. | Use the native conversation identities and restrictions; navigation must never mark a conversation read or change the sending character. |
 | Named workspaces | Viewport and native floater geometry exist; selective named arrangements, previews, favorites and HUD restore are incomplete. | Map Folderstorm's restore groups onto Aurora's typed settings/actions after stable character storage is established. |
 | Fade and Birdseye switches | Native activation exists; Folderstorm's visual transitions are not ported. | Preserve fenced GPU/input handoff; design each transition around native camera/render actions after host acceptance. |
@@ -55,6 +62,9 @@ Stable profile labels are display names, not account identity. The actual logged
 account must remain visible beside a custom label. Chat drafts must never be keyed
 by a slot label or carried into a newly authorized session merely because the slot
 is the same. A detached worker retains its profile lock until actual process exit.
+The stable namespace remains tied to the canonical executable path; persistence
+tests must restart the host from the same location. Another portable folder is a
+separate installation for these profiles.
 
 ## Validation and input needed later
 

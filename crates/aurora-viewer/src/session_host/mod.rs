@@ -216,7 +216,7 @@ impl Shell {
         let output = context.run_ui(raw, |ui| {
             let shown = self.ui.show(ui, &p, &self.snapshot, native_ready, hosted, self.closing.is_some());
             // A discarded egui pass must not duplicate a queued action.
-            action = action.or(shown.action);
+            action = action.take().or(shown.action);
             world = shown.world;
         });
         self.world = world;
