@@ -61,6 +61,8 @@ pub(crate) fn capture_for(scene: bool, full: bool, can_capture: bool) -> Option<
 /// thread reconfigures the swapchain when it differs from what it has.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct SurfaceState {
+    /// Main-thread requested surface generation, retained in session proofs.
+    pub epoch: u64,
     pub width: u32,
     pub height: u32,
     pub vsync: bool,

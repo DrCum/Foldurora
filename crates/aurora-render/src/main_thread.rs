@@ -39,6 +39,7 @@ use crate::gpu_cull::{CullTables, GpuCull};
 use crate::packet::{FramePacket, FrameResult, SceneGpu, Spent, SurfaceState, capture_for};
 use crate::render_thread::{Done, Host, Job, thread_wanted};
 use crate::renderer::{Backend, BackendInit, RenderError};
+use crate::session_fence::{Requests, SessionBoundary, SessionCompletion, SessionFenceError};
 use crate::textures::{MipLevel, TextureTable};
 use crate::types::*;
 use crate::upload::{StagedMesh, StagedTexture, StagingPool, UploadQueue};
@@ -183,6 +184,9 @@ pub struct Renderer {
     /// The device can draw the GPU lists (and AURORA_CPU_CULL is not set).
     gpu_cull: bool,
     size: (u32, u32),
+    /// Desired window surface generation, carried by each frame packet.
+    surface_epoch: u64,
+    session_fences: Requests,
     vsync: bool,
     settings: RenderSettings,
     msaa_supported: Vec<u32>,
@@ -606,6 +610,8 @@ impl Renderer {
             drawn_requests: Vec::new(),
             drawn_answers: Vec::new(),
             frames: 0,
+            surface_epoch: 1,
+            session_fences: Requests::default(),
             last_stats: RenderStats::default(),
             fresh: false,
             gpu_frames,
@@ -870,7 +876,10 @@ impl Renderer {
         if width == 0 || height == 0 {
             return;
         }
-        self.size = (width, height);
+        if self.size != (width, height) {
+            self.surface_epoch = crate::session_fence::next_surface_epoch(self.surface_epoch);
+            self.size = (width, height);
+        }
     }
 
     /// The draw lists can be culled on the GPU (`DrawLists::gpu`).
@@ -961,7 +970,10 @@ impl Renderer {
     }
 
     pub fn set_vsync(&mut self, vsync: bool) {
-        self.vsync = vsync;
+        if self.vsync != vsync {
+            self.surface_epoch = crate::session_fence::next_surface_epoch(self.surface_epoch);
+            self.vsync = vsync;
+        }
     }
 
     pub fn vsync(&self) -> bool {
@@ -1307,6 +1319,7 @@ impl Renderer {
             lists: spent.lists,
             ui,
             surface: SurfaceState {
+                epoch: self.surface_epoch,
                 width: self.size.0,
                 height: self.size.1,
                 vsync: self.vsync,
@@ -1514,9 +1527,107 @@ impl Renderer {
             return;
         };
         match owner.take_ready() {
-            Ok(Some(Done::Frame(r))) => self.apply(*r),
+            Ok(Some(done)) => self.apply_done(done),
             Ok(_) => {}
             Err(_) => self.fail(),
+        }
+    }
+
+    fn apply_done(&mut self, done: Done) {
+        match done {
+            Done::Frame(result) => self.apply(*result),
+            Done::SessionFence(reply) => self.session_fences.receive(reply),
+            Done::Pick(_) => {}
+        }
+    }
+
+    fn session_fences_supported(&self) -> Result<(), SessionFenceError> {
+        if !self.threaded() || self.vr_engaged() {
+            return Err(SessionFenceError::Unsupported);
+        }
+        if self.failed || self.lost.get() || self.surface_epoch == 0 {
+            return Err(SessionFenceError::RendererFailed);
+        }
+        Ok(())
+    }
+
+    /// Snapshot after applying a viewport/size change, before submitting its
+    /// prepared frame. A completed frame must be newer than `after_frame`.
+    pub fn session_boundary(&self) -> Result<SessionBoundary, SessionFenceError> {
+        self.session_fences_supported()?;
+        if self.session_fences.pending() {
+            return Err(SessionFenceError::Busy);
+        }
+        Ok(SessionBoundary {
+            surface_epoch: self.surface_epoch,
+            after_frame: self.frames,
+        })
+    }
+
+    /// Start one explicit handoff fence without waiting for the render thread
+    /// or GPU. Stop submitting frames before this call and until consumption;
+    /// only the caller knows which account/activation owns that rendering gate.
+    pub fn request_session_fence(&mut self, ticket: u64) -> Result<(), SessionFenceError> {
+        self.session_fences_supported()?;
+        self.session_fences.request(ticket)?;
+        self.drive_session_fence()
+    }
+
+    /// Retry/consume the matching fence once. A Pending result only schedules
+    /// another nonblocking render-thread poll; this never polls the device here.
+    pub fn poll_session_fence(&mut self, ticket: u64) -> Result<Option<SessionCompletion>, SessionFenceError> {
+        self.session_fences_supported()?;
+        self.session_fences.check(ticket)?;
+        self.drive_session_fence()?;
+        self.session_fences.take(ticket)
+    }
+
+    /// Release a host request during lease failure/detachment. Old callbacks
+    /// retain their original identity; ordinary rendering can resume at once.
+    pub fn cancel_session_fence(&mut self, ticket: u64) -> bool {
+        self.session_fences.cancel(ticket)
+    }
+
+    /// Preserve the UI atlas while the viewer keeps CPU/network work alive
+    /// without submitting a standby/transition frame.
+    pub fn retain_session_ui(&mut self, mut ui: crate::EguiFrame) {
+        self.held_textures.0.append(std::mem::take(&mut ui.textures_delta));
+    }
+
+    fn drive_session_fence(&mut self) -> Result<(), SessionFenceError> {
+        let ready = match &self.host {
+            Host::Thread { owner, .. } => owner.try_take_ready(),
+            Host::Inline(_, _) => return Err(SessionFenceError::Unsupported),
+        };
+        match ready {
+            Ok(Some(done)) => self.apply_done(done),
+            Ok(None) => {}
+            Err(_) => {
+                self.fail();
+                return Err(SessionFenceError::RendererFailed);
+            }
+        }
+        self.session_fences_supported()?;
+        let Some(ticket) = self.session_fences.next_job() else {
+            return Ok(());
+        };
+        let submitted = match &self.host {
+            Host::Thread { owner, .. } => owner.try_submit(Job::SessionFence(ticket)),
+            Host::Inline(_, _) => return Err(SessionFenceError::Unsupported),
+        };
+        match submitted {
+            Ok(Some(submitted)) => {
+                self.session_fences.handed(ticket);
+                if let Some(done) = submitted.previous {
+                    self.apply_done(done);
+                }
+                Ok(())
+            }
+            Ok(None) => Ok(()),
+            Err(_) => {
+                self.fail();
+                Err(SessionFenceError::RendererFailed)
+            }
         }
     }
 
