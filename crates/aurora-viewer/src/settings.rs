@@ -2160,6 +2160,16 @@ fn unit_test_root() -> Option<PathBuf> {
 }
 
 pub fn config_dir() -> PathBuf {
+    if let Some(root) = crate::session_host::profile::root() {
+        return root.join("config");
+    }
+    catalogue_dir()
+}
+
+/// Global saved-account metadata remains shared while host-worker settings and
+/// account files use their explicit per-session profile. No credential is read
+/// or copied through this path.
+pub(crate) fn catalogue_dir() -> PathBuf {
     if let Some(root) = unit_test_root() {
         return root.join("config");
     }
@@ -2187,6 +2197,9 @@ pub fn accounts_dir() -> PathBuf {
 }
 
 pub fn cache_dir() -> PathBuf {
+    if let Some(root) = crate::session_host::profile::root() {
+        return root.join("cache");
+    }
     if let Some(root) = unit_test_root() {
         return root.join("cache");
     }

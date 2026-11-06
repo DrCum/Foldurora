@@ -85,7 +85,7 @@ fn read(path: &Path) -> std::io::Result<(Vec<Account>, bool)> {
 }
 
 pub fn load() -> Vec<Account> {
-    match read(&crate::settings::config_dir().join("login_accounts.json")) {
+    match read(&crate::settings::catalogue_dir().join("login_accounts.json")) {
         Ok((accounts, _)) => accounts,
         Err(error) => {
             log::warn!("account catalogue unreadable: {error}");
@@ -125,7 +125,7 @@ pub fn save(account: Account) -> Vec<Account> {
 
 /// A card can switch grids without deleting credentials for its previous grid.
 pub fn replace(previous: &(String, String), account: Account) -> Vec<Account> {
-    let result = change_at(&crate::settings::config_dir().join("login_accounts.json"), |accounts| {
+    let result = change_at(&crate::settings::catalogue_dir().join("login_accounts.json"), |accounts| {
         upsert(accounts, previous, account);
     });
     result.unwrap_or_else(|error| {
@@ -148,7 +148,7 @@ fn upsert(accounts: &mut Vec<Account>, previous: &(String, String), mut account:
 
 /// A scene capture changes only this account's last-place metadata.
 pub fn remember_place(account: &Account, place: LastPlace) -> bool {
-    change_at(&crate::settings::config_dir().join("login_accounts.json"), |accounts| {
+    change_at(&crate::settings::catalogue_dir().join("login_accounts.json"), |accounts| {
         if let Some(current) = accounts
             .iter_mut()
             .find(|current| current.key() == account.key() && current.agent == account.agent)
@@ -168,7 +168,7 @@ pub fn remember_place(account: &Account, place: LastPlace) -> bool {
 }
 
 pub fn remove(account: &Account) -> Vec<Account> {
-    change_at(&crate::settings::config_dir().join("login_accounts.json"), |accounts| {
+    change_at(&crate::settings::catalogue_dir().join("login_accounts.json"), |accounts| {
         accounts.retain(|old| old.key() != account.key())
     })
     .unwrap_or_else(|error| {
@@ -179,7 +179,7 @@ pub fn remove(account: &Account) -> Vec<Account> {
 
 /// Move identities in the latest catalogue without replacing any profile data.
 pub fn move_relative(from: &(String, String), target: &(String, String), after: bool) -> std::io::Result<Vec<Account>> {
-    change_at(&crate::settings::config_dir().join("login_accounts.json"), |accounts| {
+    change_at(&crate::settings::catalogue_dir().join("login_accounts.json"), |accounts| {
         move_in(accounts, from, target, after);
     })
 }
@@ -205,7 +205,7 @@ pub fn move_in(accounts: &mut Vec<Account>, from: &(String, String), target: &(S
 
 /// Update only the chosen preference in the latest catalogue, under its lock.
 pub fn forget_preference(account: &Account, mfa: bool) -> Vec<Account> {
-    change_at(&crate::settings::config_dir().join("login_accounts.json"), |accounts| {
+    change_at(&crate::settings::catalogue_dir().join("login_accounts.json"), |accounts| {
         if let Some(current) = accounts.iter_mut().find(|current| current.key() == account.key()) {
             if mfa {
                 current.remember_mfa = false;

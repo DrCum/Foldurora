@@ -84,6 +84,7 @@ pub(crate) use gpu_stall::withdraw_all as withdraw_gpu_notices;
 mod graphics_start;
 mod grid_status;
 mod group_titles;
+mod host_session;
 mod hover_height;
 mod hover_tips;
 mod hud_drag;
@@ -823,6 +824,8 @@ pub struct App {
     gpu_stall: gpu_stall::GpuStall,
     /// The 3D paused behind on a busy card (app/busy_pause.rs).
     busy_pause: busy_pause::BusyPause,
+    /// Optional exact-process host bridge; standalone viewers have none.
+    host_session: Option<crate::session_host::worker::WorkerBridge>,
     /// The other viewers on this PC (instances.rs).
     instances: crate::instances::Instances,
     characters: crate::characters::Manager,
@@ -1674,6 +1677,7 @@ impl App {
             occluded: false,
             gpu_stall: Default::default(),
             busy_pause: Default::default(),
+            host_session: crate::session_host::worker::WorkerBridge::from_startup()?,
             instances: crate::instances::Instances::new(),
             characters: Default::default(),
             characters_ui: Default::default(),
@@ -8434,6 +8438,7 @@ impl App {
     }
 
     fn frame(&mut self, event_loop: &ActiveEventLoop) {
+        self.tick_host_session();
         self.tick_characters();
         // the input this frame reads came with the events just handled: its
         // time to the screen starts here (Performance › latency, pacing.rs)
@@ -14327,7 +14332,7 @@ impl App {
         let key = (self.settings.login_uri(), self.settings.username.trim().to_lowercase());
         if !self.login_form.accounts_loaded && !self.demo {
             self.login_form.accounts = crate::login_accounts::load();
-            if !crate::settings::config_dir().join("login_accounts.json").exists()
+            if !crate::settings::catalogue_dir().join("login_accounts.json").exists()
                 && self.settings.remember_username
                 && !key.1.is_empty()
                 && !self.login_form.accounts.iter().any(|a| a.key() == key)
@@ -20652,6 +20657,7 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.tick_host_session();
         crate::crash::pumped();
         self.sync_minimized_mute();
         if self.settings.window_fullscreen != self.fullscreen_applied {

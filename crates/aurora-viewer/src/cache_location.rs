@@ -37,6 +37,11 @@ pub fn chosen() -> Option<&'static Path> {
 /// written (else the default folder is used, like initCache's fallback),
 /// and removes the cache the previous run used when it was elsewhere.
 pub fn init() {
+    // A host worker's cache is fixed by its explicit session profile. A saved
+    // cache preference or old marker must not create/purge an ordinary cache.
+    if crate::session_host::profile::root().is_some() {
+        return;
+    }
     let path = crate::settings::Settings::path();
     let wanted = std::fs::read(&path)
         .ok()

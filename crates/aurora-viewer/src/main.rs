@@ -83,6 +83,7 @@ mod raw_mouse;
 mod report_abuse;
 mod scene;
 mod screen_rate;
+mod session_host;
 mod settings;
 mod shape_editor;
 mod slapp;
@@ -126,6 +127,17 @@ mod gpu_hints {
 }
 
 fn main() -> anyhow::Result<()> {
+    let cli = cli::get();
+    anyhow::ensure!(
+        !cli.session_host || cli.host_worker_config.is_none(),
+        "the session controller cannot also be a session worker"
+    );
+    if cli.session_host {
+        return session_host::run();
+    }
+    // Validate and install the production session profile before even the
+    // first settings read. No worker write may reach the ordinary profile.
+    session_host::worker::initialize_startup(cli.host_worker_config.as_deref())?;
     // Preferences › Graphics › Overlays, read from the file alone: nothing
     // else of the viewer has started yet
     let allow_overlays = settings::Settings::allow_overlays_at_start();
