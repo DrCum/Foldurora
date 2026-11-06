@@ -98,7 +98,11 @@ impl State {
     fn replace_source(&mut self, source: Option<ChatSource>, expires: Option<Instant>) {
         self.source = source;
         self.expires = expires;
-        self.revision = self.revision.checked_add(1).unwrap_or(0);
+        self.revision = if self.revision == 0 {
+            0
+        } else {
+            self.revision.checked_add(1).unwrap_or(0)
+        };
         self.retire();
         if self.revision == 0 {
             self.source = None;
@@ -769,6 +773,26 @@ mod tests {
         assert!(state.connected(state.revision).is_none());
         assert_eq!(state.revision, 0);
         assert!(state.source.is_none());
+    }
+
+    #[test]
+    fn worker_chat_same_call_expiry_and_fresh_source_cannot_reopen_exhausted_authority() {
+        let (mut state, source, _, connection) = state();
+        state.outgoing(&packet(source, 1, true)).expect("queued old event");
+        state
+            .incoming(connection, vec![packet(source, 1, false)])
+            .expect("queued old command");
+        let now = Instant::now();
+        state.revision = u64::MAX;
+        state.expires = Some(now);
+        assert_eq!(state.set_source(Some(source), Some(now + RETRY), now), SourceUpdate::Changed);
+        assert_eq!(state.revision, 0);
+        assert!(state.source.is_none() && state.expires.is_none());
+        assert!(state.outgoing.is_empty() && state.incoming.is_empty());
+        assert!(state.connection().is_none() && state.connected(1).is_none());
+        state.set_source(Some(source), Some(now + RETRY), now);
+        assert_eq!(state.revision, 0);
+        assert!(state.source.is_none() && state.expires.is_none());
     }
 
     #[test]
