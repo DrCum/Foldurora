@@ -103,6 +103,7 @@ pub(crate) struct WorkerBridge {
     device_epoch: u64,
     window: u64,
     last_frame: Option<aurora_session::FrameProof>,
+    last_receipt: Option<Instant>,
 }
 
 impl WorkerBridge {
@@ -128,6 +129,7 @@ impl WorkerBridge {
             device_epoch: 1,
             window: 0,
             last_frame: None,
+            last_receipt: None,
         }))
     }
 
@@ -193,6 +195,9 @@ impl WorkerBridge {
                 continue;
             }
             if let Ok(transition) = self.guard.on_command(&envelope, now) {
+                if self.guard.mode() != WorkerMode::Detached {
+                    self.last_receipt = Some(Instant::now());
+                }
                 if transition.effects.quiesce || transition.effects.prepare {
                     self.request_sequence = envelope.sequence;
                 }
@@ -226,8 +231,19 @@ impl WorkerBridge {
             || (self.status.keyboard_focused
                 && (self.status.phase == aurora_session::Phase::Login
                     || (matches!(self.gate, DisplayGate::Login) && self.status.phase == aurora_session::Phase::Connecting)
-                    || self.guard.input_owned()))
+                    || (self.guard.input_owned() && self.bound_session().is_some())))
     }
+    /// Fresh local channel authority only. Standby is eligible for native chat,
+    /// but a source never grants world rendering, keyboard input or focus.
+    pub(crate) fn bound_session(&self) -> Option<(aurora_session::Binding, u64)> {
+        let binding = self.guard.binding();
+        (!self.detached
+            && self.status.phase == aurora_session::Phase::Online
+            && binding.session.is_some()
+            && receipt_is_current(self.last_receipt, Instant::now()))
+        .then_some((binding, self.config.lease_epoch))
+    }
+
     pub fn world_allowed(&self) -> bool {
         self.detached || !self.supported || self.gate.allows_world()
     }
@@ -535,6 +551,12 @@ fn session_clock(since: &mut Option<Instant>, now: Instant) -> u64 {
     now.saturating_duration_since(*since.get_or_insert(now))
         .as_millis()
         .min(u64::MAX as u128) as u64
+}
+
+fn receipt_is_current(received: Option<Instant>, now: Instant) -> bool {
+    received
+        .and_then(|received| now.checked_duration_since(received))
+        .is_some_and(|age| age < std::time::Duration::from_millis(aurora_session::LEASE_MILLIS))
 }
 
 fn final_display_effects(mut effects: WorkerEffects, mode: WorkerMode) -> WorkerEffects {
@@ -946,6 +968,21 @@ mod tests {
         assert!(!contains_rect(-1000, -300, 1000, 1080, rect));
         assert!(!contains_rect(-1920, -300, 400, 1080, rect));
         assert!(!contains_rect(-1920, -300, 0, 1080, rect));
+    }
+
+    #[test]
+    fn native_source_authority_expires_on_local_receipt_age_even_without_a_frame_tick() {
+        let received = Instant::now();
+        assert!(!receipt_is_current(None, received));
+        assert!(!receipt_is_current(Some(received + std::time::Duration::from_millis(1)), received));
+        assert!(receipt_is_current(
+            Some(received),
+            received + std::time::Duration::from_millis(aurora_session::LEASE_MILLIS - 1)
+        ));
+        assert!(!receipt_is_current(
+            Some(received),
+            received + std::time::Duration::from_millis(aurora_session::LEASE_MILLIS)
+        ));
     }
 
     #[test]
