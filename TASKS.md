@@ -1,5 +1,22 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Foldurora session host (user request, 2026-11-06; no issue): opt-in CPU
+  controller, isolated manual-login workers, typed lease/handoff state machine,
+  private per-launch profiles and ordered GPU completion fences are assembled.
+  Compilation, native activation and offline runtime checks are pending; no
+  hosted-world acceptance is claimed. Preserve independent viewer processes,
+  release held input before handoff, quiesce before another login, and detach
+  safely on controller loss. See [the stage and acceptance guide](docs/SESSION_HOST.md).
+  - ⬜ Complete and verify one visible taskbar host with safe active-world switching.
+  - ⬜ Persistent account-bound worker settings across restarts; current profiles
+    are isolated per launch and must not be described as persistent.
+  - ⬜ Read-only small render targets at 0.5/1/2/5 FPS, latest-only frames and a
+    shared budget; no full-resolution background capture shortcut.
+  - ⬜ Inactive-account chat through native conversation/restriction paths,
+    bounded source-bound drafts/events and no implicit world activation.
+  - ⬜ Native Windows focus, mixed DPI, Z-order, taskbar, host failure and
+    confirmed shutdown checks; human grid testing only.
+
 - 🔧 Foldurora shared-GPU contention mitigation (user crash report, 2026-11-06;
   no issue): source `81c167e2` passed offline checks, but live multi-character
   testing lost graphics devices in background viewers with long GPU frames.
