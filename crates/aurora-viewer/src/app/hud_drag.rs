@@ -79,7 +79,14 @@ impl App {
         {
             return None;
         }
-        Some(legacy_hud_view_area(size, self.egui_ctx.pixels_per_point()))
+        let viewport = self.world_viewport_for_size((size[0], size[1]), false);
+        let [left, top, right, bottom] = legacy_hud_view_area([viewport.width, viewport.height], self.egui_ctx.pixels_per_point());
+        Some([
+            left + viewport.x as f32,
+            top + viewport.y as f32,
+            right + viewport.x as f32,
+            bottom + viewport.y as f32,
+        ])
     }
 
     pub(super) fn keep_scaled_huds_accessible(&mut self, view: HudView) {

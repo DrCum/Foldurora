@@ -13221,3 +13221,18 @@ picker-pipette-no-texture = Aucune texture copiable trouvée dans votre inventai
 picker-pipette-no-material = Aucun matériau copiable trouvé dans votre inventaire.
 
 local-texture-preview-hint = Texture locale — aperçu d’un fichier de cet ordinateur.
+
+# Multi-monitor world viewport
+mm-world-viewport = Vue du monde sur plusieurs écrans
+mm-enable = Utiliser une vue du monde personnalisée
+mm-enable-help = Étirez la fenêtre sur plusieurs écrans, puis réservez une zone au monde 3D. La caméra, les HUD et les clics dans le monde restent dans cette zone ; les panneaux peuvent occuper le reste. La vue subjective, l’interface masquée, le mode photo et la VR utilisent leur cadre entier.
+mm-presets = Position du monde
+mm-presets-help = Commencez par la moitié gauche ou droite de la fenêtre étirée, puis ajustez les marges pour des écrans de tailles différentes.
+mm-world-left = Moitié gauche
+mm-world-right = Moitié droite
+mm-full-window = Fenêtre entière
+mm-margin-left = Marge gauche
+mm-margin-right = Marge droite
+mm-margin-top = Marge supérieure
+mm-margin-bottom = Marge inférieure
+mm-margin-help = Pourcentage de la fenêtre réservé aux panneaux. Les marges opposées sont réduites ensemble pour conserver au moins 5 % pour le monde.

@@ -8,6 +8,55 @@ pub fn page(cx: &mut Cx, tab: usize) {
     use aurora_i18n::tr;
     match tab {
         0 => {
+            cx.group(tr!("mm-world-viewport"), |cx| {
+                cx.toggle(tr!("mm-enable"), tr!("mm-enable-help"), &field!(world_viewport.enabled));
+                cx.row(tr!("mm-presets"), tr!("mm-presets-help"), &field!(world_viewport), |ui, s| {
+                    let mut changed = false;
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.button(tr!("mm-world-left")).clicked() {
+                            s.world_viewport.half(false);
+                            changed = true;
+                        }
+                        if ui.button(tr!("mm-world-right")).clicked() {
+                            s.world_viewport.half(true);
+                            changed = true;
+                        }
+                        if ui.button(tr!("mm-full-window")).clicked() {
+                            s.world_viewport = Default::default();
+                            changed = true;
+                        }
+                    });
+                    changed
+                });
+                cx.slider(
+                    tr!("mm-margin-left"),
+                    tr!("mm-margin-help"),
+                    &field!(world_viewport.left),
+                    0.0..=95.0,
+                    "%",
+                );
+                cx.slider(
+                    tr!("mm-margin-right"),
+                    tr!("mm-margin-help"),
+                    &field!(world_viewport.right),
+                    0.0..=95.0,
+                    "%",
+                );
+                cx.slider(
+                    tr!("mm-margin-top"),
+                    tr!("mm-margin-help"),
+                    &field!(world_viewport.top),
+                    0.0..=95.0,
+                    "%",
+                );
+                cx.slider(
+                    tr!("mm-margin-bottom"),
+                    tr!("mm-margin-help"),
+                    &field!(world_viewport.bottom),
+                    0.0..=95.0,
+                    "%",
+                );
+            });
             cx.group(tr!("ui-options-bars"), |cx| {
                 cx.toggle(tr!("bug-toolbar"), tr!("bug-toolbar-help"), &field!(show_bug_report));
                 // the place island of the Aurora bars (also in its right-click menu)

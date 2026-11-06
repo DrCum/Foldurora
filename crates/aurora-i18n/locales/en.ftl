@@ -13225,3 +13225,18 @@ picker-pipette-no-texture = No copyable texture found in your inventory.
 picker-pipette-no-material = No copyable material found in your inventory.
 
 local-texture-preview-hint = Local texture — preview from a file on this computer.
+
+# Multi-monitor world viewport
+mm-world-viewport = Multi-monitor world viewport
+mm-enable = Use a custom world viewport
+mm-enable-help = Stretch the viewer window across monitors, then reserve one area for the 3D world. Camera, HUDs and world clicks stay in that area; panels can use the rest. Mouselook, hidden UI, photo mode and VR use their full frame.
+mm-presets = World placement
+mm-presets-help = Start with the left or right half of a stretched window, then adjust the margins for displays of different sizes.
+mm-world-left = Left half
+mm-world-right = Right half
+mm-full-window = Full window
+mm-margin-left = Left margin
+mm-margin-right = Right margin
+mm-margin-top = Top margin
+mm-margin-bottom = Bottom margin
+mm-margin-help = Percentage of the full viewer window reserved for panels. Opposite margins scale together to leave at least 5% for the world.

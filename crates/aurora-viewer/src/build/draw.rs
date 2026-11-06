@@ -46,8 +46,13 @@ fn shade(c: Color32, k: f32) -> Color32 {
 
 impl<'a> Painter3d<'a> {
     pub fn new(painter: egui::Painter, cam: &'a Cam, pal: Palette) -> Self {
+        let area = cam.hud.map_or(cam.area, |view| view.area);
+        let clip = egui::Rect::from_min_max(
+            egui::pos2(area[0] / cam.ppp, area[1] / cam.ppp),
+            egui::pos2(area[2] / cam.ppp, area[3] / cam.ppp),
+        );
         Painter3d {
-            painter,
+            painter: painter.with_clip_rect(clip),
             cam,
             pal,
             tris: Vec::new(),

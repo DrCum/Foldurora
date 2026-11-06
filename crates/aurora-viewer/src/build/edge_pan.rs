@@ -66,12 +66,12 @@ pub fn drag_cursor(cam: &Cam, cursor: (f32, f32), start: (f32, f32), grab_offset
     // A handle already inside the margin must not jump on the first move.
     (
         cursor.0.clamp(
-            (cam.width * MARGIN + grab_offset.0).min(start.0),
-            (cam.width * (1.0 - MARGIN) + grab_offset.0).max(start.0),
+            (cam.area[0] + cam.width * MARGIN + grab_offset.0).min(start.0),
+            (cam.area[0] + cam.width * (1.0 - MARGIN) + grab_offset.0).max(start.0),
         ),
         cursor.1.clamp(
-            (cam.height * MARGIN + grab_offset.1).min(start.1),
-            (cam.height * (1.0 - MARGIN) + grab_offset.1).max(start.1),
+            (cam.area[1] + cam.height * MARGIN + grab_offset.1).min(start.1),
+            (cam.area[1] + cam.height * (1.0 - MARGIN) + grab_offset.1).max(start.1),
         ),
     )
 }
@@ -91,8 +91,8 @@ impl EdgePan {
         let Some((x, y)) = cam.project_px(point) else { return Vec3::ZERO };
         let strongest = |a: f32, b: f32| if a.abs() > b.abs() { a } else { b };
         let target = Vec2::new(
-            strongest(pressure(cursor.0, cam.width), pressure(x, cam.width)),
-            strongest(pressure(cursor.1, cam.height), pressure(y, cam.height)),
+            strongest(pressure(cursor.0 - cam.area[0], cam.width), pressure(x - cam.area[0], cam.width)),
+            strongest(pressure(cursor.1 - cam.area[1], cam.height), pressure(y - cam.area[1], cam.height)),
         );
         let dt = dt.clamp(0.0, 0.05);
         let rate = std::f32::consts::LN_2 / HALF_LIFE;
@@ -143,6 +143,32 @@ mod tests {
             let delta = EdgePan::default().update(&cam, cursor, Vec3::ZERO, Motion::Plane(cam.at), 0.016, true);
             assert!(delta.dot(axis) > 0.0);
             assert!(delta.cross(axis).length() < 1e-5);
+        }
+    }
+
+    #[test]
+    fn offset_world_views_pan_and_clamp_at_their_own_edges() {
+        for (left, top) in [(0.0, 0.0), (1600.0, 0.0), (1920.0, 240.0)] {
+            let cam = camera().in_area([left, top, left + 1600.0, top + 900.0]);
+            let middle = (left + 800.0, top + 450.0);
+            assert_eq!(
+                EdgePan::default().update(&cam, middle, Vec3::ZERO, Motion::Plane(cam.at), 0.016, true),
+                Vec3::ZERO
+            );
+            assert_eq!(
+                drag_cursor(&cam, (left + 1600.0, top), middle, (0.0, 0.0)),
+                (left + 1520.0, top + 45.0)
+            );
+            for (cursor, axis) in [
+                ((left, middle.1), cam.left),
+                ((left + 1600.0, middle.1), -cam.left),
+                ((middle.0, top), cam.up),
+                ((middle.0, top + 900.0), -cam.up),
+            ] {
+                let delta = EdgePan::default().update(&cam, cursor, Vec3::ZERO, Motion::Plane(cam.at), 0.016, true);
+                assert!(delta.dot(axis) > 0.0);
+                assert!(delta.cross(axis).length() < 1e-5);
+            }
         }
     }
 

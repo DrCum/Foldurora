@@ -13198,3 +13198,18 @@ picker-pipette-no-texture = コピー可能なテクスチャがインベント�
 picker-pipette-no-material = コピー可能なマテリアルがインベントリにありません。
 
 local-texture-preview-hint = ローカルテクスチャ — このコンピューターのファイルのプレビュー。
+
+# Multi-monitor world viewport
+mm-world-viewport = 複数モニター用ワールド表示
+mm-enable = ワールドの表示領域を指定する
+mm-enable-help = ウィンドウを複数のモニターに広げ、3D ワールドを表示する領域を指定します。カメラ、HUD、ワールドへのクリックはこの領域内に収まり、残りの領域にパネルを配置できます。マウスルック、UI 非表示、写真モード、VR では全体を使用します。
+mm-presets = ワールドの配置
+mm-presets-help = 広げたウィンドウの左半分または右半分を選び、モニターの大きさに合わせて余白を調整してください。
+mm-world-left = 左半分
+mm-world-right = 右半分
+mm-full-window = ウィンドウ全体
+mm-margin-left = 左の余白
+mm-margin-right = 右の余白
+mm-margin-top = 上の余白
+mm-margin-bottom = 下の余白
+mm-margin-help = パネル用の余白をウィンドウ全体の割合で指定します。向かい合う余白は、ワールド用に少なくとも 5% が残るように調整されます。

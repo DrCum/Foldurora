@@ -63,6 +63,8 @@ mod terrain_tests;
 #[cfg(test)]
 mod test_gpu;
 pub mod tex_anim;
+mod viewport;
+pub use viewport::{WorldViewport, window_matrix as viewport_matrix};
 pub mod textures;
 pub mod thread_cpu;
 pub mod types;

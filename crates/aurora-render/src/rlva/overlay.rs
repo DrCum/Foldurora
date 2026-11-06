@@ -82,6 +82,7 @@ impl Overlays {
         view: &wgpu::TextureView,
         textures: &wgpu::BindGroup,
         effects: &[OverlayEffect],
+        viewport: crate::WorldViewport,
     ) {
         let effects = &effects[..effects.len().min(256)];
         if effects.is_empty() {
@@ -104,6 +105,15 @@ impl Overlays {
             occlusion_query_set: None,
             multiview_mask: None,
         });
+        pass.set_viewport(
+            viewport.x as f32,
+            viewport.y as f32,
+            viewport.width as f32,
+            viewport.height as f32,
+            0.0,
+            1.0,
+        );
+        pass.set_scissor_rect(viewport.x, viewport.y, viewport.width, viewport.height);
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.group, &[]);
         pass.set_bind_group(1, textures, &[]);

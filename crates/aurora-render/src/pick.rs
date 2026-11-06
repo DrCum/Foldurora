@@ -71,6 +71,7 @@ struct Slot {
     pending: Option<PickPixel>,
     /// Copied this frame: to map once submitted.
     encoded: bool,
+    generation: u64,
 }
 
 /// A click's own parameters, output and readback: several clicks can be
@@ -99,6 +100,7 @@ pub struct DepthPick {
     slots: Vec<Slot>,
     request: Option<(u32, u32)>,
     latest: Option<Vec3>,
+    generation: u64,
     clicks: Vec<ClickSlot>,
     /// Clicks asked while every slot was taken.
     click_queue: Vec<ClickRequest>,
@@ -176,6 +178,7 @@ impl DepthPick {
                 state: Arc::new(AtomicU8::new(IDLE)),
                 pending: None,
                 encoded: false,
+                generation: 0,
             })
             .collect();
         let clicks = (0..CLICK_SLOTS)
@@ -201,6 +204,7 @@ impl DepthPick {
             slots,
             request: None,
             latest: None,
+            generation: 0,
             clicks,
             click_queue: Vec::new(),
             click_answers: Vec::new(),
@@ -218,6 +222,8 @@ impl DepthPick {
         self.click_answers
             .extend(self.click_queue.drain(..).map(|(ticket, _, _)| (ticket, None)));
         self.latest = None;
+        self.request = None;
+        self.generation = self.generation.wrapping_add(1);
     }
 
     /// The last hover answer (None for the sky or not yet known).
@@ -233,7 +239,8 @@ impl DepthPick {
             };
             match s.state.load(Ordering::Acquire) {
                 MAPPED => {
-                    if let Ok(view) = s.buffer.get_mapped_range(..)
+                    if s.generation == self.generation
+                        && let Ok(view) = s.buffer.get_mapped_range(..)
                         && let Some(b) = view.get(..4)
                     {
                         self.latest = px.world(f32::from_le_bytes([b[0], b[1], b[2], b[3]]));
@@ -316,6 +323,7 @@ impl DepthPick {
             inv_view_proj,
         });
         s.encoded = true;
+        s.generation = self.generation;
     }
 
     /// Map the slots copied this frame, once their commands are submitted.

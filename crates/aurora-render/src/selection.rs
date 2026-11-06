@@ -204,6 +204,7 @@ impl Overlay {
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
         mut timestamps: Option<wgpu::RenderPassTimestampWrites<'_>>,
+        clip: Option<crate::WorldViewport>,
     ) {
         for (i, (view, pipeline)) in [(&self.horizontal, &self.spread), (target, &self.composite)]
             .into_iter()
@@ -229,6 +230,9 @@ impl Overlay {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
+            if let Some(clip) = clip {
+                pass.set_scissor_rect(clip.x, clip.y, clip.width, clip.height);
+            }
             pass.set_pipeline(pipeline);
             pass.set_bind_group(0, &self.groups[i], &[]);
             pass.draw(0..3, 0..1);

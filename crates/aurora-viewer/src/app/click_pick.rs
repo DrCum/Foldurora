@@ -232,6 +232,9 @@ impl ClickWait {
 
 impl App {
     pub(super) fn ui_takes_pointer(&self) -> bool {
+        if !self.world_pointer_inside() {
+            return true;
+        }
         if self.cursor_hold.held() {
             // the hidden cursor is the camera's: the crosshair, never a window (#1343)
             return false;

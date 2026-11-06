@@ -1653,6 +1653,7 @@ pub(crate) struct Backend {
     /// The motion vectors' view (AURORA_DEBUG_MOTION).
     motion_debug: Option<crate::motion_debug::MotionDebug>,
     rlva_overlays: Option<crate::rlva::overlay::Overlays>,
+    world_viewport: Option<crate::WorldViewport>,
     rlva_resolution_divisor: u32,
     rlva_scaled: Option<crate::rlva::resolution::Scaled>,
     smaa: Smaa,
@@ -3239,6 +3240,7 @@ impl Backend {
             rlva_spheres: None,
             motion_debug,
             rlva_overlays: None,
+            world_viewport: None,
             rlva_resolution_divisor: 1,
             rlva_scaled: None,
             smaa,
@@ -4810,6 +4812,16 @@ impl Backend {
         self.taa = Some(taa);
     }
 
+    fn output_viewport(&self) -> crate::WorldViewport {
+        let size = (self.config.width, self.config.height);
+        if self.snapshot_window.is_some() {
+            crate::WorldViewport::full(size)
+        } else {
+            self.world_viewport
+                .map_or_else(|| crate::WorldViewport::full(size), |v| v.fitted(size))
+        }
+    }
+
     fn scene_size(&self) -> (u32, u32) {
         (self.targets.color_tex.width(), self.targets.color_tex.height())
     }
@@ -4822,7 +4834,7 @@ impl Backend {
         } else {
             self.settings.render_scale_percent
         };
-        let size = crate::rlva::resolution::render_size((self.config.width, self.config.height), self.rlva_resolution_divisor, scale);
+        let size = crate::rlva::resolution::render_size(self.output_viewport().size(), self.rlva_resolution_divisor, scale);
         log::info!(
             "world resolution: {}x{} (output {}x{}, scale {}%)",
             size.0,
@@ -5632,6 +5644,7 @@ impl Backend {
             p.output = Some(eyes.textures[i].clone());
             p.params.view = eye.view;
             p.params.proj = eye.projection;
+            p.params.world_viewport = None;
             p.params.camera_pos = eye.position;
             p.params.fov_y = 2.0 * (1.0 / eye.projection.y_axis.y).atan();
             p.params.photo_tile = Mat4::IDENTITY;
@@ -5734,12 +5747,12 @@ impl Backend {
         self.depth_pick.harvest();
         self.depth_pick.harvest_clicks();
         self.drawn_pick.harvest();
-        self.drawn_pick.ask(drawn);
+
         let previous_scene = self.scene_size();
         let picks = picks
             .into_iter()
             .map(|(ticket, x, y)| {
-                let (x, y) = crate::rlva::resolution::pixel((x, y), (self.config.width, self.config.height), previous_scene);
+                let (x, y) = self.output_viewport().pixel((x, y), previous_scene);
                 (ticket, x, y)
             })
             .collect();
@@ -5754,11 +5767,31 @@ impl Backend {
             picks,
         );
         // the window and the settings as the main thread had them for this frame
+        let old_viewport = self.output_viewport();
+        let resized = (self.config.width, self.config.height) != (surface.width, surface.height);
+        self.world_viewport = params.world_viewport;
+        let divisor_changed = self.rlva_resolution_divisor != params.rlva_resolution_divisor;
+        self.rlva_resolution_divisor = params.rlva_resolution_divisor;
         self.apply_surface(surface);
-        if self.rlva_resolution_divisor != params.rlva_resolution_divisor {
-            self.rlva_resolution_divisor = params.rlva_resolution_divisor;
+        let viewport = self.output_viewport();
+        if !resized && (old_viewport.size() != viewport.size() || divisor_changed) {
             self.rebuild_targets();
         }
+        if old_viewport != viewport {
+            self.motion_cut = true;
+            self.depth_pick.scene_changed();
+            // A queued drawn-face request has not selected its camera yet.
+            // Never reinterpret its local pixel under a different viewport.
+            self.drawn_pick.viewport_changed();
+        }
+        let drawn = drawn
+            .into_iter()
+            .map(|(ticket, x, y, mode)| {
+                let (x, y) = viewport.pixel((x, y), viewport.size());
+                (ticket, x, y, mode)
+            })
+            .collect();
+        self.drawn_pick.ask(drawn);
         stats.present_mode = Some(self.config.present_mode);
         if settings != self.settings {
             self.apply_settings(settings);
@@ -5777,10 +5810,11 @@ impl Backend {
             self.begin_snapshot(s);
         } else if let Some((x, y)) = hover {
             // (window pixels: a photo frame has none of them)
-            let (x, y) = crate::rlva::resolution::pixel((x, y), (self.config.width, self.config.height), self.scene_size());
+            let (x, y) = self.output_viewport().pixel((x, y), self.scene_size());
             self.depth_pick.hover(x, y);
         }
         let world_size = self.scene_size();
+        let viewport = self.output_viewport();
 
         // egui textures first, so they are never lost on a skipped frame
         if let Some(ui) = &mut egui_frame {
@@ -5960,8 +5994,8 @@ impl Backend {
             let jx = halton(i, 2) * 2.0 / world_size.0 as f32;
             let jy = halton(i, 3) * 2.0 / world_size.1 as f32;
             depth_jitter = glam::Vec2::new(
-                halton(i, 2) * self.config.width as f32 / world_size.0 as f32,
-                -halton(i, 3) * self.config.height as f32 / world_size.1 as f32,
+                halton(i, 2) * viewport.width as f32 / world_size.0 as f32,
+                -halton(i, 3) * viewport.height as f32 / world_size.1 as f32,
             );
             let mut j = f.clone();
             j.proj = Mat4::from_translation(Vec3::new(jx, jy, 0.0)) * f.proj;
@@ -5989,7 +6023,7 @@ impl Backend {
         let above_water_possible = f.camera_pos.z >= camera_water_level - wake_margin;
         // Only the portable path needs late fragment depth at the waterline.
         // Hardware clamp keeps ordinary early depth testing for the same mesh.
-        let aspect = self.config.width as f32 / self.config.height.max(1) as f32;
+        let aspect = viewport.width as f32 / viewport.height as f32;
         let near_radius = f.near * (1.0 + (f.fov_y * 0.5).tan().powi(2) * (1.0 + aspect * aspect)).sqrt();
         let water_near = (f.camera_pos.z - camera_water_level).abs() <= near_radius * 1.3 + wake_margin;
         let do_water_refl = self.targets.water_refl.is_some() && !lists.water.is_empty() && above_water_possible;
@@ -6185,12 +6219,12 @@ impl Backend {
         let main_vp = Mat4::from_cols_array_2d(&main.view_proj);
         // (asked in window pixels: a photo frame answers none of them)
         let drawn_px = if snapshot.is_none() {
-            self.drawn_pick.begin((self.config.width, self.config.height), main_vp.inverse())
+            self.drawn_pick.begin(viewport.size(), main_vp.inverse())
         } else {
             None
         };
         if let Some((x, y, _)) = drawn_px {
-            let narrow = crate::drawn_pick::narrow(x, y, self.config.width, self.config.height);
+            let narrow = crate::drawn_pick::narrow(x, y, viewport.width, viewport.height);
             let mut u = main;
             u.view_proj = (narrow * main_vp).to_cols_array_2d();
             u.eye_view_proj = (narrow * Mat4::from_cols_array_2d(&main.eye_view_proj)).to_cols_array_2d();
@@ -8287,7 +8321,9 @@ impl Backend {
         mark(&mut encoder, MARK_BLOOM_END);
 
         let draw_huds = lists.hud_view.is_some() && self.hud_depth.is_some() && snapshot.is_none_or(|s| s.huds);
-        if world_size != (self.config.width, self.config.height) {
+        if world_size != (self.config.width, self.config.height)
+            || viewport != crate::WorldViewport::full((self.config.width, self.config.height))
+        {
             let smooth = self.settings.render_scale_percent < 100 && self.rlva_resolution_divisor <= 1 && snapshot.is_none();
             if self
                 .rlva_scaled
@@ -8405,7 +8441,7 @@ impl Backend {
                 }),
                 _ => None,
             };
-            selection.encode(&mut encoder, scene_target, timestamps);
+            selection.encode(&mut encoder, scene_target, timestamps, None);
             calls.set(calls.get() + 2);
         }
 
@@ -8423,7 +8459,7 @@ impl Backend {
             calls.set(calls.get() + passes as u32);
         }
         if let Some(scaled) = &self.rlva_scaled {
-            scaled.encode(&mut encoder, &surface_view);
+            scaled.encode(&mut encoder, &surface_view, viewport);
             calls.set(calls.get() + 1);
         }
 
@@ -8444,6 +8480,11 @@ impl Backend {
             let scale = ui.pixels_per_point;
             let glass_supported = self.ui_blur.is_some() || self.config.usage.contains(wgpu::TextureUsages::COPY_SRC);
             let (labels, rest) = ui.primitives.split_at_mut(labels_end);
+            let [left, top, right, bottom] = viewport.area();
+            let clip = egui::Rect::from_min_max(egui::pos2(left / scale, top / scale), egui::pos2(right / scale, bottom / scale));
+            for label in labels.iter_mut() {
+                label.clip_rect = label.clip_rect.intersect(clip);
+            }
             // the labels show the scene alone, blurred where they are; the
             // windows show it with its labels and the HUD attachments
             let label_glass = crate::ui_glass::bounds(labels, scale, size).filter(|_| glass_supported);
@@ -8485,9 +8526,10 @@ impl Backend {
                     &self.targets.depth_ss,
                     labels,
                     &crate::label_depth::LabelView {
-                        view_proj: unjittered_vp,
+                        view_proj: crate::viewport::window_matrix(viewport, (self.config.width, self.config.height)) * unjittered_vp,
                         pixels_per_point: scale,
                         size,
+                        viewport: viewport.rect(),
                         jitter: depth_jitter,
                     },
                 );
@@ -8557,7 +8599,14 @@ impl Backend {
         if !f.rlva_overlays.is_empty() {
             self.rlva_overlays
                 .get_or_insert_with(|| crate::rlva::overlay::Overlays::new(&self.device, self.config.format, &self.tex_layout))
-                .encode(&self.queue, &mut encoder, &surface_view, &scene.textures, &f.rlva_overlays);
+                .encode(
+                    &self.queue,
+                    &mut encoder,
+                    &surface_view,
+                    &scene.textures,
+                    &f.rlva_overlays,
+                    viewport,
+                );
             calls.set(calls.get() + 1);
         } else {
             self.rlva_overlays = None;
@@ -8600,6 +8649,7 @@ impl Backend {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
+            pass.set_scissor_rect(viewport.x, viewport.y, viewport.width, viewport.height);
             bind_mesh(&mut pass, &self.groups.refl[5]);
             draw(&mut pass, &self.pipelines.hud_opaque, hud_opaque_range);
             draw(&mut pass, &self.pipelines.hud_blend, hud_blend_range);
@@ -8610,6 +8660,7 @@ impl Backend {
             && let (Some(selection), Some((_, _, depth))) = (&self.hud_selection, &self.hud_depth)
         {
             let mut pass = selection.begin_mask(&mut encoder, depth);
+            pass.set_scissor_rect(viewport.x, viewport.y, viewport.width, viewport.height);
             bind_mesh(&mut pass, &self.groups.refl[5]);
             draw(&mut pass, &self.pipelines.selection_mask, hud_select_faces_range);
             drop(pass);
@@ -8621,7 +8672,7 @@ impl Backend {
                 }),
                 _ => None,
             };
-            selection.encode(&mut encoder, &surface_view, timestamps);
+            selection.encode(&mut encoder, &surface_view, timestamps, Some(viewport));
             calls.set(calls.get() + 2);
         }
         if let (Some(t), Some(slot)) = (&self.timer, timer_slot) {
@@ -8906,13 +8957,12 @@ impl Backend {
     /// drawn (depth prepass read-back; None for the sky). Blocks on the GPU
     /// for one tiny copy: clicks only.
     pub fn pick_world(&mut self, x: f32, y: f32) -> Option<Vec3> {
-        let (w, h) = (self.config.width, self.config.height);
-        if x < 0.0 || y < 0.0 || x >= w as f32 || y >= h as f32 {
-            return None;
-        }
+        let viewport = self.output_viewport();
+        viewport.local(x, y)?;
+        let (x, y) = viewport.pixel((x as u32, y as u32), self.scene_size());
         let px = crate::pick::PickPixel {
-            x: crate::rlva::resolution::pixel((x as u32, y as u32), (w, h), self.scene_size()).0,
-            y: crate::rlva::resolution::pixel((x as u32, y as u32), (w, h), self.scene_size()).1,
+            x,
+            y,
             width: self.scene_size().0,
             height: self.scene_size().1,
             inv_view_proj: self.last_inv_vp,
