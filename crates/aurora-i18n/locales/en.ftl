@@ -13290,6 +13290,29 @@ character-window-connecting = Connecting
 character-window-online = Online
 character-window-main-grid = Second Life
 
+# Account-bound session-host chat popouts
+host-chat-open = Chat
+host-chat-title = { $account } · { $grid } — Chat — { $viewer }
+host-chat-identity = { $account } · { $grid }
+host-chat-bound-help = Chat stays with this character while you switch worlds.
+host-chat-no-conversation = Select a conversation
+host-chat-unavailable = This chat connection is unavailable. Reopen chat after the character reconnects.
+host-chat-restricted = Reading or sending is restricted in this viewer.
+host-chat-history-gap = Some earlier lines are unavailable.
+host-chat-input = Message to this conversation
+host-chat-send = Send
+host-chat-compose-help = Ctrl+Enter to send. Text is sent literally.
+host-chat-draft-cleared = Draft cleared because the conversation or its permissions changed.
+host-chat-too-long = Messages may use up to 1,023 UTF-8 bytes.
+host-chat-invalid = Remove unsupported control characters before sending.
+host-chat-queued = Queued for this character.
+host-chat-accepted = Submitted locally. Remote delivery is not confirmed.
+host-chat-uncertain = The send outcome is uncertain. Check the conversation before sending again.
+host-chat-rejected = This viewer did not send the message.
+host-chat-empty = No live messages yet.
+host-chat-queue-busy = The local chat queue is busy. Your draft is still here.
+host-chat-queue-unavailable = Chat is unavailable. Your draft has not been sent.
+
 # Native character windows
 character-switch-title = Characters
 character-switch-description = Keep characters signed in in separate viewer windows. Switch to a running window, or open a saved character’s login. You sign in yourself.
