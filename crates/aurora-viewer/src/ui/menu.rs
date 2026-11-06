@@ -737,10 +737,11 @@ pub(crate) fn settings_panel(ui: &Ui, p: &Palette, id: Id, body: impl FnOnce(&mu
     } else {
         (egui::RectAlign::LEFT_END, egui::RectAlign::RIGHT_END)
     };
+    let alternatives = [other];
     let popup = Popup::new(id, ui.ctx().clone(), PopupAnchor::ParentRect(anchor), ui.layer_id())
         .kind(PopupKind::Menu)
         .align(align)
-        .align_alternatives(&[other])
+        .align_alternatives(&alternatives)
         .gap(8.0)
         .layout(egui::Layout::top_down_justified(egui::Align::Min))
         .close_behavior(PopupCloseBehavior::IgnoreClicks)
