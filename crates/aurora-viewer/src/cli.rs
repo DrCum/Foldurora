@@ -82,7 +82,7 @@ pub fn get() -> &'static Cli {
     CLI.get_or_init(|| {
         let cli = parse(std::env::args().skip(1));
         aurora_i18n::select("default", cli.language.as_deref());
-        if cli.help {
+        if cli.output_request() == Some(OutputRequest::Help) {
             let languages = aurora_i18n::available_languages()
                 .map(|(code, _)| code)
                 .collect::<Vec<_>>()
@@ -95,12 +95,31 @@ pub fn get() -> &'static Cli {
             );
             std::process::exit(0);
         }
-        if cli.version {
+        if cli.output_request() == Some(OutputRequest::Version) {
             println!("{}", aurora_i18n::tr!("common-aurora-viewer", value0 = aurora_version::version()));
             std::process::exit(0);
         }
         cli
     })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OutputRequest {
+    Help,
+    Version,
+}
+
+impl Cli {
+    /// Evaluated by get() before it returns to any host/viewer startup route.
+    fn output_request(&self) -> Option<OutputRequest> {
+        if self.help {
+            Some(OutputRequest::Help)
+        } else if self.version {
+            Some(OutputRequest::Version)
+        } else {
+            None
+        }
+    }
 }
 
 fn parse(args: impl Iterator<Item = String>) -> Cli {
@@ -406,6 +425,27 @@ mod tests {
         assert!(cli.login.lock().expect("login").is_none());
         assert_eq!(cli.grid, None);
         assert_eq!(args(&["-url", "  "]).url, None);
+    }
+
+    #[test]
+    fn help_and_version_exit_before_host_console_or_viewer_initialization() {
+        for arguments in [
+            vec!["--session-host", "--help"],
+            vec!["--help", "--session-host"],
+            vec!["--session-host", "--version", "--help"],
+        ] {
+            assert_eq!(args(&arguments).output_request(), Some(OutputRequest::Help));
+        }
+        assert_eq!(
+            args(&["--session-host", "--version"]).output_request(),
+            Some(OutputRequest::Version)
+        );
+        assert_eq!(
+            args(&["--host-worker-config", "/synthetic/bootstrap.json", "--version"]).output_request(),
+            Some(OutputRequest::Version)
+        );
+        assert_eq!(args(&["--session-host"]).output_request(), None);
+        assert_eq!(args(&[]).output_request(), None, "ordinary startup remains an ordinary viewer");
     }
 
     #[test]

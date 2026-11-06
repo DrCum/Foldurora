@@ -9,6 +9,11 @@
   hosted-world acceptance is claimed. Preserve independent viewer processes,
   release held input before handoff, quiesce before another login, and detach
   safely on controller loss. See [the stage and acceptance guide](docs/SESSION_HOST.md).
+  - 🔧 Controller console/logging follow-up: check and sync a distinct host log
+    before scoped Windows console detachment; managed workers start without
+    consoles. Preserve help/version and ordinary viewer startup, report failures
+    visibly, and verify startup ordering/file failure/creation flags. Native
+    Windows taskbar and shared-terminal acceptance remain pending.
   - ⬜ Complete and verify one visible taskbar host with safe active-world switching.
   - ⬜ Persistent account-bound worker settings across restarts; current profiles
     are isolated per launch and must not be described as persistent.

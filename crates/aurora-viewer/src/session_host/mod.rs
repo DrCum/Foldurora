@@ -4,6 +4,7 @@
 mod native;
 pub(crate) mod profile;
 mod software;
+pub(crate) mod startup;
 pub(crate) mod transport;
 mod ui;
 pub(crate) mod worker;

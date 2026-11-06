@@ -1215,6 +1215,7 @@ fn launch(
     if let Some(language) = crate::cli::get().language.as_deref() {
         command.arg("--language").arg(language);
     }
+    super::startup::prepare_worker(&mut command);
     // Inherited environment is unchanged; no login values, password arguments,
     // user input injection or credential-store access occur in the controller.
     let process = command.spawn()?;

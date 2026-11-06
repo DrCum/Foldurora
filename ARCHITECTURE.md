@@ -7,6 +7,12 @@ owns child launches and bounded private-file IO on background threads. Typed V1
 identities and ownership transitions live in the pure `aurora-session` crate.
 See `docs/SESSION_HOST.md` for the checkpoint's explicit limitations.
 
+`session_host/startup.rs` initializes and syncs a distinct controller diagnostic
+log before detaching only its own Windows console. Help/version output exits
+before that route. Controller-launched Windows workers use `CREATE_NO_WINDOW`;
+ordinary viewer startup, console behavior and log names remain unchanged.
+Startup/log failures remain visible through a controller-owned error dialog.
+
 Worker bootstrap validates the exact installation/host/worker nonce and a
 single-use private configuration before settings or cache initialization.
 `session_host/profile.rs` locks private per-launch/session-generation config,

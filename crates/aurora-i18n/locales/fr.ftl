@@ -13313,3 +13313,17 @@ character-switch-missing = Ce personnage enregistré est indisponible. Sélectio
 character-switch-cli-help = --saved-account <id>  Sélectionner un personnage enregistré sur un écran de connexion manuel
 character-switch-other-grid = Cet avatar a une fenêtre ouverte sur une autre grille. Fermez-la avant cette connexion ; ses données de compte sont partagées entre les grilles.
 character-switch-busy = Une autre ouverture de personnage est en cours de vérification. Réessayez dans un instant.
+
+# Les erreurs du contrôleur restent visibles après le détachement de sa console.
+host-start-error-title = Hôte de sessions
+host-start-log-failed = L’hôte de sessions n’a pas pu ouvrir son journal de diagnostic.
+    { $error }
+host-start-console-failed = L’hôte de sessions n’a pas pu démarrer sans fenêtre de console supplémentaire.
+    { $error }
+    Journal de diagnostic : { $path }
+host-start-run-failed = L’hôte de sessions s’est arrêté à cause d’une erreur.
+    { $error }
+    Journal de diagnostic : { $path }
+host-start-flush-failed = L’hôte de sessions n’a pas pu terminer l’écriture de son journal de diagnostic.
+    { $error }
+    Journal de diagnostic : { $path }

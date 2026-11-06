@@ -133,7 +133,7 @@ fn main() -> anyhow::Result<()> {
         "the session controller cannot also be a session worker"
     );
     if cli.session_host {
-        return session_host::run();
+        return session_host::startup::run();
     }
     // Validate and install the production session profile before even the
     // first settings read. No worker write may reach the ordinary profile.

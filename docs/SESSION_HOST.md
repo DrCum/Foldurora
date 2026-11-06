@@ -41,6 +41,11 @@ compatibility is claimed.
 
 - The controller uses egui and softbuffer CPU painting, without another Vulkan
   world renderer. Unchanged status receipts must not cause continuous repaints.
+- Controller startup checks and syncs a separate `aurora-session-host-*.log`
+  before detaching only its own Windows console. Managed Windows workers start
+  with `CREATE_NO_WINDOW`; no shared or foreign console window is hidden or
+  closed. Help/version output and ordinary viewer startup remain unchanged.
+  Log or startup failures stay visible, including after console detachment.
 - Each worker keeps its own world, network and GPU state. IO and launches stay
   off the viewer frame path, and queues/messages have explicit bounds.
 - Private transport binds installation, controller, worker nonce, account,
@@ -73,6 +78,12 @@ old-surface frame proofs, uncertain-grant rollback, quiescence before another
 login, profile locks and path ownership, bounded transport, idle CPU repaint
 behavior and source-bound control actions. Run formatting, strict workspace
 Clippy and workspace tests, then build the normal viewer at the exact source.
+
+Native Windows checks must confirm that `--help` and `--version` still print in
+an existing terminal, that the terminal remains available after a host launch,
+and that a debug host plus its managed workers adds only the host's taskbar
+entry after manual login/hosting. Check the distinct host log and visible
+startup failures before treating console detachment as accepted.
 
 Native Windows checks must prove the taskbar and Z-order behavior, switching,
 host-control focus, held-key/PTT release, resizing, mixed DPI, display removal,

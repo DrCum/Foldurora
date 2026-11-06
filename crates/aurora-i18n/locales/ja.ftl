@@ -13290,3 +13290,17 @@ character-switch-missing = この保存済みキャラクターは利用でき�
 character-switch-cli-help = --saved-account <id>  保存済みキャラクターの手動ログイン画面を選択
 character-switch-other-grid = このアバターは別のグリッドでウィンドウを起動しています。アカウントデータを共有するため、そちらを閉じてからログイン画面を開いてください。
 character-switch-busy = 別のキャラクターの起動を確認しています。少し待ってからもう一度お試しください。
+
+# コントローラーのコンソールを切り離した後も起動エラーを表示します。
+host-start-error-title = セッションホスト
+host-start-log-failed = セッションホストの診断ログを開けませんでした。
+    { $error }
+host-start-console-failed = 追加のコンソールウィンドウを表示せずにセッションホストを起動できませんでした。
+    { $error }
+    診断ログ: { $path }
+host-start-run-failed = エラーのためセッションホストが停止しました。
+    { $error }
+    診断ログ: { $path }
+host-start-flush-failed = セッションホストの診断ログへの書き込みを完了できませんでした。
+    { $error }
+    診断ログ: { $path }

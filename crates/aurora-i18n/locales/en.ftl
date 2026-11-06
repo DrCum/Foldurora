@@ -13317,3 +13317,17 @@ character-switch-missing = That saved character is unavailable. Select an accoun
 character-switch-cli-help = --saved-account <id>  Select an exact saved character on a manual login screen
 character-switch-other-grid = This avatar has a window open on another grid. Close it before opening this login; its account data is shared across grids.
 character-switch-busy = Another character launch is being checked. Try again shortly.
+
+# Controller-only startup errors stay visible even after its console detaches.
+host-start-error-title = Session host
+host-start-log-failed = The session host could not start its diagnostic log.
+    { $error }
+host-start-console-failed = The session host could not start without an extra console window.
+    { $error }
+    Diagnostic log: { $path }
+host-start-run-failed = The session host stopped because of an error.
+    { $error }
+    Diagnostic log: { $path }
+host-start-flush-failed = The session host could not finish writing its diagnostic log.
+    { $error }
+    Diagnostic log: { $path }
