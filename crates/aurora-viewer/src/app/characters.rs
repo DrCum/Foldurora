@@ -87,10 +87,10 @@ impl App {
             return;
         }
         self.characters.startup_applied = true;
-        if let Some(id) = crate::cli::get().saved_account.as_deref() {
-            if !ui::login::select_saved_character(&mut self.settings, &mut self.login_form, id) {
-                self.login_form.error = Some(aurora_i18n::tr!("character-switch-missing").into());
-            }
+        if let Some(id) = crate::cli::get().saved_account.as_deref()
+            && !ui::login::select_saved_character(&mut self.settings, &mut self.login_form, id)
+        {
+            self.login_form.error = Some(aurora_i18n::tr!("character-switch-missing").into());
         }
     }
 }
