@@ -1,0 +1,66 @@
+# Source-only screen: reviewed upstream sixteen onto frozen M2
+
+Base: `480176d037eb576119775e8d67aa2df065aa86ae` (native inactive chat plus authenticated transport, profile/worker integration, ring reuse and egui fixes). Original-commit order comes from `/workspace/work/upstream-latest-review/docs/UPSTREAM_REVIEW_20261106.md`; no later upstream commits or local ledger/CI commits were included.
+
+**Result:** all sixteen original commits are textually clean individually and as the complete ordered sequence. No additional semantic conflict or missing deferred prerequisite was found in this source review. The clean candidate subset is therefore all sixteen, in exactly the order below. The simulated combined tree is **`e5ed6d12bea04238c300699937cd3c5f9ab0cae8`**.
+
+This is not a build/runtime receipt or approval to merge. No commit was picked, conflict resolved, tracked file edited, build run, or branch pushed. M2 remained frozen and the ACL branch stayed clean at `1bad9769d19d8837ea4ffd78481b5c57238c2a24`. The existing seventeen deferrals remain unchanged and were not resimulated or partially extracted.
+
+## Exact candidate order
+
+| Order | Original upstream commit | Scope |
+|---|---|---|
+| 1 | `2944d8016715696eb51e861e1cbf8b1ccd963543` | Central demo-source resolver |
+| 2 | `e8faf65ef9ecc90668075cc5c8e5be799594c6e7` | Source-bound inventory/environment/script rights |
+| 3 | `493b519114c38328f94f9e5acf3adf07ffd4e30d` | Inventory-based IK animation names |
+| 4 | `cae37649b4157fd6e6879525c7b3e0a48d882b6d` | Dialog display-name normalization |
+| 5 | `6da2115bd3fee4650465a146c42384013c138e83` | Asset-ID display policy |
+| 6 | `b4041f7a529fcfce281cc5fd21925e79fa3e650f` | OpenSim inventory script-save result |
+| 7 | `ddb8a69c735e94b30f931c534a83f4bf47ac193a` | Neighbour terrain edges |
+| 8 | `224b01d79cda4f3bf8a85dd04667d5819ce3e284` | Worn-object media trust |
+| 9 | `d981d28600a2cfd7753641d043e13c5681d43682` | Login import follows chat-saving settings |
+| 10 | `b30f7982a118d49e61b203a26a02b58e5ff9cb2a` | Linux stack-snapshot signal stack |
+| 11 | `d37702436d6b4808aa467f946d774eb4180c22a8` | Native bridge channels/gaze/RLVa version |
+| 12 | `a86f1a3411afb23662f2037e0856adcdaaf2128d` | Passage/portal land rights |
+| 13 | `b962b2a759b24856c2c12b75e98a50e463f888e5` | Appearance camera/pose controls |
+| 14 | `85d488a95e236dfbbfaa82960365a5c807cb8cc5` | Pinned wgpu empty-descriptor fix |
+| 15 | `113afd8062dbd5c41a5b3822580bb805718f1c1e` | Fetch-ceiling documentation |
+| 16 | `7afa101cdc6e0e83b15612e0e4bde57d9c638d9f` | Background microphone-close join |
+
+No textual conflicts occurred at any step; no commit needed to be skipped. Each individual application was also clean without its preceding candidate commits, though the maintained sequence above remains the reviewed order.
+
+## Semantic overlap with actual M2
+
+### Native chat, transcript history, and privacy
+
+`d981d286` adds `import::Kinds` to filesystem transcript import requests, filtering automatic login imports using `ChatLog.cfg.log_im/log_nearby`. Explicit user-requested imports retain `Kinds::ALL`. It does not change live-message admission, `LineClock`, `Origin`, account identity, or native send restrictions. Its only `world/transcripts.rs` changes are tests.
+
+Actual M2 `app/host_chat.rs::native_lines` reads the existing account's live nearby/direct conversation and `LineClock`; `lines` explicitly excludes every entry whose origin is not `Origin::Live`. Therefore imported `Origin::Log` history does not become raw IPC text because of this import change. Existing token/gap handling and privacy-policy revisions remain present. Dialog normalization in `cae37649` changes display names in native notifications/offers and a system notice; it does not change IM identity or bypass M2's exclusions for invite/inventory/payment entries, nor its per-export privacy checks. Native IM/nearby restriction functions remain unchanged.
+
+`d3770243` changes the viewer-to-worn-object LSL bridge's negative chat channels, with its matching Rust/LSL consumers and compatibility discovery fallback included. These channels are separate from the memory-only authenticated loopback host chat lane. The RLVa change is version reply wording, not restriction state/revision or the send/receive authorization APIs used by M2.
+
+### Bootstrap, authentication, profile and worker boundaries
+
+Eighty-two protected source files were compared by blob ID before/after the simulation: all `session_host/`, `aurora-session/`, ordinary `ui/chat/`, `app/host_chat*`, `app/host_session*`, and the viewer's `main.rs`, `cli.rs`, `cache_key.rs`, `cache_location.rs`, `logging.rs` and `Cargo.toml`. **No protected file differs.**
+
+This includes private bootstrap binding and secret handling, mutual HMAC verification, bounded queues/framing/deadlines, sequence/replay rules, explicit user ownership of private files, consumed sentinel, profile locking, source/lease admission, independent worker IO, native-policy-before-lines ordering, stale-cache invalidation, gap/draft retention, owned CPU tool windows, and the exact native painter and egui fixture fixes present in M2. No source-level dependency on deferred cache-format/installation migration or login/session work was introduced.
+
+The combined lockfile preserves every package name, version and dependency list, including viewer→`ring` and egui. Only `source` and removal of registry `checksum` change for eleven existing wgpu-family packages. There are no added/removed packages, so the ring reuse and egui 0.37 compatibility fixes are not undone by dependency resolution metadata in this simulated tree.
+
+### Shared App/settings/UI and GPU changes
+
+The only modified paths that also differ between fork baseline `f5043422` and M2 are `ARCHITECTURE.md`, `Cargo.lock`, `TASKS.md`, all three locale catalogues, `crates/aurora-viewer/src/app.rs`, `crates/aurora-viewer/src/settings.rs`, and `docs/TESTING.md`.
+
+`app.rs` changes are the new land-rights module, worn-media demo wording, asset-diagnostic arguments, and ordinary appearance UI/camera call sites. M2's `tick_host_chat` call, standby/submission gates, input release, and source lease wiring remain unchanged. Appearance UI continues below the existing standby early return. No upstream commit in this set adds a host modal or installs an ordinary viewer startup route.
+
+Settings changes add the independent appearance-camera field/default and migrate look-at aim once to v32. `Settings::config_dir`, `accounts_dir`, `cache_dir`, `Settings::path`, and their host-profile early returns remain unchanged. These preferences stay scoped by M2's already-selected private profile; they do not replace bootstrap/account identity or copy ordinary account settings. No literal locale key used by the protected native-chat sources changes in EN/FR/JA.
+
+The source-rights, asset-ID, IK, script-result, terrain, worn-media and portal changes carry their own production callers, helpers and tests. None changes the literal native IM/nearby submission path or the CPU chat renderer. `scene/picking.rs::movement_exit` and its caller change together for land-rights checking; no fork viewport coordinate or native pointer conversion changes. Terrain edits do not change host window geometry or projection.
+
+The wgpu pin still has the previously reviewed sole eleven-line Vulkan descriptor-pool allocation fallback. It changes no API/queue/fence/resource ownership logic; the M2 CPU tool renderer does not allocate a GPU renderer. Existing host GPU completion fences remain byte-identical. Native low-settings/startup/driver/performance validation remains necessary. The microphone-close change leaves voice transmission policy and host input revocation unchanged and does not establish the cause of the earlier shutdown watchdog.
+
+## Evidence and limits
+
+Temporary index only: `git read-tree <base>`, full original binary patches through `git apply --cached --3way`, conflict-stage inspection, then `git write-tree`. The index and lock were removed; no checkout or cherry-pick occurred. Raw individual/sequence results, all intermediate tree IDs, protected-file check, lockfile comparison and locale-literal comparison are in `.scratch/upstream-m2-simulation.json`; reproducer is `.scratch/upstream-m2-screen.py`.
+
+No additional source-level exclusions were found among these sixteen. The seventeen earlier deferred commits stay excluded, including the uninstall/media-consent/README group. Combined formatting, strict Clippy, complete workspace tests, locked normal Windows/Linux builds, actual authenticated inactive-chat runtime acceptance, driver behavior, performance and confirmed shutdown must be evaluated on any later concrete integration checkpoint. Existing receipts for M2 or sixteen-upstream-only source do not validate this combined simulated tree.

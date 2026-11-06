@@ -1,0 +1,86 @@
+{
+  "observed_at": "2026-11-06T19:33:00Z",
+  "repository": "DrCum/Foldurora",
+  "pull_requests": [
+    {
+      "n": 1,
+      "head": "fix/credential-transport",
+      "sha": "9f389441cfbafaa42c968a35324cc08fda0bb734",
+      "base": "main",
+      "base_sha": "7b52b689c6df523cf2c778eddd950d1854ca784e",
+      "draft": true,
+      "state": "open",
+      "merged": false
+    },
+    {
+      "n": 2,
+      "head": "feat/overnight-integration",
+      "sha": "62cdd4ea911983cbdfee3708317f42ec00b8e480",
+      "base": "main",
+      "base_sha": "ae2fd1016ec83304719fa131312e2ac69c8f37a6",
+      "draft": true,
+      "state": "open",
+      "merged": false
+    },
+    {
+      "n": 3,
+      "head": "feat/workspace-followup",
+      "sha": "81c167e27e9a2fcce692ff166b27edd0be1b9c62",
+      "base": "feat/overnight-integration",
+      "base_sha": "62cdd4ea911983cbdfee3708317f42ec00b8e480",
+      "draft": true,
+      "state": "open",
+      "merged": false
+    },
+    {
+      "n": 4,
+      "head": "fix/character-gpu-coexistence",
+      "sha": "5e46f785bdaaed5db40a2f1558d86b69d6dbc386",
+      "base": "feat/workspace-followup",
+      "base_sha": "81c167e27e9a2fcce692ff166b27edd0be1b9c62",
+      "draft": true,
+      "state": "open",
+      "merged": false
+    },
+    {
+      "n": 5,
+      "head": "feat/viewport-ui-integration",
+      "sha": "f504342231006423d392224f1225bc08e9e32fb5",
+      "base": "fix/character-gpu-coexistence",
+      "base_sha": "5e46f785bdaaed5db40a2f1558d86b69d6dbc386",
+      "draft": true,
+      "state": "open",
+      "merged": false
+    },
+    {
+      "n": 6,
+      "head": "sync/upstream-safe-20261106",
+      "sha": "5cf34c58778651cd2cb8e942aa88ddab4000a48b",
+      "base": "feat/viewport-ui-integration",
+      "base_sha": "f504342231006423d392224f1225bc08e9e32fb5",
+      "draft": true,
+      "state": "open",
+      "merged": false
+    },
+    {
+      "n": 7,
+      "head": "sync/upstream-safe-b962b2a7",
+      "sha": "8fbb2f6878bbc571f1c5e9619f17407190c93178",
+      "base": "sync/upstream-safe-20261106",
+      "base_sha": "5cf34c58778651cd2cb8e942aa88ddab4000a48b",
+      "draft": true,
+      "state": "open",
+      "merged": false
+    },
+    {
+      "n": 8,
+      "head": "feat/session-host-integration",
+      "sha": "d87d11df89ec15ff0688cf3605f8f70d5e98b391",
+      "base": "feat/viewport-ui-integration",
+      "base_sha": "f504342231006423d392224f1225bc08e9e32fb5",
+      "draft": true,
+      "state": "open",
+      "merged": false
+    }
+  ]
+}

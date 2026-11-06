@@ -44,6 +44,9 @@ $pages = @(
     @{ Section = 'Contributing'; Page = 'Translating'; Title = 'Translating the viewer'; Source = 'docs/TRANSLATING.md' }
     @{ Section = 'Contributing'; Page = 'Branding'; Title = 'Branding and interface'; Source = 'docs/BRANDING.md' }
     @{ Section = 'Technical'; Page = 'Architecture'; Title = 'Architecture'; Source = 'ARCHITECTURE.md' }
+    @{ Section = 'Technical'; Page = 'Foldurora-handoff-20261106'; Title = 'Foldurora implementation handoff 6 November 2026'; Source = 'docs/FOLDURORA_HANDOFF_20261106.md' }
+    @{ Section = 'Technical'; Page = 'Foldurora-preview-worker-handoff'; Title = 'Foldurora preview worker handoff'; Source = 'docs/handoff/PREVIEW_WORKER.md' }
+    @{ Section = 'Technical'; Page = 'Foldurora-preview-caller-handoff'; Title = 'Foldurora preview caller handoff'; Source = 'docs/handoff/PREVIEW_CALLER.md' }
     @{ Section = 'Technical'; Page = 'RLVa'; Title = 'RLVa implementation status'; Source = 'docs/RLVA.md' }
     @{ Section = 'Technical'; Page = 'Licences'; Title = 'Licences and notices'; Source = 'NOTICE.md' }
 )

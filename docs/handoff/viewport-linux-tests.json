@@ -1,0 +1,14 @@
+{
+  "source": "c5076565a3777d27c436fe59d9713907533be0e8",
+  "command": "cargo test --workspace --locked --no-fail-fast",
+  "totals": {
+    "passed": 7597,
+    "failed": 1,
+    "ignored": 47
+  },
+  "failed_tests": [
+    "terrain_tests::pbr_terrain_samples_all_layers_maps_and_triplanar_normals_on_gpu"
+  ],
+  "test_result_summaries": 28,
+  "log": ".scratch/viewport-hotfix-full-final.log"
+}
