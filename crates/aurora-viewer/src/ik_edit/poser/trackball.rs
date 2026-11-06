@@ -26,6 +26,7 @@ mod tests {
             (Vec3::new(-3.0, -4.0, 2.0), Vec3::Y),
         ] {
             let proj = Projector {
+                world_viewport: None,
                 view_proj: glam::camera::rh::proj::directx::perspective_infinite_reverse(0.8, 1.0, 0.05)
                     * glam::camera::rh::view::look_to_mat4(eye, -eye.normalize(), up),
                 width: 900.0,

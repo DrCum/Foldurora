@@ -12,6 +12,8 @@ struct Locals {
     // from a pixel of the surface to where the scene's depth has it (the
     // jitter of temporal anti-aliasing), in pixels
     jitter: vec2<f32>,
+    viewport_origin: vec2<f32>,
+    viewport_size: vec2<f32>,
     dithering: u32,
     pad: u32,
 }
@@ -91,7 +93,7 @@ fn shown(frag: vec2<f32>, depth: f32) -> f32 {
         return 1.0;
     }
     let size = vec2<f32>(textureDimensions(scene_depth));
-    let at = (frag + locals.jitter) / locals.screen_px * size - 0.5;
+    let at = (frag - locals.viewport_origin + locals.jitter) / locals.viewport_size * size - 0.5;
     let base = vec2<i32>(floor(at));
     let f = fract(at);
     let last = vec2<i32>(size) - 1;

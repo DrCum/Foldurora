@@ -55,6 +55,7 @@ impl App {
         }
         let pos = if mode.avatar {
             let projector = ui::hud::Projector {
+                world_viewport: None,
                 view_proj,
                 width: size.0 as f32,
                 height: size.1 as f32,

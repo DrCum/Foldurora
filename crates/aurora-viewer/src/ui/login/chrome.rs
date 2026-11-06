@@ -125,6 +125,16 @@ pub fn footer(ctx: &Context, p: &Palette, icons: &Icons, info: &LoginInfo, sideb
                 action = LoginAction::Accessibility;
             }
         });
+    egui::Area::new(Id::unique("login_characters"))
+        .anchor(egui::Align2::RIGHT_TOP, Vec2::new(-101.0, 20.0))
+        .show(ctx, |ui| {
+            if widgets::action_button(ui, p, "users", "", ActionKind::Flat, Vec2::splat(30.0))
+                .on_hover_text(aurora_i18n::tr!("character-switch-title"))
+                .clicked()
+            {
+                action = LoginAction::Characters;
+            }
+        });
     egui::Area::new(Id::unique("login_quit"))
         .anchor(egui::Align2::RIGHT_BOTTOM, Vec2::new(-25.0, -20.0))
         .show(ctx, |ui| {

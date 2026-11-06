@@ -139,6 +139,7 @@ fn virtual_list_shows_parents_and_ctrl_rotation_survives_modifier_release() {
     let offset = Vec3::new(3.0, -4.0, 3.0);
     let eye = point + offset;
     let proj = Projector {
+        world_viewport: None,
         view_proj: glam::camera::rh::proj::directx::perspective_infinite_reverse(0.8, 16.0 / 9.0, 0.05)
             * glam::camera::rh::view::look_to_mat4(eye, (point - eye).normalize(), Vec3::Z),
         width: 1600.0,
@@ -233,6 +234,7 @@ fn shift_drags_a_virtual_point_freely_while_default_mode_reserves_translation_fo
     let point = frame.model.transform_point3(before.p());
     let eye = point + Vec3::new(3.0, -4.0, 3.0);
     let proj = Projector {
+        world_viewport: None,
         view_proj: glam::camera::rh::proj::directx::perspective_infinite_reverse(0.8, 16.0 / 9.0, 0.05)
             * glam::camera::rh::view::look_to_mat4(eye, (point - eye).normalize(), Vec3::Z),
         width: 1600.0,

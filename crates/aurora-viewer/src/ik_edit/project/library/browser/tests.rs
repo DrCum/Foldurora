@@ -69,6 +69,7 @@ fn projects_tab_selects_and_manages_complete_projects_through_real_pointer_input
     theme.apply(&ctx, 1.0);
     let palette = theme.palette();
     let proj = Projector {
+        world_viewport: None,
         view_proj: Mat4::IDENTITY,
         width: 1600.0,
         height: 900.0,

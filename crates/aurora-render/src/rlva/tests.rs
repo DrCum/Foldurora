@@ -276,6 +276,7 @@ fn rlva_gpu_spheres_preserve_uniform_images_and_compose_black_masks_without_glow
             color: [1.0, 0.0, 0.0, 0.5],
             texture: [0; 4],
         }],
+        crate::WorldViewport::full((64, 64)),
     );
     encoder.copy_texture_to_buffer(
         output.as_image_copy(),
@@ -308,65 +309,93 @@ fn rlva_gpu_spheres_preserve_uniform_images_and_compose_black_masks_without_glow
     drop(bytes);
     readback.unmap();
     for smooth in [false, true] {
-        let scaled = resolution::Scaled::new(&device, format, (2, 1), smooth);
-        queue.write_texture(
-            scaled.texture.as_image_copy(),
-            &[204, 102, 51, 255, 0, 204, 255, 255],
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(8),
-                rows_per_image: Some(1),
+        for viewport in [
+            crate::WorldViewport::full((64, 64)),
+            crate::WorldViewport {
+                x: 16,
+                y: 8,
+                width: 32,
+                height: 48,
             },
-            wgpu::Extent3d {
-                width: 2,
-                height: 1,
-                depth_or_array_layers: 1,
-            },
-        );
-        let mut encoder = device.create_command_encoder(&Default::default());
-        scaled.encode(&mut encoder, &out);
-        overlays.encode(
-            &queue,
-            &mut encoder,
-            &out,
-            &textures,
-            &[crate::OverlayEffect {
-                color: [1.0, 0.0, 0.0, 0.5],
-                texture: [0; 4],
-            }],
-        );
-        encoder.copy_texture_to_buffer(
-            output.as_image_copy(),
-            wgpu::TexelCopyBufferInfo {
-                buffer: &readback,
-                layout: wgpu::TexelCopyBufferLayout {
+        ] {
+            let scaled = resolution::Scaled::new(&device, format, (2, 1), smooth);
+            queue.write_texture(
+                scaled.texture.as_image_copy(),
+                &[204, 102, 51, 255, 0, 204, 255, 255],
+                wgpu::TexelCopyBufferLayout {
                     offset: 0,
-                    bytes_per_row: Some(256),
-                    rows_per_image: Some(64),
+                    bytes_per_row: Some(8),
+                    rows_per_image: Some(1),
                 },
-            },
-            wgpu::Extent3d {
-                width: 64,
-                height: 64,
-                depth_or_array_layers: 1,
-            },
-        );
-        queue.submit([encoder.finish()]);
-        readback.map_async(wgpu::MapMode::Read, .., |result| result.expect("resolution readback"));
-        device.poll(wgpu::PollType::wait_indefinitely()).expect("GPU completion");
-        let bytes = readback.get_mapped_range(..).expect("mapped pixels");
-        for (x, expected) in [(8, [204, 102, 51, 255]), (56, [128, 102, 128, 255])] {
-            let offset = (32 * 64 + x) * 4;
-            assert!(
-                bytes[offset..offset + 4].iter().zip(expected).all(|(v, e)| v.abs_diff(e) <= 1),
-                "upscale/overlay at x={x}"
+                wgpu::Extent3d {
+                    width: 2,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
             );
+            let mut encoder = device.create_command_encoder(&Default::default());
+            scaled.encode(&mut encoder, &out, viewport);
+            overlays.encode(
+                &queue,
+                &mut encoder,
+                &out,
+                &textures,
+                &[crate::OverlayEffect {
+                    color: [1.0, 0.0, 0.0, 0.5],
+                    texture: [0; 4],
+                }],
+                viewport,
+            );
+            encoder.copy_texture_to_buffer(
+                output.as_image_copy(),
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &readback,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(256),
+                        rows_per_image: Some(64),
+                    },
+                },
+                wgpu::Extent3d {
+                    width: 64,
+                    height: 64,
+                    depth_or_array_layers: 1,
+                },
+            );
+            queue.submit([encoder.finish()]);
+            readback.map_async(wgpu::MapMode::Read, .., |result| result.expect("resolution readback"));
+            device.poll(wgpu::PollType::wait_indefinitely()).expect("GPU completion");
+            let bytes = readback.get_mapped_range(..).expect("mapped pixels");
+            let y = viewport.y as usize + viewport.height as usize / 2;
+            for (local_x, expected) in [
+                (viewport.width / 8, [204, 102, 51, 255]),
+                (viewport.width * 7 / 8, [128, 102, 128, 255]),
+            ] {
+                let x = (viewport.x + local_x) as usize;
+                let offset = (y * 64 + x) * 4;
+                assert!(
+                    bytes[offset..offset + 4].iter().zip(expected).all(|(v, e)| v.abs_diff(e) <= 1),
+                    "upscale/overlay at x={x}"
+                );
+            }
+            if smooth {
+                let x = (viewport.x + viewport.width / 2 - 1) as usize;
+                let red = bytes[(y * 64 + x) * 4];
+                assert!((90..150).contains(&red), "smooth transition: {red}");
+            }
+            for y in 0..64 {
+                for x in 0..64 {
+                    if viewport.local(x as f32, y as f32).is_none() {
+                        assert_eq!(
+                            &bytes[(y * 64 + x) * 4..(y * 64 + x + 1) * 4],
+                            &[0, 0, 0, 255],
+                            "workspace pixel {x},{y}"
+                        );
+                    }
+                }
+            }
+            drop(bytes);
+            readback.unmap();
         }
-        if smooth {
-            let red = bytes[(32 * 64 + 31) * 4];
-            assert!((90..150).contains(&red), "smooth transition: {red}");
-        }
-        drop(bytes);
-        readback.unmap();
     }
 }

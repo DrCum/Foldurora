@@ -32,6 +32,7 @@ $pages = @(
     @{ Section = 'For testers'; Page = 'Windows-VR'; Title = 'Experimental Windows VR'; Source = 'docs/VR_WINDOWS.md' }
     @{ Section = 'For testers'; Page = 'Installing-on-macOS'; Title = 'Installing on macOS'; Source = 'docs/MACOS.md' }
     @{ Section = 'For testers'; Page = 'Updates'; Title = 'Updates'; Source = 'docs/UPDATES.md' }
+    @{ Section = 'For testers'; Page = 'Foldurora-preview'; Title = 'Foldurora workspace and characters'; Source = 'docs/FOLDURORA.md' }
     @{ Section = 'For testers'; Page = 'Asset-imports'; Title = 'Asset imports'; Source = 'docs/IMPORTS.md' }
     @{ Section = 'For testers'; Page = 'Blender-Live'; Title = 'LiveMesh'; Source = 'docs/BLENDER_LIVE.md' }
     @{ Section = 'For testers'; Page = 'Hand-contacts'; Title = 'Motorcycle hand contacts'; Source = 'docs/HAND_CONTACTS.md' }

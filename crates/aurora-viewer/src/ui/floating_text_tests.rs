@@ -196,6 +196,7 @@ fn world_objects_use_the_same_baselines_without_changing_avatar_tags() {
     let output = ctx.run_ui(input(1.0), |ui| {
         shift = glyph_shift(ui.ctx(), 12.0);
         let proj = hud::Projector {
+            world_viewport: None,
             // Project Z vertically. A 0.5 m cube's anchor is Z=0.3,
             // hence screen Y=350, last baseline=337. The radius pull
             // changes depth only with the eye at that same height.

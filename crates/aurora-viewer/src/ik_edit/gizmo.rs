@@ -50,7 +50,8 @@ pub(super) struct Geometry {
 
 /// Recover the current camera, including roll, from the rendered projection.
 pub(super) fn camera(proj: &Projector) -> Option<Cam> {
-    let inverse = proj.view_proj.inverse();
+    let view_proj = proj.world_view_proj();
+    let inverse = view_proj.inverse();
     let unproject = |x, y, z, w| {
         let p = inverse * Vec4::new(x, y, z, w);
         p.truncate() / p.w
@@ -63,7 +64,7 @@ pub(super) fn camera(proj: &Projector) -> Option<Cam> {
     if !eye.is_finite() || !fov.is_finite() || !(0.01..3.13).contains(&fov) {
         return None;
     }
-    let mut cam = Cam::new(eye, near, proj.view_proj, fov, proj.width, proj.height, proj.ppp);
+    let mut cam = Cam::new(eye, near, view_proj, fov, proj.width, proj.height, proj.ppp).in_area(proj.viewport().area());
     // Keep a rolled camera's actual up/right, too.
     cam.up = up_span.try_normalize()?;
     cam.left = cam.up.cross(cam.at).try_normalize()?;
@@ -105,6 +106,9 @@ impl Geometry {
     }
 
     fn pick(&self, pointer: Pos2) -> Option<Part> {
+        if !self.cam.clip_rect().contains(pointer) {
+            return None;
+        }
         let mut best = (8.0, None);
         for axis in 0..3 {
             if self.tool == Tool::Move {

@@ -21,6 +21,8 @@ pub struct Cam {
     pub width: f32,
     pub height: f32,
     pub ppp: f32,
+    /// World viewport within the native output, in physical pixels.
+    pub area: [f32; 4],
 }
 
 impl Default for Cam {
@@ -37,6 +39,7 @@ impl Default for Cam {
             width: 1.0,
             height: 1.0,
             ppp: 1.0,
+            area: [0.0, 0.0, 1.0, 1.0],
         }
     }
 }
@@ -58,20 +61,38 @@ impl Cam {
             width: width.max(1.0),
             height: height.max(1.0),
             ppp: ppp.max(0.1),
+            area: [0.0, 0.0, width.max(1.0), height.max(1.0)],
         }
+    }
+
+    pub fn in_area(mut self, area: [f32; 4]) -> Self {
+        self.area = area;
+        self.width = area[2] - area[0];
+        self.height = area[3] - area[1];
+        self
+    }
+
+    pub fn clip_rect(&self) -> egui::Rect {
+        let [left, top, right, bottom] = self.hud.map_or(self.area, |view| view.area);
+        egui::Rect::from_min_max(
+            egui::pos2(left / self.ppp, top / self.ppp),
+            egui::pos2(right / self.ppp, bottom / self.ppp),
+        )
     }
 
     /// LLManip's SELECT_TYPE_HUD projection: orthographic, with the same
     /// zoom and viewport as the HUD renderer and triangle picking.
     pub fn for_hud(view: aurora_render::HudView, ppp: f32) -> Self {
         let view_proj = view.matrix();
+        let [width, height] = view.area_size();
         Self {
             hud: Some(view),
             eye: Vec3::new(view.min_x - 1.0, 0.0, 0.0),
             view_proj,
             inv_view_proj: view_proj.inverse(),
-            width: view.width,
-            height: view.height,
+            width,
+            height,
+            area: [0.0, 0.0, view.width, view.height],
             ppp: ppp.max(0.1),
             ..Self::default()
         }
@@ -90,7 +111,7 @@ impl Cam {
         if let Some(view) = self.hud {
             return view.unit();
         }
-        self.height / (2.0 * (self.fov_y * 0.5).tan())
+        (self.area[3] - self.area[1]) / (2.0 * (self.fov_y * 0.5).tan())
     }
 
     /// World size of `px` screen pixels at `p` (LLManip: range * tan(px / view
@@ -103,7 +124,7 @@ impl Cam {
         if range < 0.001 {
             return 1.0;
         }
-        range * (px / self.height * self.fov_y).tan()
+        range * (px / (self.area[3] - self.area[1]) * self.fov_y).tan()
     }
 
     /// Distance along the view direction (z depth).
@@ -117,7 +138,14 @@ impl Cam {
             let (origin, dir) = view.ray(x, y);
             return (origin - Vec3::X, dir);
         }
-        let ndc = |z: f32| Vec4::new(x / self.width * 2.0 - 1.0, 1.0 - y / self.height * 2.0, z, 1.0);
+        let ndc = |z: f32| {
+            Vec4::new(
+                (x - self.area[0]) / (self.area[2] - self.area[0]) * 2.0 - 1.0,
+                1.0 - (y - self.area[1]) / (self.area[3] - self.area[1]) * 2.0,
+                z,
+                1.0,
+            )
+        };
         let un = |v: Vec4| {
             let p = self.inv_view_proj * v;
             p.truncate() / p.w
@@ -138,8 +166,8 @@ impl Cam {
     pub fn clip_to_screen(&self, c: Vec4) -> Pos2 {
         let ndc = c.truncate() / c.w;
         Pos2::new(
-            (ndc.x * 0.5 + 0.5) * self.width / self.ppp,
-            (0.5 - ndc.y * 0.5) * self.height / self.ppp,
+            (self.area[0] + (ndc.x * 0.5 + 0.5) * (self.area[2] - self.area[0])) / self.ppp,
+            (self.area[1] + (0.5 - ndc.y * 0.5) * (self.area[3] - self.area[1])) / self.ppp,
         )
     }
 
@@ -276,12 +304,45 @@ mod tests {
     use super::*;
 
     #[test]
+    fn offset_viewports_keep_rays_projection_and_handle_sizes_in_agreement() {
+        let eye = Vec3::new(-10.0, 0.0, 0.0);
+        let fov = 60f32.to_radians();
+        let view = glam::camera::rh::view::look_at_mat4(eye, Vec3::ZERO, Vec3::Z);
+        let proj = glam::camera::rh::proj::directx::perspective_infinite_reverse(fov, 1600.0 / 900.0, 0.1);
+        for ppp in [1.0, 1.25, 1.5, 2.0] {
+            let full = Cam::new(eye, Vec3::ZERO, proj * view, fov, 3840.0, 1440.0, ppp);
+            for origin in [(0.0, 0.0), (1600.0, 0.0), (1920.0, 240.0)] {
+                let cam = full.in_area([origin.0, origin.1, origin.0 + 1600.0, origin.1 + 900.0]);
+                assert_eq!((cam.width, cam.height), (1600.0, 900.0));
+                assert_eq!(cam.project_px(Vec3::ZERO), Some((origin.0 + 800.0, origin.1 + 450.0)));
+                for p in [Vec3::ZERO, Vec3::new(1.0, 2.0, -0.5)] {
+                    let (x, y) = cam.project_px(p).unwrap();
+                    let (o, ray) = cam.ray(x, y);
+                    assert!(ray.abs_diff_eq((p - o).normalize(), 1e-5));
+                }
+                let px = cam.project_px(Vec3::Y).unwrap().0;
+                assert!((origin.0 + 800.0 - px - cam.pixel_meter_ratio() / 10.0).abs() < 1e-3);
+            }
+        }
+    }
+
+    #[test]
     fn hud_handles_keep_pixel_size_and_parallel_rays_after_zoom_and_resize() {
         for size in [[1280, 720], [720, 1280]] {
             for zoom in [1.0, 0.5, 0.1] {
                 let full = aurora_render::HudView::new(size, zoom, -3.0, 7.0);
-                for view in [full, full.in_area([0.0, 29.0, size[0] as f32, size[1] as f32])] {
+                for view in [
+                    full,
+                    full.in_area([0.0, 29.0, size[0] as f32, size[1] as f32]),
+                    full.in_area([
+                        size[0] as f32 * 0.25,
+                        size[1] as f32 * 0.15,
+                        size[0] as f32 * 0.9,
+                        size[1] as f32 * 0.8,
+                    ]),
+                ] {
                     let cam = Cam::for_hud(view, 2.0);
+                    assert_eq!([cam.width, cam.height], view.area_size());
                     for p in [Vec3::ZERO, Vec3::new(5.0, 0.3, -0.4)] {
                         let a = cam.project_px(p).unwrap();
                         let b = cam.project_px(p + Vec3::Y * cam.meters_for_pixels(p, 50.0)).unwrap();

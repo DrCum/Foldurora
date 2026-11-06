@@ -48,6 +48,7 @@ mod blender_shape;
 mod buy_currency;
 mod buy_land;
 mod camera_presets;
+mod characters;
 mod chat_commands;
 mod chat_import;
 mod click_pick;
@@ -100,6 +101,7 @@ mod marketplace_listings;
 mod money_tracker;
 mod monitor;
 mod movement;
+mod multi_monitor;
 mod object_actions;
 mod object_menu;
 mod object_menu_demo;
@@ -822,6 +824,8 @@ pub struct App {
     busy_pause: busy_pause::BusyPause,
     /// The other viewers on this PC (instances.rs).
     instances: crate::instances::Instances,
+    characters: crate::characters::Manager,
+    characters_ui: ui::characters::CharactersUi,
     /// The Down key's latch (FSCrouchToggle).
     crouch_toggle: crate::movement::crouch_toggle::CrouchToggle,
     music_parcel_url: String,
@@ -847,6 +851,8 @@ pub struct App {
     /// Avatar name tags on screen last frame, far first: a click on one
     /// counts as one on its avatar.
     name_tags: Vec<ui::hud::NameTag>,
+    /// The displayed world area; pointer events in workspace margins are UI only.
+    world_viewport: Option<aurora_render::WorldViewport>,
     name_tag_visibility: ui::hud::NameTagVisibility,
     /// Clickable destination marker last painted under the HUDs and UI.
     beacon_hit: Option<ui::minimap::BeaconHit>,
@@ -1667,6 +1673,8 @@ impl App {
             gpu_stall: Default::default(),
             busy_pause: Default::default(),
             instances: crate::instances::Instances::new(),
+            characters: Default::default(),
+            characters_ui: Default::default(),
             crouch_toggle: Default::default(),
             music_parcel_url: String::new(),
             music_override: None,
@@ -1684,6 +1692,7 @@ impl App {
             voice_tags: Default::default(),
             plates: Default::default(),
             name_tags: Vec::new(),
+            world_viewport: None,
             name_tag_visibility: Default::default(),
             beacon_hit: None,
             plate_hover: None,
@@ -3913,6 +3922,7 @@ impl App {
         let at = egui::pos2(self.cursor_pos.0 / ppp, self.cursor_pos.1 / ppp);
         let (alt, ctrl) = self.mouse_alt_ctrl();
         matches!(self.screen, Screen::World)
+            && self.world_pointer_inside()
             && !self.camera.mouselook()
             && !alt
             && !ctrl
@@ -3946,6 +3956,7 @@ impl App {
             || self.mouse_mode != MouseMode::None
             || self.camera.mouselook()
             || !(focus_tool || alt)
+            || !self.world_pointer_inside()
             || ctx.is_pointer_over_egui()
             || ctx.egui_wants_pointer_input()
         {
@@ -4002,7 +4013,11 @@ impl App {
                 },
                 _ => crate::camera::ToolMode::from_mods(ctrl, self.shift),
             };
-            let width = self.gfx.as_ref().map(|g| g.renderer.size().0 as f32).unwrap_or(1280.0);
+            let width = self
+                .gfx
+                .as_ref()
+                .map(|g| self.world_viewport_for_size(g.renderer.size(), false).width as f32)
+                .unwrap_or(1280.0);
             self.camera.drag(mode, dx, dy, width, &mut self.world.agent);
         } else if self.right_drag {
             if !self.right_gesture.motion(dx, dy, self.egui_ctx.pixels_per_point()) {
@@ -4910,7 +4925,7 @@ impl App {
         let (cx, cy) = self.cursor_pos;
         let still = (cx - self.look_cursor.0).abs() < 0.5 && (cy - self.look_cursor.1).abs() < 0.5;
         self.look_cursor = (cx, cy);
-        let (kind, object, offset) = if still && !turning {
+        let (kind, object, offset) = if (still && !turning) || !self.world_pointer_inside() {
             let v = self.world.agent.velocity;
             let ahead = if v.length_squared() > 4.0 {
                 v
@@ -4923,8 +4938,8 @@ impl App {
         } else {
             let dir = lookat::cursor_direction(
                 self.camera.forward(),
-                cx / width.max(1.0) - 0.5,
-                0.5 - cy / height.max(1.0),
+                (cx - self.world_viewport.map_or(0.0, |v| v.x as f32)) / width.max(1.0) - 0.5,
+                0.5 - (cy - self.world_viewport.map_or(0.0, |v| v.y as f32)) / height.max(1.0),
                 prefs.head_yaw,
                 prefs.head_pitch,
             );
@@ -5815,6 +5830,7 @@ impl App {
     /// Log out, save the window, layout, inventory cache and settings, exit.
     fn shutdown(&mut self, event_loop: &ActiveEventLoop) {
         self.instances.leave();
+        self.characters.leave();
         // closed while the graphics card still holds a frame, from its
         // notice or not: reported, and the next start offers the safe
         // graphics (app/gpu_stall.rs)
@@ -6999,8 +7015,8 @@ impl App {
     /// viewing angle depend on it).
     fn view_aspect(&self) -> f32 {
         self.gfx.as_ref().map_or(16.0 / 9.0, |g| {
-            let (w, h) = g.renderer.size();
-            w as f32 / h.max(1) as f32
+            let view = self.world_viewport_for_size(g.renderer.size(), g.renderer.vr_engaged());
+            view.width as f32 / view.height as f32
         })
     }
 
@@ -8416,6 +8432,7 @@ impl App {
     }
 
     fn frame(&mut self, event_loop: &ActiveEventLoop) {
+        self.tick_characters();
         // the input this frame reads came with the events just handled: its
         // time to the screen starts here (Performance › latency, pacing.rs)
         if let Some(g) = &mut self.gfx {
@@ -8916,12 +8933,14 @@ impl App {
         self.viewfinder_frame(&mut gfx.renderer);
         self.photo_isolate_frame(&mut gfx.renderer);
         let photo = self.photo_frame(&mut gfx.renderer);
-        let window_aspect = w as f32 / h.max(1) as f32;
+        let viewport = self.world_viewport_for_size((w, h), gfx.renderer.vr_engaged());
+        self.world_viewport = (viewport != aurora_render::WorldViewport::full((w, h))).then_some(viewport);
+        let window_aspect = viewport.width as f32 / viewport.height as f32;
         let aspect = photo.as_ref().map_or(window_aspect, |f| f.aspect);
         let photo_tile = photo.as_ref().map_or(glam::Mat4::IDENTITY, |f| f.tile);
         let photo_scale = photo.as_ref().map_or(1.0, |f| f.scale);
         let photo_context = photo.as_ref().map_or(aurora_render::PhotoContext::None, |f| f.context);
-        let lod_height = photo.as_ref().map_or(h, |f| f.height);
+        let lod_height = photo.as_ref().map_or(viewport.height, |f| f.height);
         let frame_proj = |camera: &crate::camera::Camera| match &photo {
             Some(f) => photo_tile * camera.photo_proj(f.aspect, window_aspect),
             None => camera.proj(aspect),
@@ -9040,7 +9059,7 @@ impl App {
             }
             self.trace_own_motion();
             self.update_pointing();
-            self.update_look_at(w as f32, h as f32);
+            self.update_look_at(viewport.width as f32, viewport.height as f32);
             let mut c = self.world.agent.controls(&self.input, &self.camera, self.settings.draw_distance);
             // the walk to a double-clicked point (src/autopilot.rs)
             c.control_flags = self.autopilot_controls(c.control_flags);
@@ -9498,7 +9517,8 @@ impl App {
                 w as f32,
                 h as f32,
                 self.egui_ctx.pixels_per_point(),
-            );
+            )
+            .in_area(viewport.area());
             if self.build.tool == crate::build::Tool::Edit
                 && self.build.hud_selected(&self.world)
                 && let Some(view) = drag_view
@@ -9522,7 +9542,8 @@ impl App {
                     w as f32,
                     h as f32,
                     self.egui_ctx.pixels_per_point(),
-                );
+                )
+                .in_area(viewport.area());
             }
             let over_ui = self.ui_takes_pointer();
             let mods = crate::build::Mods {
@@ -9623,7 +9644,8 @@ impl App {
                     w as f32,
                     h as f32,
                     self.egui_ctx.pixels_per_point(),
-                );
+                )
+                .in_area(viewport.area());
             }
             self.scene.update_beacons(&mut self.world, &self.settings.beacons, &cull);
             self.scene.held_at = hold.map(|h| h.at);
@@ -9760,6 +9782,7 @@ impl App {
                 && self.cursor_pos.1 >= 0.0
                 && self.cursor_pos.0 < w as f32
                 && self.cursor_pos.1 < h as f32
+                && self.world_pointer_inside()
                 && self.build.creation_preview_enabled(&self.settings.build, over_ui, mods)
             {
                 let mut candidates = std::mem::take(&mut self.scene.creation_preview.candidates);
@@ -10178,6 +10201,7 @@ impl App {
             aurora_render::ProbeFrame::default()
         };
         let mut fp = FrameParams {
+            world_viewport: self.world_viewport,
             // (a window behind past the driver's budget, or on a card another
             // program keeps busy, pauses its 3D drawing: its 3D targets
             // shrink, texture_budget::Background, busy_pause.rs)
@@ -10288,7 +10312,7 @@ impl App {
                     None => self.camera.proj(aspect),
                 };
                 let fov = 2.0 * (1.0 / lens_proj.y_axis.y.max(1e-6)).atan();
-                self.dof_frame(&mut gfx.renderer, dt, fov, lod_height, h)
+                self.dof_frame(&mut gfx.renderer, dt, fov, lod_height, viewport.height)
             },
             // the photo's isolation, "show only" on an empty background
             cutout: self.world.photo_isolation.empty_background(),
@@ -10299,7 +10323,7 @@ impl App {
         self.snapshots.look_focus = focus;
         fp.look = match &photo {
             Some(f) => f.look.clone(),
-            None => self.live_look((w, h), focus),
+            None => self.live_look(viewport.size(), focus),
         };
         self.scene.parts.lap(Part::ParamsProbes, t_part);
 
@@ -10615,7 +10639,7 @@ impl App {
             // before any field reads its keys: Ctrl+W is the frontmost window's
             ui::close_key::begin(ui.ctx());
             let t = Instant::now();
-            let projector = ui::hud::Projector::for_ui(ui.ctx(), vp, [w as f32, h as f32]);
+            let projector = ui::hud::Projector::for_ui(ui.ctx(), vp, [w as f32, h as f32]).in_viewport(viewport);
             // A discarded pass (`request_discard`) is followed by one that
             // gets no input events: what the first pass clicked must survive
             // the second, or a click that changed a row's size is lost.
@@ -10706,6 +10730,7 @@ impl App {
             && self.media_cursor.is_none()
             && !ctx.is_pointer_over_egui()
             && !ctx.egui_wants_pointer_input()
+            && self.world_pointer_inside()
         {
             let hud = self.scene.hover_hud(&self.world, self.cursor_pos);
             if hud.is_some() {
@@ -10797,6 +10822,7 @@ impl App {
                 && !self.camera.mouselook()
                 && !ctx.is_pointer_over_egui()
                 && !ctx.egui_wants_pointer_input()
+                && self.world_pointer_inside()
                 && self
                     .scene
                     .hud_move_pick(&self.world, self.cursor_pos)
@@ -13080,6 +13106,7 @@ impl App {
             LoginAction::CheckUpdates => self.updater.check(self.net.runtime(), true),
             LoginAction::ReportBug => self.open_issue_chooser(),
             LoginAction::CopyVersion => self.copy_version(),
+            LoginAction::Characters => ui::widgets::toggle_floater(&self.egui_ctx, "characters", &mut self.characters_ui.open),
             LoginAction::SafeGraphics(choice) => self.safe_graphics_choice(choice),
             LoginAction::PhotoQualityOff(back_on) => self.photo_quality_off_answer(back_on),
             LoginAction::DismissDriverNotice => {
@@ -13200,6 +13227,7 @@ impl App {
             self.panels.appearance = true;
         }
         match a.bar {
+            BarAction::Characters => ui::widgets::toggle_floater(&self.egui_ctx, "characters", &mut self.characters_ui.open),
             BarAction::ImportStreamList => self.import_stream_list(),
             BarAction::ExportStreamList => self.export_stream_list(),
             BarAction::CheckUpdates => self.updater.check(self.net.runtime(), true),
@@ -14302,6 +14330,8 @@ impl App {
                 }
             });
         }
+        self.apply_startup_character();
+        let key = (self.settings.login_uri(), self.settings.username.trim().to_lowercase());
         if let Some(rx) = &self.login_form.portrait_rx {
             for (agent, image) in rx.try_iter() {
                 self.login_form.portraits.insert(
@@ -17289,6 +17319,7 @@ impl App {
             matches!(self.screen, Screen::Login) && !self.login_form.busy || self.demo,
             self.net.runtime(),
         );
+        self.show_characters(&ctx, &p);
         a.exit = self.exit_prompt.show(&ctx, &p, self.in_world());
         self.ui_parts.lap(Part::UiRest, t);
         a
@@ -17396,6 +17427,9 @@ impl ApplicationHandler for App {
         if self.gfx.is_some() {
             return;
         }
+        if std::env::var_os("AURORA_DEMO").is_some() {
+            self.demo_world_viewport();
+        }
         // captures keep a fixed, predictable window
         let capture = self.capture.is_some();
         let (mut w, mut h) = (self.settings.window_width.max(800), self.settings.window_height.max(600));
@@ -17425,7 +17459,21 @@ impl ApplicationHandler for App {
         if let (Some(m), false) = (&monitor, capture) {
             let sf = m.scale_factor();
             let (mw, mh) = (m.size().width as f64 / sf, m.size().height as f64 / sf);
-            if w as f64 >= mw * 0.95 && h as f64 >= mh * 0.9 {
+            let displays: Vec<_> = event_loop
+                .available_monitors()
+                .map(|m| {
+                    let (p, s) = (m.position(), m.size());
+                    [
+                        i64::from(p.x),
+                        i64::from(p.y),
+                        i64::from(p.x) + i64::from(s.width),
+                        i64::from(p.y) + i64::from(s.height),
+                    ]
+                })
+                .collect();
+            let unavailable_span =
+                self.settings.world_viewport.enabled && !crate::world_viewport::span_fits_displays((w, h), sf, pos, &displays);
+            if unavailable_span || (!self.settings.world_viewport.enabled && w as f64 >= mw * 0.95 && h as f64 >= mh * 0.9) {
                 w = (mw * 0.8) as u32;
                 h = (mh * 0.8) as u32;
                 let p = m.position();

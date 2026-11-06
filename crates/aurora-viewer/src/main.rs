@@ -23,6 +23,7 @@ mod cache;
 mod cache_key;
 mod cache_location;
 mod camera;
+mod characters;
 mod cli;
 mod cmdline;
 mod colorblind;
@@ -105,6 +106,7 @@ mod wearable_editor;
 mod window_hold;
 mod window_show;
 mod world;
+mod world_viewport;
 
 /// Hybrid-GPU hints (#894): on a PC with an integrated and a dedicated GPU,
 /// the NVIDIA (Optimus) and AMD (PowerXpress) drivers run a program that

@@ -68,7 +68,7 @@ impl Editor {
     fn pose_overlay(&mut self, ctx: &egui::Context, p: &Palette, world: &World, proj: &Projector, frame: &Frame) {
         let rig = &world.avatar_lib.rig;
         let layer = egui::LayerId::new(egui::Order::Background, egui::Id::unique("poser-skeleton"));
-        let painter = ctx.layer_painter(layer);
+        let painter = ctx.layer_painter(layer).with_clip_rect(proj.clip_rect());
         let segments = self.skeleton_segments(world, proj, frame);
         self.draw_segments(&painter, p, &segments);
         let gizmo_owns = if self.poser.transform == 2 {
@@ -91,6 +91,9 @@ impl Editor {
             let Some((at, _)) = proj.project(frame.joints[joint].w_axis.truncate()) else {
                 continue;
             };
+            if !proj.clip_rect().contains(at) {
+                continue;
+            }
             let selected = chosen == Some(joint);
             let response = egui::Area::new(egui::Id::unique(("poser-joint", joint)))
                 .fixed_pos(at - egui::vec2(6.0, 6.0))
@@ -98,6 +101,7 @@ impl Editor {
                 .movable(false)
                 .interactable(!gizmo_owns)
                 .show(ctx, |ui| {
+                    ui.set_clip_rect(ui.clip_rect().intersect(proj.clip_rect()));
                     let sense = if gizmo_owns {
                         Sense::hover()
                     } else if self.poser.transform == 2 {
@@ -146,7 +150,10 @@ impl Editor {
         let Some(pointer) = ctx.input(|i| i.pointer.interact_pos()) else {
             return;
         };
-        if ctx.layer_id_at(pointer).is_some_and(|l| l.order > egui::Order::Background) || self.point_owns_pointer(ctx, rig, pointer) {
+        if !proj.clip_rect().contains(pointer)
+            || ctx.layer_id_at(pointer).is_some_and(|l| l.order > egui::Order::Background)
+            || self.point_owns_pointer(ctx, rig, pointer)
+        {
             return;
         }
         let Some(segment) = segments::pick(&segments, pointer) else {
@@ -161,7 +168,10 @@ impl Editor {
             .order(egui::Order::Background)
             .fixed_pos(at - egui::vec2(6.0, 6.0))
             .movable(false)
-            .show(ctx, |ui| ui.allocate_exact_size(egui::vec2(12.0, 12.0), Sense::click()).1)
+            .show(ctx, |ui| {
+                ui.set_clip_rect(ui.clip_rect().intersect(proj.clip_rect()));
+                ui.allocate_exact_size(egui::vec2(12.0, 12.0), Sense::click()).1
+            })
             .inner;
         if response.hovered() {
             painter.line_segment([segment.a.0, segment.b.0], Stroke::new(3.0, p.violet_light));

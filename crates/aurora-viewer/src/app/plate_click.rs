@@ -205,7 +205,9 @@ impl App {
 
     /// The hand of a clickable object over a plate that acts.
     pub(super) fn plate_cursor(&self) -> bool {
-        !self.classic_name_tags() && plate_click_acts(self.plate_click_action(), self.plate_hover, self.world.agent_id)
+        self.world_pointer_inside()
+            && !self.classic_name_tags()
+            && plate_click_acts(self.plate_click_action(), self.plate_hover, self.world.agent_id)
     }
 
     /// A left press on the world: on another avatar's plate with an action
@@ -361,6 +363,7 @@ mod tests {
             let view = glam::camera::rh::view::look_at_mat4(eye, Vec3::Z, Vec3::Z);
             let vp = projection * view;
             let proj = ui::hud::Projector {
+                world_viewport: None,
                 view_proj: vp,
                 width: 1920.0,
                 height: 1080.0,
@@ -392,6 +395,7 @@ mod tests {
         }
         // A bad / behind-camera ray must not create a click target.
         let proj = ui::hud::Projector {
+            world_viewport: None,
             view_proj: Mat4::IDENTITY,
             width: 100.0,
             height: 100.0,

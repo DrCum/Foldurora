@@ -32,6 +32,9 @@ impl App {
     }
 
     pub(super) fn sample_build_color(&mut self) {
+        if !self.world_pointer_inside() {
+            return;
+        }
         let cursor = self.cursor_pos;
         let compact = shared::armed(&self.egui_ctx);
         let fresh = if compact {

@@ -13198,3 +13198,45 @@ picker-pipette-no-texture = コピー可能なテクスチャがインベント�
 picker-pipette-no-material = コピー可能なマテリアルがインベントリにありません。
 
 local-texture-preview-hint = ローカルテクスチャ — このコンピューターのファイルのプレビュー。
+
+# Multi-monitor world viewport
+mm-world-viewport = 複数モニター用ワールド表示
+mm-enable = ワールドの表示領域を指定する
+mm-enable-help = ウィンドウを複数のモニターに広げ、3D ワールドを表示する領域を指定します。カメラ、HUD、ワールドへのクリックはこの領域内に収まり、残りの領域にパネルを配置できます。マウスルック、UI 非表示、写真モード、VR では全体を使用します。
+mm-presets = ワールドの配置
+mm-presets-help = 広げたウィンドウの左半分または右半分を選び、モニターの大きさに合わせて余白を調整してください。
+mm-world-left = 左半分
+mm-world-right = 右半分
+mm-full-window = ウィンドウ全体
+mm-margin-left = 左の余白
+mm-margin-right = 右の余白
+mm-margin-top = 上の余白
+mm-margin-bottom = 下の余白
+mm-margin-help = パネル用の余白をウィンドウ全体の割合で指定します。向かい合う余白は、ワールド用に少なくとも 5% が残るように調整されます。
+
+# Native character windows
+character-switch-title = キャラクター
+character-switch-description = キャラクターごとに別のビューアウィンドウでログインを維持します。起動中のウィンドウへ切り替えるか、保存済みキャラクターのログイン画面を開きます。ログイン操作はご自身で行ってください。
+character-switch-shared-settings = 初期設定とレイアウトは共有されます。最後に保存したウィンドウが、別のウィンドウの変更を上書きする場合があります。
+character-switch-demo = オフラインデモ：キャラクターとウィンドウは模擬表示です。
+character-switch-demo-action = デモ表示のみです。ウィンドウの起動や切り替えは行いません。
+character-switch-search = キャラクターまたはグリッドを検索…
+character-switch-current = このウィンドウ
+character-switch-opening = ログインウィンドウを起動中…
+character-switch-online = 別のウィンドウでログイン中
+character-switch-connecting = 別のウィンドウで接続中
+character-switch-login-open = ログインウィンドウ起動済み
+character-switch-offline = オフライン
+character-switch-switch = 切り替え
+character-switch-open-login = ログイン画面を開く
+character-switch-empty = 保存済みキャラクターがありません。ログイン画面でユーザー名の保存を有効にしてログインすると追加されます。
+character-switch-no-results = 一致するキャラクターがありません。
+character-switch-limit = 保存済みキャラクターの先頭６４件を表示します。ログイン画面のアカウント管理で順序を変更できます。
+character-switch-launch-requested = ログインウィンドウを起動しています。準備ができたら、そのウィンドウでログインしてください。
+character-switch-focus-requested = ウィンドウの切り替えを要求しました。デスクトップに制限される場合は、タスクバーまたはＤｏｃｋからビューアを選択してください。
+character-switch-failed = キャラクターのウィンドウが変更されたか、開けませんでした。一覧の更新を待ってから再試行してください。
+character-switch-beta-grid = Second Lifeベータ
+character-switch-custom-grid = カスタムグリッド
+character-switch-missing = この保存済みキャラクターは利用できません。ログイン画面でアカウントを選択してください。
+character-switch-cli-help = --saved-account <id>  保存済みキャラクターの手動ログイン画面を選択
+character-switch-other-grid = このアバターは別のグリッドでウィンドウを起動しています。アカウントデータを共有するため、そちらを閉じてからログイン画面を開いてください。

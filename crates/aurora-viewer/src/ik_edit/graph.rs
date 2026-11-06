@@ -1065,29 +1065,35 @@ impl Editor {
         let nodes = self.graph.definition.nodes.clone();
         // Overlapping controls reserve the selected point first. Virtual
         // points also reserve their pixels before real-bone widgets are drawn.
-        let point_target = ctx.input(|i| i.pointer.interact_pos()).and_then(|pointer| {
-            nodes
-                .iter()
-                .filter_map(|node| {
-                    let transform = self.graph.node_transform(node.id)?;
-                    let (at, _) = proj.project(frame.model.transform_point3(transform.p()))?;
-                    egui::Rect::from_center_size(at, egui::Vec2::splat(16.0))
-                        .contains(pointer)
-                        .then_some((node.id, at.distance_sq(pointer)))
-                })
-                .min_by(|a, b| {
-                    (self.graph.selected != Some(a.0))
-                        .cmp(&(self.graph.selected != Some(b.0)))
-                        .then(a.1.total_cmp(&b.1))
-                })
-                .map(|(id, _)| id)
-        });
+        let point_target = ctx
+            .input(|i| i.pointer.interact_pos())
+            .filter(|p| proj.clip_rect().contains(*p))
+            .and_then(|pointer| {
+                nodes
+                    .iter()
+                    .filter_map(|node| {
+                        let transform = self.graph.node_transform(node.id)?;
+                        let (at, _) = proj.project(frame.model.transform_point3(transform.p()))?;
+                        egui::Rect::from_center_size(at, egui::Vec2::splat(16.0))
+                            .contains(pointer)
+                            .then_some((node.id, at.distance_sq(pointer)))
+                    })
+                    .min_by(|a, b| {
+                        (self.graph.selected != Some(a.0))
+                            .cmp(&(self.graph.selected != Some(b.0)))
+                            .then(a.1.total_cmp(&b.1))
+                    })
+                    .map(|(id, _)| id)
+            });
         for node in &nodes {
             let Some(transform) = self.graph.node_transform(node.id) else {
                 continue;
             };
             let p = frame.model.transform_point3(transform.p());
             let Some((point, _)) = proj.project(p) else { continue };
+            if !proj.clip_rect().contains(point) {
+                continue;
+            }
             let selected = self.graph.selected == Some(node.id);
             if selected
                 && self.gizmo_visible(ctx.input(|i| i.modifiers))
@@ -1134,6 +1140,7 @@ impl Editor {
                 .movable(false)
                 .interactable(!gizmo_owns && point_target.is_none_or(|id| id == node.id))
                 .show(ctx, |ui| {
+                    ui.set_clip_rect(ui.clip_rect().intersect(proj.clip_rect()));
                     let (rect, response) = ui.allocate_exact_size(
                         egui::Vec2::splat(16.0),
                         if self.links.bone_pick {

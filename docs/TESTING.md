@@ -4709,6 +4709,8 @@ both open states and the selection count. Capture at frame 620.
 
 | Variable | Effect |
 |---|---|
+| `AURORA_DEMO_VIEWPORT=left\|right\|inset\|scaled` | Synthetic multi-monitor world rectangle, without changing saved preferences |
+| `AURORA_DEMO_CHARACTERS=1` | Opens Characters with synthetic account/session rows and inert actions |
 | `AURORA_DEMO_TOOLBAR=1` | Open the "Toolbar buttons" window; the bars mockup's custom state, side toolbars, labels. |
 | `AURORA_DEMO_AREA_SEARCH=1\|filters\|ranges\|scope\|fields\|columns\|all-columns\|link\|parcel\|sale\|search\|menu` | Open Area Search with named objects and sale entries; `menu` opens its right-click menu. |
 | `AURORA_DEMO_TEXTURE_LIBRARY=<mode>` | Compact inventory library with synthetic folders, eight types and thumbnails. |
@@ -5059,6 +5061,19 @@ before (`amis`, `groupes`, `repere`, `historique`…) are still accepted.
 | `AURORA_DEMO_GRID_STATUS=open\|new\|none\|error` | Help › Grid status: the grid's incidents, and its toolbar button's flash |
 
 ### Details
+
+- **`AURORA_DEMO_VIEWPORT`** requires `AURORA_DEMO=1`. `left` and `right`
+  keep the world in that half of the native window. `inset` uses margins of
+  25% left, 10% right, 15% top and 20% bottom; `scaled` adds 75% render scale.
+  Capture after frame 660 and compare world aspect, labels, HUDs and picks with
+  the full-window demo. Floaters retain the full native canvas. Mouselook,
+  hidden UI, photos/viewfinder and VR temporarily use the full frame. These
+  scenarios change only in-memory demo settings.
+- **`AURORA_DEMO_CHARACTERS=1`** requires `AURORA_DEMO=1` and opens the
+  Characters panel after frame 550. It shows three synthetic saved accounts
+  with current/live/offline states. Actions produce a demo notice; they never
+  launch another process or read real session discovery. Capture after frame
+  660, including in French and Japanese and with an inset world viewport.
 
 - **`AURORA_DEMO_RLVA`**: `enabled` opens Preferences > RLVa and
   applies synthetic object restrictions at frame 700. `disabled` delivers

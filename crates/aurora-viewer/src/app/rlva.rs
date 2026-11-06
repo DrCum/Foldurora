@@ -8,14 +8,21 @@ impl App {
             .as_ref()
             .map(|g| g.window.inner_size())
             .filter(|size| size.width > 0 && size.height > 0)
-            .map_or(1.0, |size| size.width as f32 / size.height as f32)
+            .map_or(1.0, |size| {
+                let view = self.world_viewport_for_size((size.width, size.height), false);
+                view.width as f32 / view.height as f32
+            })
     }
     pub(super) fn rlva_overlay_blocks(&self) -> bool {
         let size = self.gfx.as_ref().map(|g| g.window.inner_size());
         let Some(size) = size.filter(|s| s.width > 0 && s.height > 0) else {
             return false;
         };
-        let (u, v) = (self.cursor_pos.0 / size.width as f32, self.cursor_pos.1 / size.height as f32);
+        let view = self.world_viewport_for_size((size.width, size.height), false);
+        let Some((x, y)) = view.local(self.cursor_pos.0, self.cursor_pos.1) else {
+            return false;
+        };
+        let (u, v) = (x / view.width as f32, y / view.height as f32);
         self.world
             .rlva_overlay_frames(Instant::now())
             .iter()
