@@ -359,6 +359,9 @@ fn warning_text(warning: Warning) -> &'static str {
 }
 
 #[cfg(test)]
+mod visual;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use aurora_session::chat::{ChatLine, ConversationInfo, LineKind};

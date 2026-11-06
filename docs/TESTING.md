@@ -28,6 +28,40 @@ single crate resolves the features of its dependencies on its own, so Cargo
 builds a second copy of them (`cargo test -p aurora-render` alone: 67 s of
 dependencies, then again for the next `--workspace` build).
 
+**CPU chat popout captures.**
+
+| Variable | Effect |
+|---|---|
+| `AURORA_HOST_CHAT_VISUAL_DIR=<directory>` | Empty output directory for the explicit test-only chat capture fixture |
+| `AURORA_HOST_CHAT_VISUAL_LANGUAGE=en\|fr\|ja` | Locale of that isolated test process |
+
+These variables exist only under `cfg(test)`; the viewer executable has no
+corresponding startup mode. Run the ignored fixture alone, once per locale,
+from the task worktree, using a fresh output directory each time:
+
+```powershell
+$env:AURORA_HOST_CHAT_VISUAL_DIR = '.scratch/chat-popout-visual-fr'
+$env:AURORA_HOST_CHAT_VISUAL_LANGUAGE = 'fr'
+cargo test --workspace host_chat_cpu_visual_fixture -- --ignored --test-threads=1 --nocapture
+```
+
+The fixture drives the actual chat widgets with egui pointer/text events and
+paints their meshes through the same CPU painter as `SoftwareWindow`. It
+creates twelve PNGs with matching JSON records and a combined `manifest.json`:
+Nearby, an inactive resident IM draft, queued and uncertain receipts, source
+replacement, and revoked reading/sending policy, at 640 × 640 points and at
+380 × 640 points with 150% native scaling. Each record checks the immutable
+synthetic account/grid/session, selected conversation title, visible sender,
+history, draft and receipt text. Source replacement and privacy revocation
+purge the draft and old text before any capture. Japanese captures require an
+installed CJK fallback font and fail explicitly if it is missing.
+
+Inspect the actual PNGs for clipping, font coverage and the honest uncertain
+status. The fixture uses only synthetic memory snapshots: no controller,
+profile, socket, grid, native window or graphics adapter is created. These
+captures validate the CPU UI body; native ownership, taskbar and focus behavior
+still need separate Windows acceptance.
+
 **To add a variable**: one short line in the table of its topic (the name
 alone in the first column, one sentence in the second); if it takes more
 than one sentence, or if there are several modes, a "Details" paragraph

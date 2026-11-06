@@ -56,6 +56,12 @@ active world's scheduling recognizes only its exact host PID/owned-window
 family; keyboard focus remains an independent native fact. Integrated builds,
 privacy/failure tests and native acceptance are required before publication.
 
+The test-only `session_host/chat_ui/visual.rs` drives that same popout body with
+real egui input and paints through `crash::software::Painter`, as
+`SoftwareWindow` does. Its ignored, explicitly configured EN/FR/JA fixture
+writes synthetic PNG/JSON evidence without a native window, controller, profile,
+socket or graphics adapter. It does not replace native-window acceptance.
+
 `app/busy_pause.rs` chooses shared-viewer background pause before the packet's
 world resolution and draw lists. A live peer from the same or an unknown GPU
 counts even at the login screen or with zero reported memory. The existing
