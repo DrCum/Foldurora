@@ -4963,6 +4963,7 @@ before (`amis`, `groupes`, `repere`, `historique`…) are still accepted.
 | `AURORA_DEMO_CONV_BUTTON=1\|mute\|still\|menu` | The Conversations button flashing for nearby chat and an IM, nearby chat left out, Reduce motion, its right-click menu |
 | `AURORA_DEMO_ATTENTION=1\|front\|capture` | Taskbar flashes and system notifications for messages, mentions and offers arriving in the background |
 | `AURORA_DEMO_BUSY_PAUSE=<frame>` | From that frame, the window counts as behind on a busy card: the 3D pauses, with its notice and window title, until a click |
+| `AURORA_DEMO_SHARED_GPU=1` | Private updater-test installation only: enable the real GPU peer registry for an offline synthetic world; external captures only, no capture/profile flags |
 | `AURORA_DEMO_IM_ANNOUNCE=1\|prefs` | Residents start typing IMs to us, then send them: the conversation announced before the message, and the unread count in the window title |
 | `AURORA_DEMO_MENTION=list\|names` | The chat bar's `@` list of residents to mention, or the prediction of a nearby resident's name |
 | `AURORA_DEMO_KEYWORDS=1\|prefs` | Keyword alerts on for the run: nearby chat, IM, group chat and object lines holding a keyword, coloured and with their sound; or the preferences' settings, the lines sent again and again |
@@ -6180,6 +6181,22 @@ failure. Grid validation and any paid upload are performed by the human.
   3D when the card is overloaded" off, nothing pauses. A capture run
   pauses too (a real one never does): `AURORA_FPS_LIMIT=60`,
   `AURORA_DEMO_BUSY_PAUSE=900` and `AURORA_CAPTURE_FRAMES=1000`.
+- **`AURORA_DEMO_SHARED_GPU=1`**: only in a validated private updater-test
+  installation, a normal offline demo participates in its isolated `instances`
+  registry. Ordinary demos still never publish/read real peers; capture/profile
+  runs remain exempt even with this flag. Use a small window, finite lifetime,
+  and external screenshots, without forced GPU loss or a real-grid login.
+  Start focused, publish a fresh private peer heartbeat (zero usage and inactive
+  peers count; known different GPU identities do not), then move focus to an
+  owned sentinel. The first shared-pause packet must log resolution divisor 16,
+  `world draws withheld true` and `slow_latched false`, without waiting for a
+  completed slow GPU measurement. Its notice and native title identify a shared
+  card, while the UI/session frame loop continues. Focus resumes immediately;
+  after a peer expires, four seconds of continuous absence release shared-only
+  pause. A transient missing record must not resume the world. Test the setting
+  opt-out and photo/VR exemptions separately. This validates the mitigation's
+  policy and actual packet wiring; it does not reproduce or establish the cause
+  of a physical GPU reset, nor accept simultaneous live sessions.
 - **`AURORA_DEMO_ATTENTION=1|front|capture`**: the window goes to the
   taskbar at frame 700, then an IM (760), a mention in nearby chat (820), a
   mention in a group chat (880), an object's message (940), a teleport offer

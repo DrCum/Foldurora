@@ -80,6 +80,19 @@ Wayland leave the window alone when reliable position or hold state is unavailab
 
 ## Character testing
 
+Live testing of source `81c167e2` confirmed the display-spanning viewport but
+reported graphics-device loss in older background character windows. Automated
+checks had passed; they did not establish safe real-world GPU coexistence.
+The contention mitigation pauses an unfocused world before drawing when another
+live viewer shares the graphics card, using the existing **Pause background 3D
+on a shared or overloaded card** preference. Chat, sound and the session keep
+running. Focus resumes the world immediately. Shared-only pause also ends after
+four seconds without peers; a transient registry read failure cannot resume a
+heavy frame. Known different GPUs are excluded; unknown GPU identities count
+conservatively. Photos, VR, capture/profile runs and the setting's opt-out retain
+their exemptions. The underlying reset cause remains unconfirmed; a person
+still needs to accept simultaneous sessions on the affected hardware.
+
 Open **Me → Characters**, or use the users icon on the login screen. Use the
 Characters panel to select an existing session or open a saved
 account's login window. Opening another character does not log out the first.

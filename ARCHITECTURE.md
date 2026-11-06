@@ -1,5 +1,16 @@
 # Aurora Viewer architecture
 
+`app/busy_pause.rs` chooses shared-viewer background pause before the packet's
+world resolution and draw lists. A live peer from the same or an unknown GPU
+counts even at the login screen or with zero reported memory. The existing
+`background_gpu_pause` setting, focus, photo and VR exemptions remain in force.
+Shared-only pause releases after four seconds of continuous peer absence;
+the distinct slow-GPU latch retains its earlier focus-based release. Both use
+the existing small-target/empty-world-list path while CPU/session/UI work runs.
+`instances.rs` keeps ordinary demos and timed runs isolated. An explicit
+shared-demo fixture is allowed only inside a validated private updater test
+installation and exercises the real registry without grid access.
+
 The workspace follow-up keeps native window captions in the existing attention
 writer: account, short grid label and session phase share the unread/pause
 decoration path. Explicit custom titles, process arguments, log names and

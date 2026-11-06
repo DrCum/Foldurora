@@ -41,6 +41,29 @@ pub const BEHIND_FPS: f32 = 10.0;
 
 const EXTENSION: &str = "instance";
 
+/// Ordinary demos and timed runs remain isolated from real viewers. The
+/// explicit offline coexistence fixture uses only its private updater test
+/// root, so its real registry/renderer policy cannot affect user sessions.
+fn participates(demo: bool, timed: bool, requested: bool, isolated: bool) -> bool {
+    !timed && (!demo || (requested && isolated))
+}
+
+pub fn coexistence_enabled(demo: bool, timed: bool) -> bool {
+    if !demo {
+        return participates(false, timed, false, false);
+    }
+    static FIXTURE: std::sync::OnceLock<(bool, bool)> = std::sync::OnceLock::new();
+    let (requested, isolated) = *FIXTURE.get_or_init(|| {
+        let requested = std::env::var("AURORA_DEMO_SHARED_GPU").is_ok_and(|v| v == "1");
+        let isolated = aurora_updater::test_environment().is_some();
+        if requested && isolated {
+            log::info!("GPU coexistence: isolated shared-demo registry enabled; timed runs remain exempt");
+        }
+        (requested, isolated)
+    });
+    participates(true, timed, requested, isolated)
+}
+
 /// What a viewer says of itself.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Own {
@@ -92,6 +115,7 @@ pub struct Instances {
     file: PathBuf,
     shared: Shared,
     started: bool,
+    sharing: bool,
 }
 
 impl Instances {
@@ -110,6 +134,7 @@ impl Instances {
                 Condvar::new(),
             )),
             started: false,
+            sharing: false,
         }
     }
 
@@ -118,6 +143,7 @@ impl Instances {
     /// shows a fake world or measures must not take room from the one on the
     /// grid, nor have its own figures skewed by it).
     pub fn tick(&mut self, enabled: bool, own: Own) {
+        self.sharing = enabled;
         if !enabled {
             return;
         }
@@ -137,6 +163,10 @@ impl Instances {
     /// The others, as of the last pass.
     pub fn peers(&self) -> Peers {
         lock(&self.shared).peers.clone()
+    }
+
+    pub fn sharing(&self) -> bool {
+        self.sharing
     }
 
     /// The viewer closes: its file goes, the others do not wait for it to
@@ -281,6 +311,71 @@ pub fn throttle(cap: f32, focused: bool, shared: bool, exempt: bool) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shared_demo_fixture_requires_private_test_root_and_cannot_override_timed_exemptions() {
+        assert!(participates(false, false, false, false));
+        assert!(!participates(false, true, true, true));
+        assert!(!participates(true, false, false, true));
+        assert!(!participates(true, false, true, false));
+        assert!(!participates(true, false, false, false));
+        assert!(participates(true, false, true, true));
+        assert!(!participates(true, true, true, true));
+    }
+
+    #[test]
+    fn login_inactive_and_unknown_card_peers_count_but_different_cards_and_stale_peers_do_not() {
+        let entries = [
+            (
+                100,
+                Own {
+                    usage: 0,
+                    active: true,
+                    luid: 42,
+                },
+            ),
+            (
+                100,
+                Own {
+                    usage: 0,
+                    active: false,
+                    luid: 42,
+                },
+            ),
+            (
+                100,
+                Own {
+                    usage: 0,
+                    active: false,
+                    luid: 0,
+                },
+            ),
+            (
+                100,
+                Own {
+                    usage: 0,
+                    active: true,
+                    luid: 84,
+                },
+            ),
+            (
+                91,
+                Own {
+                    usage: 1024,
+                    active: true,
+                    luid: 42,
+                },
+            ),
+        ];
+        let peers = alive(&entries, 100, 42);
+        assert_eq!(peers.list, entries[..3].iter().map(|(_, own)| *own).collect::<Vec<_>>());
+        assert_eq!(
+            alive(&entries, 100, 0).list.len(),
+            4,
+            "unknown own card conservatively counts every fresh peer"
+        );
+        assert!(alive(&entries, 109, 42).list.is_empty());
+    }
 
     const MB: u64 = 1 << 20;
 

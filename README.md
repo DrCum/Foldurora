@@ -7,6 +7,9 @@
 The Foldurora preview branches add a multi-monitor workspace and native character
 switching. See the [feature inventory and morning test guide](docs/FOLDURORA.md)
 for the implementation boundaries and remaining Windows/grid acceptance.
+Live testing confirmed the world viewport and exposed a background GPU loss
+with several characters. The follow-up adds preventive shared-GPU pause;
+native coexistence acceptance is still required.
 
 **A modern Second Life viewer, written in Rust.**<br>
 A Vulkan renderer, a clean interface, and the Second Life you already know.
