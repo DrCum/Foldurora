@@ -5,7 +5,7 @@
 
 use super::bridge_auth::{HANDSHAKE_DEADLINE, Permit};
 use super::preview_io::{Image, PreviewMailbox};
-use super::preview_protocol::{Availability, Header, ImageHeader, PreviewSource, State};
+use super::preview_protocol::{Availability, Header, ImageHeader, PreviewSource, State, Suspend, Suspended};
 use super::preview_transport::{Error, Kind, Packet, WorkerIo};
 use aurora_session::WorkerIdentity;
 use std::io;
@@ -41,11 +41,48 @@ enum SourceUpdate {
     Changed,
 }
 
+#[derive(Default)]
+struct SuspensionInput {
+    highest: Option<Suspend>,
+    pending: Option<Suspend>,
+}
+
+impl SuspensionInput {
+    fn retain(&mut self, request: Suspend, latched: bool) -> Option<bool> {
+        if request.validate().is_err() {
+            return None;
+        }
+        if let Some(old) = self.highest {
+            if old.source != request.source || old.challenge > request.challenge || (old.challenge == request.challenge && old != request) {
+                return None;
+            }
+            // A completed old request may be replayed after a legitimate
+            // resume. Its cached proof/floor must not retire new authority.
+            if old == request && self.pending.is_none() && !latched {
+                return None;
+            }
+        }
+        let changed = self.highest != Some(request);
+        self.highest = Some(request);
+        self.pending = Some(request);
+        Some(changed)
+    }
+
+    fn retry(&mut self, receive: impl FnOnce(Suspend) -> bool) {
+        if let Some(request) = self.pending
+            && receive(request)
+        {
+            self.pending = None;
+        }
+    }
+}
+
 struct Source {
     scope: Scope,
     source: Option<PreviewSource>,
     expires: Option<Instant>,
     revision: u64,
+    suspension: SuspensionInput,
 }
 
 impl Source {
@@ -55,6 +92,7 @@ impl Source {
             source: None,
             expires: None,
             revision: 1,
+            suspension: SuspensionInput::default(),
         }
     }
 
@@ -66,6 +104,7 @@ impl Source {
         };
         self.source = (self.revision != 0).then_some(source).flatten();
         self.expires = self.source.and(expires);
+        self.suspension = SuspensionInput::default();
     }
 
     fn expire(&mut self, now: Instant) -> bool {
@@ -103,6 +142,21 @@ impl Source {
     }
 }
 
+fn retain_suspend(source: &mut Source, mailbox: &PreviewMailbox, request: Suspend, receive: impl FnOnce(Suspend) -> bool) {
+    if source.source != Some(request.source) {
+        return;
+    }
+    if let Some(changed) = source.suspension.retain(request, mailbox.is_suspended()) {
+        if changed {
+            // Retire even when receive_suspend cannot yet acquire its tiny
+            // metadata/producer locks. The source-local pending slot also
+            // blocks every optional image write until the receipt is stored.
+            mailbox.disconnect();
+        }
+        source.suspension.retry(receive);
+    }
+}
+
 struct Shared {
     source: Mutex<Source>,
     mailbox: Arc<PreviewMailbox>,
@@ -136,6 +190,42 @@ impl Shared {
         self.authority() == Some(authority)
     }
 
+    fn preview_current(&self, authority: Authority) -> bool {
+        let mut source = self.source();
+        let now = Instant::now();
+        self.expire(&mut source, now);
+        !self.stop.load(Ordering::Acquire)
+            && source.authority(now) == Some(authority)
+            && source.suspension.pending.is_none()
+            && !self.mailbox.is_suspended()
+    }
+
+    fn retry_suspend(&self, authority: Authority, now: Instant) {
+        let mut source = self.source();
+        self.expire(&mut source, now);
+        if !self.stop.load(Ordering::Acquire) && source.authority(now) == Some(authority) {
+            source.suspension.retry(|request| self.mailbox.receive_suspend(request));
+        }
+    }
+
+    fn current_request(&self, authority: Authority, request: Suspend) -> bool {
+        let mut source = self.source();
+        let now = Instant::now();
+        self.expire(&mut source, now);
+        !self.stop.load(Ordering::Acquire)
+            && source.authority(now) == Some(authority)
+            && request.source == authority.source
+            && source.suspension.highest == Some(request)
+            && (source.suspension.pending.is_some() || self.mailbox.is_suspended())
+    }
+
+    fn suspended(&self, authority: Authority) -> Option<Suspended> {
+        // Only the owning App's actual GPU completion can populate this slot.
+        // Receiving/retaining a Suspend never creates a proof in this lane.
+        let proof = self.mailbox.suspended()?;
+        (proof.validate().is_ok() && self.current_request(authority, proof.request)).then_some(proof)
+    }
+
     fn can_connect(&self, authority: Authority, now: Instant) -> bool {
         let source = self.source();
         !self.stop.load(Ordering::Acquire)
@@ -159,10 +249,15 @@ impl Shared {
         }
         match packet.header {
             Header::Subscribe(subscription) => {
-                self.mailbox.receive_subscription(subscription, now);
+                if source.suspension.pending.is_none() {
+                    self.mailbox.receive_subscription(subscription, now);
+                }
             }
             Header::Probe(probe) => {
                 self.mailbox.receive_probe(probe, now);
+            }
+            Header::Suspend(request) => {
+                retain_suspend(&mut source, &self.mailbox, request, |request| self.mailbox.receive_suspend(request));
             }
             _ => {}
         }
@@ -180,11 +275,15 @@ impl Shared {
         if let Some(peer) = self.mailbox.take_peer(now) {
             reports.push(Header::Peer(peer));
         }
-        if let Some(sample) = self.mailbox.take_sample(now) {
-            reports.push(Header::Sample(sample));
-        }
-        if let Some(probe) = self.mailbox.take_budget_request() {
-            reports.push(Header::Probe(probe));
+        let sample = self.mailbox.take_sample(now);
+        let probe = self.mailbox.take_budget_request();
+        if source.suspension.pending.is_none() && !self.mailbox.is_suspended() {
+            if let Some(sample) = sample {
+                reports.push(Header::Sample(sample));
+            }
+            if let Some(probe) = probe {
+                reports.push(Header::Probe(probe));
+            }
         }
         reports.retain(|header| header.source() == authority.source);
         reports
@@ -297,7 +396,7 @@ impl ImageGuard {
 fn connection_current(shared: &Shared, authority: Authority, generation: u64, now: Instant) -> bool {
     generation != 0
         && shared.mailbox.generation() == generation
-        && shared.current(authority)
+        && shared.preview_current(authority)
         && shared
             .mailbox
             .control(now)
@@ -374,6 +473,7 @@ impl Drop for Ended {
 struct ControlState {
     last: Option<State>,
     generation: Option<u64>,
+    proof: Option<Suspended>,
 }
 
 impl ControlState {
@@ -382,6 +482,11 @@ impl ControlState {
     }
     fn queued(&mut self, state: State, generation: u64) {
         self.last = Some(state);
+        self.generation = Some(generation);
+    }
+    fn queued_proof(&mut self, proof: Suspended, generation: u64) {
+        self.proof = Some(proof);
+        self.last = None;
         self.generation = Some(generation);
     }
     fn drained(&mut self) {
@@ -394,7 +499,19 @@ fn control_current(shared: &Shared, authority: Authority, generation: Option<u64
 }
 
 fn queue_control(socket: &mut WorkerIo, shared: &Shared, authority: Authority, state_cursor: &mut ControlState) -> Result<(), Error> {
-    if !socket.has_pending_writes() {
+    queue_control_inner(shared, authority, state_cursor, socket.has_pending_writes(), |header| {
+        socket.queue(header, &[])
+    })
+}
+
+fn queue_control_inner(
+    shared: &Shared,
+    authority: Authority,
+    state_cursor: &mut ControlState,
+    pending_writes: bool,
+    mut queue: impl FnMut(&Header) -> Result<(), Error>,
+) -> Result<(), Error> {
+    if !pending_writes {
         state_cursor.drained();
     }
     if !control_current(shared, authority, state_cursor.generation) {
@@ -404,15 +521,33 @@ fn queue_control(socket: &mut WorkerIo, shared: &Shared, authority: Authority, s
     if !state_cursor.accepts_generation(generation) {
         return Err(Error::Closed);
     }
-    if let Some(state) = shared
-        .mailbox
-        .state()
-        .filter(|state| state.source == authority.source && Some(*state) != state_cursor.last)
+    if let Some(proof) = shared.suspended(authority).filter(|proof| Some(*proof) != state_cursor.proof) {
+        if state_cursor.proof.is_some_and(|old| old.request == proof.request && old != proof) {
+            return Err(Error::Malformed);
+        }
+        match queue(&Header::Suspended(proof)) {
+            Ok(()) => {
+                if !shared.current_request(authority, proof.request) || shared.mailbox.generation() != generation {
+                    return Err(Error::Closed);
+                }
+                // Retain this identity after drain: a cached GPU proof is
+                // queued once per connection, not once per twenty-ms tick.
+                state_cursor.queued_proof(proof, generation);
+            }
+            Err(Error::Busy) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    if shared.preview_current(authority)
+        && let Some(state) = shared
+            .mailbox
+            .state()
+            .filter(|state| state.source == authority.source && Some(*state) != state_cursor.last)
     {
         if !shared.current(authority) || shared.mailbox.generation() != generation {
             return Err(Error::Closed);
         }
-        match socket.queue(&Header::State(state), &[]) {
+        match queue(&Header::State(state)) {
             Ok(()) => {
                 // Encoding is off-thread, but a concurrent privacy change
                 // must still discard this queued state before any write.
@@ -429,7 +564,7 @@ fn queue_control(socket: &mut WorkerIo, shared: &Shared, authority: Authority, s
         if !shared.current(authority) {
             return Err(Error::Closed);
         }
-        match socket.queue(&report, &[]) {
+        match queue(&report) {
             Ok(()) | Err(Error::Busy) => {}
             Err(error) => return Err(error),
         }
@@ -486,6 +621,7 @@ fn run(control_port: u16, image_port: u16, permit: Permit, shared: Arc<Shared>) 
             shared.wait();
             continue;
         };
+        shared.retry_suspend(authority, Instant::now());
         if control.is_none() && control_retry.due(Instant::now()) && shared.can_connect(authority, Instant::now()) {
             control_retry.attempted(Instant::now());
             match WorkerIo::connect(control_port, permit.clone(), Kind::Control) {
@@ -631,6 +767,7 @@ mod tests {
             visible: true,
             challenge,
             budget: None,
+            resume_after: None,
         }
     }
 
@@ -980,6 +1117,7 @@ mod tests {
             source: Some(source),
             expires: Some(now),
             revision: u64::MAX,
+            suspension: SuspensionInput::default(),
         };
         assert_eq!(current.set(Some(source), Some(now + RETRY), now), SourceUpdate::Changed);
         assert_eq!(current.revision, 0);
@@ -987,5 +1125,351 @@ mod tests {
         current.set(Some(source), Some(now + RETRY), now);
         assert_eq!(current.revision, 0);
         assert!(current.source.is_none() && current.expires.is_none());
+    }
+
+    fn suspend(shared: &Shared, authority: Authority, challenge: u64) -> Suspend {
+        let request = Suspend {
+            source: authority.source,
+            device_epoch: 2,
+            challenge,
+        };
+        shared.incoming(
+            authority,
+            Packet {
+                header: Header::Suspend(request),
+                rgba: Vec::new(),
+            },
+            Instant::now(),
+        );
+        request
+    }
+
+    fn gpu_proof(request: Suspend) -> Suspended {
+        Suspended {
+            request,
+            surface_epoch: 3,
+            completed_frame: Some(8),
+        }
+    }
+
+    fn publish_peer(shared: &Shared, authority: Authority, now: Instant) {
+        let probe = Probe {
+            source: authority.source,
+            challenge: 70,
+        };
+        shared.incoming(
+            authority,
+            Packet {
+                header: Header::Probe(probe),
+                rgba: Vec::new(),
+            },
+            now,
+        );
+        let peer = Peer {
+            cohort: Cohort {
+                source: authority.source,
+                device_epoch: 2,
+                pid: 200,
+            },
+            luid: 42,
+        };
+        shared.mailbox.publish_peer(CohortReport {
+            peer,
+            challenge: probe.challenge,
+        });
+        shared.mailbox.publish_sample(GpuSample {
+            peer,
+            challenge: probe.challenge,
+            surface_epoch: 3,
+            frame: 8,
+            gpu_micros: 100,
+        });
+        shared.mailbox.request_budget(authority.source, now);
+    }
+
+    #[test]
+    fn preview_lane_suspend_io_receipt_never_generates_gpu_ack_and_keeps_peer_metadata() {
+        let (shared, authority) = shared();
+        let (_, old_image) = seed(&shared, authority, 1, 1);
+        let request = suspend(&shared, authority, 10);
+        assert!(shared.mailbox.is_suspended());
+        assert_eq!(shared.mailbox.pending_suspend(), Some(request));
+        assert!(shared.suspended(authority).is_none());
+        assert!(!old_image.current(&shared, Instant::now()));
+        assert!(!shared.preview_current(authority));
+        publish_peer(&shared, authority, Instant::now());
+        let mut headers = Vec::new();
+        queue_control_inner(&shared, authority, &mut ControlState::default(), false, |header| {
+            headers.push(header.clone());
+            Ok(())
+        })
+        .expect("metadata IO");
+        assert!(
+            matches!(headers.as_slice(), [Header::Peer(_)]),
+            "no State, Sample, budget or GPU ack while only an IO receipt exists"
+        );
+        assert!(shared.suspended(authority).is_none());
+        let mut wrong = request;
+        wrong.device_epoch += 1;
+        assert!(
+            !shared.mailbox.publish_suspended(gpu_proof(wrong)),
+            "the App proof must echo the exact requested device"
+        );
+    }
+
+    #[test]
+    fn preview_lane_retains_only_latest_contended_suspend_and_services_other_control() {
+        let (shared, authority) = shared();
+        seed(&shared, authority, 1, 1);
+        let request = Suspend {
+            source: authority.source,
+            device_epoch: 2,
+            challenge: 10,
+        };
+        {
+            let mut source = shared.source();
+            retain_suspend(&mut source, &shared.mailbox, request, |_| false);
+        }
+        assert!(
+            !shared.mailbox.is_suspended(),
+            "fixture models metadata contention before the mailbox latch"
+        );
+        assert!(!shared.preview_current(authority));
+        assert!(
+            shared.mailbox.control(Instant::now()).is_none(),
+            "new request retired authority before a contended receipt"
+        );
+        publish_peer(&shared, authority, Instant::now());
+        assert!(matches!(shared.reports(authority, Instant::now()).as_slice(), [Header::Peer(_)]));
+        let next = Suspend { challenge: 11, ..request };
+        {
+            let mut source = shared.source();
+            retain_suspend(&mut source, &shared.mailbox, next, |_| false);
+            let generation = shared.mailbox.generation();
+            retain_suspend(&mut source, &shared.mailbox, request, |_| {
+                panic!("older request must not reach the mailbox")
+            });
+            retain_suspend(&mut source, &shared.mailbox, Suspend { device_epoch: 99, ..next }, |_| {
+                panic!("conflicting scope must not reach the mailbox")
+            });
+            assert_eq!(source.suspension.highest, Some(next));
+            assert_eq!(source.suspension.pending, Some(next));
+            assert_eq!(shared.mailbox.generation(), generation);
+        }
+        shared.retry_suspend(authority, Instant::now());
+        assert!(shared.source().suspension.pending.is_none());
+        assert_eq!(shared.mailbox.pending_suspend(), Some(next));
+        assert!(
+            shared.suspended(authority).is_none(),
+            "retrying delivery is not a physical completion"
+        );
+    }
+
+    #[test]
+    fn preview_lane_app_gpu_ack_has_priority_retries_busy_and_is_queued_once() {
+        let (shared, authority) = shared();
+        let request = suspend(&shared, authority, 10);
+        let proof = gpu_proof(request);
+        assert!(
+            shared.mailbox.publish_suspended(proof),
+            "fixture represents the App's consumed GPU completion"
+        );
+        publish_peer(&shared, authority, Instant::now());
+        let mut state = ControlState::default();
+        let mut headers = Vec::new();
+        queue_control_inner(&shared, authority, &mut state, false, |header| {
+            headers.push(header.clone());
+            if matches!(header, Header::Suspended(_)) {
+                Err(Error::Busy)
+            } else {
+                Ok(())
+            }
+        })
+        .expect("bounded backpressure");
+        assert!(matches!(headers.as_slice(), [Header::Suspended(found), Header::Peer(_)] if *found==proof));
+        assert!(state.proof.is_none(), "Busy leaves the immutable GPU proof available for retry");
+        headers.clear();
+        queue_control_inner(&shared, authority, &mut state, true, |header| {
+            headers.push(header.clone());
+            Ok(())
+        })
+        .expect("retry proof");
+        assert_eq!(headers, [Header::Suspended(proof)]);
+        assert_eq!(state.proof, Some(proof));
+        headers.clear();
+        queue_control_inner(&shared, authority, &mut state, true, |header| {
+            headers.push(header.clone());
+            Ok(())
+        })
+        .expect("still in flight");
+        queue_control_inner(&shared, authority, &mut state, false, |header| {
+            headers.push(header.clone());
+            Ok(())
+        })
+        .expect("fully drained");
+        assert!(headers.is_empty(), "cached proof cannot be requeued every IO tick");
+        assert_eq!(state.proof, Some(proof));
+        assert!(
+            !shared.mailbox.publish_suspended(Suspended { surface_epoch: 4, ..proof }),
+            "proof remains immutable"
+        );
+    }
+
+    #[test]
+    fn preview_lane_suspend_proof_survives_old_state_close_and_exact_source_reconnect() {
+        let (shared, authority) = shared();
+        let (_, old_image) = seed(&shared, authority, 1, 1);
+        let mut old_state = ControlState::default();
+        old_state.queued(shared.mailbox.state().expect("old Live state"), old_image.generation);
+        let request = suspend(&shared, authority, 10);
+        let proof = gpu_proof(request);
+        assert!(shared.mailbox.publish_suspended(proof));
+        assert_eq!(
+            queue_control_inner(&shared, authority, &mut old_state, true, |_| panic!(
+                "obsolete partial State must close first"
+            )),
+            Err(Error::Closed)
+        );
+        shared.mailbox.disconnect();
+        assert_eq!(shared.mailbox.suspended(), Some(proof));
+        assert_eq!(shared.source().suspension.highest, Some(request));
+        let mut state = ControlState::default();
+        assert_eq!(
+            queue_control_inner(&shared, authority, &mut state, false, |_| {
+                shared.mailbox.disconnect();
+                Ok(())
+            }),
+            Err(Error::Closed)
+        );
+        assert!(
+            state.proof.is_none(),
+            "generation change during encode closes before the proof is written"
+        );
+        let mut headers = Vec::new();
+        queue_control_inner(&shared, authority, &mut state, false, |header| {
+            headers.push(header.clone());
+            Ok(())
+        })
+        .expect("new authenticated socket");
+        assert_eq!(headers, [Header::Suspended(proof)]);
+        assert!(
+            control_current(&shared, authority, state.generation),
+            "current proof generation does not deadlock its write guard"
+        );
+    }
+
+    #[test]
+    fn preview_lane_completed_suspend_replay_does_not_poison_legitimate_resume() {
+        let (shared, authority) = shared();
+        seed(&shared, authority, 1, 1);
+        let request = suspend(&shared, authority, 10);
+        let proof = gpu_proof(request);
+        assert!(shared.mailbox.publish_suspended(proof));
+        let resume = Subscription {
+            revision: 2,
+            resume_after: Some(request.challenge),
+            ..subscription(authority.source, 11)
+        };
+        shared.incoming(
+            authority,
+            Packet {
+                header: Header::Subscribe(resume.clone()),
+                rgba: Vec::new(),
+            },
+            Instant::now(),
+        );
+        assert!(!shared.mailbox.is_suspended());
+        assert!(shared.mailbox.publish_state(State {
+            source: authority.source,
+            subscription_revision: 2,
+            epoch: 2,
+            availability: Availability::Live,
+            challenge: 11
+        }));
+        let header = ImageHeader {
+            source: authority.source,
+            subscription_revision: 2,
+            epoch: 2,
+            sequence: 2,
+            size: PreviewSize::Small,
+            challenge: 11,
+        };
+        assert!(shared.mailbox.publish_image(header, vec![12; PreviewSize::Small.bytes() as usize]));
+        let generation = shared.mailbox.generation();
+        for old in [
+            request,
+            Suspend { challenge: 9, ..request },
+            Suspend {
+                device_epoch: 99,
+                ..request
+            },
+        ] {
+            shared.incoming(
+                authority,
+                Packet {
+                    header: Header::Suspend(old),
+                    rgba: Vec::new(),
+                },
+                Instant::now(),
+            );
+        }
+        assert_eq!(shared.mailbox.generation(), generation);
+        assert_eq!(
+            *shared.mailbox.control(Instant::now()).expect("resume retained").subscription,
+            resume
+        );
+        assert!(shared.preview_current(authority));
+        assert!(candidate(&shared, authority).is_some());
+        assert!(shared.source().suspension.pending.is_none());
+        assert_eq!(shared.source().suspension.highest, Some(request));
+        let mut headers = Vec::new();
+        queue_control_inner(&shared, authority, &mut ControlState::default(), false, |header| {
+            headers.push(header.clone());
+            Ok(())
+        })
+        .expect("resumed outputs");
+        assert!(
+            matches!(headers.as_slice(), [Header::State(_)]),
+            "cached pre-resume proof cannot replace current outputs"
+        );
+        let next = suspend(&shared, authority, 11);
+        assert!(shared.mailbox.is_suspended());
+        assert_ne!(shared.mailbox.generation(), generation);
+        assert_eq!(shared.mailbox.pending_suspend(), Some(next));
+        assert!(shared.suspended(authority).is_none(), "new request requires a new actual GPU proof");
+    }
+
+    #[test]
+    fn preview_lane_source_change_clears_retention_and_never_replays_an_old_gpu_ack() {
+        let (shared, authority) = shared();
+        let request = suspend(&shared, authority, 10);
+        assert!(shared.mailbox.publish_suspended(gpu_proof(request)));
+        let channel = WorkerChannel { shared: shared.clone() };
+        let mut next = authority.source;
+        next.session.generation += 1;
+        channel.set_source(Some(next), Some(Instant::now() + Duration::from_secs(3600)));
+        let authority = shared.authority().expect("new exact source");
+        {
+            let source = shared.source();
+            assert!(source.suspension.highest.is_none() && source.suspension.pending.is_none());
+        }
+        assert!(shared.suspended(authority).is_none());
+        let generation = shared.mailbox.generation();
+        shared.incoming(
+            authority,
+            Packet {
+                header: Header::Suspend(request),
+                rgba: Vec::new(),
+            },
+            Instant::now(),
+        );
+        assert_eq!(shared.mailbox.generation(), generation);
+        let mut headers = Vec::new();
+        queue_control_inner(&shared, authority, &mut ControlState::default(), false, |header| {
+            headers.push(header.clone());
+            Ok(())
+        })
+        .expect("new source IO");
+        assert!(headers.is_empty());
     }
 }
