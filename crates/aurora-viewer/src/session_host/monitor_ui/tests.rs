@@ -357,7 +357,19 @@ fn monitor_body_captures_exact_binding_and_settings_base_without_optimistic_ackn
         .unwrap();
     assert!(f.pointer(1, at, false).is_none(), "release cannot exchange the replacement binding");
     assert_ne!(f.model.binding(view).unwrap().incarnation, old.incarnation);
+    let old_pixels = f.rect(1, control_id(view, "exchange")).center();
+    f.model.close(view).unwrap();
+    f.model
+        .open_fixed(Source::new(SlotId::try_from(2).unwrap(), source(3), true).unwrap())
+        .unwrap();
+    // Native input was queued against the old painted binding before the first
+    // redraw can show this replacement; current geometry may not capture it.
+    assert!(f.pointer(1, old_pixels, true).is_none());
+    assert!(f.pointer(1, old_pixels, false).is_none());
     f.settle(1);
+    assert!(
+        matches!(f.click(1,control_id(view,"exchange")),Some(Action::Control{command:Command::Exchange(ticket),..}) if ticket.source().chat()==source(3))
+    );
     assert!(f.click(1, control_id(view, "options")).is_none());
     f.settle(1);
     let Some(Action::Control {
@@ -475,6 +487,17 @@ fn monitor_body_three_contexts_share_canonical_draft_undo_and_keep_mismatched_so
     f.chat.select_for(View::Fixed1.surface(), source(1));
     f.settle(1);
     assert_eq!(f.send(1).text.as_str(), "Canonical base");
+    f.composer(1);
+    let redo = Modifiers {
+        shift: true,
+        ..command_z()
+    };
+    assert!(f.show(1, vec![key(Key::Z, true, redo), key(Key::Z, false, redo)]).is_none());
+    assert_eq!(
+        f.send(0).text.as_str(),
+        "Canonical base plus monitor edit",
+        "source-bound mismatch did not replace the shared Undo/Redo history"
+    );
 }
 
 #[test]
