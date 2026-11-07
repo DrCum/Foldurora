@@ -173,16 +173,41 @@ struct Shared {
     clock: Instant,
     ui_budget: UiPixelBudget,
     operations: Arc<AtomicUsize>,
+    retirement: AtomicBool,
 }
 impl Shared {
-    fn try_store(&self) -> Result<std::sync::MutexGuard<'_, store::Store>, PreviewError> {
-        self.store.try_lock().map_err(|error| match error {
-            std::sync::TryLockError::WouldBlock => PreviewError::Busy,
-            std::sync::TryLockError::Poisoned(_) => {
+    fn try_store(&self) -> Result<StoreGuard<'_>, PreviewError> {
+        match self.store.try_lock() {
+            Ok(locked) => Ok(StoreGuard {
+                shared: self,
+                locked: Some(locked),
+            }),
+            Err(std::sync::TryLockError::WouldBlock) => Err(PreviewError::Busy),
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => {
                 self.frontdoor.retire();
-                PreviewError::Unavailable
+                self.retirement.swap(true, Ordering::AcqRel);
+                drop(poisoned.into_inner());
+                self.try_retire_store();
+                Err(PreviewError::Unavailable)
             }
-        })
+        }
+    }
+    fn retire_store(&self) {
+        // Permanent RMW latch pairs with every StoreGuard's post-unlock RMW.
+        // Neither retirement nor cleanup can recreate source/image authority.
+        self.retirement.swap(true, Ordering::AcqRel);
+        self.try_retire_store();
+    }
+    fn try_retire_store(&self) {
+        let mut store = match self.store.try_lock() {
+            Ok(store) => store,
+            Err(std::sync::TryLockError::WouldBlock) => return,
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+        };
+        store.retire_terminal(self);
+        let garbage = store.drain_garbage();
+        drop(store);
+        drop(garbage);
     }
     fn try_control(&self) -> Result<std::sync::MutexGuard<'_, Arc<ControlSnapshot>>, PreviewError> {
         self.control.try_lock().map_err(|error| match error {
@@ -201,6 +226,49 @@ impl Shared {
             return Err(PreviewError::Stale);
         }
         u64::try_from(at.duration_since(self.clock).as_millis()).map_err(|_| PreviewError::Exhausted)
+    }
+}
+
+/// Every actual Store borrower owns terminal cleanup until AFTER unlocking.
+/// This also covers early returns and stop racing the final under-lock check.
+struct StoreGuard<'a> {
+    shared: &'a Shared,
+    locked: Option<std::sync::MutexGuard<'a, store::Store>>,
+}
+impl std::ops::Deref for StoreGuard<'_> {
+    type Target = store::Store;
+    fn deref(&self) -> &Self::Target {
+        self.locked.as_deref().expect("live Store guard")
+    }
+}
+impl std::ops::DerefMut for StoreGuard<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.locked.as_deref_mut().expect("live Store guard")
+    }
+}
+impl StoreGuard<'_> {
+    fn release(&mut self, before_unlock: impl FnOnce()) {
+        let Some(mut store) = self.locked.take() else { return };
+        if self.shared.retirement.fetch_or(false, Ordering::AcqRel) || !self.shared.frontdoor.current() {
+            self.shared.retirement.swap(true, Ordering::AcqRel);
+            store.retire_terminal(self.shared);
+        }
+        let garbage = store.drain_garbage();
+        before_unlock();
+        drop(store);
+        drop(garbage);
+        // If stop won before this RMW, we try cleanup after releasing the lock.
+        // If stop wins after it, the mutex is already free: stop either cleans
+        // itself or transfers to a newer actual StoreGuard. No spin or wait.
+        if self.shared.retirement.fetch_or(false, Ordering::AcqRel) || !self.shared.frontdoor.current() {
+            self.shared.retirement.swap(true, Ordering::AcqRel);
+            self.shared.try_retire_store();
+        }
+    }
+}
+impl Drop for StoreGuard<'_> {
+    fn drop(&mut self) {
+        self.release(|| {});
     }
 }
 
@@ -232,6 +300,7 @@ impl PreviewReader {
             clock: Instant::now(),
             ui_budget: ui_budget(),
             operations: Arc::new(AtomicUsize::new(0)),
+            retirement: AtomicBool::new(false),
         }))
     }
     pub fn ui_budget(&self) -> UiPixelBudget {

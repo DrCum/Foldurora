@@ -134,6 +134,9 @@ impl Job {
             && self.admitted.current(self.now())
     }
     fn run(self) -> Completion {
+        self.run_before_publish(|| {})
+    }
+    fn run_before_publish(self, before_publish: impl FnOnce()) -> Completion {
         let payload = (|| {
             if !self.current() {
                 return None;
@@ -145,6 +148,7 @@ impl Job {
                     PrivateImage::from_rgba(&self.budget, size, bytes)
                 })?
                 .ok()?;
+            before_publish();
             if !self.current() {
                 return None;
             }
@@ -169,90 +173,253 @@ pub(super) struct Completion {
     pub lifetime: EpochFence,
     pub payload: Option<Arc<Payload>>,
 }
+struct Queued {
+    job: Job,
+    sink: std::sync::Weak<CompletionSink>,
+}
 struct Mailbox {
-    jobs: VecDeque<Job>,
-    done: Vec<Completion>,
+    jobs: VecDeque<Queued>,
 }
 struct Worker {
     mailbox: Mutex<Mailbox>,
     wake: Condvar,
 }
-#[derive(Clone)]
-pub(super) struct Preparer(Arc<Worker>);
+struct CompletionSink {
+    owner: Arc<Frontdoor>,
+    done: Mutex<Vec<Completion>>,
+}
+/// The Broker owns its bounded results. The global worker holds only a Weak
+/// sink, so terminal stop cannot orphan finished payloads in a static cache.
+pub(super) struct Preparer {
+    worker: Arc<Worker>,
+    sink: Arc<CompletionSink>,
+}
 impl Preparer {
     /// Called lazily by the Broker after real owned admission, never from UI.
     /// The one stack+bounded metadata fit inside the host's 8MiB service reserve;
     /// raw32/UI24 pixel credits are separate and are retained through errors.
-    pub fn shared() -> Result<Self, PreviewError> {
-        static WORKER: OnceLock<Result<Preparer, PreviewError>> = OnceLock::new();
-        WORKER
+    pub fn shared(owner: Arc<Frontdoor>) -> Result<Self, PreviewError> {
+        static WORKER: OnceLock<Result<Arc<Worker>, PreviewError>> = OnceLock::new();
+        let worker = WORKER
             .get_or_init(|| {
                 let worker = Arc::new(Worker {
                     mailbox: Mutex::new(Mailbox {
                         jobs: VecDeque::with_capacity(MAX_WORKERS),
-                        done: Vec::with_capacity(MAX_WORKERS),
                     }),
                     wake: Condvar::new(),
                 });
-                let owner = worker.clone();
+                let runner = worker.clone();
                 std::thread::Builder::new()
                     .name("session-preview-prepare".into())
                     .stack_size(256 * 1024)
-                    .spawn(move || owner.run())
+                    .spawn(move || runner.run())
                     .map_err(|_| PreviewError::Unavailable)?;
-                Ok(Preparer(worker))
+                Ok(worker)
             })
-            .clone()
+            .clone()?;
+        Ok(Self::owner(worker, owner))
     }
+    fn owner(worker: Arc<Worker>, owner: Arc<Frontdoor>) -> Self {
+        Self {
+            worker,
+            sink: Arc::new(CompletionSink {
+                owner,
+                done: Mutex::new(Vec::with_capacity(MAX_WORKERS)),
+            }),
+        }
+    }
+    #[expect(
+        clippy::result_large_err,
+        reason = "return the bounded indivisible owned job on contention; do not allocate a metadata box under the queue lock"
+    )]
     pub fn submit(&self, job: Job) -> Result<(), Job> {
+        if !Arc::ptr_eq(&job.owner, &self.sink.owner) || !self.sink.owner.current() {
+            return Err(job);
+        }
+        let sink = Arc::downgrade(&self.sink);
         let retired;
         {
-            let Ok(mut mailbox) = self.0.mailbox.try_lock() else {
+            let Ok(mut mailbox) = self.worker.mailbox.try_lock() else {
                 return Err(job);
             };
             retired = mailbox
                 .jobs
                 .iter()
-                .position(|old| old.source == job.source)
+                .position(|old| old.job.source == job.source && old.sink.ptr_eq(&sink))
                 .and_then(|at| mailbox.jobs.remove(at));
             if mailbox.jobs.len() >= MAX_WORKERS {
                 return Err(job);
             }
-            mailbox.jobs.push_back(job);
+            mailbox.jobs.push_back(Queued { job, sink });
         }
         drop(retired);
-        self.0.wake.notify_one();
+        self.worker.wake.notify_one();
         Ok(())
     }
     pub fn take(&self) -> Result<Vec<Completion>, PreviewError> {
-        let mut mailbox = self.0.mailbox.try_lock().map_err(|_| PreviewError::Busy)?;
-        Ok(std::mem::replace(&mut mailbox.done, Vec::with_capacity(MAX_WORKERS)))
+        let mut done = self.sink.done.try_lock().map_err(|_| PreviewError::Busy)?;
+        Ok(std::mem::replace(&mut *done, Vec::with_capacity(MAX_WORKERS)))
     }
 }
 impl Worker {
+    fn complete(&self, queued: Queued) {
+        self.publish(queued.sink, queued.job.run());
+    }
+    fn publish(&self, sink: std::sync::Weak<CompletionSink>, done: Completion) {
+        let Some(sink) = sink.upgrade() else { return };
+        let retired;
+        {
+            let mut mailbox = sink.done.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            retired = mailbox
+                .iter()
+                .position(|old| old.source == done.source)
+                .map(|at| mailbox.swap_remove(at));
+            if mailbox.len() < MAX_WORKERS && done.lifetime.current() && sink.owner.current() {
+                mailbox.push(done);
+            }
+        }
+        drop(retired);
+        // A rejected completion and the final transient upgraded sink are both
+        // destroyed here, after releasing the completion mutex.
+    }
     fn run(&self) {
         loop {
-            let job = {
+            let queued = {
                 let mut mailbox = self.mailbox.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 while mailbox.jobs.is_empty() {
                     mailbox = self.wake.wait(mailbox).unwrap_or_else(std::sync::PoisonError::into_inner);
                 }
                 mailbox.jobs.pop_front().expect("nonempty bounded preparation queue")
             };
-            let done = job.run();
-            let retired;
-            {
-                let mut mailbox = self.mailbox.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                retired = mailbox
-                    .done
-                    .iter()
-                    .position(|old| old.source == done.source)
-                    .map(|at| mailbox.done.swap_remove(at));
-                if mailbox.done.len() < MAX_WORKERS && done.lifetime.current() {
-                    mailbox.done.push(done);
-                }
-            }
-            drop(retired);
+            self.complete(queued);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::store::tests::Owned;
+    use super::*;
+
+    fn worker() -> Arc<Worker> {
+        Arc::new(Worker {
+            mailbox: Mutex::new(Mailbox {
+                jobs: VecDeque::with_capacity(MAX_WORKERS),
+            }),
+            wake: Condvar::new(),
+        })
+    }
+    fn pop(worker: &Worker) -> Queued {
+        worker.mailbox.lock().unwrap().jobs.pop_front().unwrap()
+    }
+    fn submit(preparer: &Preparer, job: Job) {
+        assert!(preparer.submit(job).is_ok());
+    }
+
+    #[test]
+    fn preview_host_completed_conversion_owner_drop_releases_real_raw_and_private_pixel_credits() {
+        let (mut fixture, mut job, raw) = Owned::preparation_fixture();
+        // Inject a separate real credit pool only to measure this ownership
+        // case deterministically alongside parallel tests. Production always
+        // uses Shared's ONE process pool, covered by the actual reader test.
+        let pixels = UiPixelBudget::new();
+        job.budget = pixels.clone();
+        let worker = worker();
+        let preparer = Preparer::owner(worker.clone(), job.owner.clone());
+        submit(&preparer, job);
+        worker.complete(pop(&worker));
+        assert_eq!(preparer.sink.done.lock().unwrap().len(), 1);
+        assert!(preparer.sink.done.lock().unwrap()[0].payload.is_some());
+        assert!(raw.used() > 0);
+        assert!(pixels.used() > 0);
+        let weak = Arc::downgrade(&preparer.sink);
+        fixture.stop_preparation_fixture();
+        drop(preparer); // Same result-owner disposal performed by runtime.stop.
+        assert!(weak.upgrade().is_none());
+        assert_eq!(raw.used(), 0);
+        assert_eq!(pixels.used(), 0);
+    }
+
+    #[test]
+    fn preview_host_queued_and_running_conversion_after_stop_cannot_publish_or_release_credits_early() {
+        for running in [false, true] {
+            let (mut fixture, mut job, raw) = Owned::preparation_fixture();
+            let pixels = UiPixelBudget::new();
+            job.budget = pixels.clone();
+            let worker = worker();
+            let preparer = Preparer::owner(worker.clone(), job.owner.clone());
+            submit(&preparer, job);
+            let queued = running.then(|| pop(&worker));
+            let weak = Arc::downgrade(&preparer.sink);
+            fixture.stop_preparation_fixture();
+            drop(preparer);
+            assert!(weak.upgrade().is_none());
+            assert!(raw.used() > 0, "actual queued/running owner still holds its raw allocation");
+            worker.complete(queued.unwrap_or_else(|| pop(&worker)));
+            assert_eq!(raw.used(), 0);
+            assert_eq!(pixels.used(), 0);
+            assert!(worker.mailbox.lock().unwrap().jobs.is_empty());
+        }
+    }
+
+    #[test]
+    fn preview_host_two_completion_owners_cannot_steal_or_coalesce_each_others_results() {
+        let (mut fixture, mut job, raw) = Owned::preparation_fixture();
+        let pixels = UiPixelBudget::new();
+        job.budget = pixels.clone();
+        let worker = worker();
+        let first = Preparer::owner(worker.clone(), job.owner.clone());
+        let other = Preparer::owner(worker.clone(), job.owner.clone());
+        let mut another = fixture.actual_preparation_job();
+        another.budget = pixels.clone();
+        submit(&first, job);
+        submit(&other, another);
+        assert_eq!(
+            worker.mailbox.lock().unwrap().jobs.len(),
+            2,
+            "same-source jobs of different owners never coalesce"
+        );
+        worker.complete(pop(&worker));
+        assert!(other.take().unwrap().is_empty());
+        assert_eq!(first.sink.done.lock().unwrap().len(), 1);
+        let results = first.take().unwrap();
+        assert!(first.take().unwrap().is_empty());
+        assert_eq!(results.len(), 1);
+        assert!(results[0].payload.is_some());
+        worker.complete(pop(&worker));
+        let other_results = other.take().unwrap();
+        assert_eq!(other_results.len(), 1);
+        assert!(other_results[0].payload.is_some());
+        fixture.stop_preparation_fixture();
+        drop(first);
+        drop(other);
+        assert!(raw.used() > 0, "a handed-out result is a genuine physical owner");
+        assert!(pixels.used() > 0);
+        drop(results);
+        assert!(raw.used() > 0, "the other owner still holds its result");
+        drop(other_results);
+        assert_eq!(raw.used(), 0);
+        assert_eq!(pixels.used(), 0);
+    }
+    #[test]
+    fn preview_host_stop_during_actual_conversion_drops_unpublished_pixels_after_final_original_guard_check() {
+        let (mut fixture, mut job, raw) = Owned::preparation_fixture();
+        let pixels = UiPixelBudget::new();
+        job.budget = pixels.clone();
+        let worker = worker();
+        let preparer = Preparer::owner(worker.clone(), job.owner.clone());
+        submit(&preparer, job);
+        let Queued { job, sink } = pop(&worker);
+        let done = job.run_before_publish(|| {
+            assert!(pixels.used() > 0, "the actual private conversion has completed");
+            fixture.stop_preparation_fixture();
+            drop(preparer);
+            assert!(pixels.used() > 0, "in-flight converted allocation is still physically owned");
+            assert!(raw.used() > 0);
+        });
+        assert!(done.payload.is_none(), "original owner/lifetime is checked AFTER conversion");
+        worker.publish(sink, done);
+        assert_eq!(raw.used(), 0);
+        assert_eq!(pixels.used(), 0);
     }
 }

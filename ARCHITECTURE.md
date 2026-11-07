@@ -5224,3 +5224,19 @@ producer-origin disagreement, bounded listener startup, and exact immutable
 Exchange receipts. A queued native setting which outlives its owner wait becomes
 Uncertain, preserving its reservation. All 33 Host regressions are authored UNRUN;
 independent source review and root compilation/runtime checks remain separate.
+
+Terminal Host shutdown also retires serialized Store ownership without a future
+actor poll. Every actual Store borrower owns a private cleanup guard: a permanent
+atomic retirement RMW is checked again after unlocking, so stop between the final
+under-lock check and unlock cannot abandon cached allocations. Cleanup remains
+try-only; model/cache retirement and conservative native reservation loss happen
+under Store ownership, while payload garbage drops after releasing the mutex.
+
+The converter still has one process-global worker and five queued job slots.
+Each Broker owns its bounded five-slot completion sink; queued/running jobs keep
+only a Weak sink. Explicit stop drops this owner and held actor results outside
+Store locks. A transient worker upgrade checks the original owner/lifetime and
+drops rejected or final results after releasing the completion mutex. One Broker
+cannot drain/coalesce another Broker's completion. Seven further authored UNRUN
+lifecycle/resource cases bring Host coverage to 40; actual OS/GPU permission is
+outside these authenticated protocol/pure CPU ownership fixtures' scope.

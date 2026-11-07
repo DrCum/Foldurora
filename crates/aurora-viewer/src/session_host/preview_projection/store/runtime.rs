@@ -246,6 +246,11 @@ impl BrokerProjection {
     }
     pub(in crate::session_host) fn stop(&mut self) {
         self.reader.0.frontdoor.retire();
+        self.reader.0.retire_store();
+        // The result owner is never dropped under a Store/completion mutex.
+        drop(self.preparer.take());
+        self.completions.clear();
+        self.frames.clear();
         self.external_intent();
         if let Some(channel) = &self.channel {
             channel.stop();
@@ -564,15 +569,15 @@ impl BrokerProjection {
         let planned_generation;
         let garbage = {
             let Ok(mut locked) = shared.try_store() else { return };
-            let mut store = &mut *locked;
+            let store = &mut *locked;
             let now = shared.now(); // Every model time is sampled inside lock.
             if store.apply_control(&control).is_err() {
                 return;
             }
             store.reconcile_frontdoor(&shared);
-            self.apply_requests(&mut store, &control);
+            self.apply_requests(store, &control);
             planned_generation = store.generation;
-            self.publish_exchange(&mut store);
+            self.publish_exchange(store);
             for worker in self.exits.drain(..) {
                 store.ledger.exited(worker);
             }
@@ -619,7 +624,7 @@ impl BrokerProjection {
                         let _ = shared.frontdoor.capture_intent();
                         store.reconcile_frontdoor(&shared);
                         if matches!(receipt.outcome, aurora_session::preview_wire::DemandOutcome::Rejected { .. }) {
-                            finish_settings(&mut store, token.source(), SettingsOutcome::Rejected);
+                            finish_settings(store, token.source(), SettingsOutcome::Rejected);
                         }
                     }
                     if let Some(demand) = observed.observation().stopped_demand {
@@ -635,7 +640,7 @@ impl BrokerProjection {
                     }
                 }
             }
-            resolve_settings(&mut store, metadata.as_ref().filter(|_| metadata_current));
+            resolve_settings(store, metadata.as_ref().filter(|_| metadata_current));
             let mut at = 0;
             while at < store.settings.len() {
                 if store.settings[at].began.elapsed() >= Duration::from_secs(2) {
@@ -661,7 +666,7 @@ impl BrokerProjection {
                 .map(|entry| entry.source)
                 .collect();
             for source in uncertain {
-                finish_settings(&mut store, source, SettingsOutcome::Uncertain);
+                finish_settings(store, source, SettingsOutcome::Uncertain);
                 if let Some(entry) = store.entries.iter_mut().find(|entry| entry.source == source) {
                     entry.retire(&mut store.garbage);
                 }
@@ -877,7 +882,7 @@ impl BrokerProjection {
             }
         }
         if !jobs.is_empty() && self.preparer.is_none() {
-            self.preparer = prepare::Preparer::shared().ok();
+            self.preparer = prepare::Preparer::shared(shared.frontdoor.clone()).ok();
         }
         for job in jobs {
             let rejected = if let Some(preparer) = &self.preparer {

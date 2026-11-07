@@ -9,7 +9,7 @@ use aurora_session::preview_image::{CaptureClaim, ImageBudget, PreviewPolicy, So
 use std::collections::VecDeque;
 use std::time::Duration;
 
-struct Garbage {
+pub(super) struct Garbage {
     _raw: Option<Arc<RetainedFrame>>,
     _prepared: Option<Arc<prepare::Payload>>,
     _handoff: Option<FrameHandoff>,
@@ -164,7 +164,7 @@ impl Store {
             garbage: Vec::new(),
         }
     }
-    fn drain_garbage(&mut self) -> Vec<Garbage> {
+    pub(super) fn drain_garbage(&mut self) -> Vec<Garbage> {
         std::mem::take(&mut self.garbage)
     }
     fn apply_control(&mut self, control: &ControlSnapshot) -> Result<(), PreviewError> {
@@ -242,6 +242,13 @@ impl Store {
             }
         }
     }
+    pub(super) fn retire_terminal(&mut self, shared: &Shared) {
+        self.reconcile_frontdoor(shared);
+        for entry in &mut self.entries {
+            entry.retire(&mut self.garbage);
+            self.ledger.lost(entry.source.worker());
+        }
+    }
     fn visible(&self, source: PreviewSource) -> bool {
         self.views.iter().any(|view| view.source == source && view.visible)
     }
@@ -260,10 +267,9 @@ impl Store {
         }
         if io_service == self.io_service
             && let Some(old) = self.io_applied
+            && (stamp.publisher() != old.publisher() || stamp.serial() < old.serial())
         {
-            if stamp.publisher() != old.publisher() || stamp.serial() < old.serial() {
-                return Err(PreviewError::Stale);
-            }
+            return Err(PreviewError::Stale);
         }
         // Check every join and origin before ANY model mutation, including
         // absence and expiry handling. One stale source cannot partially apply.
@@ -390,10 +396,10 @@ impl Store {
                     entry.model = Some(model);
                 }
             }
-            if let Some(model) = &mut entry.model {
-                if model.retained(now).is_err() {
-                    entry.retire(&mut self.garbage);
-                }
+            if let Some(model) = &mut entry.model
+                && model.retained(now).is_err()
+            {
+                entry.retire(&mut self.garbage);
             }
             entry.status = if entry.prepared.is_some() {
                 ImageStatus::LastActive
@@ -501,31 +507,29 @@ pub(super) fn read(shared: &Arc<Shared>, view: View, namespace: ViewNamespace) -
                 None
             };
             let mut image = None;
-            if metadata_current {
-                if let Some(entry) = store.entries.iter().find(|entry| entry.source == descriptor.source) {
-                    image_status = entry.status;
-                    if let (Some(payload), Some(source), Some(metadata)) = (
-                        entry.prepared.clone(),
-                        control.images.iter().find(|source| source.source() == descriptor.source),
-                        metadata.as_ref(),
-                    ) && let Ok(control_guard) = ControlGuard::from_host(source)
-                    {
-                        let prepared = Arc::new(PreparedImage::for_read(
-                            payload,
-                            prepare::ReadScope {
-                                control: control_guard,
-                                control_head: control.guard.clone(),
-                                metadata_head: metadata.head_guard(),
-                                view: view_guard.clone(),
-                                shared: shared.clone(),
-                                binding: (descriptor.view, descriptor.namespace),
-                                service: io_service,
-                            },
-                        ));
-                        if prepared.current() {
-                            image_status = ImageStatus::LastActive;
-                            image = Some(prepared);
-                        }
+            if metadata_current && let Some(entry) = store.entries.iter().find(|entry| entry.source == descriptor.source) {
+                image_status = entry.status;
+                if let (Some(payload), Some(source), Some(metadata)) = (
+                    entry.prepared.clone(),
+                    control.images.iter().find(|source| source.source() == descriptor.source),
+                    metadata.as_ref(),
+                ) && let Ok(control_guard) = ControlGuard::from_host(source)
+                {
+                    let prepared = Arc::new(PreparedImage::for_read(
+                        payload,
+                        prepare::ReadScope {
+                            control: control_guard,
+                            control_head: control.guard.clone(),
+                            metadata_head: metadata.head_guard(),
+                            view: view_guard.clone(),
+                            shared: shared.clone(),
+                            binding: (descriptor.view, descriptor.namespace),
+                            service: io_service,
+                        },
+                    ));
+                    if prepared.current() {
+                        image_status = ImageStatus::LastActive;
+                        image = Some(prepared);
                     }
                 }
             }
@@ -596,4 +600,4 @@ struct PendingSetting {
 mod runtime;
 pub(in crate::session_host) use runtime::{BootstrapAdmission, BrokerProjection, RequestKind};
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

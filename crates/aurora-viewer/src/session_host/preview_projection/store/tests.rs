@@ -176,7 +176,7 @@ impl Peer {
         receipt
     }
 }
-struct Owned {
+pub(in crate::session_host::preview_projection) struct Owned {
     _serial: std::sync::MutexGuard<'static, ()>,
     runtime: BrokerProjection,
     reader: PreviewReader,
@@ -405,6 +405,38 @@ impl Owned {
         });
         self.apply(&set).unwrap();
         self.peer.heartbeat = true;
+    }
+    pub(in crate::session_host::preview_projection) fn preparation_fixture() -> (Self, prepare::Job, ImageBudget) {
+        let mut owned = Self::new();
+        owned.capture_ready();
+        let image = owned.prepared_frame(1);
+        let job = owned.actual_preparation_job();
+        drop(image);
+        let budget = owned.channel.image_budget();
+        (owned, job, budget)
+    }
+    pub(in crate::session_host::preview_projection) fn actual_preparation_job(&self) -> prepare::Job {
+        let shared = &self.reader.0;
+        let control = shared.control.lock().unwrap();
+        let store = shared.store.lock().unwrap();
+        let entry = &store.entries[0];
+        let revision = entry.candidate.load(Ordering::Acquire);
+        prepare::Job {
+            source: entry.source,
+            revision,
+            raw: entry.raw.as_ref().unwrap().clone(),
+            admitted: entry.admitted_candidate.as_ref().unwrap().clone(),
+            control: ControlGuard::from_host(&control.images[0]).unwrap(),
+            candidate: EpochFence::generation(entry.candidate.clone(), revision),
+            lifetime: entry.lifetime.clone(),
+            clock: shared.clock,
+            budget: shared.ui_budget.clone(),
+            owner: shared.frontdoor.clone(),
+            view_generation: shared.frontdoor.view_fence(store.generation),
+        }
+    }
+    pub(in crate::session_host::preview_projection) fn stop_preparation_fixture(&mut self) {
+        self.runtime.stop();
     }
     fn settings(&mut self, request: u64, descriptor: ViewDescriptor, desired: Options) {
         self.runtime.queue(
@@ -1160,4 +1192,76 @@ fn preview_host_exchange_receipt_requires_exact_accepted_grant_and_preserves_imm
     assert_eq!(receipt.request, 3);
     assert_eq!(receipt.exchange, cancelled);
     assert_eq!(receipt.outcome, ExchangeOutcome::Cancelled);
+}
+
+#[test]
+fn preview_host_terminal_stop_retires_prepared_cache_without_a_later_broker_poll() {
+    let mut owned = Owned::new();
+    owned.capture_ready();
+    let old = owned.prepared_frame(1);
+    let budget = owned.channel.image_budget();
+    let held = owned.reader.0.store.lock().unwrap().ledger.held();
+    owned.runtime.stop();
+    {
+        let store = owned.reader.0.store.lock().unwrap();
+        let entry = &store.entries[0];
+        assert!(entry.model.is_none() && entry.raw.is_none() && entry.prepared.is_none());
+        assert!(store.views.is_empty());
+        assert_eq!(store.ledger.held(), held);
+        assert!(store.ledger.uncertain(owned.descriptor.source));
+        assert!(store.garbage.is_empty());
+    }
+    assert!(!old.current());
+    assert!(budget.used() > 0, "genuine held consumer retains physical credits");
+    drop(old);
+    until(|| (budget.used() == 0).then_some(()));
+}
+
+#[test]
+fn preview_host_terminal_stop_transfers_cleanup_to_an_already_held_actual_store_guard() {
+    let mut owned = Owned::new();
+    owned.capture_ready();
+    let old = owned.prepared_frame(1);
+    let shared = owned.reader.0.clone();
+    let guard = shared.try_store().unwrap();
+    owned.runtime.stop();
+    assert!(
+        guard.entries[0].raw.is_some(),
+        "stop does not block or mutate through another owner"
+    );
+    assert!(!old.current(), "render authority retires before physical cleanup");
+    drop(guard);
+    let store = shared.store.lock().unwrap();
+    assert!(store.entries[0].model.is_none());
+    assert!(store.entries[0].raw.is_none());
+    assert!(store.entries[0].prepared.is_none());
+    assert!(store.garbage.is_empty());
+}
+
+#[test]
+fn preview_host_stop_between_final_terminal_check_and_unlock_cannot_abandon_store_cache() {
+    let mut owned = Owned::new();
+    owned.capture_ready();
+    let old = owned.prepared_frame(1);
+    let shared = owned.reader.0.clone();
+    let mut guard = shared.try_store().unwrap();
+    assert!(guard.entries[0].raw.is_some());
+    assert!(!shared.retirement.load(Ordering::Acquire));
+    guard.release(|| {
+        // Deterministic exact lost-cleanup interleaving: StoreGuard has already
+        // checked terminal=false but still owns the mutex. stop must fail its
+        // try_lock, then the post-unlock RMW owns retirement with no next tick.
+        owned.runtime.stop();
+        assert!(shared.store.try_lock().is_err());
+        assert!(shared.retirement.load(Ordering::Acquire));
+    });
+    assert!(guard.locked.is_none());
+    assert!(!old.current());
+    let store = shared.store.lock().unwrap();
+    assert!(store.entries[0].model.is_none());
+    assert!(store.entries[0].raw.is_none());
+    assert!(store.entries[0].prepared.is_none());
+    assert!(store.garbage.is_empty());
+    drop(store);
+    drop(guard); // Already-consumed cleanup cannot run the hook twice.
 }

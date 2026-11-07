@@ -3645,3 +3645,12 @@ Open-source technologies that could set Aurora apart (human request of 2026-10-1
     bindings are corrected. Queued native settings timeout stays Uncertain.
     The shared recoverable-admit seam and UI ViewReads follow-up are explicit
     combined dependencies. No source-clear or runtime/product claim is made here.
+  - Terminal Host ownership follow-up: nonblocking StoreGuard cleanup with a
+    permanent atomic handoff and post-unlock recheck covers shutdown contention
+    and the exact final-check/unlock race. Per-Broker bounded completion ownership
+    replaces static orphan result retention; global queued/running jobs hold Weak
+    sinks, one process worker and all raw/private credits remain unchanged.
+    Explicit stop disposes its completion owner outside Store locks. Seven real
+    credit/lifecycle regressions are authored UNRUN (40 Host tests total); compile
+    mechanicals are folded in without changing effect/guard order. Exact source
+    review and root compilation/runtime remain pending; factory stays closed.
