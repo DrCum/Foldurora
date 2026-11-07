@@ -1,9 +1,13 @@
 # Aurora Viewer architecture
 
 `settings/profile_seed.rs` and its strict JSON reader are a cfg(test)-only
-selective-profile prerequisite: four closed typed presentation/control families,
+selective-profile data prerequisite: four closed typed presentation/control families,
 explicit field lists, current native defaults, duplicate/depth/node/byte limits,
-selected-field refusal and semantic preservation of unselected target JSON values.
+selected-field refusal and lossless preservation of unselected target JSON values.
+The existing serde_json raw_value feature retains numeric lexemes; all raw trees
+still receive duplicate/depth/node checks, and only selected typed values decode.
+Native default construction may lazily query keyboard layout; the real adapter
+must schedule it off the GUI/control pump under its bounded worker lease.
 The seed retains no raw source, path, account, unknown value or native authority;
 Debug and summaries contain counters/enums only. `settings/presentation.rs` shares
 the existing ordinary normalization ranges without changing their call order.

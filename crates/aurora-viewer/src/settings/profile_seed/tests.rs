@@ -327,3 +327,87 @@ fn profile_seed_output_allocation_stays_capped_after_one_large_unselected_string
     );
     assert_eq!(serde_json::from_slice::<Value>(&output).unwrap(), value);
 }
+
+#[test]
+fn profile_seed_unselected_numeric_lexemes_remain_lossless_through_nested_target_values() {
+    let source = document(serde_json::json!({"draw_distance":128.0}));
+    let seed = ProfileSeed::read(&source, families(1)).unwrap();
+    for number in [
+        "18446744073709551617",
+        "-9223372036854775809",
+        "0.123456789012345678901234567890123456789",
+        "9007199254740993.0000000000000001",
+        "1.234567890123456789012345e+123",
+        "9.999999999999999999e-9999",
+        "1e100000",
+        "-0.0000000000000000000000000000001",
+    ] {
+        let target = format!(
+            r#"{{"settings_version":32,"draw_distance":96.0,"opaque":{{"values":[{number},{{"nested":{number}}}],"label":"untouched"}}}}"#
+        )
+        .into_bytes();
+        let original = json::object(&target).unwrap();
+        let (output, _) = seed.patch(Some(&target)).unwrap();
+        let written = json::object(&output).unwrap();
+        assert_eq!(
+            written["opaque"].get(),
+            original["opaque"].get(),
+            "unselected numeric semantics must not traverse f64: {number}"
+        );
+        assert_eq!(serde_json::from_str::<f32>(written["draw_distance"].get()).unwrap(), 128.0);
+        let opaque = json::members(&written["opaque"]).unwrap();
+        let values: Vec<&serde_json::value::RawValue> = serde_json::from_str(opaque["values"].get()).unwrap();
+        assert_eq!(values[0].get(), number);
+        assert_eq!(json::members(values[1]).unwrap()["nested"].get(), number);
+    }
+}
+#[test]
+fn profile_seed_lossless_raw_subtrees_still_require_duplicate_depth_node_and_number_syntax_validation() {
+    let seed = ProfileSeed::read(&document(serde_json::json!({})), families(1)).unwrap();
+    for bad in [
+        r#"{"settings_version":32,"opaque":  {"large":18446744073709551617,"same":1,"\u0073ame":2}}"#.to_owned(),
+        r#"{"settings_version":32,"opaque": [1e100000,{"x":1,"x":2}]}"#.to_owned(),
+        format!(
+            r#"{{"settings_version":32,"opaque": {}1e100000{}}}"#,
+            "[".repeat(MAX_DEPTH),
+            "]".repeat(MAX_DEPTH)
+        ),
+        format!(r#"{{"settings_version":32,"opaque":[{}]}}"#, vec!["1e100000"; MAX_NODES].join(",")),
+    ] {
+        assert!(matches!(seed.patch(Some(bad.as_bytes())), Err(Error::Json)));
+    }
+    for malformed_number in ["01", "1e", "1.e2", "+1", "--1"] {
+        let bad = format!(r#"{{"settings_version":32,"opaque":{malformed_number}}}"#);
+        assert!(matches!(seed.patch(Some(bad.as_bytes())), Err(Error::Json)));
+    }
+}
+#[test]
+fn profile_seed_selected_typed_numeric_overflow_refuses_without_output_or_unselected_reinterpretation() {
+    let seed = ProfileSeed::read(&document(serde_json::json!({})), families(1)).unwrap();
+    for (key, number) in [
+        ("draw_distance", "1e100000"),
+        ("texture_budget_mb", "18446744073709551617"),
+        ("shadow_quality", "256"),
+    ] {
+        let original = format!(r#"{{"settings_version":32,"{key}":{number},"opaque":0.123456789012345678901234567890}}"#).into_bytes();
+        let before = original.clone();
+        assert!(matches!(ProfileSeed::read(&original, families(1)), Err(Error::Selected)));
+        assert!(matches!(seed.patch(Some(&original)), Err(Error::Selected)));
+        assert_eq!(original, before, "refusal emits no candidate and never repairs original data");
+    }
+}
+
+#[test]
+fn profile_seed_raw_skip_preflight_bounds_deep_input_before_capture_and_ignores_escaped_string_delimiters() {
+    let seed = ProfileSeed::read(&document(serde_json::json!({})), families(1)).unwrap();
+    let target = document(serde_json::json!({"opaque":"[{\\\"".repeat(1000)}));
+    let output = seed.patch(Some(&target)).unwrap().0;
+    assert_eq!(
+        json::object(&output).unwrap()["opaque"].get(),
+        json::object(&target).unwrap()["opaque"].get()
+    );
+    let depth = MAX_FILE / 4;
+    let deep = format!(r#"{{"settings_version":32,"opaque":{}0{}}}"#, "[".repeat(depth), "]".repeat(depth));
+    assert!(deep.len() < MAX_FILE);
+    assert!(matches!(seed.patch(Some(deep.as_bytes())), Err(Error::Json)));
+}
