@@ -262,10 +262,11 @@ impl Connected {
         let mut tick = TickBudget::new();
         let _auth = tick.external(1024, 8);
         #[cfg(test)]
-        if self.stopping.is_some() && shared.break_before_ack.swap(false, Ordering::AcqRel) {
-            if let Some(stream) = self.pixels.take() {
-                let _ = stream.shutdown(Shutdown::Both);
-            }
+        if self.stopping.is_some()
+            && shared.break_before_ack.swap(false, Ordering::AcqRel)
+            && let Some(stream) = self.pixels.take()
+        {
+            let _ = stream.shutdown(Shutdown::Both);
         }
         let pixels = if shared.stall_pixels.load(Ordering::Acquire) {
             None

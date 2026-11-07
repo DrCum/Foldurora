@@ -2,6 +2,7 @@
 //! begin only inside the spawned owners, never in these caller methods.
 use super::state::*;
 use super::*;
+use super::{HostUpdate, ReceivedCommand};
 use aurora_render::viewport_capture::CapturedViewport;
 use std::io;
 use std::sync::{
@@ -59,7 +60,7 @@ impl<T> Shared<T> {
     fn new(mailbox: T) -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(1);
         let incarnation = NEXT
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_add(1))
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_add(1))
             .unwrap_or(0);
         Self {
             incarnation,
@@ -89,7 +90,7 @@ impl<T> Shared<T> {
     }
     fn advance(&self, counter: &AtomicU64) {
         if counter
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |epoch| epoch.checked_add(1))
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |epoch| epoch.checked_add(1))
             .is_err()
         {
             self.stop.store(true, Ordering::Release);
@@ -272,11 +273,11 @@ impl HostChannel {
         } else if capture.is_some() {
             return Err(Error::Binding);
         }
-        if matches!(command, PreviewCommand::Stop { .. }) {
-            if let Some(update) = mailbox.updates.iter_mut().find(|u| u.observation.token == token) {
-                update.observation.capture.revoke();
-                update.frame = None;
-            }
+        if matches!(command, PreviewCommand::Stop { .. })
+            && let Some(update) = mailbox.updates.iter_mut().find(|u| u.observation.token == token)
+        {
+            update.observation.capture.revoke();
+            update.frame = None;
         }
         if mailbox.commands.len() >= QUEUE * MAX_WORKERS
             || mailbox.commands.iter().filter(|c| c.token.source == token.source).count() >= QUEUE
@@ -662,7 +663,7 @@ mod tests {
                 control: control.clone(),
                 registration: 1,
             };
-            channel.publish_permits(&[original.clone()]).unwrap();
+            channel.publish_permits(std::slice::from_ref(&original)).unwrap();
             let observed = Observation {
                 token: ConnectionToken {
                     source,

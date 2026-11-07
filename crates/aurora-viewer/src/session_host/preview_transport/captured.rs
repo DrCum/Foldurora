@@ -54,10 +54,10 @@ impl CapturedBody {
     }
     pub fn check(&self) -> Result<(), Error> {
         #[cfg(test)]
-        if let Publication::Fixture { gate: Some(gate), .. } = &self.publication {
-            if !gate.current() {
-                return Err(Error::CaptureRevoked);
-            }
+        if let Publication::Fixture { gate: Some(gate), .. } = &self.publication
+            && !gate.current()
+        {
+            return Err(Error::CaptureRevoked);
         }
         if let Publication::Native(guard) = &self.publication {
             return guard.transport_check();

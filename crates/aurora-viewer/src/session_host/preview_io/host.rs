@@ -190,10 +190,9 @@ impl Source {
             .pending_capture
             .as_ref()
             .is_some_and(|(claim, guard, sent)| sent.elapsed() >= DEADLINE || !guard.current(*claim, Instant::now()))
+            && let Some((claim, _, _)) = self.pending_capture.take()
         {
-            if let Some((claim, _, _)) = self.pending_capture.take() {
-                self.observation.unavailable = Some((claim, Unavailable::Expired));
-            }
+            self.observation.unavailable = Some((claim, Unavailable::Expired));
         }
         self.pair.set_source_guard(super::guards::IoSourceGuard {
             control: self.permit.control.clone(),
