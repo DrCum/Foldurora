@@ -36,7 +36,7 @@ impl App {
         reconcile_read_interest(&mut self.world);
     }
 
-    fn configure_host_chat_rules(&mut self) {
+    pub(super) fn configure_host_chat_rules(&mut self) {
         // The same runtime layer as send_from; never save Preferences here.
         self.world.rlva_configure(self.settings.rlva_enabled);
         self.world.rlva.preferences.clone_from(&self.settings.rlva);

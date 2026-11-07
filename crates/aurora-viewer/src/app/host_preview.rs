@@ -1,0 +1,806 @@
+//! CPU-only LastActive policy prerequisite. No image endpoint, demand producer,
+//! capture request or inactive render loop is enabled by this module.
+//!
+//! Legacy `FSSessionWorker::sharingAllowed` (fssessionworker.cpp:294, pinned
+//! abbe3cb0) forbids names/location privacy. Aurora also applies its
+//! shared locked-HUD rule (viewfinder.rs / World::rlva_has_locked_hud), shownearby,
+//! unresolved RLVa visual masks, incomplete mute state,
+//! teleport/loading/recovery and every photo setup. Explicit OpenMonitor binding
+//! will own RememberActive demand in a later slice; no separate Remember button.
+
+use super::{App, Gfx};
+use crate::session_host::worker::{PreviewAuthority, PreviewScope};
+use crate::world::World;
+use aurora_render::WorldViewport;
+use aurora_session::preview_image::{PreviewAccess, PreviewEpochs, PreviewPolicy, PreviewSource};
+use std::time::Instant;
+use uuid::Uuid;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct WorldPolicy {
+    agent: Uuid,
+    ready: bool,
+    rlva_revision: u64,
+    mute_version: u64,
+    derender_generation: u64,
+    privacy: bool,
+    visual_mask: bool,
+    locked_hud: bool,
+}
+
+impl WorldPolicy {
+    fn observe(world: &World) -> Self {
+        let enabled = world.rlva.enabled();
+        let visuals = &world.rlva.visuals;
+        Self {
+            agent: world.agent_id,
+            ready: !world.agent_id.is_nil()
+                && world.main_region.is_some()
+                && world.movement_complete
+                && !world.teleporting
+                && world.mutes.is_loaded(),
+            rlva_revision: world.rlva.revision,
+            mute_version: world.mutes.version,
+            derender_generation: world.derender.generation,
+            privacy: enabled && (world.rlva.has("shownames") || world.rlva.has("showloc") || world.rlva.has("shownearby")),
+            // Raw registrations count even when textures have not resolved into
+            // this frame's RLVa draw lists. Missing assets are never permission.
+            visual_mask: enabled
+                && (!visuals.overlays.is_empty()
+                    || !visuals.spheres.is_empty()
+                    || !visuals.overlay_order.is_empty()
+                    || !visuals.sphere_order.is_empty()),
+            locked_hud: world.rlva_has_locked_hud(),
+        }
+    }
+    fn allows_retention(self) -> bool {
+        self.ready && !self.privacy && !self.visual_mask && !self.locked_hud
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct PhotoPolicy {
+    panel: bool,
+    drawing: bool,
+    capturing: bool,
+    frozen: bool,
+    scene: bool,
+    full: bool,
+    snapshot: bool,
+    context: aurora_render::PhotoContext,
+}
+
+impl PhotoPolicy {
+    fn observe_snapshots(snapshots: &super::snapshot::Snapshots, panel: bool, frozen: bool) -> Self {
+        Self {
+            panel,
+            drawing: snapshots.drawing(),
+            capturing: snapshots.capturing.is_some(),
+            frozen,
+            ..Self::default()
+        }
+    }
+
+    fn allows_capture(self) -> bool {
+        self == Self::default()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PhysicalStamp {
+    instance: u64,
+    device: u64,
+    generation: u64,
+    size: (u32, u32),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ActiveGrant {
+    activation: u64,
+    viewport: aurora_session::HostedViewport,
+    boundary: aurora_render::viewport_capture::CaptureBoundary,
+}
+impl From<PreviewAuthority> for ActiveGrant {
+    fn from(value: PreviewAuthority) -> Self {
+        Self {
+            activation: value.activation,
+            viewport: value.viewport,
+            boundary: value.boundary,
+        }
+    }
+}
+
+/// Small copied facts only. App supplies borrowed-out Gfx explicitly; missing
+/// App.gfx during a frame is never interpreted as logout or renderer teardown.
+struct NativePreviewFacts {
+    scope: Option<PreviewScope>,
+    authority: Option<PreviewAuthority>,
+    world: WorldPolicy,
+    physical: Option<PhysicalStamp>,
+    viewport: Option<WorldViewport>,
+    capture_generation: u64,
+    capture_ready: bool,
+    lifecycle_ready: bool,
+    photo: PhotoPolicy,
+    remembered: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Observation {
+    source: Option<PreviewSource>,
+    world: WorldPolicy,
+    physical: Option<PhysicalStamp>,
+    viewport: Option<WorldViewport>,
+    active: Option<ActiveGrant>,
+    capture_generation: u64,
+    capture_ready: bool,
+    retention_ready: bool,
+    photo: PhotoPolicy,
+    remembered: bool,
+}
+
+/// No pixels or unbounded collections. All export counters are local checked
+/// epochs, rather than wrapping World counters or control FrameProof values.
+#[derive(Default)]
+pub(super) struct HostPreview {
+    observed: Option<Observation>,
+    policy: Option<PreviewPolicy>,
+    revision: u64,
+    privacy: u64,
+    render: u64,
+    viewport: u64,
+    surface: u64,
+    exhausted: bool,
+    observed_at: Option<Instant>,
+}
+
+impl HostPreview {
+    /// Return true when any old capture must be canceled. A normal park changes
+    /// capture access/revision but keeps physical/privacy/history epochs stable.
+    fn sync(&mut self, facts: NativePreviewFacts, now: Instant) -> bool {
+        if self.exhausted || self.observed_at.is_some_and(|previous| now < previous) {
+            self.exhausted = true;
+            self.policy = None;
+            return true;
+        }
+        self.observed_at = Some(now);
+        let scope = facts.scope.filter(|scope| scope.expires_at > now);
+        let source = scope.map(|scope| scope.source);
+        let active = facts
+            .authority
+            .filter(|authority| {
+                Some(authority.scope.source) == source
+                    && authority.scope.expires_at > now
+                    && authority.activation != 0
+                    && facts.physical.is_some_and(|physical| {
+                        physical.device == authority.boundary.device_epoch() && physical.size == authority.boundary.size()
+                    })
+                    && (authority.viewport.rect.width, authority.viewport.rect.height) == authority.boundary.size()
+            })
+            .map(ActiveGrant::from);
+        let retention_ready = source.is_some()
+            && facts.lifecycle_ready
+            && facts.world.allows_retention()
+            && facts.physical.is_some()
+            && facts.physical.zip(facts.viewport).is_some_and(|(physical, view)| {
+                view.width != 0
+                    && view.height != 0
+                    && view.x.checked_add(view.width).is_some_and(|right| right <= physical.size.0)
+                    && view.y.checked_add(view.height).is_some_and(|bottom| bottom <= physical.size.1)
+            });
+        let next = Observation {
+            source,
+            world: facts.world,
+            physical: facts.physical,
+            viewport: facts.viewport,
+            active,
+            capture_generation: facts.capture_generation,
+            capture_ready: facts.capture_ready,
+            retention_ready,
+            photo: facts.photo,
+            remembered: facts.remembered,
+        };
+        if self.observed == Some(next) {
+            return false;
+        }
+        let old = self.observed;
+        let cancel = self.policy.is_some_and(|policy| policy.access().capture_active)
+            && old.is_some_and(|old| old.capture_generation == next.capture_generation);
+        let source_changed = old.is_none_or(|old| old.source != next.source);
+        let privacy_changed = old.is_none_or(|old| old.world != next.world || old.retention_ready != next.retention_ready);
+        let physical_changed = source_changed || old.is_none_or(|old| old.physical != next.physical);
+        let viewport_changed = source_changed || old.is_none_or(|old| old.viewport != next.viewport);
+        if !advance(&mut self.revision)
+            || (privacy_changed && !advance(&mut self.privacy))
+            || (physical_changed && (!advance(&mut self.render) || !advance(&mut self.surface)))
+            || (viewport_changed && !advance(&mut self.viewport))
+        {
+            self.exhausted = true;
+            self.policy = None;
+            self.observed = None;
+            return true;
+        }
+        let capture = retention_ready
+            && active.is_some()
+            && facts.capture_ready
+            && facts.capture_generation != 0
+            && facts.photo.allows_capture()
+            && facts.remembered;
+        let access = PreviewAccess {
+            ready: retention_ready,
+            active: retention_ready && active.is_some(),
+            activation: active.map_or(0, |grant| grant.activation),
+            capture_active: capture,
+            retain_last_active: retention_ready,
+        };
+        self.policy = source.and_then(|source| {
+            let epochs = PreviewEpochs::new(self.revision, self.privacy, self.render, self.viewport, self.surface).ok()?;
+            PreviewPolicy::new(source, epochs, access).ok()
+        });
+        self.observed = Some(next);
+        cancel
+    }
+
+    pub(super) fn retire(&mut self) {
+        // Even if the next observation repeats all values, it must earn new
+        // epochs. There is no validity flag that can revive old image handles.
+        self.policy = None;
+        self.observed = None;
+    }
+}
+
+fn advance(value: &mut u64) -> bool {
+    if let Some(next) = value.checked_add(1) {
+        *value = next;
+        true
+    } else {
+        false
+    }
+}
+
+impl App {
+    /// Runs before the parked return and before other GUI work even with no
+    /// pending image. This function never starts image IO or submits rendering.
+    pub(super) fn tick_host_preview(&mut self) {
+        if self.host_session.is_none() {
+            self.host_preview.retire();
+            return;
+        }
+        self.configure_host_chat_rules();
+        let facts = self.host_preview_facts(self.gfx.as_ref(), aurora_render::PhotoContext::None);
+        if self.host_preview.sync(facts, Instant::now())
+            && let Some(gfx) = &mut self.gfx
+        {
+            gfx.renderer.invalidate_viewport_capture();
+        }
+    }
+
+    pub(super) fn host_preview_frame(&mut self, gfx: &mut Gfx, photo_context: aurora_render::PhotoContext) {
+        if self.host_session.is_none() {
+            self.host_preview.retire();
+            return;
+        }
+        self.configure_host_chat_rules();
+        let facts = self.host_preview_facts(Some(gfx), photo_context);
+        if self.host_preview.sync(facts, Instant::now()) {
+            gfx.renderer.invalidate_viewport_capture();
+        }
+    }
+
+    fn host_preview_facts(&self, gfx: Option<&Gfx>, photo_context: aurora_render::PhotoContext) -> NativePreviewFacts {
+        let scope = self.host_session.as_ref().and_then(|bridge| {
+            let scope = bridge.preview_scope()?;
+            let actual = super::host_chat::source(self, bridge)?;
+            (scope.source.worker() == actual.worker
+                && scope.source.session() == actual.session
+                && scope.source.lease_epoch() == actual.lease_epoch)
+                .then_some(scope)
+        });
+        let authority = scope.and_then(|_| {
+            let gfx = gfx?;
+            self.host_session.as_ref()?.preview_authority(&gfx.window, &gfx.renderer)
+        });
+        let physical = gfx
+            .and_then(|gfx| gfx.renderer.viewport_capture_retention_guard())
+            .filter(|guard| guard.current())
+            .map(|guard| PhysicalStamp {
+                instance: guard.instance(),
+                device: guard.device_epoch(),
+                generation: guard.generation(),
+                size: gfx.map_or((0, 0), |gfx| gfx.renderer.size()),
+            });
+        let viewport = gfx.map(|gfx| self.world_viewport_for_size(gfx.renderer.size(), gfx.renderer.vr_engaged()));
+        let photo = PhotoPolicy {
+            scene: gfx.is_some_and(|gfx| gfx.renderer.capture_scene),
+            full: gfx.is_some_and(|gfx| gfx.renderer.capture_request),
+            snapshot: gfx.is_some_and(|gfx| gfx.renderer.snapshot_request.is_some()),
+            context: photo_context,
+            ..PhotoPolicy::observe_snapshots(&self.snapshots, self.panels.snapshot, self.photo_world_frozen())
+        };
+        NativePreviewFacts {
+            scope,
+            authority,
+            world: WorldPolicy::observe(&self.world),
+            physical,
+            viewport,
+            capture_generation: gfx.map_or(0, |gfx| gfx.renderer.viewport_capture_generation()),
+            capture_ready: gfx.is_some_and(|gfx| !gfx.renderer.failed() && !gfx.renderer.device_lost() && !gfx.renderer.vr_engaged())
+                && self.host_submission_allowed()
+                && self.options_ui.capture.is_none()
+                && !self.drawing_paused(),
+            lifecycle_ready: !self.exit_prompt.open
+                && !self.login_form.busy
+                && self.gpu_stall.recover.is_none()
+                && !self.gpu_stall.close
+                && gfx.is_some_and(|gfx| !gfx.renderer.failed() && !gfx.renderer.device_lost()),
+            photo,
+            // Explicit OpenMonitor binding will supply this in the IO slice.
+            // Merely starting a worker or logging in never subscribes it.
+            remembered: false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aurora_session::{AccountKey, GridKey, HostId, InstallationId, SessionId, SessionIdentity, WorkerId, WorkerIdentity};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    fn world() -> World {
+        let mut world = World::new(Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+        for event in crate::demo::events() {
+            world.apply(event);
+        }
+        world.movement_complete = true;
+        world.teleporting = false;
+        world.mutes.on_server(aurora_net::MuteListSource::File(String::new()), None);
+        world.rlva_configure(true);
+        assert!(WorldPolicy::observe(&world).allows_retention());
+        world
+    }
+
+    fn command(world: &mut World, source: Uuid, text: &str) {
+        assert!(world.rlva.receive(&aurora_net::ChatMessage {
+            from_name: "Preview test object".into(),
+            source_id: source,
+            owner_id: world.agent_id,
+            source_type: aurora_net::ChatSourceType::Object,
+            chat_type: aurora_net::ChatType::OwnerSay,
+            position: glam::Vec3::ZERO,
+            message: text.into(),
+        }));
+    }
+
+    fn facts(world: &World, now: Instant) -> NativePreviewFacts {
+        let source = PreviewSource::new(
+            WorkerIdentity {
+                installation: InstallationId::from_bytes([1; 32]).unwrap(),
+                host: HostId::from_bytes([2; 16]).unwrap(),
+                worker: WorkerId::from_bytes([3; 16]).unwrap(),
+            },
+            SessionIdentity {
+                session: SessionId::from_bytes([4; 16]).unwrap(),
+                account: AccountKey::from_bytes([5; 32]).unwrap(),
+                grid: GridKey::from_bytes([6; 32]).unwrap(),
+                generation: 1,
+            },
+            7,
+        )
+        .unwrap();
+        let scope = PreviewScope {
+            source,
+            expires_at: now + Duration::from_millis(aurora_session::LEASE_MILLIS),
+        };
+        let viewport = aurora_session::HostedViewport {
+            host_window: 10,
+            rect: aurora_session::PhysicalRect {
+                x: 0,
+                y: 0,
+                width: 1280,
+                height: 720,
+            },
+        };
+        NativePreviewFacts {
+            scope: Some(scope),
+            authority: Some(PreviewAuthority {
+                scope,
+                activation: 8,
+                viewport,
+                boundary: aurora_render::viewport_capture::CaptureBoundary::new(41, 9, (1280, 720)).unwrap(),
+            }),
+            world: WorldPolicy::observe(world),
+            physical: Some(PhysicalStamp {
+                instance: 42,
+                device: 41,
+                generation: 1,
+                size: (1280, 720),
+            }),
+            viewport: Some(WorldViewport::full((1280, 720))),
+            capture_generation: 1,
+            capture_ready: true,
+            lifecycle_ready: true,
+            photo: PhotoPolicy::default(),
+            remembered: true,
+        }
+    }
+
+    #[test]
+    fn preview_native_world_policy_uses_actual_rlva_privacy_secure_aliases_and_unresolved_masks() {
+        let mut world = world();
+        let issuer = Uuid::from_u128(100);
+        for restriction in ["shownames", "shownames_sec", "showloc", "shownearby"] {
+            command(&mut world, issuer, &format!("@{restriction}=n"));
+            let policy = WorldPolicy::observe(&world);
+            assert!(policy.privacy, "{restriction}");
+            assert!(!policy.allows_retention());
+            command(&mut world, issuer, "@clear");
+            assert!(WorldPolicy::observe(&world).allows_retention());
+        }
+        for restriction in ["setoverlay", "setsphere"] {
+            command(&mut world, issuer, &format!("@{restriction}=n"));
+            assert!(WorldPolicy::observe(&world).visual_mask);
+            assert!(!WorldPolicy::observe(&world).allows_retention());
+            if restriction == "setoverlay" {
+                assert!(
+                    world.rlva.visuals.overlays[&issuer].texture.is_nil(),
+                    "unresolved texture still denies export"
+                );
+            }
+            command(&mut world, issuer, "@clear");
+        }
+        world.rlva.visuals.overlay_order.push(issuer);
+        assert!(
+            !WorldPolicy::observe(&world).allows_retention(),
+            "unresolved registration without resolved draw"
+        );
+        world.rlva_configure(false);
+        assert!(WorldPolicy::observe(&world).allows_retention());
+    }
+
+    #[test]
+    fn preview_native_world_policy_uses_loaded_mutes_derender_witness_and_actual_world_readiness() {
+        let mut world = world();
+        let original = WorldPolicy::observe(&world);
+        world.mutes.reset(world.agent_id);
+        assert!(!WorldPolicy::observe(&world).allows_retention());
+        world.mutes.on_server(aurora_net::MuteListSource::File(String::new()), None);
+        assert!(WorldPolicy::observe(&world).allows_retention());
+        world
+            .mutes
+            .add(
+                crate::world::mutes::Mute {
+                    id: Uuid::from_u128(105),
+                    name: "Synthetic resident".into(),
+                    kind: crate::world::mutes::MuteType::Agent,
+                    flags: 0,
+                },
+                crate::world::mutes::flag::TEXT_CHAT,
+            )
+            .unwrap();
+        assert_ne!(WorldPolicy::observe(&world).mute_version, original.mute_version);
+        world.derender.add(
+            Uuid::from_u128(106),
+            crate::world::derender::Entry {
+                name: String::new(),
+                region: String::new(),
+                kind: crate::world::derender::Kind::Object,
+                date: 0,
+                permanent: false,
+            },
+        );
+        assert_ne!(WorldPolicy::observe(&world).derender_generation, original.derender_generation);
+        world.mutes.state = crate::world::mutes::LoadState::Degraded;
+        assert!(
+            WorldPolicy::observe(&world).allows_retention(),
+            "same cached-mute readiness contract as native chat"
+        );
+        world.teleporting = true;
+        assert!(!WorldPolicy::observe(&world).allows_retention());
+        world.teleporting = false;
+        world.movement_complete = false;
+        assert!(!WorldPolicy::observe(&world).allows_retention());
+        world.movement_complete = true;
+        world.main_region = None;
+        assert!(!WorldPolicy::observe(&world).allows_retention());
+    }
+
+    #[test]
+    fn preview_native_world_policy_uses_actual_temporary_point_and_folder_locked_huds() {
+        use crate::world::inventory::{FetchState, Folder};
+        use aurora_net::inventory::{InvFolder, InvItem};
+        let mut world = world();
+        let id = Uuid::from_u128(110);
+        let issuer = Uuid::from_u128(111);
+        let point = 31;
+        assert!(world.avatar_lib.attach_points[&point].hud);
+        let mut object = crate::demo::outfit_attachment(&aurora_net::AttachRequest {
+            item_id: id,
+            owner_id: world.agent_id,
+            point,
+            add: true,
+            flags: 0,
+            group_mask: 0,
+            everyone_mask: 0,
+            next_owner_mask: 0,
+            name: String::new(),
+            desc: String::new(),
+        });
+        let region = world.main_region.unwrap();
+        world.objects.upsert(region, object.clone());
+        assert!(WorldPolicy::observe(&world).allows_retention());
+        command(&mut world, id, "@detach=n");
+        assert!(WorldPolicy::observe(&world).locked_hud, "temporary HUD lacks inventory record");
+        command(&mut world, id, "@clear");
+        command(&mut world, issuer, "@remattach:center 2=n");
+        assert!(WorldPolicy::observe(&world).locked_hud, "actual worn point lock");
+        command(&mut world, issuer, "@clear");
+        let root = Uuid::from_u128(120);
+        let shared = Uuid::from_u128(121);
+        let locked = Uuid::from_u128(122);
+        world.inventory.root = root;
+        for (folder, parent, name, children, items) in [
+            (root, Uuid::nil(), "Inventory", vec![shared], vec![]),
+            (shared, root, "#RLV", vec![locked], vec![]),
+            (locked, shared, "Synthetic HUD", vec![], vec![id]),
+        ] {
+            world.inventory.folders.insert(
+                folder,
+                Folder {
+                    info: InvFolder {
+                        id: folder,
+                        parent,
+                        name: name.into(),
+                        type_default: -1,
+                        ..Default::default()
+                    },
+                    children,
+                    items,
+                    state: FetchState::Fetched,
+                    library: false,
+                },
+            );
+        }
+        world.inventory.items.insert(
+            id,
+            InvItem {
+                id,
+                parent: locked,
+                asset_type: 6,
+                flags: u32::from(point),
+                ..Default::default()
+            },
+        );
+        command(&mut world, id, "@detachallthis=n");
+        assert!(
+            WorldPolicy::observe(&world).locked_hud,
+            "shared folder lock uses native worn/inventory resolution"
+        );
+        object.state = 1_u8.rotate_right(4);
+        world.objects.upsert(region, object);
+        assert!(
+            !WorldPolicy::observe(&world).locked_hud,
+            "ordinary locked attachment does not forbid HUD export"
+        );
+    }
+
+    #[test]
+    fn preview_native_model_requires_explicit_demand_and_keeps_history_epochs_on_normal_park() {
+        let world = world();
+        let now = Instant::now();
+        let mut model = HostPreview::default();
+        let mut input = facts(&world, now);
+        input.remembered = false;
+        assert!(!model.sync(input, now));
+        let initial = model.policy.unwrap();
+        assert!(initial.access().active && initial.access().retain_last_active);
+        assert!(
+            !initial.access().capture_active,
+            "normal login/active grant never silently subscribes"
+        );
+        let input = facts(&world, now);
+        assert!(!model.sync(input, now));
+        let active = model.policy.unwrap();
+        assert!(active.access().capture_active);
+        let mut parked = facts(&world, now);
+        parked.authority = None;
+        parked.capture_ready = false;
+        parked.capture_generation += 1; // ordinary session fence has already revoked capture
+        assert!(!model.sync(parked, now), "do not create a self-invalidating generation loop");
+        let history = model.policy.unwrap();
+        assert!(!history.access().active && !history.access().capture_active);
+        assert!(history.access().retain_last_active);
+        assert_eq!(history.epochs().privacy(), active.epochs().privacy());
+        assert_eq!(history.epochs().render(), active.epochs().render());
+        assert_eq!(history.epochs().viewport(), active.epochs().viewport());
+        assert_eq!(history.epochs().surface(), active.epochs().surface());
+        assert!(history.epochs().revision() > active.epochs().revision());
+        assert!(!model.sync(facts(&world, now), now));
+        assert!(
+            model.policy.unwrap().access().capture_active,
+            "reactivation earns fresh revision, never a late old frame"
+        );
+    }
+
+    #[test]
+    fn preview_native_model_observes_privacy_and_physical_loss_without_pending_capture_or_open_view() {
+        let mut world = world();
+        let now = Instant::now();
+        let mut model = HostPreview::default();
+        let mut input = facts(&world, now);
+        input.remembered = false;
+        model.sync(input, now);
+        let old = model.policy.unwrap();
+        command(&mut world, Uuid::from_u128(130), "@showloc=n");
+        let mut input = facts(&world, now);
+        input.remembered = false;
+        model.sync(input, now);
+        let denied = model.policy.unwrap();
+        assert!(!denied.access().ready && !denied.access().retain_last_active);
+        assert!(denied.epochs().privacy() > old.epochs().privacy());
+        command(&mut world, Uuid::from_u128(130), "@clear");
+        let mut input = facts(&world, now);
+        input.physical.as_mut().unwrap().generation += 1;
+        model.sync(input, now);
+        let replaced = model.policy.unwrap();
+        assert!(replaced.epochs().render() > denied.epochs().render());
+        let mut input = facts(&world, now);
+        input.physical = None;
+        model.sync(input, now);
+        assert!(!model.policy.unwrap().access().retain_last_active);
+        model.retire();
+        model.sync(facts(&world, now), now);
+        assert!(model.policy.unwrap().epochs().render() > replaced.epochs().render());
+    }
+
+    #[test]
+    fn preview_native_photo_adapter_reads_actual_snapshot_state_and_all_tiled_contexts() {
+        let mut snapshots = super::super::snapshot::Snapshots::default();
+        assert!(PhotoPolicy::observe_snapshots(&snapshots, false, false).allows_capture());
+        for interface in [false, true] {
+            snapshots.capturing = Some(aurora_render::SnapshotSpec {
+                width: 480,
+                height: 270,
+                interface,
+                huds: true,
+                photo: (480, 270),
+                world_viewport: None,
+            });
+            assert!(!PhotoPolicy::observe_snapshots(&snapshots, false, false).allows_capture());
+        }
+        snapshots.capturing = None;
+        for context in [
+            aurora_render::PhotoContext::None,
+            aurora_render::PhotoContext::Record,
+            aurora_render::PhotoContext::Use,
+        ] {
+            let photo = PhotoPolicy {
+                context,
+                ..PhotoPolicy::observe_snapshots(&snapshots, false, false)
+            };
+            assert_eq!(photo.allows_capture(), matches!(context, aurora_render::PhotoContext::None));
+        }
+        assert!(!PhotoPolicy::observe_snapshots(&snapshots, true, false).allows_capture());
+        assert!(!PhotoPolicy::observe_snapshots(&snapshots, false, true).allows_capture());
+    }
+
+    #[test]
+    fn preview_native_model_vetoes_every_photo_setup_and_lifecycle_loss_without_destroying_photo_history() {
+        let world = world();
+        let now = Instant::now();
+        for case in 0..8 {
+            let mut model = HostPreview::default();
+            model.sync(facts(&world, now), now);
+            let before = model.policy.unwrap();
+            let mut input = facts(&world, now);
+            match case {
+                0 => input.photo.panel = true,
+                1 => input.photo.drawing = true,
+                2 => input.photo.capturing = true,
+                3 => input.photo.frozen = true,
+                4 => input.photo.scene = true,
+                5 => input.photo.full = true,
+                6 => input.photo.snapshot = true,
+                7 => input.photo.context = aurora_render::PhotoContext::Record,
+                _ => unreachable!(),
+            }
+            assert!(model.sync(input, now), "cancel old permission for photo case {case}");
+            let after = model.policy.unwrap();
+            assert!(!after.access().capture_active && after.access().retain_last_active);
+            assert_eq!(after.epochs().privacy(), before.epochs().privacy());
+            assert_eq!(after.epochs().render(), before.epochs().render());
+        }
+        for case in 0..4 {
+            let mut input = facts(&world, now);
+            match case {
+                0 => input.lifecycle_ready = false, // exit/recovery
+                1 => input.scope = None,            // source/account/grid/logout/lease
+                2 => input.physical = None,
+                3 => input.viewport = None,
+                _ => unreachable!(),
+            }
+            let mut model = HostPreview::default();
+            model.sync(input, now);
+            assert!(model.policy.is_none_or(|policy| !policy.access().retain_last_active));
+        }
+    }
+
+    #[test]
+    fn preview_native_model_lease_and_checked_epochs_fail_closed_without_revival() {
+        let world = world();
+        let now = Instant::now();
+        let mut model = HostPreview::default();
+        let input = facts(&world, now);
+        let expiry = input.scope.unwrap().expires_at;
+        model.sync(input, now);
+        model.sync(facts(&world, now), expiry);
+        assert!(model.policy.is_none(), "lease expiry is observed without a pending frame");
+        let now = expiry;
+        model.sync(facts(&world, now), now);
+        let old = model.policy.unwrap();
+        let mut next = facts(&world, now);
+        let source = next.scope.unwrap().source;
+        let mut session = source.session();
+        session.generation += 1;
+        next.scope.as_mut().unwrap().source = PreviewSource::new(source.worker(), session, source.lease_epoch()).unwrap();
+        model.sync(next, now);
+        assert!(
+            !model.policy.unwrap().access().active,
+            "old native grant cannot authorize new source"
+        );
+        assert!(model.policy.unwrap().epochs().render() > old.epochs().render());
+        model.revision = u64::MAX;
+        model.sync(facts(&world, now), now);
+        assert!(model.exhausted && model.policy.is_none());
+        model.retire();
+        model.sync(facts(&world, now), now);
+        assert!(model.policy.is_none(), "teardown does not reset an exhausted epoch");
+    }
+
+    #[test]
+    fn preview_native_model_rejects_invalid_geometry_foreign_boundary_and_clock_regression() {
+        let world = world();
+        let now = Instant::now();
+        for view in [
+            WorldViewport {
+                x: u32::MAX,
+                y: 0,
+                width: 4,
+                height: 4,
+            },
+            WorldViewport {
+                x: 0,
+                y: 0,
+                width: 0,
+                height: 720,
+            },
+            WorldViewport {
+                x: 0,
+                y: 719,
+                width: 1280,
+                height: 2,
+            },
+        ] {
+            let mut model = HostPreview::default();
+            let mut input = facts(&world, now);
+            input.viewport = Some(view);
+            model.sync(input, now);
+            assert!(!model.policy.unwrap().access().ready);
+        }
+        let mut model = HostPreview::default();
+        let mut input = facts(&world, now);
+        input.physical.as_mut().unwrap().device += 1;
+        model.sync(input, now);
+        assert!(
+            !model.policy.unwrap().access().capture_active,
+            "actual grant cannot cross renderer replacement"
+        );
+        model.sync(facts(&world, now), now + Duration::from_millis(1));
+        model.sync(facts(&world, now), now);
+        assert!(
+            model.exhausted && model.policy.is_none(),
+            "future observation cannot revive with a regressed clock"
+        );
+    }
+}

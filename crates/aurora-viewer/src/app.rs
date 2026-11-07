@@ -86,6 +86,7 @@ mod grid_status;
 mod group_titles;
 mod host_chat;
 mod host_chat_bridge;
+mod host_preview;
 mod host_review;
 mod host_session;
 pub(crate) use host_session::grid_label as host_grid_label;
@@ -879,6 +880,7 @@ pub struct App {
     /// Optional exact-process host bridge; standalone viewers have none.
     host_session: Option<crate::session_host::worker::WorkerBridge>,
     host_chat: Option<Box<host_chat_bridge::Driver>>,
+    host_preview: host_preview::HostPreview,
     /// The other viewers on this PC (instances.rs).
     instances: crate::instances::Instances,
     characters: crate::characters::Manager,
@@ -1770,6 +1772,7 @@ impl App {
             busy_pause: Default::default(),
             host_session: crate::session_host::worker::WorkerBridge::from_startup()?,
             host_chat: None,
+            host_preview: Default::default(),
             instances: crate::instances::Instances::new(),
             characters: Default::default(),
             characters_ui: Default::default(),
@@ -5942,6 +5945,7 @@ impl App {
 
     /// Log out, save the window, layout, inventory cache and settings, exit.
     fn shutdown(&mut self, event_loop: &ActiveEventLoop) {
+        self.host_preview.retire();
         self.instances.leave();
         self.characters.leave();
         // closed while the graphics card still holds a frame, from its
@@ -9127,6 +9131,7 @@ impl App {
         }
 
         self.tick_host_chat();
+        self.tick_host_preview();
         self.frame_profile.lap(Lap::Social);
         // Coalesce OS pointer moves before taking the renderer for this frame.
         if self.left_down && self.texture_pipette() && !self.egui_ctx.is_pointer_over_egui() {
@@ -9574,6 +9579,7 @@ impl App {
             self.update_ao(now);
         }
         if !self.host_submission_allowed() {
+            self.host_preview_frame(&mut gfx, photo_context);
             if let Some(controls) = late_controls {
                 self.net.set_controls(controls);
             }
@@ -10873,6 +10879,7 @@ impl App {
         self.options_ui
             .prepare_scale_input(&raw, ctx.pixels_per_point(), self.numeric_drag.active());
         self.numeric_drag.before(&mut raw, ctx.pixels_per_point());
+        self.host_preview_frame(&mut gfx, photo_context);
         let egui_state = &mut gfx.egui_state;
         self.text_menu.before(
             &ctx,
@@ -11329,6 +11336,7 @@ impl App {
         // capture is waited for, its pixels are read in the tail below.
         // (nothing of the scene while the 3D drawing is paused behind,
         // texture_budget::Background, busy_pause.rs)
+        self.host_preview_frame(&mut gfx, photo_context);
         let lists = if self.in_world() && self.host_world_allowed() && !self.drawing_paused() {
             &self.scene.lists
         } else {
@@ -20369,6 +20377,7 @@ impl ApplicationHandler for App {
     /// closed connection and every exit ended in a segmentation fault (before
     /// the browsers' private profiles were cleaned up).
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        self.host_preview.retire();
         self.gfx = None;
     }
 

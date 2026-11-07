@@ -174,6 +174,18 @@ bounded service callers, and a single host-wide pool with fixed framing/metadata
 headroom inside the 64 MiB total. The existing pool covers image payloads only;
 creating independent per-source pools cannot bypass retained allocation credit.
 
+`app/host_preview.rs` observes the exact managed source and native World privacy
+on CPU ticks, including the parked 50 ms path and before UI painting. It shares
+the strict Review source/grant core but requires visible exact-PID geometry
+without granting keyboard foreground. A successful world Grant may record an
+optional actual capture boundary; missing image support never rejects hosting.
+Checked policy epochs distinguish normal Active-to-Standby capture revocation
+from physical/privacy/history loss. Borrowed-out Gfx is passed explicitly, and
+WorkerBridge is restored before observation. Production remembered-view demand
+is absent: this prerequisite starts no endpoint, request, pixel IO or GPU loop.
+Renderer physical witnesses are sampled for this local model; continuous IO-side
+atomic guards and authenticated service integration remain a later slice.
+
 `aurora-render::viewport_capture` provides pure checked geometry, nonreused
 request/callback identities and byte-credit lifetimes for a future asynchronous
 readback. `aurora-session::preview_image` models exact-source image metadata,

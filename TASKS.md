@@ -34,6 +34,19 @@
     All photo modes and tiled contexts veto capture. Fake allocation/retirement
     tests and four-format synthetic GPU coverage are authored, not executed.
 
+- 🔧 Native LastActive permit prerequisite (2026-11-07; no issue): shared strict
+  managed source/grant authority, optional actual renderer boundary association,
+  visible exact-PID native geometry without changing Review foreground behavior,
+  and a CPU-only App policy model before parked returns/UI paint. Actual native
+  RLVa privacy/unresolved visual registrations, loaded mute state, derender
+  witnesses and temporary/point/folder locked HUDs are checked; all photo contexts
+  and source/lease/recovery loss fail closed. Pure/native-World tests are authored,
+  not executed. Explicit OpenMonitor binding will own internal RememberActive
+  demand later; current production demand is absent. No endpoint, image request,
+  outgoing pixels, standby rendering or monitor UI is enabled. This is stricter
+  than Legacy sharingAllowed (shownames/showloc) while unsupported image capture
+  remains independent of ordinary world Grant success.
+
 - 🔧 Native Attention CPU input fixture (2026-11-07; no issue): source-only
   Linux ignored test around the production AttentionWindow, with synthetic
   body-free snapshots, local Open/Dismiss intents and queued-only preferences.

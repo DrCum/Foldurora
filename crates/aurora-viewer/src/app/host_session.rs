@@ -45,6 +45,9 @@ impl App {
         }
         self.pump_host_display(&mut bridge, effects);
         self.host_session = Some(bridge);
+        // The bridge is restored before policy observation: take() above is
+        // a temporary borrow, never a source disappearance.
+        self.tick_host_preview();
     }
 
     fn pump_host_display(&mut self, bridge: &mut crate::session_host::worker::WorkerBridge, effects: aurora_session::WorkerEffects) {
@@ -152,6 +155,7 @@ impl App {
     }
 
     pub(super) fn invalidate_host_display(&mut self) {
+        self.host_preview.retire();
         let Some(mut bridge) = self.host_session.take() else {
             return;
         };
@@ -159,6 +163,9 @@ impl App {
         self.release_host_input();
         self.pump_host_display(&mut bridge, effects);
         self.host_session = Some(bridge);
+        // The bridge is restored before policy observation: take() above is
+        // a temporary borrow, never a source disappearance.
+        self.tick_host_preview();
     }
 
     pub(super) fn host_resized(&mut self, width: u32, height: u32) {

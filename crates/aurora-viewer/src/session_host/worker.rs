@@ -106,6 +106,7 @@ pub(crate) struct WorkerBridge {
     window: u64,
     last_frame: Option<aurora_session::FrameProof>,
     last_receipt: Option<Instant>,
+    preview_grant: Option<PreviewGrant>,
     chat: Option<super::chat_io::WorkerChannel>,
 }
 
@@ -147,6 +148,7 @@ impl WorkerBridge {
             window: 0,
             last_frame: None,
             last_receipt: None,
+            preview_grant: None,
             chat,
         }))
     }
@@ -295,7 +297,7 @@ impl WorkerBridge {
     ) -> Result<(), aurora_session::chat::ReviewOutcome> {
         use aurora_session::chat::ReviewOutcome;
         let native_matches = self.window != 0 && native_window(window) == self.window && self.status.native_window == self.window;
-        if !self.review_authority(native_matches).accepts(source, activation, Instant::now()) {
+        if !self.native_authority(native_matches).accepts(source, activation, Instant::now()) {
             return Err(ReviewOutcome::RejectedNative);
         }
         let viewport = self.guard.viewport().ok_or(ReviewOutcome::RejectedNative)?;
@@ -320,12 +322,12 @@ impl WorkerBridge {
     /// Reading a fresh monotonic time here prevents an expired lease from being
     /// represented by an earlier successful HWND/foreground check.
     pub(crate) fn review_still_current(&self, source: aurora_session::chat::ChatSource, activation: u64) -> bool {
-        self.review_authority(self.window != 0 && self.status.native_window == self.window)
+        self.native_authority(self.window != 0 && self.status.native_window == self.window)
             .accepts(source, activation, Instant::now())
     }
 
-    fn review_authority(&self, native_matches: bool) -> ReviewAuthority {
-        ReviewAuthority {
+    fn native_authority(&self, native_matches: bool) -> NativeAuthority {
+        NativeAuthority {
             current: (self.status.phase == aurora_session::Phase::Online)
                 .then(|| aurora_session::chat::ChatSource::try_from((self.guard.binding(), self.config.lease_epoch)).ok())
                 .flatten(),
@@ -339,6 +341,48 @@ impl WorkerBridge {
             blocked: self.status.blocked,
             native_matches,
         }
+    }
+
+    /// Retention authority has no ordinary-viewer/unsupported fallback and
+    /// survives a normal managed park. It does not authorize new images.
+    pub(crate) fn preview_scope(&self) -> Option<PreviewScope> {
+        let facts = self.native_authority(self.window != 0 && self.status.native_window == self.window);
+        facts.scope(Instant::now())
+    }
+
+    /// Share Review's complete native grant gate, but do not require keyboard
+    /// foreground: an Active world may render while an owned host tool has focus.
+    /// Surface sampleability remains image-local and never affects world Grant.
+    pub(crate) fn preview_authority(&self, window: &winit::window::Window, renderer: &aurora_render::Renderer) -> Option<PreviewAuthority> {
+        let scope = self.preview_scope()?;
+        let source = self.native_authority(true).current?;
+        let activation = self.guard.activation();
+        let matches = self.window != 0 && native_window(window) == self.window && self.status.native_window == self.window;
+        if !self.native_authority(matches).accepts(source, activation, Instant::now()) {
+            return None;
+        }
+        let viewport = self.guard.viewport()?;
+        if !matches!(
+            self.presentation.state(window, viewport, self.config.host_pid),
+            Ok(NativeState::Ready)
+        ) {
+            return None;
+        }
+        #[cfg(windows)]
+        let visible = native::presentation_visible(viewport.host_window, self.window, self.config.host_pid);
+        #[cfg(not(windows))]
+        let visible = false;
+        let boundary = renderer.viewport_capture_boundary().ok()?;
+        let grant = self.preview_grant?;
+        if !visible || !grant.accepts(activation, boundary) || !self.native_authority(matches).accepts(source, activation, Instant::now()) {
+            return None;
+        }
+        Some(PreviewAuthority {
+            scope,
+            activation,
+            viewport,
+            boundary,
+        })
     }
 
     pub fn world_allowed(&self) -> bool {
@@ -383,6 +427,7 @@ impl WorkerBridge {
     }
 
     fn fail_closed(&mut self) -> WorkerEffects {
+        self.preview_grant = None;
         self.detached = true;
         self.admitted = false;
         if let Some(chat) = &self.chat {
@@ -554,6 +599,12 @@ impl WorkerBridge {
                 ),
                 "host reply queue is full"
             );
+            // Optional image association is recorded only after Granted was
+            // queued. Unsupported capture must never reject ordinary hosting.
+            self.preview_grant = renderer.viewport_capture_boundary().ok().map(|boundary| PreviewGrant {
+                activation: self.guard.activation(),
+                boundary,
+            });
         }
         if matches!(self.gate, DisplayGate::Active)
             && let Some(viewport) = self.guard.viewport()
@@ -733,7 +784,35 @@ fn receipt_is_current(received: Option<Instant>, now: Instant) -> bool {
         .is_some_and(|age| age < std::time::Duration::from_millis(aurora_session::LEASE_MILLIS))
 }
 
-struct ReviewAuthority {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PreviewScope {
+    pub source: aurora_session::preview_image::PreviewSource,
+    pub expires_at: Instant,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PreviewAuthority {
+    pub scope: PreviewScope,
+    pub activation: u64,
+    pub viewport: aurora_session::HostedViewport,
+    pub boundary: aurora_render::viewport_capture::CaptureBoundary,
+}
+
+#[derive(Clone, Copy)]
+struct PreviewGrant {
+    activation: u64,
+    boundary: aurora_render::viewport_capture::CaptureBoundary,
+}
+
+impl PreviewGrant {
+    fn accepts(self, activation: u64, boundary: aurora_render::viewport_capture::CaptureBoundary) -> bool {
+        activation != 0 && activation == self.activation && boundary == self.boundary
+    }
+}
+
+// Shared strict source/grant core. Review adds foreground; capture adds a
+// renderer association and visible exact-PID native presentation.
+struct NativeAuthority {
     current: Option<aurora_session::chat::ChatSource>,
     last_receipt: Option<Instant>,
     activation: u64,
@@ -746,7 +825,20 @@ struct ReviewAuthority {
     native_matches: bool,
 }
 
-impl ReviewAuthority {
+impl NativeAuthority {
+    fn scope(&self, now: Instant) -> Option<PreviewScope> {
+        let current = self.current?;
+        if !self.managed || !self.native_matches || !receipt_is_current(self.last_receipt, now) || current.validate().is_err() {
+            return None;
+        }
+        Some(PreviewScope {
+            source: aurora_session::preview_image::PreviewSource::new(current.worker, current.session, current.lease_epoch).ok()?,
+            expires_at: self
+                .last_receipt?
+                .checked_add(std::time::Duration::from_millis(aurora_session::LEASE_MILLIS))?,
+        })
+    }
+
     fn accepts(&self, source: aurora_session::chat::ChatSource, activation: u64, now: Instant) -> bool {
         source.validate().is_ok()
             && self.current == Some(source)
@@ -901,6 +993,22 @@ fn native_order(window: &winit::window::Window, viewport: aurora_session::Hosted
     Ok(())
 }
 
+/// Query adapter shared by capture and Review. Foreground is intentionally a
+/// separate Review check; ownership/visibility do not imply keyboard focus.
+#[cfg(any(windows, test))]
+fn visible_native_presentation(
+    host: u64,
+    worker: u64,
+    host_pid: u32,
+    worker_pid: u32,
+    mut query: impl FnMut(u64) -> Option<(u32, bool, bool)>,
+) -> bool {
+    let mut visible_owner = |window: u64, expected: u32| {
+        window != 0 && expected != 0 && query(window).is_some_and(|(pid, visible, iconic)| pid == expected && visible && !iconic)
+    };
+    visible_owner(host, host_pid) && visible_owner(worker, worker_pid)
+}
+
 #[cfg(windows)]
 mod native {
     use windows_sys::Win32::{
@@ -1052,21 +1160,22 @@ mod native {
         })
     }
 
-    pub(super) fn review_foreground(host: u64, worker: u64, host_pid: u32) -> bool {
-        let visible_owner = |window: u64, expected: u32| {
+    pub(super) fn presentation_visible(host: u64, worker: u64, host_pid: u32) -> bool {
+        super::visible_native_presentation(host, worker, host_pid, std::process::id(), |window| {
             let mut pid = 0;
-            // SAFETY: query only live HWND properties; no foreign mutation.
+            // SAFETY: read live HWND properties only. A destroyed or reused
+            // window fails unless the exact expected process owns it now.
             unsafe {
-                window != 0
-                    && expected != 0
-                    && IsWindow(window as HWND) != 0
-                    && IsWindowVisible(window as HWND) != 0
-                    && IsIconic(window as HWND) == 0
-                    && GetWindowThreadProcessId(window as HWND, &mut pid) != 0
-                    && pid == expected
+                if IsWindow(window as HWND) == 0 || GetWindowThreadProcessId(window as HWND, &mut pid) == 0 {
+                    return None;
+                }
+                Some((pid, IsWindowVisible(window as HWND) != 0, IsIconic(window as HWND) != 0))
             }
-        };
-        if !visible_owner(host, host_pid) || !visible_owner(worker, std::process::id()) {
+        })
+    }
+
+    pub(super) fn review_foreground(host: u64, worker: u64, host_pid: u32) -> bool {
+        if !presentation_visible(host, worker, host_pid) {
             return false;
         }
         // SAFETY: actual foreground, with visibility checked before trusting
@@ -1442,7 +1551,7 @@ mod tests {
         let (guard, _) = guard_and_command();
         let source = aurora_session::chat::ChatSource::try_from((guard.binding(), 1)).unwrap();
         let received = Instant::now();
-        let valid = || ReviewAuthority {
+        let valid = || NativeAuthority {
             current: Some(source),
             last_receipt: Some(received),
             activation: 7,
@@ -1486,7 +1595,7 @@ mod tests {
         let (guard, _) = guard_and_command();
         let source = aurora_session::chat::ChatSource::try_from((guard.binding(), 1)).unwrap();
         let received = Instant::now();
-        let mut facts = ReviewAuthority {
+        let mut facts = NativeAuthority {
             current: Some(source),
             last_receipt: Some(received),
             activation: 7,
@@ -1507,5 +1616,85 @@ mod tests {
         assert!(facts.accepts(source, 7, after_queries));
         facts.current.as_mut().unwrap().session.generation += 1;
         assert!(!facts.accepts(source, 7, after_queries));
+    }
+
+    #[test]
+    fn preview_scope_retains_normal_standby_but_rejects_fallbacks_and_expired_control() {
+        let (guard, _) = guard_and_command();
+        let source = aurora_session::chat::ChatSource::try_from((guard.binding(), 1)).unwrap();
+        let now = Instant::now();
+        let mut authority = NativeAuthority {
+            current: Some(source),
+            last_receipt: Some(now),
+            activation: 7,
+            managed: true,
+            active: false,
+            display_active: false,
+            render_owned: false,
+            input_owned: false,
+            blocked: false,
+            native_matches: true,
+        };
+        let scope = authority.scope(now).unwrap();
+        assert_eq!(scope.source.session(), source.session);
+        assert!(!authority.accepts(source, 7, now), "retention scope never grants capture");
+        assert!(authority.scope(scope.expires_at).is_none());
+        assert!(
+            authority.scope(now - std::time::Duration::from_millis(1)).is_none(),
+            "future receipt"
+        );
+        authority.managed = false;
+        assert!(authority.scope(now).is_none(), "detached/unsupported/unadmitted fallback");
+        authority.managed = true;
+        authority.native_matches = false;
+        assert!(authority.scope(now).is_none());
+        authority.native_matches = true;
+        authority.current = None;
+        assert!(authority.scope(now).is_none(), "logout/account-grid generation loss");
+    }
+
+    #[test]
+    fn preview_optional_grant_binds_actual_device_surface_and_size_without_control_epoch_alias() {
+        use aurora_render::viewport_capture::CaptureBoundary;
+        let boundary = CaptureBoundary::new(41, 9, (1280, 720)).unwrap();
+        let grant = PreviewGrant { activation: 7, boundary };
+        assert!(grant.accepts(7, boundary));
+        for other in [
+            CaptureBoundary::new(1, 9, (1280, 720)).unwrap(), // protocol device counter is not renderer device identity
+            CaptureBoundary::new(42, 9, (1280, 720)).unwrap(),
+            CaptureBoundary::new(41, 10, (1280, 720)).unwrap(),
+            CaptureBoundary::new(41, 9, (1281, 720)).unwrap(),
+        ] {
+            assert!(!grant.accepts(7, other));
+        }
+        assert!(!grant.accepts(0, boundary));
+        assert!(!grant.accepts(8, boundary));
+    }
+
+    #[test]
+    fn preview_native_visibility_requires_two_live_exact_pid_windows_without_foreground_input() {
+        let query = |window| match window {
+            10 => Some((100, true, false)),
+            20 => Some((200, true, false)),
+            _ => None,
+        };
+        assert!(visible_native_presentation(10, 20, 100, 200, query));
+        assert!(!visible_native_presentation(0, 20, 100, 200, query));
+        assert!(!visible_native_presentation(10, 20, 0, 200, query));
+        assert!(!visible_native_presentation(10, 20, 101, 200, query));
+        assert!(!visible_native_presentation(10, 20, 100, 201, query));
+        for changed in [10, 20] {
+            for replacement in [
+                None,
+                Some((if changed == 10 { 100 } else { 200 }, false, false)),
+                Some((if changed == 10 { 100 } else { 200 }, true, true)),
+            ] {
+                assert!(!visible_native_presentation(10, 20, 100, 200, |window| if window == changed {
+                    replacement
+                } else {
+                    query(window)
+                }));
+            }
+        }
     }
 }
