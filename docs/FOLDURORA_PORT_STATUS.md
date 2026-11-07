@@ -276,8 +276,22 @@ The sixteen reviewed imports from upstream snapshot `576dd54a` remain included
 in the current candidate; twenty-five other commits retain the dependency plan
 in its `docs/FOLDURORA.md`. A read-only refresh at 09:34 UTC found upstream main
 `8d360a2f`, exactly two newer commits: clicked sit offsets (`c6a4d06c`, #2784)
-and object linking (`8d360a2f`, #2785). Their source/dependency/applicability review
-is for a separate candidate; they are not included in frozen `6b512b1a`.
+and object linking (`8d360a2f`, #2785). Their source review is complete; neither
+is an intact text-clean cherry-pick on `6b512b1a`, and neither is included there.
+A bounded sit-offset port is source-clear after preserving the existing
+`select_for_menu` call in one unchanged context line; all seven production/test
+files then apply-check clean, without enabling the deferred selection changes.
+It still needs its own compiled camera/RLVa/viewport and human sit checks.
+
+Linking assumes extracted shared eligibility helpers plus both compact and
+Legacy Link-button gates from deferred `3ce55eba`. Resolving its module conflicts
+alone would leave buttons enabled where the new keyboard/menu checks refuse.
+An intact import belongs with the rights/build batch; a smaller linking-only
+backport is possible only if it also ports those two gates and validates both
+styles, property freshness, packet batching, replacement order, RLVa and host
+modal behavior. Source/applicability checks establish no new runtime acceptance.
+The exact patch review and checklist remain privately retained under
+`/workspace/scratch/upstream-2784-2785-sol/REVIEW.md`.
 
 The deferred cache/rights chain `026651a8` → `316e5e06` → `1ae9a375` → `3ce55eba`
 was rechecked against `6b512b1a`; none of the four whole patches independently
