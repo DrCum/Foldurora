@@ -118,6 +118,7 @@ struct Frames {
     manager: Manager,
     add: Option<PlaybackItem>,
     open: bool,
+    overlay: bool,
 }
 impl Frames {
     fn new() -> Self {
@@ -162,6 +163,7 @@ impl Frames {
             manager,
             add: Some(item),
             open: true,
+            overlay: false,
         };
         for _ in 0..5 {
             assert!(f.draw(vec![]).0.is_none());
@@ -195,6 +197,11 @@ impl Frames {
                         status: "board-ready",
                     },
                 );
+                if self.overlay {
+                    crate::ui::widgets::Modal::new(egui::Id::unique("board_fixture_overlay")).show(ui.ctx(), |ui| {
+                        ui.label("Fixture overlay");
+                    });
+                }
             },
         );
         result.textures_delta.clear();
@@ -386,4 +393,148 @@ fn board_native_actual_availability_gate_preserves_temporary_borrow_and_denies_a
     assert!(available(slot.as_ref(), None, Cell::get));
     // This is a physical availability predicate only: it never mints a managed
     // NativeActionScope or bypasses the separate App source/action permission.
+}
+
+fn key(key: egui::Key, pressed: bool, repeat: bool) -> egui::Event {
+    egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed,
+        repeat,
+        modifiers: Default::default(),
+    }
+}
+#[test]
+fn board_native_ui_queued_pointer_preserves_prior_painted_play_and_old_asset_target() {
+    let mut f = Frames::new();
+    let target = f.add.unwrap();
+    let pos = f.position(aurora_i18n::tr!("common-play"));
+    f.manager.play(target.item(), Gesture::default(), None);
+    let native = f.manager.playback_id(target.item()).unwrap();
+    assert!(f.pointer(pos, true).is_none());
+    if let Some(action) = f.pointer(pos, false) {
+        let Command::Play(ticket, captured) = action.command else {
+            panic!("prior play")
+        };
+        assert!(captured == target);
+        assert!(matches!(
+            f.actor.runtime.click(ticket, &f.data, captured, &mut f.manager, Instant::now()),
+            Err(playback::Error::Stale)
+        ));
+    }
+    assert!(f.manager.playback_id(target.item()) == Some(native));
+    // A deliberate fresh click after paint may stop exactly the visible run.
+    let action = f.click(aurora_i18n::tr!("common-stop"));
+    let Command::Play(ticket, captured) = action.command else {
+        panic!("stop")
+    };
+    assert!(matches!(
+        f.actor.runtime.click(ticket, &f.data, captured, &mut f.manager, Instant::now()),
+        Ok(playback::Click::Stopped(_))
+    ));
+    for _ in 0..3 {
+        f.draw(vec![]);
+    }
+    let pos = f.position(aurora_i18n::tr!("common-play"));
+    f.inv.items.get_mut(&target.item()).unwrap().asset_id = Uuid::from_u128(990004);
+    assert!(f.pointer(pos, true).is_none());
+    let action = f.pointer(pos, false).expect("old painted target");
+    let Command::Play(_, captured) = action.command else {
+        panic!("prior target")
+    };
+    assert!(captured == target);
+    assert!(!current_target(&f.inv, captured));
+    assert!(!f.manager.has_playing());
+}
+#[test]
+fn board_native_ui_exact_nonrepeat_key_keeps_original_intent_and_ignores_other_release() {
+    let mut f = Frames::new();
+    let target = f.add.unwrap();
+    let _ = f.click(aurora_i18n::tr!("common-play"));
+    assert!(f.draw(vec![key(egui::Key::Enter, true, false)]).0.is_none());
+    f.manager.play(target.item(), Gesture::default(), None);
+    let native = f.manager.playback_id(target.item()).unwrap();
+    assert!(f.draw(vec![key(egui::Key::Enter, true, true)]).0.is_none());
+    assert!(f.draw(vec![key(egui::Key::Space, false, false)]).0.is_none());
+    let action = f.draw(vec![key(egui::Key::Enter, false, false)]).0.expect("original exact key");
+    let Command::Play(ticket, captured) = action.command else {
+        panic!("original play")
+    };
+    assert!(matches!(
+        f.actor.runtime.click(ticket, &f.data, captured, &mut f.manager, Instant::now()),
+        Err(playback::Error::Stale)
+    ));
+    assert!(f.manager.playback_id(target.item()) == Some(native));
+}
+#[test]
+fn board_native_ui_ime_focus_and_removed_overlay_cancel_held_or_queued_activation() {
+    let mut f = Frames::new();
+    let _ = f.click(aurora_i18n::tr!("common-play"));
+    assert!(f.draw(vec![key(egui::Key::Enter, true, false)]).0.is_none());
+    assert!(
+        f.draw(vec![egui::Event::Ime(egui::ImeEvent::Preedit {
+            text: "x".into(),
+            active_range_chars: None
+        })])
+        .0
+        .is_none()
+    );
+    assert!(
+        f.draw(vec![
+            egui::Event::Ime(egui::ImeEvent::Commit("x".into())),
+            key(egui::Key::Enter, false, false)
+        ])
+        .0
+        .is_none()
+    );
+    let _ = f.click(aurora_i18n::tr!("common-play"));
+    assert!(f.draw(vec![key(egui::Key::Space, true, false)]).0.is_none());
+    assert!(f.draw(vec![egui::Event::WindowFocused(false)]).0.is_none());
+    assert!(
+        f.draw(vec![egui::Event::WindowFocused(true), key(egui::Key::Space, false, false)])
+            .0
+            .is_none()
+    );
+    let pos = f.position(aurora_i18n::tr!("common-play"));
+    f.overlay = true;
+    for _ in 0..3 {
+        f.draw(vec![]);
+    }
+    f.overlay = false;
+    assert!(f.pointer(pos, true).is_none());
+    assert!(f.pointer(pos, false).is_none());
+    assert!(!f.manager.has_playing());
+}
+#[test]
+fn board_native_ui_modal_and_newly_rebound_controls_require_fresh_painted_intent() {
+    let mut f = Frames::new();
+    let pos = f.position(aurora_i18n::tr!("common-play"));
+    f.actor.cancel_actions();
+    assert!(f.pointer(pos, true).is_none());
+    assert!(f.pointer(pos, false).is_none());
+    assert!(f.tap(aurora_i18n::tr!("board-new")).is_none());
+    for _ in 0..3 {
+        f.draw(vec![]);
+    }
+    assert!(f.draw(vec![key(egui::Key::Space, true, false)]).0.is_none());
+    assert!(f.draw(vec![key(egui::Key::Space, false, false)]).0.is_none());
+    assert!(f.tap(aurora_i18n::tr!("common-cancel")).is_none());
+    for _ in 0..3 {
+        f.draw(vec![]);
+    }
+    let revision = f.data.revision;
+    let pos = f.position(aurora_i18n::tr!("common-play"));
+    f.data = f
+        .data
+        .apply(Change::Rename {
+            board: f.data.boards[0].id,
+            name: "Renamed before input pass".into(),
+        })
+        .unwrap();
+    assert!(f.pointer(pos, true).is_none());
+    if let Some(action) = f.pointer(pos, false) {
+        assert_eq!(action.revision, revision);
+        assert_ne!(action.revision, f.data.revision);
+    }
+    assert!(!f.manager.has_playing());
 }

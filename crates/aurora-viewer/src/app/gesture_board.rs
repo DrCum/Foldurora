@@ -355,15 +355,12 @@ impl State {
             Err(_) => self.status = "board-save-failed",
         }
     }
-    fn resolve(app: &App, target: PlaybackItem) -> bool {
-        actions::resolve_playback_item(&app.world.inventory, target.reference(), target.kind()) == Ok(target)
-    }
     fn ready(&mut self, app: &mut App, proof: Proof, target: PlaybackItem, ready: Ready, presentation: Option<Presentation<'_>>) {
-        if !self.current(app, proof, presentation) || !Self::resolve(app, target) || app.world.rlva.has("sendgesture") {
+        if !self.current(app, proof, presentation) || !current_target(&app.world.inventory, target) || app.world.rlva.has("sendgesture") {
             return;
         }
         app.gesture_prefetch(ready.definition());
-        if !self.current(app, proof, presentation) || !Self::resolve(app, target) {
+        if !self.current(app, proof, presentation) || !current_target(&app.world.inventory, target) {
             return;
         }
         let Some(data) = self.snapshot.as_ref().map(|s| s.data.clone()) else {
@@ -383,7 +380,7 @@ impl State {
         let work: Vec<_> = self.pending.values().copied().collect();
         for (ticket, proof, target) in work {
             if !self.current(app, proof, presentation)
-                || !Self::resolve(app, target)
+                || !current_target(&app.world.inventory, target)
                 || app.world.rlva.has("sendgesture")
                 || app.gesture_state.board_cache_failed(target)
             {
@@ -433,7 +430,7 @@ impl State {
             }
             Command::Inventory => app.panels.inventory = true,
             Command::Play(ticket, target) => {
-                if !Self::resolve(app, target) {
+                if !current_target(&app.world.inventory, target) {
                     self.status = "board-stale";
                     return;
                 }
@@ -474,7 +471,7 @@ impl State {
                 }
             }
             Command::Add(board, target) => {
-                if self.job.is_some() || !Self::resolve(app, target) {
+                if self.job.is_some() || !current_target(&app.world.inventory, target) {
                     self.status = "board-stale";
                     return;
                 }
@@ -711,6 +708,9 @@ impl App {
     }
 }
 
+fn current_target(inventory: &crate::world::inventory::Inventory, target: PlaybackItem) -> bool {
+    actions::resolve_playback_item(inventory, target.reference(), target.kind()) == Ok(target)
+}
 fn duplicate(inventory: &crate::world::inventory::Inventory, board: &model::Board, target: PlaybackItem) -> bool {
     board
         .tiles

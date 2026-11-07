@@ -11,7 +11,7 @@ use crate::{
     theme::Palette,
     world::inventory::{Inventory, actions::PlaybackItem},
 };
-use std::time::Instant;
+use std::{collections::BTreeMap, time::Instant};
 
 #[derive(Clone)]
 pub(crate) enum Command {
@@ -34,7 +34,7 @@ pub(crate) struct Action {
 struct Held {
     id: egui::Id,
     action: Action,
-    keyboard: bool,
+    key: Option<egui::Key>,
 }
 struct Dialog {
     origin: Proof,
@@ -43,17 +43,34 @@ struct Dialog {
     delete: bool,
     name: String,
 }
+struct Painted {
+    action: Action,
+    rect: egui::Rect,
+    layer: egui::LayerId,
+    clip: egui::Rect,
+    focused: bool,
+}
+const MAX_CONTROLS: usize = model::MAX_TILES * 2 + model::MAX_BOARDS + 16;
 #[derive(Default)]
 pub(crate) struct State {
     owner: Option<Proof>,
     held: Option<Held>,
     dialog: Option<Dialog>,
     last_press: Option<u64>,
+    frame: Option<u64>,
+    painted: BTreeMap<egui::Id, Painted>,
+    building: BTreeMap<egui::Id, Painted>,
+    composing: bool,
+    input_blocked: bool,
+    suspended: bool,
+    focus: Option<egui::Id>,
 }
 impl State {
     pub(crate) fn cancel(&mut self) {
         self.held = None;
         self.dialog = None;
+        self.painted.clear();
+        self.building.clear();
     }
     fn bind(&mut self, proof: Option<Proof>) {
         if !self.owner.zip(proof).is_some_and(|(a, b)| a.same_owner(b)) {
@@ -61,37 +78,125 @@ impl State {
         }
         self.owner = proof;
     }
+    fn begin(&mut self, ctx: &egui::Context) {
+        let frame = ctx.cumulative_frame_nr();
+        if self.frame != Some(frame) {
+            self.painted = std::mem::take(&mut self.building);
+            self.frame = Some(frame);
+        }
+        // Each egui pass replaces this set. The next frame sees the last pass,
+        // while a discarded pass cannot overwrite the prior painted witnesses.
+        self.building.clear();
+        let was_composing = self.composing;
+        let blocked = ctx.input(|input| {
+            let mut event = false;
+            for value in &input.events {
+                match value {
+                    egui::Event::Ime(ime) => {
+                        event = true;
+                        match ime {
+                            egui::ImeEvent::Preedit { text, .. } => self.composing = !text.is_empty(),
+                            egui::ImeEvent::Commit(_) => self.composing = false,
+                            #[allow(deprecated)]
+                            egui::ImeEvent::Disabled => self.composing = false,
+                            _ => {}
+                        }
+                    }
+                    egui::Event::WindowFocused(_) => event = true,
+                    _ => {}
+                }
+            }
+            !input.focused || event || was_composing || self.composing
+        });
+        let focus = ctx.memory(|m| m.focused());
+        if self.focus != focus && self.held.as_ref().is_some_and(|held| held.key.is_some()) {
+            self.held = None;
+        }
+        self.focus = focus;
+        self.input_blocked = blocked;
+        if blocked {
+            self.held = None;
+        }
+    }
     fn capture(&mut self, response: &egui::Response, make: impl FnOnce() -> Option<Action>) -> Option<Action> {
         let frame = response.ctx.cumulative_frame_nr();
-        // Snapshot input without calling back into Context under its input lock.
-        let (pointer_press, pointer_release, key_press, key_release) = response.ctx.input(|i| {
+        let (pointer_press, pointer_release, key_press, enter_release, space_release) = response.ctx.input(|input| {
             (
-                i.pointer.button_pressed(egui::PointerButton::Primary),
-                i.pointer.button_released(egui::PointerButton::Primary),
-                i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Space),
-                i.key_released(egui::Key::Enter) || i.key_released(egui::Key::Space),
+                input.pointer.button_pressed(egui::PointerButton::Primary),
+                input.pointer.button_released(egui::PointerButton::Primary),
+                input.events.iter().find_map(|event| match event {
+                    egui::Event::Key {
+                        key,
+                        pressed: true,
+                        repeat: false,
+                        modifiers,
+                        ..
+                    } if matches!(key, egui::Key::Enter | egui::Key::Space) && !modifiers.ctrl && !modifiers.alt && !modifiers.command => {
+                        Some(*key)
+                    }
+                    _ => None,
+                }),
+                input.key_released(egui::Key::Enter),
+                input.key_released(egui::Key::Space),
             )
         });
-        let pointer = pointer_press && response.contains_pointer();
-        let keyboard = key_press && response.has_focus();
-        if response.enabled() && (pointer || keyboard) && self.last_press != Some(frame) {
+        let interactive = response.ctx.memory(|memory| memory.allows_interaction(response.layer_id)) && !self.suspended;
+        let pointer = interactive
+            && pointer_press
+            && response.contains_pointer()
+            && (response.is_pointer_button_down_on() || response.clicked_by(egui::PointerButton::Primary));
+        let key = key_press.filter(|_| interactive && response.has_focus());
+        if !self.input_blocked && response.enabled() && (pointer || key.is_some()) && self.last_press != Some(frame) && self.held.is_none()
+        {
             self.last_press = Some(frame);
-            self.held = make().map(|action| Held {
-                id: response.id,
-                action,
-                keyboard,
-            });
+            // A queued press can only bind the action actually painted BEFORE
+            // this input pass. New link targets/runs/rows require a fresh paint.
+            self.held = self
+                .painted
+                .get(&response.id)
+                .filter(|painted| {
+                    painted.rect == response.rect
+                        && painted.clip == response.interact_rect
+                        && painted.layer == response.layer_id
+                        && (key.is_none() || painted.focused)
+                })
+                .map(|painted| Held {
+                    id: response.id,
+                    action: painted.action.clone(),
+                    key,
+                });
         }
-        let released = self
-            .held
-            .as_ref()
-            .is_some_and(|h| h.id == response.id && if h.keyboard { key_release } else { pointer_release });
+        if interactive
+            && response.enabled()
+            && self.building.len() < MAX_CONTROLS
+            && let Some(action) = make()
+        {
+            self.building.insert(
+                response.id,
+                Painted {
+                    action,
+                    rect: response.rect,
+                    layer: response.layer_id,
+                    clip: response.interact_rect,
+                    focused: response.has_focus(),
+                },
+            );
+        }
+        let released = self.held.as_ref().is_some_and(|held| {
+            held.id == response.id
+                && match held.key {
+                    Some(egui::Key::Enter) => enter_release,
+                    Some(egui::Key::Space) => space_release,
+                    Some(_) => false,
+                    None => pointer_release,
+                }
+        });
         if released {
             let held = self.held.take()?;
-            // Keys must still focus this control; pointer release must still be
-            // inside it. Dialog text Enter is never a board playback shortcut.
-            if response.enabled()
-                && if held.keyboard {
+            if interactive
+                && !self.input_blocked
+                && response.enabled()
+                && if held.key.is_some() {
                     response.has_focus()
                 } else {
                     response.contains_pointer()
@@ -127,6 +232,8 @@ pub(crate) fn show(ctx: &egui::Context, p: &Palette, state: &mut State, open: &m
         status,
     } = context;
     state.bind(proof);
+    state.begin(ctx);
+    state.suspended = state.dialog.is_some();
     let mut output = None;
     Floater::new(
         "gesture_boards",
@@ -151,10 +258,12 @@ pub(crate) fn show(ctx: &egui::Context, p: &Palette, state: &mut State, open: &m
         egui::ScrollArea::horizontal().id_salt("board_choices").show(ui, |ui| {
             ui.horizontal(|ui| {
                 for board in &data.boards {
-                    let response = ui.add_enabled(proof.is_some(), egui::Button::new(&board.name).selected(selected == Some(board.id)));
-                    if let Some(a) = state.capture(&response, || action(Command::Select(board.id))) {
-                        output = Some(a);
-                    }
+                    ui.push_id(board.id, |ui| {
+                        let response = ui.add_enabled(proof.is_some(), egui::Button::new(&board.name).selected(selected == Some(board.id)));
+                        if let Some(a) = state.capture(&response, || action(Command::Select(board.id))) {
+                            output = Some(a);
+                        }
+                    });
                 }
             });
         });
@@ -277,6 +386,7 @@ pub(crate) fn show(ctx: &egui::Context, p: &Palette, state: &mut State, open: &m
                 }
             });
     });
+    state.suspended = false;
     if !*open {
         state.cancel();
         return None;
@@ -292,6 +402,9 @@ pub(crate) fn show(ctx: &egui::Context, p: &Palette, state: &mut State, open: &m
             }
         };
         if let Some((board, delete, name)) = dialog {
+            state.held = None;
+            state.painted.clear();
+            state.building.clear();
             state.dialog = Some(Dialog {
                 origin: a.proof,
                 revision: a.revision,
