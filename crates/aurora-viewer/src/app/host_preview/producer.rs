@@ -368,21 +368,25 @@ impl Producer {
                 .is_some_and(|age| age >= Duration::from_millis(config.config.rate.interval_millis()))
         })
     }
-    fn current_pending(&self, app: &App, gfx: &Gfx, context: &Context, now: Instant) -> bool {
-        let Some(pending) = &self.pending else { return false };
-        pending.deadline > now
-            && context.token == Some(pending.token)
-            && claim_matches(context.policy, context.layout, self.ledger.current(), pending.claim)
+    fn pending_current(&self, pending: &Pending, app: &App, gfx: &Gfx, context: &Context, now: Instant) -> bool {
+        context.token == Some(pending.token)
             && context.capture.as_ref().is_some_and(|capture| capture.current())
-            && app
-                .host_session
-                .as_ref()
-                .and_then(|bridge| bridge.preview_authority(&gfx.window, &gfx.renderer))
-                .is_some_and(|authority| {
-                    authority.scope.source == context.policy.source()
-                        && authority.activation == pending.claim.activation()
-                        && authority.boundary.surface_epoch() == pending.claim.epochs().surface()
-                })
+            && context.retention.current(now)
+            && pending_authority_matches(
+                context.policy,
+                context.layout,
+                self.ledger.current(),
+                pending,
+                app.host_session
+                    .as_ref()
+                    .and_then(|bridge| bridge.preview_authority(&gfx.window, &gfx.renderer)),
+                now,
+            )
+    }
+    fn current_pending(&self, app: &App, gfx: &Gfx, context: &Context, now: Instant) -> bool {
+        self.pending
+            .as_ref()
+            .is_some_and(|pending| self.pending_current(pending, app, gfx, context, now))
     }
     fn complete(&mut self, app: &App, gfx: &mut Gfx, context: &Context) {
         if self.pending.as_ref().is_none_or(|pending| pending.gpu.is_none()) {
@@ -446,7 +450,18 @@ impl Producer {
                     Self::unavailable(app, &pending, Unavailable::Denied);
                     return;
                 };
+                // Polling may have yielded ownership while the OS window or
+                // accepted native grant changed. Requery actual native state at
+                // the effect boundary; the pre-poll Context cannot prove it.
+                if !self.pending_current(&pending, app, gfx, context, Instant::now()) {
+                    Self::unavailable(app, &pending, Unavailable::Denied);
+                    return;
+                }
                 if let Some(channel) = app.host_session.as_ref().and_then(|bridge| bridge.preview_channel()) {
+                    if channel.connection() != Some(pending.token) || !channel.frame_available() {
+                        Self::unavailable(app, &pending, Unavailable::Denied);
+                        return;
+                    }
                     if channel.try_frame(guard, stamp, frame).is_err() {
                         // The moved allocation is dropped by the image owner. Never retry/copy.
                         Self::unavailable(app, &pending, Unavailable::Busy);
@@ -592,6 +607,31 @@ impl Drop for Producer {
     fn drop(&mut self) {
         self.retire();
     }
+}
+
+/// The same exact native correlation is used before poll and AFTER Ready at
+/// handoff. Authority must be freshly queried by the caller from the OS/bridge;
+/// copied layout or an old Context never substitutes for that query.
+fn pending_authority_matches(
+    policy: PreviewPolicy,
+    layout: Option<PreviewLayout>,
+    applied: Option<Applied>,
+    pending: &Pending,
+    authority: Option<crate::session_host::worker::PreviewAuthority>,
+    now: Instant,
+) -> bool {
+    pending.deadline > now
+        && claim_matches(policy, layout, applied, pending.claim)
+        && authority.is_some_and(|authority| {
+            authority.scope.expires_at > now
+                && authority.scope.source == policy.source()
+                && authority.activation == pending.claim.activation()
+                && authority.boundary.surface_epoch() == pending.claim.epochs().surface()
+                && layout.is_some_and(|layout| {
+                    authority.boundary.device_epoch() == layout.device_epoch()
+                        && [authority.boundary.size().0, authority.boundary.size().1] == layout.source_size()
+                })
+        })
 }
 
 /// Metadata correlation only. This never substitutes for strict native window,

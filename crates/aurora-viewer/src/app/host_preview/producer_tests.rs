@@ -256,3 +256,86 @@ fn native_producer_busy_connection_read_preserves_original_config_but_cannot_aut
         "old accepted config is never replayed"
     );
 }
+
+#[test]
+fn native_producer_post_poll_native_loss_or_retarget_rejects_original_ready_claim() {
+    let world = world();
+    let now = Instant::now();
+    let mut native = HostPreview::default();
+    native.sync(facts(&world, now), now);
+    let policy = native.policy.unwrap();
+    let observed = native.observed.unwrap();
+    let mut ledger = Ledger::default();
+    ledger.apply(policy.source(), 1, 7, config(PreviewRate::One), None).unwrap();
+    let layout = native_layout(policy, ledger.current(), observed.active, observed.viewport).unwrap();
+    let mut host = SourceImages::new(policy.source(), ImageBudget::new(HOST_IMAGE_BYTES).unwrap()).unwrap();
+    host.sync(policy, 0).unwrap();
+    let claim = host.request(1, 7, layout.geometry(PreviewSize::Small).unwrap(), 1).unwrap();
+    let pending = Pending {
+        token: ConnectionToken::transport_fixture(policy.source(), 1, 1, 1).unwrap(),
+        claim,
+        deadline: now + TTL,
+        gpu: None, // No fake real renderer token/result is minted.
+    };
+    let actual = facts(&world, now).authority.unwrap();
+    assert!(pending_authority_matches(
+        policy,
+        Some(layout),
+        ledger.current(),
+        &pending,
+        Some(actual),
+        now
+    ));
+    // Production re-queries preview_authority after poll: a newly hidden,
+    // minimized, unfitted or lost native window returns None even if the old
+    // copied Context and atomic capture generation have not changed.
+    assert!(!pending_authority_matches(
+        policy,
+        Some(layout),
+        ledger.current(),
+        &pending,
+        None,
+        now
+    ));
+    let mut changed = actual;
+    changed.activation += 1;
+    assert!(!pending_authority_matches(
+        policy,
+        Some(layout),
+        ledger.current(),
+        &pending,
+        Some(changed),
+        now
+    ));
+    changed = actual;
+    changed.boundary = aurora_render::viewport_capture::CaptureBoundary::new(42, 9, (1280, 720)).unwrap();
+    assert!(!pending_authority_matches(
+        policy,
+        Some(layout),
+        ledger.current(),
+        &pending,
+        Some(changed),
+        now
+    ));
+    changed = actual;
+    changed.scope.expires_at = now;
+    assert!(!pending_authority_matches(
+        policy,
+        Some(layout),
+        ledger.current(),
+        &pending,
+        Some(changed),
+        now
+    ));
+    assert!(!pending_authority_matches(
+        policy,
+        Some(layout),
+        ledger.current(),
+        &pending,
+        Some(actual),
+        now + TTL
+    ));
+    // Original ready claim/deadline remain immutable; no fresh proof substitutes.
+    assert_eq!(pending.claim, claim);
+    assert_eq!(pending.deadline, now + TTL);
+}
