@@ -750,6 +750,10 @@ impl Viewfinder {
             .pivot(Align2::RIGHT_TOP)
             .fixed_pos(screen.right_top() + Vec2::new(-GAP, 14.0))
             .show(ctx, |ui| {
+                // Right-to-left centre alignment otherwise uses half the
+                // viewport height and leaves a foreground hit plane over
+                // the world all the way down to that row.
+                ui.set_height(24.0);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 18.0;
                     let fps = format!("{} i/s", f.fps.round() as i32);

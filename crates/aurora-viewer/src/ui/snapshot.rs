@@ -2043,6 +2043,7 @@ mod tests {
                         .expect("actual viewfinder area")
                 };
                 let bounds = f.control_bounds();
+                assert!(area(&f, "vf_top_right").height() <= 40.0, "top controls must not cover the scene");
                 let dock = area(&f, "vf_dock");
                 assert!(dock.width() <= 90.0, "dock owns an oversized hit region: {dock:?}");
                 assert!(
