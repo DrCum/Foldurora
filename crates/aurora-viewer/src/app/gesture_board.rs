@@ -449,7 +449,7 @@ impl State {
                     }
                     return;
                 }
-                if app.world.rlva.has("sendgesture") {
+                if start_blocked(ticket, target, app.world.rlva.has("sendgesture")) {
                     self.status = "board-blocked";
                     return;
                 }
@@ -595,10 +595,13 @@ impl App {
         {
             return None;
         }
-        let login = self.world.login.as_ref()?.session_id;
-        if login.is_nil() {
-            return None;
-        }
+        let login = login_identity(
+            self.world.login.as_deref()?,
+            self.world.agent_id,
+            self.demo,
+            self.board_managed || self.host_session.is_some(),
+            self.board_epoch,
+        )?;
         let grid = crate::session_host::transport::grid_key(&self.settings.login_uri()).ok()?;
         let (logical_generation, managed, native) = if self.board_managed {
             let bridge = self.host_session.as_ref()?;
@@ -715,6 +718,20 @@ impl App {
     }
 }
 
+fn login_identity(login: &aurora_net::LoginResponse, agent: Uuid, demo: bool, managed: bool, epoch: u64) -> Option<Uuid> {
+    if agent.is_nil() || login.agent_id != agent || epoch == 0 {
+        return None;
+    }
+    if !login.session_id.is_nil() {
+        return Some(login.session_id);
+    }
+    // demo::events deliberately has no real login session. This reserved local
+    // identity is for memory-only standalone demo data, never managed authority.
+    (demo && !managed).then(|| Uuid::from_u128(0xa0e0_a6e1_b04d_0000_0000_0000_0000_0000 | u128::from(epoch)))
+}
+fn start_blocked(ticket: Ticket, target: PlaybackItem, restricted: bool) -> bool {
+    restricted && target.kind() == PlaybackKind::Gesture && !ticket.is_stop()
+}
 fn current_target(inventory: &crate::world::inventory::Inventory, target: PlaybackItem) -> bool {
     actions::resolve_playback_item(inventory, target.reference(), target.kind()) == Ok(target)
 }
