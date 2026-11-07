@@ -4,9 +4,89 @@ This is the coordination ledger for the Folderstorm port. Source, automated
 checks, native Windows acceptance and human grid acceptance are separate results.
 Handoffs and screenshots are reference material, not authority to merge or release.
 
-## Current native Enter guard candidate
+## Current Attention MVP candidate
 
-The next test source is frozen at
+The current source is frozen at
+[`9a6918b4e7334e4da319449b56e985107e6b5cd5`](https://github.com/DrCum/Foldurora/commit/9a6918b4e7334e4da319449b56e985107e6b5cd5),
+pushed on `feat/attention-integration`. It builds on the previous frozen Enter
+guard candidate below. This first Attention slice lists unread Nearby/existing
+Direct conversations from the five stable saved profiles, with explicit profile,
+actual account/grid and conversation identity. Direct is on and Nearby is off
+by default. The compact host bell and management entry open an owned CPU window;
+profile/category filters are collapsed by default and scroll when expanded.
+Open shared chat and Previous/Next perform passive exact-source navigation;
+Dismiss reminder changes only the local reminder book until new activity.
+There is no native Review action, monitor preview or chat protocol V3 in this MVP.
+
+Exact-source Linux validation passed all **203 required checks** exactly once,
+including real-egui stale input, selection, filter/save lifecycle, compact layout
+and first-profile pointer interaction at **380×340**. All **54 production CPU
+captures** passed required-text/clipping/privacy checks: 18 each for EN/FR/JA,
+including 540×580, narrow 380×580 at 150%, and short 380×420 scenes. The full Linux
+workspace run reports **8,020 passed, one inherited terrain precision failure,
+53 ignored**. Clippy passed with the existing Linux `dead_code` allowance.
+These are the measured Linux results; the inherited renderer failure remains
+recorded and the full run is not described as entirely green.
+
+[Six unchanged Attention CPU captures, original manifests and hashes](https://github.com/DrCum/Foldurora/blob/2885dbfcec558932a3df4642347f7d2a938932f3/foldurora/20261107-9a6918b4-attention-cpu/README.md)
+retain the exact source identity. The gallery is a six-image subset of the 54
+passing captures, with selected/expanded filters, French narrow bottom filters,
+Japanese short filters and simulated save/load failures. Images use the actual
+production egui body and software painter with synthetic body-free snapshots.
+They establish no native-window/OS-input, Windows, physical-GPU, real IME,
+authentication, preference-file IO, World or grid acceptance. The 340-pixel
+minimum-height result belongs to the actual-egui regression, not the short
+420-pixel-high gallery images.
+
+The validated test ELF is **770,055,472 bytes**, SHA-256
+`a5f017ee4d2834c3cbbf6b6e4794007c16ca3c98bdf4025ae70db23dc043cbfc`.
+It is distinct from a normal viewer executable. The build worktree retains
+`.scratch/attention-validation-9a6918b4/validation-receipt.json` and
+`source-expectations.json`; the original runtime receipt is also in the capture
+publication. The normal Linux viewer build/receipt is **pending** at this
+checkpoint; no normal-binary hash or launch is inferred from the test ELF.
+
+[Windows run 42385255872](https://github.com/DrCum/Foldurora/actions/runs/42385255872)
+is **pending verification** for this exact source. Its logs, required-name counts,
+manifest, package CRCs, executable/version/icons and artifact hashes must be
+verified before calling it a tested Windows download. No expected Windows test
+count is presented as a measured result, and no current Windows artifact/hash
+is substituted from the previous 6b package below.
+
+Separate follow-ups remain outside this candidate:
+
+- The native Attention fixture at `8f5aa440d7a09e0b1b9d40c47a8c1ab2417f8706`
+  and guarded external driver SHA-256
+  `21b78b564dae2fe48c41e938dc24b711da36cafcd104a2458733fa0c371ffbc6`
+  are source-reviewed only: **uncompiled and unrun**. Their synthetic protocol,
+  clipped hit probes and effect-time traces establish no native acceptance yet.
+- The canonical database prerequisite (`db9` checkpoint) and native Review protocol/UI/
+  broker/worker changes are source-reviewed, **uncompiled** work on separate
+  branches. They are absent from this MVP and provide no native Review result.
+- The pure monitor model checkpoint `5a57f08b` is source-reviewed only; its GPU
+  follow-up remains under review. Neither provides integrated monitor parity.
+
+Human/platform follow-up for the exact eventual package:
+
+- Confirm the bell/drawer entry, exact profile/account/grid/conversation labels,
+  collapsed filters and usable scrolling/actions at 380×340 and 150% UI scale,
+  including long profile names and EN/FR/JA text.
+- Verify Open/Previous/Next honor the exact intended sender and preserve
+  canonical Shared Chat drafts without marking unread messages as read or activating a World;
+  verify Dismiss stays local and new activity restores its reminder.
+- Check held pointer/key actions across source/policy changes, focus loss and
+  close/reopen. Held Enter/Space after refocus must remain inert until a physical
+  release and fresh press; a vanished selected source must not select another.
+- Check preference save completion/failure, published checkmarks, retry and
+  queued-save close/reopen retention with the real controller's private IO.
+  Real IME, native Windows and grid checks remain separate from CPU fixtures.
+- The user reported that camera behavior is now as expected, without stating
+  the exact tested commit. Keep that report without attributing it to this
+  package or declaring full camera, GPU/device-loss or port parity acceptance.
+
+## Previous frozen native Enter guard candidate
+
+The previous frozen test source is at
 [`6b512b1a`](https://github.com/DrCum/Foldurora/commit/6b512b1aa44102c871579a8a69211c12e0c87f89)
 on `fix/shared-chat-enter-integration`. Its
 [Windows run 42359207310](https://github.com/DrCum/Foldurora/actions/runs/42359207310)
