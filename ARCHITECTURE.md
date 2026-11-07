@@ -24,6 +24,20 @@ over nonzero client dimensions. Size/permission/paint panics trigger private
 retirement and resume unwinding; a retirement guard destroys native DIB storage
 before old/new bitmap credits, including if the parent edit-flush panics.
 
+`private_image/tool.rs` and `tool/tests.rs` add a dormant sealed native facade.
+The Windows caller supplies its localized title/logical geometry; it receives
+only native IDs, events/raw input, observed focus/minimize/pin/placement, opaque
+image staging and original sealed draw/present/retire operations. Each native
+call borrows ActiveEventLoop without storing it, and the facade cannot move to
+an IO thread. No Window Arc, pixels or output/ticket constructor is exported.
+First-show is requested only after a current sealed presentation and additional
+permission checks; same-binding updates do not re-show the tool. Placement is
+request-only until a later actual query, and pin uses owned HWND NOACTIVATE plus
+observed topmost state. The existing generic owner still controls bitmap credits,
+minimize/error/unwind retirement and old-input flush. Five portable fake facade
+regressions and one Windows compile reference are authored/unrun. Shell routing,
+service/Broker authority, menus and production registration remain absent.
+
 Foldurora application branding is embedded from `assets/branding/foldurora-*`.
 `cli::with_desktop_id` supplies a small cached RGBA icon to CPU and initial GPU
 windows while retaining the existing desktop identity. Main-window recovery

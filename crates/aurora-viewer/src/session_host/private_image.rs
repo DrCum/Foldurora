@@ -3,6 +3,9 @@
 //! No private bytes enter egui's texture manager or the ordinary Painter cache.
 
 mod surface;
+mod tool;
+#[cfg(windows)]
+pub(super) use tool::{MonitorSurface, Placement, ToolOptions};
 #[cfg(test)]
 mod tests;
 

@@ -21,6 +21,19 @@
   Active/XR/photo behavior and GPU producers remain unchanged; source review and
   root-owned compilation/tests are next.
 
+- 🔧 Sealed Monitor native facade (2026-11-07; no issue): test-only Windows
+  owner accepts localized title/logical geometry, exact native event routing,
+  raw input, redraw/focus, observed pin/placement and opaque credited images.
+  First-show follows current original sealed presentation; stale old frames
+  cannot close a newer owner. Existing CPU credit/minimize/retire flow remains
+  authoritative; facade command/draw failures retire with old-context edit flush
+  before physical credit release. Placement requests are not acknowledged state;
+  pin reads actual owned topmost after a no-activation request. Five portable
+  fake facade tests and one Windows compile reference are authored/unrun.
+  All previous tests/fixture APIs are preserved. No Window Arc/pixel/output-ticket
+  construction, service permission, Shell menu, producer or runtime enablement is
+  added. Actual native Windows allocation/focus/placement remains later validation.
+
 - 🔧 Disabled CPU/body integration (2026-11-07; no issue): preserve the nine
   reviewed CPU surface/body commits on exact disabled-foundation base b6d5ed6b.
   CPU source at 25ae27c6 and body source at a59bd978 remain byte-identical;

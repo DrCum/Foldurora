@@ -215,16 +215,41 @@ impl WindowsSurface {
         context: &Context,
         owner: &winit::window::Window,
     ) -> anyhow::Result<Self> {
+        Self::configured_tool(
+            event_loop,
+            context,
+            owner,
+            super::ToolOptions {
+                title: String::new(),
+                initial: [380.0, 290.0],
+                minimum: [280.0, 120.0],
+                background: Color32::BLACK,
+            },
+        )
+    }
+    fn owned_hwnd(&self) -> Result<windows_sys::Win32::Foundation::HWND, Error> {
+        use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        let RawWindowHandle::Win32(handle) = self.native.window.window_handle().map_err(|_| Error::Surface)?.as_raw() else {
+            return Err(Error::Surface);
+        };
+        Ok(handle.hwnd.get() as windows_sys::Win32::Foundation::HWND)
+    }
+    pub(super) fn configured_tool(
+        event_loop: &winit::event_loop::ActiveEventLoop,
+        context: &Context,
+        owner: &winit::window::Window,
+        options: super::ToolOptions,
+    ) -> anyhow::Result<Self> {
         Ok(Self {
             native: super::super::software::SoftwareWindow::owned_tool(
                 event_loop,
                 context,
                 owner,
-                String::new(),
-                [380.0, 290.0],
-                [280.0, 120.0],
+                options.title,
+                options.initial,
+                options.minimum,
             )?,
-            background: Color32::BLACK,
+            background: options.background,
         })
     }
 }
@@ -256,5 +281,95 @@ impl OwnedSurface for WindowsSurface {
         self.native
             .present_private(presentation, context, output, self.background, size, private, current)
             .map_err(|_| Error::Surface)
+    }
+}
+
+#[cfg(windows)]
+impl super::tool::ToolNative for WindowsSurface {
+    type Id = winit::window::WindowId;
+    type Event = winit::event::WindowEvent;
+    type Response = egui_winit::EventResponse;
+    fn id(&self) -> Self::Id {
+        self.native.window.id()
+    }
+    fn event(&mut self, _context: &Self::PresentContext, event: &Self::Event) -> Result<Self::Response, Error> {
+        Ok(self.native.event(event))
+    }
+    fn show(&mut self, _context: &Self::PresentContext) -> Result<(), Error> {
+        self.native.window.set_visible(true);
+        Ok(())
+    }
+    fn request_redraw(&mut self, _context: &Self::PresentContext) -> Result<(), Error> {
+        self.native.window.request_redraw();
+        Ok(())
+    }
+    fn focused(&self, _context: &Self::PresentContext) -> Result<bool, Error> {
+        Ok(self.native.window.has_focus())
+    }
+    fn focus(&mut self, _context: &Self::PresentContext) -> Result<(), Error> {
+        self.native.window.focus_window();
+        Ok(())
+    }
+    fn set_title(&mut self, _context: &Self::PresentContext, title: &str) -> Result<(), Error> {
+        self.native.window.set_title(title);
+        Ok(())
+    }
+    fn pin(&mut self, _context: &Self::PresentContext, pinned: bool) -> Result<bool, Error> {
+        use windows_sys::Win32::Foundation::{GetLastError, SetLastError};
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            GWL_EXSTYLE, GetWindowLongPtrW, HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
+            SetWindowPos, WS_EX_TOPMOST,
+        };
+        let hwnd = self.owned_hwnd()?;
+        // SAFETY: only this live owned tool HWND is changed on its GUI thread;
+        // NOACTIVATE preserves current focus. No foreign/native worker is used.
+        unsafe {
+            if SetWindowPos(
+                hwnd,
+                if pinned { HWND_TOPMOST } else { HWND_NOTOPMOST },
+                0,
+                0,
+                0,
+                0,
+                SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER,
+            ) == 0
+            {
+                return Err(Error::Surface);
+            }
+            SetLastError(0);
+            let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            if style == 0 && GetLastError() != 0 {
+                return Err(Error::Surface);
+            }
+            Ok(style as u32 & WS_EX_TOPMOST != 0)
+        }
+    }
+    fn placement(&self, _context: &Self::PresentContext) -> Result<super::Placement, Error> {
+        let pos = self.native.window.outer_position().map_err(|_| Error::Surface)?;
+        let size = self.native.window.inner_size();
+        let hwnd = self.owned_hwnd()?;
+        // SAFETY: this owned live tool is queried on its GUI thread. IsZoomed
+        // reads actual native state, independent of winit's requested flags.
+        let maximized = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsZoomed(hwnd) != 0 };
+        Ok(super::Placement {
+            outer_position: [pos.x, pos.y],
+            client_size: [size.width, size.height],
+            maximized,
+        })
+    }
+    fn request_placement(&mut self, _context: &Self::PresentContext, placement: super::Placement) -> Result<(), Error> {
+        self.native.window.set_maximized(false);
+        self.native.window.set_outer_position(winit::dpi::PhysicalPosition::new(
+            placement.outer_position[0],
+            placement.outer_position[1],
+        ));
+        let _ = self
+            .native
+            .window
+            .request_inner_size(winit::dpi::PhysicalSize::new(placement.client_size[0], placement.client_size[1]));
+        if placement.maximized {
+            self.native.window.set_maximized(true);
+        }
+        Ok(())
     }
 }
