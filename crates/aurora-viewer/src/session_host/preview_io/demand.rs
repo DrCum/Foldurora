@@ -112,16 +112,24 @@ mod tests {
             .is_err()
         );
         let good = receipt(1, 9);
+        let wrong_config = DemandConfiguration {
+            size: PreviewSize::Large,
+            ..config()
+        };
+        let wrong = DemandReceipt {
+            requested: wrong_config,
+            outcome: DemandOutcome::Accepted {
+                effective: wrong_config,
+                native_revision: 9,
+            },
+            ..good
+        };
         assert!(
-            book.finish(DemandReceipt {
-                requested: DemandConfiguration {
-                    size: PreviewSize::Large,
-                    ..config()
-                },
-                ..good
-            })
-            .is_err()
+            wrong.validate().is_ok(),
+            "well-formed receipt must still match the original request"
         );
+        assert!(book.finish(wrong).is_err());
+        assert!(!book.can_stop(1));
         assert!(book.finish(good).unwrap());
         assert!(!book.finish(good).unwrap());
         assert_eq!(book.records.iter().find(|r| r.id == 1).unwrap().receipt, Some(good));

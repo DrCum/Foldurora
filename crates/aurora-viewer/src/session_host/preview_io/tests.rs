@@ -880,11 +880,16 @@ fn preview_io_v4_demand_receipt_rejects_wrong_source_connection_config_and_old_t
             )
             .is_err()
     );
-    assert!(
-        io.worker
-            .try_demand_receipt(command.token, DemandReceipt { requested: config, ..good })
-            .is_err()
-    );
+    let wrong_config = DemandReceipt {
+        requested: config,
+        outcome: DemandOutcome::Accepted {
+            effective: config,
+            native_revision: 2,
+        },
+        ..good
+    };
+    assert!(wrong_config.validate().is_ok());
+    assert!(io.worker.try_demand_receipt(command.token, wrong_config).is_err());
     io.worker.try_demand_receipt(command.token, good).unwrap();
     until(|| {
         io.host
