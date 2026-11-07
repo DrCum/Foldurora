@@ -5,14 +5,51 @@ use winit::keyboard::{Key, ModifiersState};
 
 #[derive(Default)]
 pub(super) struct EnterRelease {
-    _reserved: (),
+    held: bool,
+    focused: bool,
+    before_focus: bool,
 }
 
 impl EnterRelease {
-    pub fn focused(&mut self, _focused: bool) {}
+    pub fn focused(&mut self, focused: bool) {
+        if self.focused == focused {
+            return;
+        }
+        self.focused = focused;
+        if focused {
+            // Windows sends held-key snapshot presses before Focused(true),
+            // X11 afterward. No Enter in the snapshot lets a key released
+            // outside the window send on its first subsequent fresh press.
+            self.held = self.before_focus;
+        }
+        self.before_focus = false;
+    }
 
-    pub fn suppress(&mut self, key: &Key, state: ElementState, repeat: bool, _synthetic: bool, modifiers: ModifiersState) -> bool {
-        super::suppress_enter_repeat(key, state, repeat, modifiers)
+    pub fn suppress(&mut self, key: &Key, state: ElementState, repeat: bool, synthetic: bool, modifiers: ModifiersState) -> bool {
+        if *key != Key::Named(winit::keyboard::NamedKey::Enter) {
+            return false;
+        }
+        if state == ElementState::Released {
+            if !synthetic {
+                self.held = false;
+                self.before_focus = false;
+            }
+            // A focus-loss snapshot release clears egui's key set, not the
+            // physical Enter. Only real release or the next focus snapshot
+            // may rearm this logical Enter-family fence.
+            return false;
+        }
+        let held = std::mem::replace(&mut self.held, true);
+        if !self.focused {
+            self.before_focus = true;
+        }
+        if synthetic {
+            return false; // egui-winit ignores snapshot presses after we observe them.
+        }
+        // X11 explicitly resets its repeat tracking on focus loss, so the
+        // first real held-key event after refocus has repeat=false (winit
+        // xinput_key_input). Shift+Enter retains multiline repeat behavior.
+        !self.focused || (!modifiers.shift_key() && held) || super::suppress_enter_repeat(key, state, repeat, modifiers)
     }
 }
 
@@ -147,5 +184,30 @@ mod tests {
         assert!(enter(&mut guard, true, false, false, false));
         enter(&mut guard, false, false, false, false);
         assert!(!enter(&mut guard, true, false, false, false));
+    }
+
+    #[test]
+    fn native_enter_both_focus_snapshot_orders_keep_shift_release_from_sending() {
+        for snapshot_before_focus in [false, true] {
+            let mut guard = EnterRelease::default();
+            guard.focused(true);
+            assert!(!enter(&mut guard, true, false, false, true));
+            enter(&mut guard, false, true, false, true);
+            guard.focused(false);
+            if snapshot_before_focus {
+                enter(&mut guard, true, true, false, false);
+            }
+            guard.focused(true);
+            if !snapshot_before_focus {
+                enter(&mut guard, true, true, false, false);
+            }
+            assert!(!enter(&mut guard, true, false, false, true), "held Shift+Enter remains multiline");
+            assert!(
+                enter(&mut guard, true, false, false, false),
+                "dropping Shift must not turn the held key into Send"
+            );
+            enter(&mut guard, false, false, false, false);
+            assert!(!enter(&mut guard, true, false, false, false));
+        }
     }
 }

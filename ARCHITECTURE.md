@@ -146,6 +146,16 @@ synthetic controller data and a bounded Send/Read inbox, without starting broker
 IO or workers. Its private X11/XDG driver contract and evidence limits are in
 `docs/TESTING.md`; it cannot establish native authentication or grid delivery.
 
+`chat_window/enter_release.rs` observes logical Enter before egui-winit ignores
+synthetic focus presses. Its bounded held/focus/snapshot state preserves a held
+key across synthetic releases and blocks even X11's first real repeat=false
+event after refocus. Windows snapshot presses precede Focused(true), while X11's
+follow it; both are handled. A real release clears the fence, and absence from
+the next focus snapshot permits a key released outside to send on its first
+fresh press. Repeated focus notices, IME and navigation cannot rearm held Enter;
+Shift+Enter's normal multiline repeats remain available. No native key query or
+protocol change is involved. Compiled and fixed native validation remain pending.
+
 The test-only `session_host/chat_ui/visual.rs` drives that same popout body with
 real egui input and paints through `crash::software::Painter`, as
 `SoftwareWindow` does. Its ignored, explicitly configured EN/FR/JA fixture

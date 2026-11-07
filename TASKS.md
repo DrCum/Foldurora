@@ -5,6 +5,17 @@
   recorded intents only. Source preparation does not validate OS input; root
   compilation, an owned native run and exact driver assertions remain pending.
 
+- 🔧 Shared Chat native Enter release fence (2026-11-07; task
+  `native-enter-release-guard`; no issue): an isolated Linux CPU-window case
+  with synthetic policies queued a Send while Return remained physically held
+  across focus loss/return. Winit's first real X11 event after refocus can have
+  repeat=false. Observe native focus snapshots before egui-winit; synthetic
+  releases cannot rearm held Enter, while a released-outside key can send on its
+  next fresh press. Preserve Shift+Enter multiline and Ctrl+Enter. Eight pure
+  regression cases are authored against the old stateless boundary; root
+  compilation and unchanged-fixture negative/fixed native proof remain pending.
+  Frozen `0e40e48f` Windows CI does not establish this Linux input behavior.
+
 - 🔧 Native unread and explicit Shared Chat read (2026-11-07; no issue):
   isolated follow-up to the frozen Shared Chat candidate. Separate chat V2
   transports native Nearby/existing resident-IM badge counts and native incoming/

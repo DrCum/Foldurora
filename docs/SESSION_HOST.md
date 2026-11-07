@@ -136,6 +136,14 @@ compatibility is claimed.
   before navigation/Close stay with the old sender; ambiguous input after a
   navigation boundary is suppressed. A queued Cut is ignored on the close-only
   pass so that discarding clipboard output cannot delete the draft.
+- The owned Chat window also tracks native Enter presses across focus snapshots
+  before egui-winit conversion. A synthetic focus-loss release does not authorize
+  another Send from the still-held key, even when X11 reports its first real
+  post-focus press as repeat=false. A physical release rearms it; a key released
+  elsewhere and absent from the returning focus snapshot accepts its next fresh
+  press. Windows and X11 snapshot ordering differ and are handled separately.
+  This source follow-up preserves normal Shift+Enter/Ctrl+Enter and changes no
+  chat authority or delivery protocol. Root build/native verification is pending.
 - Reduced-resolution monitors are a later stage; protocol/budget models or an
   uninvoked renderer backend alone are not that feature.
 

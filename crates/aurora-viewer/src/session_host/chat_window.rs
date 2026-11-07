@@ -123,7 +123,7 @@ impl ChatWindow {
             WindowEvent::ModifiersChanged(modifiers) => self.native_modifiers = modifiers.state(),
             WindowEvent::Focused(focused) => {
                 self.enter_release.focused(*focused);
-                if !focused {
+                if !*focused {
                     self.native_modifiers = ModifiersState::empty();
                 }
             }
@@ -229,7 +229,8 @@ impl ChatWindow {
 
 /// ComposerReturn::character (indra/newview/fssessionchatbehavior.h) rejects
 /// OS repeats. egui-winit drops this flag and egui clears its held-key set on
-/// focus loss, so reject send repeats before either can make them look fresh.
+/// focus loss. EnterRelease additionally fences native focus snapshots whose
+/// first real held-key press can itself have repeat=false.
 /// Shift+Enter remains an ordinary multiline editing key.
 pub(super) fn suppress_enter_repeat(key: &winit::keyboard::Key, state: ElementState, repeat: bool, modifiers: ModifiersState) -> bool {
     *key == winit::keyboard::Key::Named(winit::keyboard::NamedKey::Enter)
