@@ -295,9 +295,8 @@ fn preview_auth_mutual_roles_domains_source_lease_and_nonce_replay_fail_closed()
         worker.finish(&reflected, 2).is_err(),
         "a correctly shaped reflected worker MAC cannot authenticate the host role"
     );
-    let (_, session) = host.accept(answer.as_slice(), 2).unwrap();
+    let (_, _session) = host.accept(answer.as_slice(), 2).unwrap();
     assert!(host.accept(answer.as_slice(), 3).is_err());
-    drop(session);
 }
 
 #[test]
@@ -413,11 +412,10 @@ fn preview_stream_zero_byte_write_and_source_reconnect_drop_payload_credit() {
     h.queue();
     assert!(matches!(h.worker_tick(10), Err(Error::Closed)));
     assert_eq!(h.budget.used(), 0);
-    let (mut host, worker) = sessions(Lane::Metadata);
+    let (mut host, _worker) = sessions(Lane::Metadata);
     let (hp, _) = sessions(Lane::Pixels);
     host.scope.connection += 1;
     assert!(matches!(Pair::new(host, hp, h.budget.clone()), Err(Error::Binding)));
-    drop(worker);
     let mut fresh = Harness::new(4096, 4096, PreviewSize::Small, false);
     assert!(
         fresh.host_tick(10).unwrap().is_empty(),
