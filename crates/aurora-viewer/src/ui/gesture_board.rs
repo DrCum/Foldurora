@@ -38,6 +38,28 @@ struct Held {
     press_frame: u64,
     press_index: usize,
 }
+impl Held {
+    fn release(&self, input: &egui::InputState, frame: u64) -> Option<Option<egui::Pos2>> {
+        input.events.iter().enumerate().find_map(|(index, event)| {
+            if self.press_frame == frame && index <= self.press_index {
+                return None;
+            }
+            match (self.key, event) {
+                (
+                    None,
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        ..
+                    },
+                ) => Some(Some(*pos)),
+                (Some(expected), egui::Event::Key { key, pressed: false, .. }) if expected == *key => Some(None),
+                _ => None,
+            }
+        })
+    }
+}
 struct Dialog {
     origin: Proof,
     revision: u64,
@@ -66,9 +88,19 @@ pub(crate) struct State {
     input_blocked: bool,
     suspended: bool,
     focus: Option<egui::Id>,
+    retire_focus: Option<egui::Id>,
 }
 impl State {
     pub(crate) fn cancel(&mut self) {
+        self.retire_focus = self
+            .focus
+            .filter(|id| self.painted.contains_key(id) || self.building.contains_key(id))
+            .or_else(|| self.building.iter().find_map(|(id, painted)| painted.focused.then_some(*id)))
+            .or(self.retire_focus);
+        self.owner = None;
+        self.composing = false;
+        self.input_blocked = false;
+        self.focus = None;
         self.held = None;
         self.dialog = None;
         self.painted.clear();
@@ -111,12 +143,32 @@ impl State {
             !input.focused || event || was_composing || self.composing
         });
         let focus = ctx.memory(|m| m.focused());
+        if let Some(id) = self.retire_focus.take().filter(|id| Some(*id) == focus) {
+            ctx.memory_mut(|m| m.surrender_focus(id));
+        }
+        let focus = ctx.memory(|m| m.focused());
+        if blocked && let Some(id) = focus.filter(|id| self.painted.contains_key(id)) {
+            ctx.memory_mut(|m| m.surrender_focus(id));
+        }
+        let focus = ctx.memory(|m| m.focused());
         if self.focus != focus && self.held.as_ref().is_some_and(|held| held.key.is_some()) {
             self.held = None;
         }
         self.focus = focus;
         self.input_blocked = blocked;
         if blocked {
+            self.held = None;
+        }
+    }
+    fn finish(&mut self, ctx: &egui::Context) {
+        // Virtualization/removal may prevent the originating widget from being
+        // visited. Its retirement or exact release still consumes the gesture.
+        let frame = ctx.cumulative_frame_nr();
+        if self
+            .held
+            .as_ref()
+            .is_some_and(|held| !self.building.contains_key(&held.id) || ctx.input(|input| held.release(input, frame).is_some()))
+        {
             self.held = None;
         }
     }
@@ -204,28 +256,11 @@ impl State {
                 },
             );
         }
-        let released = self.held.as_ref().filter(|held| held.id == response.id).and_then(|held| {
-            response.ctx.input(|input| {
-                input.events.iter().enumerate().find_map(|(index, event)| {
-                    if held.press_frame == frame && index <= held.press_index {
-                        return None;
-                    }
-                    match (held.key, event) {
-                        (
-                            None,
-                            egui::Event::PointerButton {
-                                pos,
-                                button: egui::PointerButton::Primary,
-                                pressed: false,
-                                ..
-                            },
-                        ) => Some(Some(*pos)),
-                        (Some(expected), egui::Event::Key { key, pressed: false, .. }) if expected == *key => Some(None),
-                        _ => None,
-                    }
-                })
-            })
-        });
+        let released = self
+            .held
+            .as_ref()
+            .filter(|held| held.id == response.id)
+            .and_then(|held| response.ctx.input(|input| held.release(input, frame)));
         if let Some(position) = released {
             let held = self.held.take()?;
             let owns_release = position.map_or_else(
@@ -505,5 +540,6 @@ pub(crate) fn show(ctx: &egui::Context, p: &Palette, state: &mut State, open: &m
             }
         }
     }
+    state.finish(ctx);
     output
 }

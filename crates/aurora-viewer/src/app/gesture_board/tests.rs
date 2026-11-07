@@ -655,3 +655,98 @@ fn board_app_current_exact_tile_stop_remains_allowed_under_start_restriction() {
     assert!(!start_blocked(sound_ticket, sound, true));
     assert!(f.actor.runtime.validate_sound(sound_ticket, &f.data, sound, now).is_ok());
 }
+
+#[test]
+fn board_native_ui_close_reopen_retires_composition_even_when_terminal_is_consumed_hidden() {
+    let mut f = Frames::new();
+    assert!(
+        f.draw(vec![egui::Event::Ime(egui::ImeEvent::Preedit {
+            text: "x".into(),
+            active_range_chars: None
+        })])
+        .0
+        .is_none()
+    );
+    f.open = false;
+    assert!(f.draw(vec![]).0.is_none());
+    // The ordinary App consumes terminal input while this panel is hidden.
+    let mut hidden = f.ctx.run_ui(
+        egui::RawInput {
+            events: vec![
+                egui::Event::Ime(egui::ImeEvent::Commit("x".into())),
+                key(egui::Key::Enter, false, false),
+            ],
+            ..Default::default()
+        },
+        |_| {},
+    );
+    hidden.textures_delta.clear();
+    f.actor.window += 1;
+    f.open = true;
+    for _ in 0..4 {
+        assert!(f.draw(vec![]).0.is_none());
+    }
+    assert!(matches!(f.click(aurora_i18n::tr!("common-play")).command, Command::Play(_, _)));
+    assert!(!f.manager.has_playing());
+}
+#[test]
+fn board_native_ui_removed_held_tile_release_does_not_stick_or_retarget_next_control() {
+    let mut f = Frames::new();
+    let pos = f.position(aurora_i18n::tr!("common-play"));
+    assert!(f.pointer(pos, true).is_none());
+    f.data = f
+        .data
+        .apply(Change::Remove {
+            board: f.data.boards[0].id,
+            tile: f.data.boards[0].tiles[0].id,
+        })
+        .unwrap();
+    assert!(f.pointer(pos, false).is_none());
+    assert!(f.tap(aurora_i18n::tr!("board-new")).is_none());
+    for _ in 0..3 {
+        f.draw(vec![]);
+    }
+    assert!(f.tap(aurora_i18n::tr!("common-cancel")).is_none());
+    assert!(matches!(f.click(aurora_i18n::tr!("board-add")).command, Command::Add(_, _)));
+    assert!(!f.manager.has_playing());
+}
+
+#[test]
+fn board_native_ui_ime_terminal_retires_only_command_focus_before_later_enter_confirmation() {
+    let mut f = Frames::new();
+    let _ = f.click(aurora_i18n::tr!("common-play"));
+    assert!(
+        f.draw(vec![egui::Event::Ime(egui::ImeEvent::Preedit {
+            text: "x".into(),
+            active_range_chars: None
+        })])
+        .0
+        .is_none()
+    );
+    assert!(f.draw(vec![egui::Event::Ime(egui::ImeEvent::Commit("x".into()))]).0.is_none());
+    assert!(f.draw(vec![key(egui::Key::Enter, true, false)]).0.is_none());
+    assert!(f.draw(vec![key(egui::Key::Enter, false, false)]).0.is_none());
+    let _ = f.click(aurora_i18n::tr!("common-play"));
+    assert!(f.draw(vec![key(egui::Key::Enter, true, false)]).0.is_none());
+    assert!(matches!(
+        f.draw(vec![key(egui::Key::Enter, false, false)]).0.unwrap().command,
+        Command::Play(_, _)
+    ));
+    assert!(!f.manager.has_playing());
+    assert!(f.tap(aurora_i18n::tr!("board-new")).is_none());
+    for _ in 0..3 {
+        f.draw(vec![]);
+    }
+    assert!(f.tap(aurora_i18n::tr!("board-name-placeholder")).is_none());
+    let text_focus = f.ctx.memory(|m| m.focused()).unwrap();
+    assert!(
+        f.draw(vec![egui::Event::Ime(egui::ImeEvent::Preedit {
+            text: "x".into(),
+            active_range_chars: None
+        })])
+        .0
+        .is_none()
+    );
+    assert!(f.draw(vec![egui::Event::Ime(egui::ImeEvent::Commit("x".into()))]).0.is_none());
+    assert_eq!(f.ctx.memory(|m| m.focused()), Some(text_focus));
+}
