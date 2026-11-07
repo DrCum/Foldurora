@@ -21,6 +21,8 @@ struct Trace {
     minimized: bool,
     panic_title: bool,
     fail_pin: bool,
+    minimize_on_show_entry: bool,
+    panic_minimized: bool,
     drop_credits: Vec<usize>,
     colors: Vec<u32>,
 }
@@ -48,7 +50,9 @@ impl Fake {
 impl OwnedSurface for Fake {
     type PresentContext = ();
     fn minimized(&self) -> bool {
-        self.trace.borrow().minimized
+        let trace = self.trace.borrow();
+        assert!(!trace.panic_minimized, "synthetic native minimize query panic");
+        trace.minimized
     }
     fn size(&self) -> [u32; 2] {
         self.trace.borrow().placement.unwrap().client_size
@@ -125,7 +129,14 @@ impl ToolNative for Fake {
         Ok(true)
     }
     fn show(&mut self, _: &()) -> Result<(), Error> {
-        self.trace.borrow_mut().calls.push("show");
+        let mut trace = self.trace.borrow_mut();
+        if trace.minimize_on_show_entry {
+            trace.minimized = true;
+        }
+        if trace.minimized {
+            return Err(Error::Stale);
+        }
+        trace.calls.push("show");
         Ok(())
     }
     fn request_redraw(&mut self, _: &()) -> Result<(), Error> {
@@ -431,4 +442,60 @@ fn private_tool_windows_facade_is_owned_and_all_native_calls_use_per_call_event_
     let _ = MonitorSurface::stage;
     let _ = MonitorSurface::present;
     let _ = MonitorSurface::retire;
+}
+
+#[test]
+fn private_tool_first_show_rechecks_minimized_after_paint_without_revoking_source_permission() {
+    for minimize_at in [2, 3, usize::MAX] {
+        let (mut tool, context, budget, trace) = fixture();
+        trace.borrow_mut().minimize_on_show_entry = minimize_at == usize::MAX;
+        let sealed = draw(&mut tool);
+        let mut checks = 0;
+        let mut current = || {
+            checks += 1;
+            if checks == minimize_at {
+                trace.borrow_mut().minimized = true;
+            }
+            true // source/retention permission remains valid throughout
+        };
+        assert_eq!(tool.present(&(), &context, sealed, &mut current, &mut |_, _| {}), Err(Error::Stale));
+        assert!(checks >= 2, "actual paint completed before the late minimize");
+        assert!(trace.borrow().calls.contains(&"paint"));
+        assert!(
+            !trace.borrow().calls.contains(&"show"),
+            "a late native minimize cannot restore/show this owner"
+        );
+        assert_eq!(
+            trace.borrow().drop_credits,
+            [64],
+            "actual DIB destroyed before physical credit release"
+        );
+        assert_eq!(budget.used(), 0);
+        assert!(!tool.live());
+    }
+    let (mut tool, context, budget, trace) = fixture();
+    let sealed = draw(&mut tool);
+    let mut checks = 0;
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = tool.present(
+            &(),
+            &context,
+            sealed,
+            &mut || {
+                checks += 1;
+                if checks == 3 {
+                    trace.borrow_mut().panic_minimized = true;
+                }
+                true
+            },
+            &mut |_, _| {},
+        );
+    }));
+    assert!(result.is_err(), "late native query failure resumes the original unwind");
+    assert_eq!(checks, 3);
+    assert!(trace.borrow().calls.contains(&"paint"));
+    assert!(!trace.borrow().calls.contains(&"show"));
+    assert_eq!(trace.borrow().drop_credits, [64]);
+    assert_eq!(budget.used(), 0);
+    assert!(!tool.live(), "a caught late query panic retains no native bitmap");
 }

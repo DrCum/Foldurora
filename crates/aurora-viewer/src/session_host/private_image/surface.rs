@@ -296,7 +296,13 @@ impl super::tool::ToolNative for WindowsSurface {
         Ok(self.native.event(event))
     }
     fn show(&mut self, _context: &Self::PresentContext) -> Result<(), Error> {
+        if self.native.window.is_minimized() != Some(false) {
+            return Err(Error::Stale);
+        }
         self.native.window.set_visible(true);
+        if self.native.window.is_minimized() != Some(false) {
+            return Err(Error::Stale);
+        }
         Ok(())
     }
     fn request_redraw(&mut self, _context: &Self::PresentContext) -> Result<(), Error> {

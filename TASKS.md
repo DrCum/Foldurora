@@ -28,8 +28,10 @@
   cannot close a newer owner. Existing CPU credit/minimize/retire flow remains
   authoritative; facade command/draw failures retire with old-context edit flush
   before physical credit release. Placement requests are not acknowledged state;
-  pin reads actual owned topmost after a no-activation request. Five portable
+  pin reads actual owned topmost after a no-activation request. Six portable
   fake facade tests and one Windows compile reference are authored/unrun.
+  Late native minimization/query failure after paint refuses first-show and
+  retires actual bitmap storage before its credit is released.
   All previous tests/fixture APIs are preserved. No Window Arc/pixel/output-ticket
   construction, service permission, Shell menu, producer or runtime enablement is
   added. Actual native Windows allocation/focus/placement remains later validation.

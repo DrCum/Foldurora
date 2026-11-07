@@ -218,11 +218,11 @@ impl<S: ToolNative> Tool<S> {
         }
         if !self.presented {
             self.operation(false, flush, |native| {
-                if !current() {
+                if !current() || native.minimized() {
                     return Err(Error::Stale);
                 }
                 native.show(presentation)?;
-                if !current() {
+                if !current() || native.minimized() {
                     return Err(Error::Stale);
                 }
                 Ok(())

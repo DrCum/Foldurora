@@ -30,11 +30,11 @@ only native IDs, events/raw input, observed focus/minimize/pin/placement, opaque
 image staging and original sealed draw/present/retire operations. Each native
 call borrows ActiveEventLoop without storing it, and the facade cannot move to
 an IO thread. No Window Arc, pixels or output/ticket constructor is exported.
-First-show is requested only after a current sealed presentation and additional
-permission checks; same-binding updates do not re-show the tool. Placement is
+First-show is requested only after a current sealed presentation, additional
+permission checks and fresh known-not-minimized checks at the show boundary; same-binding updates do not re-show the tool. Placement is
 request-only until a later actual query, and pin uses owned HWND NOACTIVATE plus
 observed topmost state. The existing generic owner still controls bitmap credits,
-minimize/error/unwind retirement and old-input flush. Five portable fake facade
+minimize/error/unwind retirement and old-input flush. Six portable fake facade
 regressions and one Windows compile reference are authored/unrun. Shell routing,
 service/Broker authority, menus and production registration remain absent.
 
