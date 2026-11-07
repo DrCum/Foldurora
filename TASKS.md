@@ -1,5 +1,17 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Authenticated image-lane prerequisite (2026-11-07; no issue): closed,
+  versioned last-active metadata/raw-RGBA framing, independent privacy and pixel
+  roles, fresh mutually authenticated source/lease/connection/nonce contexts and
+  per-packet MACs. Header authentication precedes shared image-credit allocation;
+  bounded fragmented IO drops partial work on loss/expiry and never revives
+  pixels after restoration. Pure codec and fake-IO/auth/credit/parking regressions
+  are authored; execution and independent review remain pending. Viewer code is
+  cfg(test)-only: no endpoint, service thread, bootstrap, native adapter, image
+  surface, capture enablement or inactive rendering is shipped. Future service
+  integration must reserve fixed metadata/framing headroom in the shared 64 MiB
+  host allowance and retire SourceImages on authenticated-channel loss/errors.
+
 - 🔧 Monitor image prerequisites (2026-11-07; no issue): pure bounded capture
   geometry, callback/request identities and byte credits; exact source/policy
   metadata admits current Active captures and retains only already-admitted

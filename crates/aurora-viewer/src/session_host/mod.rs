@@ -14,6 +14,9 @@ mod chat_window;
 mod native;
 pub(crate) mod profile;
 mod review;
+// Unused prerequisite only; native IO/bootstrap/authority integration is absent.
+#[cfg(test)]
+mod preview_transport;
 mod shared_chat;
 pub(crate) mod slots;
 mod software;

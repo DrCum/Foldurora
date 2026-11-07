@@ -12,6 +12,7 @@ mod coordinator;
 mod identity;
 mod preview;
 pub mod preview_image;
+pub mod preview_wire;
 mod protocol;
 mod worker;
 

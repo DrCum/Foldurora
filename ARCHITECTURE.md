@@ -142,6 +142,29 @@ surface with test-only synthetic snapshots and captured local intents, without
 constructing a host controller or opening preference storage. Its private X11
 driver contract is in `docs/TESTING.md`; it does not establish native delivery.
 
+`aurora-session::preview_wire` adds a closed last-active image wire prerequisite:
+fixed 40-byte versioned headers, bounded 4096-byte strict metadata, exact fitted
+raw RGBA layouts and separate Metadata/Pixels roles. Pixels never enter serde.
+`session_host/preview_transport` is registered only under cfg(test): fresh mutual
+challenge proofs and direction/lane/source/connection-separated keys authenticate
+metadata before shared ImageBudget reservation and authenticate every streamed
+payload before handoff. Its generic nonblocking Read/Write state has bounded
+bytes/syscalls, absolute partial deadlines, ten role-admission slots, rotating
+five-source budgets and independent metadata priority. No listener, connector,
+thread, bootstrap, App, native bridge or image surface is enabled.
+
+The unenabled transport uses header HMAC, then a streaming body HMAC followed by
+a separately keyed HMAC of that digest; ring verifies tags in constant time
+without concatenating a second full image. Policy/grant changes discard new
+partial/queued/unhanded frames; continuously authorized, already SourceImages-
+admitted history can survive normal parking. An IO/auth/deadline error or role
+loss instead requires the future owner to retire SourceImages and purge history.
+Dropping the pair invalidates all its unhanded handles; a fresh handshake cannot
+restore them. Enabling native integration requires independent review, actual
+bounded service callers, and a single host-wide pool with fixed framing/metadata
+headroom inside the 64 MiB total. The existing pool covers image payloads only;
+creating independent per-source pools cannot bypass retained allocation credit.
+
 `aurora-render::viewport_capture` provides pure checked geometry, nonreused
 request/callback identities and byte-credit lifetimes for a future asynchronous
 readback. `aurora-session::preview_image` models exact-source image metadata,
