@@ -4,16 +4,35 @@ This is the coordination ledger for the Folderstorm port. Source, automated
 checks, native Windows acceptance and human grid acceptance are separate results.
 Handoffs and screenshots are reference material, not authority to merge or release.
 
-## Attention MVP checkpoints and strict-Clippy fix
+## Attention MVP: verified Windows fix and preserved negative checkpoint
 
 The latest fix source is frozen at
 [`15d33e6c9225bb476f224df02446e3d8c8c94c8d`](https://github.com/DrCum/Foldurora/commit/15d33e6c9225bb476f224df02446e3d8c8c94c8d),
 on `fix/attention-windows-clippy`. It uses the equivalent production
 `Preferences::includes` helper and adds that branch to the Windows workflow
 allow list. Its [Windows run 42390650825](https://github.com/DrCum/Foldurora/actions/runs/42390650825)
-is **pending verification**. No earlier test/build/package outcome transfers to
-this source without its own exact-source receipt. The original
-`feat/attention-integration` branch remains frozen at 9a.
+is **verified green for exact 15d**, attempt 1. Actual PowerShell 5.1 parser,
+formatting, strict Clippy, workspace tests, build and package commands all passed.
+Both raw and packaged logs report **7,991 passed, zero failed, 52 ignored** across
+32 summaries; all **203 required names** pass exactly once. Both ZIP CRCs,
+source/run/dev-profile identity, AMD64/PE32+ version and all seven source icon
+payloads were verified. The package manifest reports `all_checks_passed=true`.
+The original `feat/attention-integration` branch remains frozen at negative 9a.
+
+Verified [artifact 13583034550](https://github.com/DrCum/Foldurora/actions/runs/42390650825/artifacts/13583034550)
+version: `0.9.3-beta.20261106.1+207.g15d33e6c9`.
+Outer artifact SHA-256:
+`6ced4df21b2be80b074356e09679fb43ee296a54ac47aaf58c1d54e5a7cf4afb`.
+Portable ZIP SHA-256:
+`9c41f011c4fc0625bc5e022ea0ecd9f81f4b05d3b22c8cf189304fd08e588e89`.
+Executable SHA-256:
+`1805013d2ffcfa089c324d485ac7ba76c43fa00fdd557809047c1fb460026f91`.
+The build worktree retains `.scratch/windows-ci-42390650825/receipt.json`
+(SHA-256 `d8f2ce9d870df387a3f7672cb01e331ecb5589a475557c62c43b0d5485ce5250`),
+`LEDGER-UPDATE.md` and `icon-resource-verification.json`. No Windows executable
+was installed or run for this verification. Native Windows input, GPU/multiple
+monitors, real IME, real profile/preference IO and grid acceptance remain pending.
+The separate native Linux component evidence below does not transfer to 15d.
 
 The validated Linux and negative Windows checkpoint is frozen at
 [`9a6918b4e7334e4da319449b56e985107e6b5cd5`](https://github.com/DrCum/Foldurora/commit/9a6918b4e7334e4da319449b56e985107e6b5cd5),
@@ -85,20 +104,65 @@ Executable SHA-256:
 The build worktree retains `.scratch/windows-ci-42385255872/receipt.json`,
 `LEDGER-UPDATE.md`, raw/packaged logs and icon verification. No Windows executable
 was installed or run for this verification. Keep this negative 9a receipt and
-the new 15d pending run separate from the prior verified 6b package below.
+the verified-green 15d run separate from the prior verified 6b package below.
 
-Separate follow-ups remain outside this candidate:
+### Separate native Attention component and Review/monitor prerequisites
 
-- The native Attention fixture at `8f5aa440d7a09e0b1b9d40c47a8c1ab2417f8706`
-  and guarded external driver SHA-256
-  `21b78b564dae2fe48c41e938dc24b711da36cafcd104a2458733fa0c371ffbc6`
-  are source-reviewed only: **uncompiled and unrun**. Their synthetic protocol,
-  clipped hit probes and effect-time traces establish no native acceptance yet.
-- The canonical database prerequisite (`db9` checkpoint) and native Review protocol/UI/
-  broker/worker changes are source-reviewed, **uncompiled** work on separate
-  branches. They are absent from this MVP and provide no native Review result.
-- The pure monitor model checkpoint `5a57f08b` is source-reviewed only; its GPU
-  follow-up remains under review. Neither provides integrated monitor parity.
+[Six unchanged native Attention captures and the independent receipt](https://github.com/DrCum/Foldurora/blob/4f59fd97ddbfcc3a81cf98542dcc504a28775191/foldurora/20261107-2d809422-attention-native-cpu/README.md)
+record an exact-source **component pass** at
+[`2d8094224e1b44f2cc557d944b9db10ad51e3886`](https://github.com/DrCum/Foldurora/commit/2d8094224e1b44f2cc557d944b9db10ad51e3886).
+The production AttentionWindow received real isolated X11 input with synthetic
+body-free snapshots and recorded local intents. All six cases passed: Enter,
+Space, stale captures, navigation, Dismiss/reopen and simulated preferences.
+The independent audit checked **102 states, 96 case checks and all 36 PNG
+hashes/dimensions**. The gallery publishes six original PNGs without editing,
+resizing, composition or recapture, with original-name/hash metadata.
+
+Exact test ELF: **775,619,920 bytes**, SHA-256
+`99ee531b6c3c5c274598982d656b88884f98138fa89f7991bbee09cb57442232`.
+Driver SHA-256:
+`f0f80738ba23a605ba1ccedee54e7b9144619e11da4d141b29ac280651599067`.
+Suite `suite-ss3i70g1` completed in **63.864 seconds**; all six fixture PIDs
+exited normally with code 0 and were reaped without forced cleanup. The six
+Xvfb servers were reported as present/Z/exited-unreaped/not running; all were
+already Z at the first grace observation, so no actual S-to-Z grace transition
+was exercised. **Native wheel edges: 0**: all seven filter controls already fit.
+Visible reachability is established here; native offscreen scrolling is not.
+
+This evidence does **not** establish native Review, Shell/Shared Chat delivered-
+edit routing, Worker/World authority or activation/read/send, authentication/IPC,
+preference disk IO, Windows, physical GPU/multiple monitors, real IME, profiles,
+credentials, grid acceptance or native read-on-draw safety/default changes.
+The full 2d809 workspace result remains **8,137 passed, 16 failed, 55 ignored**:
+15 new failures plus the inherited terrain precision failure. The six-case
+component pass does not waive them or transfer acceptance to 15d or later code.
+Original evidence remains under
+`.scratch/review-monitor-integration-2d809422/native-driver-f0f80738-independent/`;
+independent receipt SHA-256:
+`4b00fdbcac41b5a5ea6dcdadc26170eda51295f5e61b9bb1af60808f3816dd71`.
+
+The newer Review/monitor-prerequisite integration is frozen at
+[`024ff943ac6feeef092fd83f906dc48e04a2dcbe`](https://github.com/DrCum/Foldurora/commit/024ff943ac6feeef092fd83f906dc48e04a2dcbe),
+tree `8a7a34df39586866c5a53b1aab3fbf01981957f9`, on
+`feat/attention-review-integration`. Its exact committed-source inventory finds
+137 added test definitions over 9a, no removed/renamed/reignored definitions,
+and 333 required Windows names. Inventory totals are expectations, not outcomes.
+Qualified Linux Clippy passed in **116.535 seconds**, with the existing explicit
+`-A dead_code` qualification. A targeted ignored-test run passed both actual
+headless synthetic GPU cases exactly once: crop/colors/sRGB/channels/alpha,
+and mapping success/reuse/cancel/drop without GPU validation errors.
+These are synthetic GPU texture tests, not native Windows/NVIDIA/producer or
+human acceptance. Receipts are
+`.scratch/review-monitor-integration-024ff943/{source-expectations.json,early-checks-receipt.json,gpu-outcome-audit.json}`.
+
+The full Linux workspace outcome and
+[new Windows run 42396161551](https://github.com/DrCum/Foldurora/actions/runs/42396161551)
+remain **pending verification at this checkpoint**. The native 2d component pass
+and 15d Windows package do not supply those missing results. Canonical monitor,
+image model/backend/transport/native permit work remains separately scoped;
+no live inactive producer, production image endpoint or full monitor parity is
+established by these receipts. Earlier source-only fixture/driver checkpoints
+remain distinct from the compiled 2d test ELF and driver identified above.
 
 Human/platform follow-up for the exact eventual package:
 
