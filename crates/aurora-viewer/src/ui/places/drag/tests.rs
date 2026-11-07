@@ -74,6 +74,8 @@ fn place_portal_drags_start_from_every_favorites_and_places_view_and_leave_reord
                 item: favorite,
                 asset: favorite,
                 name: "Portal favorite".into(),
+                group: None,
+                group_ticket: None,
                 region: String::new(),
                 rating: "",
                 global: None,

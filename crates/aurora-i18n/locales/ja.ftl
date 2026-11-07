@@ -13477,3 +13477,14 @@ workspaces-cancel = プレビューをキャンセル
 workspaces-previous = 前の配置
 workspaces-retry = 再試行
 workspaces-delete-confirm = 保存したワークスペースを削除しますか？現在の配置は保持されます。
+
+# Local named menus for existing landmark Favorites.
+favorites-folder-set = お気に入りフォルダーを設定…
+favorites-folder-hint = お気に入り内でのみこのランドマークをまとめます。空欄にするとバーに戻ります。
+favorites-folder-stale = このお気に入りは変更されました。メニューを閉じて開き直してください。
+favorites-folder-loading = お気に入りフォルダーを読み込み中…
+favorites-folder-saving = お気に入りフォルダーを保存中…
+favorites-folder-load-failed = お気に入りフォルダーを読み込めませんでした。既存の設定は保持されています。
+favorites-folder-save-failed = フォルダー名を保存できませんでした。メニューを開き直して再試行してください。
+favorites-folder-change-unavailable = このお気に入りまたは設定が変更されました。メニューを開き直してから再試行してください。
+favorites-folder-count = ランドマーク { $n } 件

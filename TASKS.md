@@ -1,5 +1,14 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Account-local named landmark Favorite menus (2026-11-07; no issue):
+  first-member folders share the original ordered landmarks across menu, row and
+  grid. Separate bounded account/profile/grid metadata uses original submitted
+  login provenance, exact stale-editor checks, IO-only atomic publication and a
+  nonblocking cross-process lock with revision/content CAS. Fifteen model/IO and
+  six real-egui/projection cases are authored/unrun; root-owned execution and
+  independent source review remain required. Inventory and old order IO remain
+  unchanged; no simulator write or new network operation is added.
+
 - 🔧 Actual native LastActive producer front, phase 1 (2026-11-07; no issue):
   WorkerBridge privately mints accepted Online control tokens with original
   receipt/expiry and stable revocable witness; optional image startup and source
