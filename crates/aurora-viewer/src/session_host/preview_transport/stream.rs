@@ -18,14 +18,20 @@ const PARTIAL_MILLIS: u64 = 1000;
 const METADATA_QUEUE: usize = 32;
 
 #[cfg(test)]
-pub(super) fn worker_framing_bound() -> usize {
-    // Actual transport storage plus bounded future auth/command mailbox slots;
-    // no RGBA copy or renderer-owned allocation is included a second time.
-    std::mem::size_of::<Pair>()
-        + (METADATA_QUEUE + 1) * std::mem::size_of::<Outgoing>()
+pub(super) fn worker_framing_bound(pair: &Pair) -> (usize, [usize; 2], [usize; 2]) {
+    let queued = [pair.metadata.outgoing.len(), pair.pixels.outgoing.len()];
+    let capacities = [pair.metadata.outgoing.capacity(), pair.pixels.outgoing.capacity()];
+    // Actual allocated deque capacities (not just logical lengths), current
+    // receive storage and conservative transient output/auth/command reserves.
+    // Each role consumes at most ROLE_OPERATIONS reads, hence output <=2*that;
+    // the Vec's power-of-two growth fits this already power-of-two allowance.
+    let bytes = std::mem::size_of::<Pair>()
+        + capacities.iter().sum::<usize>() * std::mem::size_of::<Outgoing>()
+        + 2 * ROLE_OPERATIONS * std::mem::size_of::<Received>()
         + 6 * 96
         + 4 * std::mem::size_of::<Metadata>()
-        + 4 * 4096
+        + 4 * 4096;
+    (bytes, queued, capacities)
 }
 
 /// One shared tick budget across all <=5 source pairs. Start at a rotating

@@ -103,6 +103,7 @@ fn preview_captured_sender_fixture_rechecks_revocation_between_partial_chunks_an
 #[test]
 fn preview_worker_capture_and_full_framing_queues_obey_seven_plus_one_mebibyte_partition() {
     let (frame, budget) = captured();
+    let extra = frame.clone(); // Same packed allocation and original credit.
     let layout = aurora_render::viewport_capture::CaptureLayout::new(640, 360).unwrap();
     let mut held = Vec::new();
     while let Ok(mut reservation) = budget.pixels(layout) {
@@ -110,13 +111,44 @@ fn preview_worker_capture_and_full_framing_queues_obey_seven_plus_one_mebibyte_p
         held.push(reservation.finish().unwrap());
     }
     assert!(budget.used() <= 7 * 1024 * 1024);
-    let framing = super::stream::worker_framing_bound();
-    assert!(framing <= 512 * 1024);
-    assert!(budget.used() + framing + 256 * 1024 + 256 * 1024 <= 8 * 1024 * 1024);
     let mut h = captured_harness();
     h.worker
         .queue_captured_fixture(h.stamp, frame, Arc::new(AtomicBool::new(true)))
         .unwrap();
+    // One Policy is already queued. Fill all remaining metadata slots while
+    // the renderer pool and the pixel writer retain their real allocations.
+    for request in 1..32 {
+        h.worker
+            .queue_metadata(Metadata::Unavailable {
+                source: source(3),
+                connection: 8,
+                request,
+                reason: aurora_session::preview_wire::Unavailable::Busy,
+            })
+            .unwrap();
+    }
+    let (framing, queued, capacities) = super::stream::worker_framing_bound(&h.worker);
+    assert_eq!(queued, [32, 1]);
+    assert!(capacities[0] >= queued[0] && capacities[1] >= queued[1]);
+    assert!(framing <= 512 * 1024);
+    assert!(budget.used() + framing + 256 * 1024 + 256 * 1024 <= 8 * 1024 * 1024);
+    assert!(matches!(
+        h.worker.queue_captured_fixture(h.stamp, extra, Arc::new(AtomicBool::new(true))),
+        Err(Error::Busy)
+    ));
+    assert!(budget.used() <= 7 * 1024 * 1024);
+    // Metadata overflow fails closed and drops the one queued pixel allocation.
+    assert!(matches!(
+        h.worker.queue_metadata(Metadata::Unavailable {
+            source: source(3),
+            connection: 8,
+            request: 32,
+            reason: aurora_session::preview_wire::Unavailable::Busy,
+        }),
+        Err(Error::Busy)
+    ));
+    let (_, queued, _) = super::stream::worker_framing_bound(&h.worker);
+    assert_eq!(queued, [0, 0]);
     h.worker.close();
     drop(held);
     assert_eq!(budget.used(), 0);
