@@ -276,6 +276,7 @@ fn folder_jump_source_privacy_and_input_boundaries_purge_or_invalidate_without_a
     loaded(&mut inventory, vec![folder(2, 1, "Private folder", -1)]);
     let current = source(&inventory);
     let mut model = start(&inventory);
+    assert_eq!(model.source(), Some(current));
     let held = model.capture_selected().expect("folder");
     model.cancel_input();
     assert!(!model.validate(held, &inventory, Some(current), ALLOWED));
@@ -287,6 +288,7 @@ fn folder_jump_source_privacy_and_input_boundaries_purge_or_invalidate_without_a
     };
     model.sync(&inventory, Some(current), denied);
     assert_eq!(model.phase(), Phase::Unavailable);
+    assert_eq!(model.source(), None);
     assert!(model.nodes.is_empty());
     assert!(model.seen.is_empty());
     assert!(model.rows().next().is_none());
@@ -352,6 +354,15 @@ fn folder_jump_bounds_deep_and_oversize_loaded_metadata_without_recursive_or_unb
     model.set_query("D");
     ready(&mut model, &inventory);
     assert_eq!(model.phase(), Phase::Ready);
+    assert!(
+        Query::parse(&"🧥".repeat(256)).is_some(),
+        "256 four-byte characters reach both independent query bounds"
+    );
+    assert!(Query::parse(&"🧥".repeat(257)).is_none());
+    assert!(
+        Query::parse(&"x ".repeat(MAX_TOKENS + 1)).is_none(),
+        "a short query still respects its token-work bound"
+    );
 }
 
 #[test]
