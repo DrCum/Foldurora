@@ -132,3 +132,55 @@ fn board_store_real_lane_methods_keep_one_inflight_exact_reply_and_no_backlog() 
     assert!(lane.try_submit(request(4)));
     assert_eq!(requests.try_recv().unwrap().operation, 4);
 }
+#[test]
+fn board_store_app_lifetime_lane_keeps_old_source_busy_credit_until_its_reply_is_drained() {
+    let old = Owner {
+        instance: 101,
+        epoch: 1,
+        facts: facts(),
+    };
+    let mut fresh = old;
+    fresh.instance = 102;
+    fresh.epoch = 2;
+    fresh.facts.login = Uuid::from_u128(90);
+    let request = |owner: Owner| {
+        let cancellation = NativeStoreCancellation::new();
+        Request {
+            owner,
+            operation: 1,
+            directory: NativeDirectory::select(NativeStoreKind::Boards, owner.facts.agent, &owner.facts.grid.to_string()).unwrap(),
+            cancellation,
+            edit: None,
+        }
+    };
+    let (send, requests) = mpsc::sync_channel(1);
+    let (results, receive) = mpsc::sync_channel(1);
+    let lane = Lane {
+        send,
+        receive,
+        busy: Cell::new(false),
+    };
+    assert!(lane.try_submit(request(old)));
+    let in_flight = requests.try_recv().unwrap();
+    // Source State and its job may be retired; App retains this SAME lane and
+    // the unfinished credit while its old captured OS operation completes.
+    in_flight.cancellation.cancel();
+    assert!(!lane.try_submit(request(fresh)));
+    assert!(lane.poll().unwrap().is_none());
+    results
+        .try_send(Reply {
+            owner: old,
+            operation: 1,
+            result: Err(Error::Cancelled),
+        })
+        .unwrap_or_else(|_| panic!("one old reply"));
+    assert!(!lane.try_submit(request(fresh)));
+    let retired = lane.poll().unwrap().unwrap();
+    assert!(retired.owner == old);
+    assert!(retired.owner != fresh);
+    assert!(lane.try_submit(request(fresh)));
+    let fresh_request = requests.try_recv().unwrap();
+    assert!(fresh_request.owner == fresh);
+    assert_eq!(fresh_request.operation, 1);
+    assert!(!lane.try_submit(request(old)));
+}

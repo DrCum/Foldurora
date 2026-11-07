@@ -77,7 +77,6 @@ pub(crate) struct State {
     facts: Option<Facts>,
     runtime: Playback,
     ui: view::State,
-    lane: Option<store::Lane>,
     snapshot: Option<store::Snapshot>,
     job: Option<Job>,
     next_operation: u64,
@@ -101,7 +100,6 @@ impl Default for State {
             facts: None,
             runtime: Playback::default(),
             ui: Default::default(),
-            lane: None,
             snapshot: None,
             job: None,
             next_operation: 1,
@@ -230,7 +228,14 @@ impl State {
             facts: self.facts?,
         })
     }
-    fn queue(&mut self, app: &App, proof: Proof, change: Option<Change>, initial: bool, presentation: Option<Presentation<'_>>) -> bool {
+    fn queue(
+        &mut self,
+        app: &mut App,
+        proof: Proof,
+        change: Option<Change>,
+        initial: bool,
+        presentation: Option<Presentation<'_>>,
+    ) -> bool {
         if !self.current(app, proof, presentation) || self.job.is_some() {
             return false;
         }
@@ -264,8 +269,10 @@ impl State {
             self.loaded = true;
             return false;
         };
-        if self.lane.is_none() {
-            self.lane = store::Lane::new().ok();
+        // App-lifetime lane: its unfinished busy credit survives source State
+        // retirement. Reopening cannot create a second worker during old fsync.
+        if app.board_store.is_none() {
+            app.board_store = store::Lane::new().ok();
         }
         let edit = change.map(|change| (self.snapshot.as_ref().and_then(store::Snapshot::original), change));
         let request = store::Request {
@@ -275,7 +282,7 @@ impl State {
             cancellation: cancellation.clone(),
             edit,
         };
-        if !self.lane.as_ref().is_some_and(|lane| lane.try_submit(request)) {
+        if !app.board_store.as_ref().is_some_and(|lane| lane.try_submit(request)) {
             self.status = "board-busy";
             return false;
         }
@@ -307,8 +314,8 @@ impl State {
         }
         self.job.take()
     }
-    fn poll(&mut self, app: &App, presentation: Option<Presentation<'_>>) {
-        let result = match self.lane.as_ref().map(store::Lane::poll) {
+    fn poll(&mut self, app: &mut App, presentation: Option<Presentation<'_>>) {
+        let result = match app.board_store.as_ref().map(store::Lane::poll) {
             Some(Ok(Some(reply))) => reply,
             Some(Err(())) => {
                 self.cancel_job();
@@ -523,7 +530,7 @@ impl State {
     }
     fn edit(
         &mut self,
-        app: &App,
+        app: &mut App,
         proof: Proof,
         data: &Catalogue,
         affected: Option<BoardId>,
