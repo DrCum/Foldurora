@@ -1062,6 +1062,15 @@ fn attention_review_keyboard_and_accessibility_bind_last_painted_ticket_and_bloc
                 data: None,
             })])
         } else {
+            // egui derives repeat from its own keys_down set, overwriting the
+            // incoming flag. Establish a genuinely held key without a focused
+            // target before making Review eligible; do not release it yet.
+            f.context.memory_mut(|memory| memory.surrender_focus(widget));
+            f.settle();
+            assert!(f.context.memory(|memory| memory.focused()).is_none());
+            assert!(f.show(vec![key_event(Key::Space, true, false)]).is_none());
+            f.context.memory_mut(|memory| memory.request_focus(widget));
+            f.settle();
             assert!(f.show(vec![key_event(Key::Space, true, true)]).is_none());
             assert!(f.show(vec![key_event(Key::Space, false, false)]).is_none());
             assert!(f.show(vec![key_event(Key::Space, true, false)]).is_none());
