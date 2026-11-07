@@ -10960,7 +10960,7 @@ impl App {
             // A discarded pass (`request_discard`) is followed by one that
             // gets no input events: what the first pass clicked must survive
             // the second, or a click that changed a row's size is lost.
-            actions.merge(self.draw_ui(ui, &projector, &gfx.renderer));
+            actions.merge(self.draw_ui(ui, &projector, &gfx.renderer, &gfx.window));
             actions.ui_scale_changed |= ui::options::scale_keyboard(ui.ctx(), &mut self.settings.ui_scale);
             if inventory_drop.is_empty() {
                 inventory_drop = self.inventory_drag_input(ui.ctx(), &gfx.renderer);
@@ -15053,7 +15053,7 @@ impl App {
         }
     }
 
-    fn draw_ui(&mut self, ui: &mut egui::Ui, projector: &ui::hud::Projector, renderer: &Renderer) -> UiActions {
+    fn draw_ui(&mut self, ui: &mut egui::Ui, projector: &ui::hud::Projector, renderer: &Renderer, board_window: &Window) -> UiActions {
         ui.ctx()
             .data_mut(|data| data.insert_temp(egui::Id::unique("vr-active"), renderer.vr_engaged()));
         // the toolbar's Sit / Stand button, greyed when RLVa would refuse it
@@ -16701,7 +16701,7 @@ impl App {
                 );
                 ui::inventory::view::set_picker_sort(&ctx, self.settings.inventory.sort);
                 self.show_gestures(&ctx, &p);
-                self.show_boards(&ctx, &p);
+                self.show_boards(&ctx, &p, gesture_board::Presentation::new(renderer, board_window));
                 self.show_texture_library(&ctx, &p);
                 self.inventory_ui.preferences_dirty |= self.settings.inventory != inventory_preferences;
                 self.inventory_ui.preferences_dirty |= self.settings.imports != import_preferences;
