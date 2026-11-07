@@ -88,6 +88,9 @@ pub(super) fn cancel_input(ctx: &egui::Context) {
 
 pub(super) struct ChatUi {
     source: ChatSource,
+    /// Shell's monotonic composer allocation. Re-authentication of the same
+    /// source must not reuse a revoked editor's still-focused widget ID.
+    instance: u64,
     conversation: Conversation,
     policy: Option<NativeChatPolicy>,
     // At most MAX_CONVERSATIONS entries, each with MAX_TEXT_BYTES of text.
@@ -129,9 +132,15 @@ fn native_policy(snapshot: &HostChatSnapshot, key: ChatKey) -> Option<NativeChat
 }
 
 impl ChatUi {
+    #[cfg(test)]
     pub fn new(source: ChatSource) -> Self {
+        Self::for_instance(source, 0)
+    }
+
+    pub fn for_instance(source: ChatSource, instance: u64) -> Self {
         Self {
             source,
+            instance,
             conversation: Conversation::Nearby,
             policy: None,
             drafts: BTreeMap::new(),
@@ -270,8 +279,15 @@ impl ChatUi {
             ),
             self.conversation,
             authority,
+            self.instance,
             self.drafts.get(&self.conversation).map(|draft| draft.incarnation),
         ))
+    }
+
+    pub fn composer_rect(&self, ctx: &egui::Context) -> Option<egui::Rect> {
+        ctx.read_response(self.editor_id())
+            .filter(|response| response.has_focus())
+            .map(|response| response.rect)
     }
 
     fn select(&mut self, conversation: Conversation) {
@@ -325,6 +341,7 @@ impl ChatUi {
         self.show_in_mode(ui, p, snapshot, account, grid, InputMode::Live)
     }
 
+    #[cfg(test)]
     pub fn show_in_mode(
         &mut self,
         ui: &mut egui::Ui,
@@ -334,9 +351,23 @@ impl ChatUi {
         grid: &str,
         mode: InputMode,
     ) -> Option<SendDraft> {
+        self.show_with_selector(ui, p, snapshot, account, grid, mode, |_| false)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn show_with_selector(
+        &mut self,
+        ui: &mut egui::Ui,
+        p: &Palette,
+        snapshot: Option<&HostChatSnapshot>,
+        account: &str,
+        grid: &str,
+        mode: InputMode,
+        selector: impl FnOnce(&mut egui::Ui) -> bool,
+    ) -> Option<SendDraft> {
         self.sync(snapshot);
         let popup_open = egui::Popup::is_any_open(ui.ctx());
-        let mut navigating = mode == InputMode::Navigating || std::mem::take(&mut self.changed);
+        let mut navigating = std::mem::take(&mut self.changed) || mode == InputMode::Navigating;
         if navigating {
             cancel_input(ui.ctx());
         }
@@ -349,64 +380,6 @@ impl ChatUi {
         let source_id = source_id(self.source);
         let mut action = None;
         let frame = widgets::overlay_frame(ui.ctx(), p);
-        egui::Panel::top(source_id.with("identity")).frame(frame).show(ui, |ui| {
-            ui.label(RichText::new(aurora_i18n::tr!("host-chat-identity", account = account, grid = grid)).strong());
-            ui.label(RichText::new(aurora_i18n::tr!("host-chat-bound-help")).small().color(p.muted));
-            let current = snapshot.filter(|snapshot| snapshot.source == self.source && self.available);
-            let selected = current
-                .and_then(|snapshot| {
-                    snapshot
-                        .conversations
-                        .iter()
-                        .take(MAX_CONVERSATIONS)
-                        .find(|info| info.policy.key == self.key())
-                })
-                .map(|info| info.title.as_str())
-                .unwrap_or(aurora_i18n::tr!("host-chat-no-conversation"));
-            let mut picked = self.conversation;
-            let combo = egui::ComboBox::from_id_salt((source_id, "conversation", self.interaction))
-                .selected_text(selected)
-                .width(ui.available_width())
-                .show_ui(ui, |ui| {
-                    if let Some(snapshot) = current {
-                        for info in snapshot.conversations.iter().take(MAX_CONVERSATIONS).filter(|info| {
-                            info.policy.key.source == self.source
-                                && supported(info.policy.key.conversation)
-                                && info.policy.validate().is_ok()
-                                && info.policy.lease_current
-                                && info.policy.ready
-                        }) {
-                            let response = ui
-                                .add_enabled_ui(mode == InputMode::Live, |ui| {
-                                    ui.push_id(policy_id(info.policy), |ui| {
-                                        ui.selectable_value(&mut picked, info.policy.key.conversation, info.title.as_str())
-                                    })
-                                    .inner
-                                })
-                                .inner;
-                            #[cfg(test)]
-                            ui.ctx().data_mut(|data| {
-                                data.insert_temp(Id::unique(("host_chat_pick", info.policy.key.conversation)), response.rect)
-                            });
-                            #[cfg(not(test))]
-                            let _ = response;
-                        }
-                    }
-                });
-            #[cfg(test)]
-            ui.ctx()
-                .data_mut(|data| data.insert_temp(Id::unique("host_chat_combo_rect"), combo.response.rect));
-            #[cfg(not(test))]
-            let _ = combo;
-            self.select(picked);
-        });
-        // Navigation restores only this exact conversation's retained draft;
-        // recheck every parked draft's authority before any input is handled.
-        self.sync(snapshot);
-        navigating |= std::mem::take(&mut self.changed);
-        if navigating {
-            cancel_input(ui.ctx());
-        }
         egui::Panel::bottom(source_id.with("compose")).frame(frame).show(ui, |ui| {
             if !self.available {
                 ui.label(RichText::new(aurora_i18n::tr!("host-chat-unavailable")).color(p.warn));
@@ -468,9 +441,14 @@ impl ChatUi {
                         key: egui::Key::Enter, pressed: true, repeat: false, modifiers, ..
                     } if !modifiers.shift && !modifiers.alt)
                 }));
+            // Freeze the Enter payload before processing any later text in
+            // this OS event batch. Later edits keep their own retained state.
+            let shortcut_text = shortcut
+                .then(|| ChatText::new(self.draft()).ok().filter(|text| !text.as_str().trim().is_empty()))
+                .flatten();
             // Enter sends, Shift+Enter inserts a newline. Remove repeated or
             // suppressed send keys too, so they cannot mutate a later draft.
-            if !was_composing && !self.ime_composing && !ime_event || mode == InputMode::Closing {
+            if mode == InputMode::Closing || (!popup_open && ui.ctx().memory(|memory| memory.has_focus(editor_id)) && !was_composing && !self.ime_composing && !ime_event) {
                 ui.ctx().input_mut(|input| input.events.retain(|event| {
                     !matches!(event, egui::Event::Key { key: egui::Key::Enter, modifiers, .. } if !modifiers.shift || mode == InputMode::Closing)
                 }));
@@ -530,7 +508,8 @@ impl ChatUi {
                 #[cfg(test)]
                 ui.ctx()
                     .data_mut(|data| data.insert_temp(Id::unique("host_chat_send_rect"), send.rect));
-                if ready
+                let text = if shortcut { shortcut_text } else { text };
+                if editable
                     && (send.clicked() || shortcut)
                     && let (Some(policy), Some(text)) = (self.policy, text)
                 {
@@ -544,6 +523,77 @@ impl ChatUi {
                 ui.label(RichText::new(aurora_i18n::tr!("host-chat-compose-help")).small().color(p.muted));
             });
         });
+        if mode == InputMode::Closing {
+            return None;
+        }
+        // Apply delivered edits to the old focused composer before drawing
+        // either navigation control. A navigation discards this visual pass;
+        // the next pass paints the new target without replaying input.
+        let source_changed = selector(ui);
+        egui::Panel::top(source_id.with("identity")).frame(frame).show(ui, |ui| {
+            ui.label(RichText::new(aurora_i18n::tr!("host-chat-identity", account = account, grid = grid)).strong());
+            ui.label(RichText::new(aurora_i18n::tr!("host-chat-bound-help")).small().color(p.muted));
+            let current = snapshot.filter(|snapshot| snapshot.source == self.source && self.available);
+            let selected = current
+                .and_then(|snapshot| {
+                    snapshot
+                        .conversations
+                        .iter()
+                        .take(MAX_CONVERSATIONS)
+                        .find(|info| info.policy.key == self.key())
+                })
+                .map(|info| info.title.as_str())
+                .unwrap_or(aurora_i18n::tr!("host-chat-no-conversation"));
+            let mut picked = self.conversation;
+            let combo_width = ui.available_width();
+            let combo = egui::ComboBox::from_id_salt((source_id, self.instance, "conversation", self.interaction))
+                .selected_text(selected)
+                .width(combo_width)
+                .wrap_mode(egui::TextWrapMode::Truncate)
+                .show_ui(ui, |ui| {
+                    ui.set_width((combo_width - ui.spacing().menu_margin.sum().x).max(1.0));
+                    if let Some(snapshot) = current {
+                        for info in snapshot.conversations.iter().take(MAX_CONVERSATIONS).filter(|info| {
+                            info.policy.key.source == self.source
+                                && supported(info.policy.key.conversation)
+                                && info.policy.validate().is_ok()
+                                && info.policy.lease_current
+                                && info.policy.ready
+                        }) {
+                            let response = ui
+                                .add_enabled_ui(mode == InputMode::Live, |ui| {
+                                    ui.push_id(policy_id(info.policy), |ui| {
+                                        ui.selectable_value(&mut picked, info.policy.key.conversation, info.title.as_str())
+                                    })
+                                    .inner
+                                })
+                                .inner;
+                            #[cfg(test)]
+                            ui.ctx().data_mut(|data| {
+                                data.insert_temp(Id::unique(("host_chat_pick", info.policy.key.conversation)), response.rect)
+                            });
+                            #[cfg(not(test))]
+                            let _ = response;
+                        }
+                    }
+                });
+            #[cfg(test)]
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(Id::unique("host_chat_combo_rect"), combo.response.rect));
+            #[cfg(not(test))]
+            let _ = combo;
+            self.select(picked);
+        });
+        self.sync(snapshot);
+        let conversation_changed = std::mem::take(&mut self.changed);
+        navigating |= source_changed || conversation_changed;
+        if source_changed || conversation_changed {
+            cancel_input(ui.ctx());
+            ui.ctx().request_discard("chat target changed after retaining delivered edits");
+        }
+        if navigating || egui::Popup::is_any_open(ui.ctx()) {
+            action = None;
+        }
         egui::CentralPanel::default().frame(frame).show(ui, |ui| {
             if let Some(snapshot) = snapshot.filter(|snapshot| snapshot.source == self.source && self.available) {
                 if snapshot.gap {
@@ -554,7 +604,7 @@ impl ChatUi {
                     .is_some_and(|policy| policy.ready && policy.lease_current && policy.can_read);
                 let mut shown = 0;
                 egui::ScrollArea::vertical()
-                    .id_salt((source_id, "lines", self.conversation))
+                    .id_salt((source_id, self.instance, "lines", self.conversation))
                     .stick_to_bottom(true)
                     .auto_shrink([false; 2])
                     .show(ui, |ui| {
@@ -1310,6 +1360,88 @@ mod tests {
         assert!(frames.show(Some(&snapshot), Vec::new()).is_none());
         assert_eq!(frames.ui.receipt.unwrap().outcome, SendOutcome::Uncertain);
         assert!(frames.ui.draft().is_empty());
+    }
+
+    #[test]
+    fn host_chat_valid_conversation_switch_cancels_a_held_send_without_discarding_either_draft() {
+        let snapshot = snapshot(source());
+        let mut frames = Frames::new();
+        frames.type_text(&snapshot, "Nearby retained");
+        frames.navigate(&snapshot, direct());
+        frames.type_text(&snapshot, "Resident retained");
+        frames.navigate(&snapshot, Conversation::Nearby);
+        let at = frames.rect(&snapshot, Id::unique("host_chat_send_rect")).center();
+        frames.show(
+            Some(&snapshot),
+            vec![
+                Event::PointerMoved(at),
+                Event::PointerButton {
+                    pos: at,
+                    button: PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        frames.ui.select(direct());
+        assert!(
+            frames
+                .show(
+                    Some(&snapshot),
+                    vec![Event::PointerButton {
+                        pos: at,
+                        button: PointerButton::Primary,
+                        pressed: false,
+                        modifiers: egui::Modifiers::NONE,
+                    }]
+                )
+                .is_none()
+        );
+        assert_eq!(
+            frames.click(&snapshot, Id::unique("host_chat_send_rect")).unwrap().text.as_str(),
+            "Resident retained"
+        );
+        frames.navigate(&snapshot, Conversation::Nearby);
+        assert_eq!(frames.ui.draft(), "Nearby retained");
+    }
+
+    #[test]
+    fn host_chat_catalogue_reorder_cancels_a_held_send_without_purging_unchanged_policy() {
+        let mut snapshot = snapshot(source());
+        let mut frames = Frames::new();
+        frames.type_text(&snapshot, "Current policy retained");
+        let at = frames.rect(&snapshot, Id::unique("host_chat_send_rect")).center();
+        frames.show(
+            Some(&snapshot),
+            vec![
+                Event::PointerMoved(at),
+                Event::PointerButton {
+                    pos: at,
+                    button: PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        snapshot.conversations.reverse();
+        assert!(
+            frames
+                .show(
+                    Some(&snapshot),
+                    vec![Event::PointerButton {
+                        pos: at,
+                        button: PointerButton::Primary,
+                        pressed: false,
+                        modifiers: egui::Modifiers::NONE,
+                    }]
+                )
+                .is_none()
+        );
+        assert_eq!(frames.ui.draft(), "Current policy retained");
+        assert_eq!(
+            frames.click(&snapshot, Id::unique("host_chat_send_rect")).unwrap().key.conversation,
+            Conversation::Nearby
+        );
     }
 
     #[test]

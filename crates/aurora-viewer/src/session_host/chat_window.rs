@@ -21,6 +21,7 @@ pub(super) struct ChatWindow {
     repaint: Option<Instant>,
     last_frame: Option<Instant>,
     blocked: bool,
+    pending_textures: egui::TexturesDelta,
 }
 
 impl ChatWindow {
@@ -45,6 +46,7 @@ impl ChatWindow {
             repaint: Some(Instant::now()),
             last_frame: None,
             blocked: false,
+            pending_textures: Default::default(),
         })
     }
 
@@ -68,12 +70,25 @@ impl ChatWindow {
     /// current authority first; this pass emits no sends or platform output.
     pub fn flush_edits(&mut self, controller: &HostController, model: &mut SharedChat) {
         model.sync(&controller.snapshot(), false);
-        let raw = edit_input(self.surface.raw_input());
+        let mut raw = self.surface.raw_input();
+        if let Some(edits) = edit_prefix(
+            &mut raw,
+            model.composer_rect(&self.context),
+            egui::Popup::is_any_open(&self.context),
+        ) {
+            self.apply_edits(edits, model);
+        }
+        self.apply_edits(edit_input(raw), model);
+    }
+
+    fn apply_edits(&mut self, raw: egui::RawInput, model: &mut SharedChat) {
         let palette = self.theme.palette();
         let mut output = self.context.run_ui(raw, |ui| {
             let _ = model.show(ui, &palette, InputMode::Closing);
         });
-        output.textures_delta.clear();
+        // A navigation flush reuses this context. Keep any new font/image
+        // uploads until the following visible pass instead of losing them.
+        self.pending_textures.append(std::mem::take(&mut output.textures_delta));
     }
 
     /// Close disposes only this surface. The caller keeps the shared model.
@@ -144,15 +159,26 @@ impl ChatWindow {
             return Ok(());
         }
         model.sync(&controller.snapshot(), false);
-        let raw = self.surface.raw_input();
+        let mut raw = self.surface.raw_input();
+        let mut suppress_send = blocked;
+        if let Some(edits) = edit_prefix(
+            &mut raw,
+            model.composer_rect(&self.context),
+            egui::Popup::is_any_open(&self.context),
+        ) {
+            suppress_send |= edits.events.iter().any(|event| matches!(event, egui::Event::Ime(_)));
+            self.apply_edits(edits, model);
+        }
         let context = self.context.clone();
         let palette = self.theme.palette();
         let mut action = None;
-        let output = context.run_ui(raw, |ui| {
-            let mode = if blocked { InputMode::Navigating } else { InputMode::Live };
+        let mut output = context.run_ui(raw, |ui| {
+            let mode = if suppress_send { InputMode::Navigating } else { InputMode::Live };
             let shown = model.show(ui, &palette, mode);
             action = action.take().or(shown);
         });
+        self.pending_textures.append(std::mem::take(&mut output.textures_delta));
+        output.textures_delta = std::mem::take(&mut self.pending_textures);
         let delay = self.surface.present(event_loop, &context, output, palette.panel)?;
         self.last_frame = Some(Instant::now());
         self.repaint = Instant::now().checked_add(delay);
@@ -172,10 +198,98 @@ impl ChatWindow {
 pub(super) fn edit_input(mut raw: egui::RawInput) -> egui::RawInput {
     raw.focused = true;
     raw.events.retain(|event| match event {
-        egui::Event::Text(_) | egui::Event::Paste(_) | egui::Event::Cut | egui::Event::ModifiersChanged(_) => true,
+        egui::Event::Text(_) | egui::Event::Paste(_) | egui::Event::ModifiersChanged(_) => true,
         egui::Event::Key { key, .. } => !matches!(key, egui::Key::Enter | egui::Key::Tab | egui::Key::Escape),
         egui::Event::Ime(egui::ImeEvent::Commit(_) | egui::ImeEvent::DeleteSurrounding { .. }) => true,
         _ => false,
     });
     raw
+}
+
+/// Winit can deliver text/paste before a navigation press in the same redraw
+/// batch. Drain that ordered prefix through the old focused editor before the
+/// pointer changes focus; the remaining raw input still performs navigation.
+pub(super) fn edit_prefix(raw: &mut egui::RawInput, composer: Option<egui::Rect>, popup_open: bool) -> Option<egui::RawInput> {
+    let navigation = raw.events.iter().position(|event| match event {
+        egui::Event::PointerButton { pos, pressed: true, .. } => composer.is_none_or(|rect| !rect.contains(*pos)),
+        egui::Event::Key {
+            key: egui::Key::Tab | egui::Key::Escape,
+            pressed: true,
+            ..
+        }
+        | egui::Event::WindowFocused(_) => true,
+        egui::Event::Key {
+            key: egui::Key::Enter,
+            pressed: true,
+            ..
+        } => popup_open,
+        _ => false,
+    });
+    let mut index = 0;
+    raw.events.retain(|event| {
+        let ambiguous = navigation.is_some_and(|navigation| index > navigation)
+            && (matches!(
+                event,
+                egui::Event::Text(_) | egui::Event::Paste(_) | egui::Event::Cut | egui::Event::Ime(_)
+            ) || matches!(
+                event,
+                egui::Event::Key {
+                    key: egui::Key::Enter,
+                    pressed: true,
+                    ..
+                }
+            ));
+        index += 1;
+        !ambiguous
+    });
+    if composer.is_none() {
+        return None;
+    }
+    let through = raw
+        .events
+        .iter()
+        .position(|event| {
+            matches!(
+                event,
+                egui::Event::PointerButton { pressed: true, .. }
+                    | egui::Event::Key {
+                        key: egui::Key::Enter | egui::Key::Tab | egui::Key::Escape,
+                        pressed: true,
+                        ..
+                    }
+                    | egui::Event::WindowFocused(_)
+                    | egui::Event::Ime(egui::ImeEvent::Preedit { .. })
+            )
+        })
+        .unwrap_or(raw.events.len());
+    let mut edits = Vec::new();
+    let mut index = 0;
+    raw.events.retain(|event| {
+        let editable = index < through
+            && !matches!(
+                event,
+                egui::Event::Key {
+                    key: egui::Key::Enter | egui::Key::Tab | egui::Key::Escape,
+                    ..
+                }
+            )
+            && matches!(
+                event,
+                egui::Event::Text(_)
+                    | egui::Event::Paste(_)
+                    | egui::Event::Key { .. }
+                    | egui::Event::Ime(egui::ImeEvent::Commit(_) | egui::ImeEvent::DeleteSurrounding { .. })
+            );
+        index += 1;
+        if editable {
+            edits.push(event.clone());
+        }
+        !editable
+    });
+    if edits.is_empty() {
+        return None;
+    }
+    let mut input = raw.clone();
+    input.events = edits;
+    Some(edit_input(input))
 }

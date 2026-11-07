@@ -39,6 +39,7 @@ pub(super) struct SharedChat {
     states: Vec<SourceUi>,
     selected: Option<ChatSource>,
     changed: bool,
+    next_instance: u64,
 }
 
 impl SharedChat {
@@ -105,7 +106,11 @@ impl SharedChat {
                 state.account = account;
                 state.grid = grid;
             } else if self.states.len() < MAX_WORKERS {
-                let mut ui = ChatUi::new(chat.source);
+                let Some(instance) = self.next_instance.checked_add(1) else {
+                    continue;
+                };
+                self.next_instance = instance;
+                let mut ui = ChatUi::for_instance(chat.source, instance);
                 ui.sync(Some(&chat));
                 self.states.push(SourceUi {
                     ui,
@@ -149,6 +154,13 @@ impl SharedChat {
         self.changed = true;
     }
 
+    pub fn composer_rect(&self, ctx: &egui::Context) -> Option<egui::Rect> {
+        self.states
+            .iter()
+            .find(|state| Some(state.ui.source()) == self.selected)
+            .and_then(|state| state.ui.composer_rect(ctx))
+    }
+
     pub fn queued(&mut self, draft: &SendDraft, request: u64) {
         if let Some(state) = self.states.iter_mut().find(|state| state.ui.source() == draft.key.source) {
             state.ui.queued(draft, request);
@@ -162,82 +174,108 @@ impl SharedChat {
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui, p: &Palette, mode: InputMode) -> Option<SendDraft> {
-        let mut changed = std::mem::take(&mut self.changed);
+        let changed = std::mem::take(&mut self.changed);
         if changed || mode == InputMode::Navigating {
             chat_ui::cancel_input(ui.ctx());
         }
-        if mode != InputMode::Closing {
-            let selected = self
-                .states
-                .iter()
-                .find(|state| Some(state.ui.source()) == self.selected)
-                .map(SourceUi::caption)
-                .unwrap_or_else(|| aurora_i18n::tr!("host-chat-source-unavailable").to_owned());
-            let mut picked = self.selected;
-            egui::Panel::top(Id::unique("shared_chat_source"))
-                .frame(crate::ui::widgets::overlay_frame(ui.ctx(), p))
-                .show(ui, |ui| {
-                    if mode != InputMode::Live {
-                        ui.disable();
-                    }
-                    ui.label(RichText::new(aurora_i18n::tr!("host-chat-send-as")).strong());
-                    let width = ui.available_width();
-                    let combo = ui
-                        .allocate_ui_with_layout(vec2(width, 28.0), egui::Layout::top_down(egui::Align::Min), |ui| {
-                            ui.set_min_width(0.0);
-                            ui.set_max_width(width);
-                            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
-                            egui::ComboBox::from_id_salt("shared_chat_source")
-                                .selected_text(selected)
-                                .width(width)
-                                .show_ui(ui, |ui| {
-                                    for state in &self.states {
-                                        let source = state.ui.source();
-                                        let response = ui
-                                            .push_id(chat_ui::source_id(source), |ui| {
-                                                ui.selectable_value(&mut picked, Some(source), state.caption())
-                                            })
-                                            .inner;
-                                        #[cfg(test)]
-                                        ui.ctx().data_mut(|data| {
-                                            data.insert_temp(Id::unique(("shared_chat_pick", chat_ui::source_id(source))), response.rect)
-                                        });
-                                        #[cfg(not(test))]
-                                        let _ = response;
-                                    }
-                                })
-                        })
-                        .inner;
-                    #[cfg(test)]
-                    ui.ctx()
-                        .data_mut(|data| data.insert_temp(Id::unique("shared_chat_combo_rect"), combo.response.rect));
-                    #[cfg(not(test))]
-                    let _ = combo;
-                });
-            if picked != self.selected {
-                if let Some(source) = picked {
-                    self.select(source);
-                    changed = true;
-                    chat_ui::cancel_input(ui.ctx());
-                }
+        let entries: Vec<_> = self.states.iter().map(|state| (state.ui.source(), state.caption())).collect();
+        let selected = self.selected;
+        let mut picked = selected;
+        let mut selector = |ui: &mut egui::Ui| {
+            if mode != InputMode::Closing {
+                source_selector(ui, p, &entries, selected, &mut picked, mode);
             }
-        }
-        if let Some(state) = self.states.iter_mut().find(|state| Some(state.ui.source()) == self.selected) {
-            let mode = if changed && mode == InputMode::Live {
+            picked != selected
+        };
+        let action = if let Some(state) = self.states.iter_mut().find(|state| Some(state.ui.source()) == selected) {
+            let body_mode = if changed && mode == InputMode::Live {
                 InputMode::Navigating
             } else {
                 mode
             };
             state
                 .ui
-                .show_in_mode(ui, p, Some(&state.snapshot), &state.account, &state.grid, mode)
+                .show_with_selector(ui, p, Some(&state.snapshot), &state.account, &state.grid, body_mode, selector)
         } else {
+            selector(ui);
             egui::CentralPanel::default()
                 .frame(crate::ui::widgets::overlay_frame(ui.ctx(), p))
                 .show(ui, |ui| {
                     ui.label(aurora_i18n::tr!("host-chat-source-unavailable"));
                 });
             None
+        };
+        if picked != selected {
+            if let Some(source) = picked {
+                self.select(source);
+                ui.ctx().request_repaint();
+            }
+            return None;
         }
+        action
     }
 }
+
+fn source_selector(
+    ui: &mut egui::Ui,
+    p: &Palette,
+    entries: &[(ChatSource, String)],
+    selected: Option<ChatSource>,
+    picked: &mut Option<ChatSource>,
+    mode: InputMode,
+) {
+    let caption = entries
+        .iter()
+        .find(|(source, _)| Some(*source) == selected)
+        .map(|(_, caption)| caption.clone())
+        .unwrap_or_else(|| aurora_i18n::tr!("host-chat-source-unavailable").to_owned());
+    egui::Panel::top(Id::unique("shared_chat_source"))
+        .frame(crate::ui::widgets::overlay_frame(ui.ctx(), p))
+        .show(ui, |ui| {
+            if mode != InputMode::Live {
+                ui.disable();
+            }
+            ui.label(RichText::new(aurora_i18n::tr!("host-chat-send-as")).strong());
+            let width = ui.available_width();
+            let combo = ui
+                .allocate_ui_with_layout(vec2(width, 28.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+                    ui.set_min_width(0.0);
+                    ui.set_max_width(width);
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+                    egui::ComboBox::from_id_salt("shared_chat_source")
+                        .selected_text(caption)
+                        .width(width)
+                        .wrap_mode(egui::TextWrapMode::Truncate)
+                        .show_ui(ui, |ui| {
+                            ui.set_width((width - ui.spacing().menu_margin.sum().x).max(1.0));
+                            for (source, caption) in entries {
+                                let response = ui
+                                    .push_id(chat_ui::source_id(*source), |ui| {
+                                        ui.selectable_value(picked, Some(*source), caption)
+                                    })
+                                    .inner;
+                                #[cfg(test)]
+                                ui.ctx().data_mut(|data| {
+                                    data.insert_temp(Id::unique(("shared_chat_pick", chat_ui::source_id(*source))), response.rect)
+                                });
+                                #[cfg(not(test))]
+                                let _ = response;
+                            }
+                        })
+                })
+                .inner;
+            #[cfg(test)]
+            ui.ctx().data_mut(|data| {
+                data.insert_temp(Id::unique("shared_chat_combo_rect"), combo.response.rect);
+                data.insert_temp(Id::unique("shared_chat_popup"), combo.response.id.with("popup"));
+            });
+            #[cfg(not(test))]
+            let _ = combo;
+        });
+}
+
+#[cfg(test)]
+mod tests;
+
+#[cfg(test)]
+mod visual;
