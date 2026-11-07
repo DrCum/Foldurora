@@ -10,10 +10,22 @@ The next test source is frozen at
 [`6b512b1a`](https://github.com/DrCum/Foldurora/commit/6b512b1aa44102c871579a8a69211c12e0c87f89)
 on `fix/shared-chat-enter-integration`. Its
 [Windows run 42359207310](https://github.com/DrCum/Foldurora/actions/runs/42359207310)
-has passed parsing, formatting and strict Clippy; full tests, portable build and
-artifact verification are still pending. The source-derived Windows expectation
-is 7,931 passed, zero failed, 51 ignored and 143 required names; it is not a
-measured Windows result yet. No PR, main merge or release has occurred.
+and [download artifact 13570911560](https://github.com/DrCum/Foldurora/actions/runs/42359207310/artifacts/13570911560)
+are verified: **7,931 passed, zero failed, 51 ignored**, across 32 summaries in
+both raw and packaged logs. All **143 required names**, including eight new
+Enter cases, pass exactly once; four obsolete names and the Linux-only native
+fixture are absent. Parser, formatting, strict Clippy, full tests, build and
+packaging passed. Exact source/branch/run, manifest, remote archive digest, both
+ZIP CRCs, AMD64/PE32+ identity and all seven source icon payloads match. The
+primary review independently rechecked the copied package's source, hashes,
+portable CRC and both logs' counts/names. No PR, main merge or release occurred.
+
+Windows version: `0.9.3-beta.20261106.1+193.g6b512b1aa`.
+Portable ZIP SHA-256: `ce90bea08a543074f4a87b471e06ab1825f5090cc32e4088d431df776207c76b`.
+Executable SHA-256: `c70daaea4e55a64ffb28a3ce8aac7d7188ce7e4d6a746c934dffe3b39b4b3fe7`.
+The build worktree retains `.scratch/windows-ci-42359207310/receipt.json`,
+`icon-resource-verification.json` and `primary-review.json`. These automated
+checks do not replace the manual/platform/grid acceptance limits below.
 
 The native guard observes held Enter and focus snapshots before egui-winit
 discards synthetic key presses. Synthetic releases cannot rearm Send, including
