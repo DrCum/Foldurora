@@ -66,8 +66,13 @@ pub(crate) use workspace::{
 /// Whether UI owns a world-pointer event at `pos` (logical points). Resize
 /// grips consume the press outside their window too, as LLResizeHandle and
 /// LLResizeBar::handleMouseDown do, and egui retains the subsequent drag.
+/// Native motion can precede egui's next frame, so also hit-test the event
+/// position against interactive layers above the background canvas.
 pub(crate) fn pointer_over_ui(ctx: &egui::Context, pos: egui::Pos2) -> bool {
-    ctx.is_pointer_over_egui() || ctx.egui_wants_pointer_input() || resize::contains_pointer(ctx, pos)
+    ctx.is_pointer_over_egui()
+        || ctx.egui_wants_pointer_input()
+        || ctx.layer_id_at(pos).is_some_and(|layer| layer.order != egui::Order::Background)
+        || resize::contains_pointer(ctx, pos)
 }
 
 /// Any floater/bare window is moving or resizing, independently of drawing
