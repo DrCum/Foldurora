@@ -1822,13 +1822,18 @@ impl Viewfinder {
     /// let go elsewhere, nothing.
     fn shutter_button(&mut self, ui: &mut egui::Ui, p: &Palette, out: &mut Vec<Out>) {
         let (rect, resp) = ui.allocate_exact_size(Vec2::splat(66.0), Sense::click_and_drag());
-        let down = resp.is_pointer_button_down_on();
+        let down = resp.is_pointer_button_down_on() && ui.input(|i| i.pointer.primary_down());
         if down && !self.mouse_down {
             self.mouse_down = true;
             out.push(Out::HalfPress);
         } else if !down && self.mouse_down {
             self.mouse_down = false;
             out.push(if resp.hovered() { Out::Release } else { Out::Cancel });
+        } else if resp.clicked_by(egui::PointerButton::Primary) {
+            // Both edges can arrive between UI frames. egui still owns the
+            // completed click, even though no rendered frame saw it held.
+            // Keep the focus/release order used by app::viewfinder_ui.
+            out.extend([Out::HalfPress, Out::Release]);
         }
         let locked = matches!(self.af.phase, Phase::Lock | Phase::Track);
         let c = rect.center();

@@ -10,6 +10,17 @@
   regressions are authored; direct formatting, diff and locale-parity checks pass.
   Compiled/native/human acceptance remains pending.
 
+- 🔧 Completed viewfinder shutter clicks (offline observation, 2026-11-07;
+  task `shutter-same-pass-sol`; no issue): accept egui's completed primary
+  click when both button edges arrive between rendered frames, preserving
+  focus-before-release, held focus, release-on-button, off-button cancellation
+  and native Enter handling. Real-egui regressions exercise repeated layout
+  passes, secondary-button exclusion and the full dock after scene hover at
+  ordinary/fractional scale and both toolbar scopes. Source-only follow-up from
+  exact frozen `1ef87bf6`; compiled checks and a new native acceptance case remain
+  pending. The earlier first-click observation remains unexplained by native
+  frame evidence; no earlier candidate's validation transfers to this change.
+
 - 🔧 Shared Chat first stage (Folderstorm port, 2026-11-07; no issue): one owned
   CPU window explicitly selects a character and its Nearby/existing resident IM,
   with one Shell-owned canonical composer per complete source (at most five).

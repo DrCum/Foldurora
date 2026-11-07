@@ -46,6 +46,24 @@ unchanged by this first shared surface. See [the host guide](SESSION_HOST.md).
 
 ## Photo viewfinder interaction follow-up
 
+The source-only `fix/shutter-same-pass-sol` follow-up starts from exact frozen
+`1ef87bf6`. The offline native case on that binary recorded no export after a
+first shutter click, then a 640×360 export after another click following a fresh
+hover. Its captures show the same unobscured shutter and MF settings. The log
+contains a photo plan/save only for the later click. The case did not record
+native event-to-egui-frame boundaries, so coalescing remains a possible cause
+of that observation, not a demonstrated native diagnosis.
+
+Source inspection found that a primary down/up pair in one egui pass never set
+the shutter's held state and therefore emitted neither focus nor release.
+The follow-up accepts egui's completed primary click with focus followed by
+release. Held presses and off-button cancellation retain their existing path;
+native Enter is already event-driven. Real-egui regressions drive the production
+shutter through repeated layout passes and the full viewfinder at ordinary and
+fractional scale with both toolbar scopes. Their compiled results and a fresh
+native shutter/export check belong to this new candidate. Frozen `1ef87bf6` and
+`6a3009f2` receipts remain evidence for those exact earlier binaries only.
+
 The `fix/camera-controls-integration` candidate follows frozen `388b299c`; it is
 separate from that verified upstream package and the earlier `f5ae21d5` photo
 package. Use the exact commit and version in the new build's manifest. Validation
