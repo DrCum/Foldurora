@@ -49,6 +49,7 @@ pub mod fly_override;
 pub mod follow;
 pub mod fonts;
 pub mod friend_prompt;
+pub(crate) mod gesture_board;
 pub mod gestures;
 pub(crate) mod give_drop;
 pub mod grid_status;
@@ -172,6 +173,7 @@ pub struct Panels {
     pub texture_library: bool,
     pub texture_library_presentation: texture_library::Presentation,
     pub gestures: bool,
+    pub gesture_board: bool,
     pub appearance: bool,
     pub ao: bool,
     pub people_tab: u8,
@@ -249,6 +251,7 @@ impl Panels {
             texture_library: false,
             texture_library_presentation: settings.texture_library.presentation,
             gestures: false,
+            gesture_board: false,
             appearance: settings.show_appearance,
             ao: settings.show_ao,
             people_tab: settings.people_tab.min(1),

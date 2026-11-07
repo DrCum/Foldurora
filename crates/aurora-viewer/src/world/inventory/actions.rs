@@ -1,11 +1,11 @@
 //! LLInvFVBridge clipboard, LLFolderBridge and LLItemBridge operations
 //! (Firestorm indra/newview/llinventorybridge.cpp, originally LGPL 2.1).
 
-// Registered with the pure Board prerequisite until its actual native consumer.
-#[cfg(test)]
+// Shared native inventory-reference resolution for the Board consumer.
 mod playback;
 #[cfg(test)]
-pub(crate) use playback::{PlaybackError, PlaybackItem, PlaybackKind, resolve_playback_item};
+pub(crate) use playback::PlaybackError;
+pub(crate) use playback::{PlaybackItem, PlaybackKind, resolve_playback_item};
 
 use super::{FetchState, Inventory};
 use aurora_llsd::{Llsd, llsd_map};

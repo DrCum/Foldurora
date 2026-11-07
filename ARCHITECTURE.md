@@ -5014,14 +5014,27 @@ pictures by GPU copy. The two-capture frame budget and full-avatar limit remain
 independent. Pending or over-budget avatars draw neutral silhouette cards rather
 than disappearing; cards have a dynamically sized instance buffer.
 
-`gesture_board/{model,playback}.rs` is the next Board prerequisite, registered
-only for tests until its actual native consumer lands. The closed version-1
-catalogue holds at most16 boards x1024 typed inventory references and4MiB encoded
-metadata; independent board revisions preserve unrelated pending intent. The
-playback controller owns at most32 cache-wait intents with original30s deadlines,
-source/profile/login/action/window fences and exact Manager run ownership. It
-never changes the shared native Load flags. `world/inventory/actions/playback.rs`
-resolves current personal/Library item/link/type/asset/trash ancestry through the
-existing shared rules; it accepts no raw asset UUID. Native proof, actual cache
-requests, prefetch/effects, hardened store and real menu/floater wiring remain
-App-consumer work. A Source/Facts value alone is not native action permission.
+`gesture_board/{model,playback,store}.rs` and `app/gesture_board.rs` own the
+first native Gesture/Sound Board slice. Closed version-1 catalogues hold at most
+16 boards x1024 typed inventory references and4MiB encoded metadata. One bounded
+IO lane uses only the hardened NativeDirectory Kind::Boards adapter, exact
+original-byte CAS and cancellable captured-profile publication; decode/apply/
+encode run off the frame thread. Unknown files never become an empty writable
+catalogue. The App accepts only exact source/operation replies, with original
+native action lease plus nonreused logical/window/action/board fences for effects.
+Managed sessions require genuine WorkerBridge NativeActionScope, independently
+of renderer/image permission; failed managed proof never becomes standalone.
+
+`ui/gesture_board.rs` uses shared Floater/Modal widgets, virtualized tiles and
+press-time targets from actual Inventory. Both menu styles and Gestures expose
+the window. Add rejects duplicate resolved aliases and never plays. Gesture cache
+requests preserve shared Load flags; only separate still-current Board intent
+may start cached playback. The controller owns exact Manager run IDs before
+ordinary effect callbacks. Stop Board cancels only its pending/issued readiness
+and exact own runs; emitted world sounds cannot be recalled. Native inventory
+TriggerSound preserves Library provenance. App source/reset/control hooks fence
+work even while closed or parked. `AURORA_DEMO_GESTURES=board` uses memory-only
+catalogues and the existing synthetic inventory; no real profile IO or automatic
+play occurs. Source phases depend on the reviewed worker action helper and the
+combined hardened NativeDirectory extraction; author tests remain UNRUN until
+root integration. This is not full Legacy Board parity or native acceptance.

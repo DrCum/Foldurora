@@ -34,6 +34,7 @@ impl Default for Preferences {
 }
 
 pub enum Action {
+    Boards,
     Open(Uuid),
     Play(Uuid),
     Preview(Uuid, Gesture),
@@ -157,6 +158,9 @@ pub fn show(
             Vec2::new(460.0, 510.0),
         )
         .show(ctx, p, open, |ui| {
+            if ui.button(aurora_i18n::tr!("board-title")).clicked() {
+                out.push(Action::Boards);
+            }
             let check_width = ui.spacing().interact_size.y;
             let usable = (ui.available_width() - check_width - ui.spacing().item_spacing.x * 4.0 - 10.0).max(150.0);
             let key_width = 70.0_f32.min(usable * 0.24);

@@ -3513,21 +3513,19 @@ Open-source technologies that could set Aurora apart (human request of 2026-10-1
 
 
 - 🔧 Native Gesture / Sound Boards first slice (source-only): exact Manager
-  playback-run identity/stop prerequisite, with checked allocation before ordinary
-  restart and old-run preservation on exhaustion. Four portable regressions are
-  authored UNRUN for later hotkey replacement, unrelated item/activation retention,
-  original waits on exhaustion and Manager recreation/disabled attempts. Bounded
-  model and board-owned pending loads follow; actual menus/floater/store consumer
-  depend on the Workspace owner's frozen/reviewed hardened shared private adapter.
-  No Cargo/native/GPU/grid/socket execution by author, no endpoint changes or
-  board UI/playback-on-open enabled. Root combined validation and independent
-  source review remain pending; this is not full Board parity.
-  - 🔧 Board data/intent prerequisite (test-registered until real consumer): closed
-    16x1024/4MiB account-grid schema, bounded decode, exact captured actions,
-    separate32-entry pending-cache ledger and board-owned exact run stops. Shared
-    inventory resolution covers links/type/trash/ancestry with native playback
-    rights; source/cache-only cancellation leaves ordinary Load flags untouched.
-    Twenty-three portable model/resolver/real-Manager/shared-load cases authored
-    UNRUN. Actual native menus/floater, store lane and genuine NativeActionScope
-    effect-boundary checks follow with the hardened shared directory dependency;
-    no usable Board completion or native validation is claimed in this phase.
+  playback identity and bounded16x1024/4MiB closed account-grid model/intent phases
+  are independently source reviewed; four Manager and26 model/resolver/playback
+  cases remain author-UNRUN. The actual App/store/UI consumer now adds both menus,
+  the Gestures entry, native shared-widget New/Rename/Delete/select/Add/Play/
+  Remove/Stop controls, a one-job private IO lane and original-byte CAS through
+  the shared hardened NativeDirectory adapter. Genuine managed NativeActionScope
+  plus App/session/window/action witnesses are rechecked before native effects;
+  no managed fallback or image permission. Add rejects resolved aliases, gesture
+  cache work preserves ordinary Load flags, exact own run stops preserve later
+  hotkey/editor playback, and sounds use native Inventory TriggerSound/Library
+  provenance. Close/control/source loss cancel affected pending/held work; no
+  playback on Add/load/open. EN/FR/JA; offline demo `AURORA_DEMO_GESTURES=board`
+  uses memory-only metadata. Root compilation/tests/demo/human grid acceptance
+  remain pending; author ran no Cargo/native/GPU/grid/socket execution.
+  - ⬜ Later parity: custom labels/colors/defaults, bulk edits/search/reordering,
+    paging, persistent last selection, multiple windows and import/export.

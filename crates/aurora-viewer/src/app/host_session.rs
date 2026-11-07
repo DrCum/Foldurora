@@ -64,6 +64,7 @@ impl App {
     }
 
     pub(super) fn release_host_input(&mut self) {
+        self.revoke_board_actions();
         self.down.clear();
         self.input = Default::default();
         self.right_drag = false;

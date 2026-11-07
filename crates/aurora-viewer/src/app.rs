@@ -76,6 +76,7 @@ mod env_day_editor;
 mod env_editor;
 mod external_links;
 mod follow;
+pub(crate) mod gesture_board;
 mod gestures;
 mod give_demo;
 mod gpu_recovery;
@@ -880,6 +881,10 @@ pub struct App {
     /// Optional exact-process host bridge; standalone viewers have none.
     host_session: Option<crate::session_host::worker::WorkerBridge>,
     host_chat: Option<Box<host_chat_bridge::Driver>>,
+    board_state: Option<Box<gesture_board::State>>,
+    board_managed: bool,
+    board_epoch: u64,
+    board_actions: u64,
     host_preview: host_preview::HostPreview,
     /// The other viewers on this PC (instances.rs).
     instances: crate::instances::Instances,
@@ -1459,6 +1464,8 @@ impl App {
         scene.draw_distance = settings.draw_distance;
         scene.lod_factor = settings.lod_factor;
         let update_demo = ui::update::UpdateDemo::from_env(&settings);
+        let host_session = crate::session_host::worker::WorkerBridge::from_startup()?;
+        let board_managed = host_session.is_some();
         Ok(Box::new(App {
             area_search_ui: ui::area_search::AreaSearchUi::from_saved(&settings.area_search),
             settings,
@@ -1770,7 +1777,11 @@ impl App {
             occluded: false,
             gpu_stall: Default::default(),
             busy_pause: Default::default(),
-            host_session: crate::session_host::worker::WorkerBridge::from_startup()?,
+            host_session,
+            board_managed,
+            board_epoch: 1,
+            board_actions: 1,
+            board_state: None,
             host_chat: None,
             host_preview: Default::default(),
             instances: crate::instances::Instances::new(),
@@ -3022,6 +3033,7 @@ impl App {
         self.texture_library.reset();
         self.library_drag = Default::default();
         self.library_demo_seeded = false;
+        self.reset_boards();
         self.gesture_state = Default::default();
         self.buy_currency_ui = Default::default();
         self.money_tracker_ui = Default::default();
@@ -8657,6 +8669,7 @@ impl App {
 
     fn frame(&mut self, event_loop: &ActiveEventLoop) {
         self.tick_host_session();
+        self.tick_boards();
         self.tick_characters();
         // the input this frame reads came with the events just handled: its
         // time to the screen starts here (Performance › latency, pacing.rs)
@@ -16611,6 +16624,7 @@ impl App {
                 );
                 ui::inventory::view::set_picker_sort(&ctx, self.settings.inventory.sort);
                 self.show_gestures(&ctx, &p);
+                self.show_boards(&ctx, &p);
                 self.show_texture_library(&ctx, &p);
                 self.inventory_ui.preferences_dirty |= self.settings.inventory != inventory_preferences;
                 self.inventory_ui.preferences_dirty |= self.settings.imports != import_preferences;
