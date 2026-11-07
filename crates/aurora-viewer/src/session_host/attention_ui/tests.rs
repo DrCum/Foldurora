@@ -126,16 +126,23 @@ struct Frames {
     host: HostSnapshot,
     frame: u64,
     text: Vec<String>,
+    logical: [f32; 2],
+    overlay: Option<Rect>,
 }
 
 impl Frames {
     fn new() -> Self {
+        Self::for_size([760.0, 900.0])
+    }
+
+    fn for_size(logical: [f32; 2]) -> Self {
         let context = egui::Context::default();
         crate::theme::Theme {
             panel_alpha: 255,
             ..Default::default()
         }
         .apply(&context, 1.0);
+        context.all_styles_mut(|style| style.animation_time = 0.0);
         let mut result = Self {
             context,
             body: AttentionUi::default(),
@@ -143,6 +150,8 @@ impl Frames {
             host: host(),
             frame: 0,
             text: Vec::new(),
+            logical,
+            overlay: None,
         };
         result.settle();
         result
@@ -152,7 +161,7 @@ impl Frames {
         self.model.sync(&self.host, &self.host.attention_preferences.preferences);
         self.frame += 1;
         let raw = RawInput {
-            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(760.0, 900.0))),
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(self.logical[0], self.logical[1]))),
             time: Some(self.frame as f64 / 60.0),
             events,
             focused,
@@ -161,6 +170,14 @@ impl Frames {
         let palette = crate::theme::Theme::default().palette();
         let mut action = None;
         let output = self.context.run_ui(raw, |ui| {
+            if let Some(rect) = self.overlay {
+                egui::Area::new(Id::unique("synthetic_attention_blocker"))
+                    .order(egui::Order::Foreground)
+                    .fixed_pos(rect.min)
+                    .show(ui.ctx(), |ui| {
+                        ui.allocate_exact_size(rect.size(), egui::Sense::click());
+                    });
+            }
             action = action.take().or(self.body.show(ui, &palette, &mut self.model, &self.host, mode));
         });
         self.text.clear();
@@ -226,6 +243,199 @@ impl Frames {
     fn has(&self, key: &'static str) -> bool {
         self.text.iter().any(|text| text.contains(aurora_i18n::text(key)))
     }
+}
+
+fn pointer_event(pos: Pos2, pressed: bool) -> Event {
+    Event::PointerButton {
+        pos,
+        button: PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    }
+}
+
+#[test]
+fn attention_batched_pointer_uses_press_pixels_and_never_an_earlier_release() {
+    let mut f = Frames::new();
+    let first = f.first();
+    let second = f.model.rows()[1].key;
+    let a = f.rect(row_id(&f.model, first)).center();
+    let b = f.rect(row_id(&f.model, second)).center();
+    assert!(
+        f.show(vec![
+            Event::PointerMoved(a),
+            pointer_event(a, true),
+            Event::PointerMoved(b),
+            pointer_event(b, false)
+        ])
+        .is_none()
+    );
+    assert_eq!(f.model.selected(), None);
+    assert!(f.show(vec![pointer_event(a, false), pointer_event(a, true)]).is_none());
+    assert_eq!(f.model.selected(), None);
+    assert!(f.pointer(a, false).is_none());
+    assert_eq!(f.model.selected(), Some(first));
+}
+
+#[test]
+fn attention_queued_press_cannot_borrow_replacement_row_selection_or_filter_base() {
+    for replacement in 0..3 {
+        let mut f = Frames::new();
+        let first = f.first();
+        let at = match replacement {
+            0 => f.rect(row_id(&f.model, first)).center(),
+            1 => {
+                f.choose(first);
+                f.rect(Id::unique("attention_open")).center()
+            }
+            _ => {
+                f.click(Id::unique("attention_filter_toggle"));
+                f.rect(Id::unique(("attention_kind", "nearby"))).center()
+            }
+        };
+        match replacement {
+            0 => {
+                let source = source(40);
+                let chat = Arc::make_mut(&mut f.host.chat[0]);
+                chat.source = source;
+                for info in &mut chat.conversations {
+                    info.policy.key.source = source;
+                }
+                f.host.workers[0].binding = source.binding();
+            }
+            1 => {
+                f.model.select(f.model.rows()[1].key);
+            }
+            _ => {
+                f.host.attention_preferences.preferences.nearby = true;
+            }
+        }
+        // No intervening paint: this native press refers to the old pixels.
+        assert!(f.pointer(at, true).is_none());
+        assert!(f.pointer(at, false).is_none());
+        if replacement == 0 {
+            assert_eq!(f.model.selected(), None);
+        }
+    }
+}
+
+#[test]
+fn attention_covered_control_cannot_capture_a_pointer_gesture() {
+    let mut f = Frames::new();
+    let first = f.first();
+    f.choose(first);
+    let rect = f.rect(Id::unique("attention_open"));
+    f.overlay = Some(rect);
+    f.settle();
+    assert!(f.pointer(rect.center(), true).is_none());
+    assert!(f.pointer(rect.center(), false).is_none());
+}
+
+#[test]
+fn attention_ime_preedit_commit_and_disabled_cancel_keyboard_gestures() {
+    for commit in [false, true] {
+        let mut f = Frames::new();
+        let selected = f.first();
+        f.choose(selected);
+        let id = Id::unique("attention_open");
+        f.rect(id);
+        let widget = f.context.data(|data| data.get_temp::<Id>(id.with("widget"))).unwrap();
+        f.context.memory_mut(|memory| memory.request_focus(widget));
+        f.settle();
+        assert!(
+            f.show(vec![
+                Event::Ime(egui::ImeEvent::Preedit {
+                    text: "あ".into(),
+                    active_range_chars: None
+                }),
+                key_event(Key::Enter, true, false)
+            ])
+            .is_none()
+        );
+        assert!(f.show(vec![key_event(Key::Enter, false, false)]).is_none());
+        assert!(f.show(vec![key_event(Key::Space, true, false)]).is_none());
+        assert!(f.show(vec![key_event(Key::Space, false, false)]).is_none());
+        #[allow(deprecated)]
+        let finish = if commit {
+            egui::ImeEvent::Commit("あ".into())
+        } else {
+            egui::ImeEvent::Disabled
+        };
+        assert!(f.show(vec![Event::Ime(finish), key_event(Key::Enter, true, false)]).is_none());
+        assert!(f.show(vec![key_event(Key::Enter, false, false)]).is_none());
+        f.context.memory_mut(|memory| memory.request_focus(widget));
+        f.settle();
+        assert!(f.show(vec![key_event(Key::Space, true, false)]).is_none());
+        let Some(Action::OpenChat(ticket)) = f.show(vec![key_event(Key::Space, false, false)]) else {
+            panic!("fresh key after IME dismissal");
+        };
+        assert_eq!(ticket.key(), selected);
+    }
+}
+
+#[test]
+fn attention_accessibility_click_uses_focused_prior_painted_identity() {
+    let mut f = Frames::new();
+    let selected = f.first();
+    f.choose(selected);
+    let id = Id::unique("attention_open");
+    f.rect(id);
+    let widget = f.context.data(|data| data.get_temp::<Id>(id.with("widget"))).unwrap();
+    f.context.memory_mut(|memory| memory.request_focus(widget));
+    f.settle();
+    let click = || {
+        Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+            action: egui::accesskit::Action::Click,
+            target_tree: egui::accesskit::TreeId::ROOT,
+            target_node: widget.accesskit_id(),
+            data: None,
+        })
+    };
+    let Some(Action::OpenChat(ticket)) = f.show(vec![click()]) else {
+        panic!("targeted accessibility click");
+    };
+    assert_eq!(ticket.key(), selected);
+    f.model.select(f.model.rows()[1].key);
+    assert!(f.show(vec![click()]).is_none());
+}
+
+#[test]
+fn attention_surface_failure_recovers_only_unqueued_preferences_and_prunes_revoked_hits() {
+    let mut f = Frames::new();
+    f.click(Id::unique("attention_filter_toggle"));
+    let Some(Action::Preferences(desired)) = f.click(Id::unique(("attention_kind", "nearby"))) else {
+        panic!("unqueued desired settings");
+    };
+    f.body.surface_failed();
+    f.settle();
+    assert!(f.has("host-attention-save-failed"));
+    let Some(Action::Preferences(retry)) = f.click(Id::unique(("attention_kind", "nearby"))) else {
+        panic!("retry after surface loss");
+    };
+    assert_eq!(retry, desired);
+    f.body.queued(73, retry);
+    f.body.surface_failed();
+    f.settle();
+    assert!(f.has("host-attention-saving"));
+    f.host.attention_preferences.operation = Some(PreferenceOperation {
+        ticket: 73,
+        preferences: retry,
+        error: None,
+    });
+    f.host.attention_preferences.preferences = retry;
+    f.settle();
+    assert!(!f.has("host-attention-saving"));
+    f.host.chat.clear();
+    f.model.sync(&f.host, &f.host.attention_preferences.preferences);
+    f.body.sync(&f.model, &f.host.attention_preferences);
+    assert!(
+        f.body
+            .controls
+            .iter()
+            .all(|control| matches!(control.intent, Intent::Preferences { .. }))
+    );
+    f.body.surface_failed();
+    assert!(f.body.controls.is_empty() && f.body.gesture.is_none());
 }
 
 #[test]
@@ -403,6 +613,7 @@ fn attention_keyboard_source_change_focus_loss_and_modality_cancel_actions() {
 #[test]
 fn attention_filter_defaults_stable_slots_and_exact_save_receipt() {
     let mut f = Frames::new();
+    assert!(f.click(Id::unique("attention_filter_toggle")).is_none());
     assert_eq!(f.model.rows().len(), 5);
     assert!(!f.host.attention_preferences.preferences.nearby);
     assert!(f.host.attention_preferences.preferences.direct);
@@ -430,8 +641,12 @@ fn attention_filter_defaults_stable_slots_and_exact_save_receipt() {
         preferences: desired,
         error: Some("SYNTHETIC_PRIVATE_PATH".into()),
     });
+    // Match the actual producer: a writable store also publishes its failed
+    // save diagnostic, while preserving the last successfully saved settings.
+    f.host.attention_preferences.error = Some("SYNTHETIC_PRIVATE_PATH".into());
     f.settle();
     assert!(f.has("host-attention-save-failed"));
+    assert!(!f.has("host-attention-load-failed"));
     assert_eq!(f.model.rows().len(), 5);
     assert!(f.text.iter().all(|text| !text.contains("SYNTHETIC_PRIVATE_PATH")));
     let Some(Action::Preferences(retry)) = f.click(Id::unique(("attention_slot", slot))) else {
@@ -440,6 +655,7 @@ fn attention_filter_defaults_stable_slots_and_exact_save_receipt() {
     assert_eq!(retry, desired);
     f.body.queued(43, desired);
     f.host.attention_preferences.preferences = desired;
+    f.host.attention_preferences.error = None;
     f.host.attention_preferences.operation = Some(PreferenceOperation {
         ticket: 43,
         preferences: desired,
@@ -470,6 +686,7 @@ fn attention_loading_and_failed_preferences_hide_rows_and_disable_actions() {
 #[test]
 fn attention_preference_queue_failure_keeps_published_filters() {
     let mut f = Frames::new();
+    assert!(f.click(Id::unique("attention_filter_toggle")).is_none());
     let Some(Action::Preferences(desired)) = f.click(Id::unique(("attention_kind", "nearby"))) else {
         panic!("nearby save intent");
     };
@@ -479,4 +696,50 @@ fn attention_preference_queue_failure_keeps_published_filters() {
     assert!(f.has("host-attention-save-failed"));
     assert!(!f.host.attention_preferences.preferences.nearby);
     assert_eq!(f.model.rows().len(), 5);
+}
+
+#[test]
+fn attention_compact_filters_toggle_without_crowding_reminders_or_actions() {
+    for logical in [[540.0, 580.0], [380.0, 420.0], [380.0, 340.0]] {
+        let mut f = Frames::for_size(logical);
+        let selected = f.first();
+        f.choose(selected);
+        assert!(f.has("host-attention-filters"));
+        assert!(!f.has("host-attention-profiles"));
+        let closed = f
+            .context
+            .data(|data| data.get_temp::<Rect>(Id::unique("attention_list_clip")))
+            .unwrap();
+        let canvas = Rect::from_min_size(Pos2::ZERO, vec2(logical[0], logical[1]));
+        for name in ["attention_open", "attention_dismiss"] {
+            assert!(canvas.contains_rect(f.rect(Id::unique(name))), "collapsed actions fit {logical:?}");
+        }
+        assert!(f.click(Id::unique("attention_filter_toggle")).is_none());
+        f.settle();
+        assert!(f.has("host-attention-profiles"));
+        let filter_clip = f
+            .context
+            .data(|data| data.get_temp::<Rect>(Id::unique("attention_filter_scroll")))
+            .unwrap();
+        assert!(filter_clip.height() <= 161.0 && canvas.contains_rect(filter_clip));
+        let expanded = f
+            .context
+            .data(|data| data.get_temp::<Rect>(Id::unique("attention_list_clip")))
+            .unwrap();
+        assert!(expanded.height() >= 48.0, "reminder list stays reachable {logical:?}: {expanded:?}");
+        assert!(closed.height() > expanded.height());
+        for name in ["attention_open", "attention_dismiss"] {
+            assert!(canvas.contains_rect(f.rect(Id::unique(name))), "expanded actions fit {logical:?}");
+        }
+        // Expansion is presentation only; a reminder still opens its exact
+        // selected source, without saving filters or mutating native unread.
+        let Some(Action::OpenChat(ticket)) = f.click(Id::unique("attention_open")) else {
+            panic!("compact action remains reachable");
+        };
+        assert_eq!(ticket.key(), selected);
+        assert!(f.click(Id::unique("attention_filter_toggle")).is_none());
+        f.settle();
+        assert!(!f.has("host-attention-profiles"));
+        assert_eq!(f.host.attention_preferences.preferences, Preferences::default());
+    }
 }

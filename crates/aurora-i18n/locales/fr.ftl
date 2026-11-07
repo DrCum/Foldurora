@@ -13435,3 +13435,4 @@ host-attention-count = { $count ->
     [one] { $count } conversation non lue
    *[other] { $count } conversations non lues
     }
+host-attention-filters = Filtres

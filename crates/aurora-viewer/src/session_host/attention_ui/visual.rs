@@ -7,7 +7,7 @@ use crate::crash::software::Painter;
 use crate::theme::Theme;
 use crate::ui::fonts;
 use aurora_session::chat::{ChatLine, ChatText, LineKind};
-use egui::{Pos2, Rect};
+use egui::{Event, Modifiers, PointerButton, Pos2, Rect};
 use serde_json::{Value, json};
 use std::path::Path;
 use std::sync::Arc;
@@ -92,6 +92,10 @@ impl Fixture {
     }
 
     fn show(&mut self) {
+        self.events(Vec::new());
+    }
+
+    fn events(&mut self, events: Vec<Event>) {
         self.model.sync(&self.host, &self.host.attention_preferences.preferences);
         self.frame += 1;
         let screen = Rect::from_min_size(Pos2::ZERO, vec2(self.logical[0] as f32, self.logical[1] as f32));
@@ -99,6 +103,7 @@ impl Fixture {
             screen_rect: Some(screen),
             time: Some(self.frame as f64 / 60.0),
             focused: true,
+            events,
             ..Default::default()
         };
         raw.viewports.entry(raw.viewport_id).or_default().native_pixels_per_point = Some(self.scale);
@@ -129,6 +134,27 @@ impl Fixture {
             output.pixels_per_point,
             palette.panel,
         );
+    }
+
+    fn toggle_filters(&mut self) {
+        for _ in 0..3 {
+            self.show();
+        }
+        let rect = self
+            .context
+            .data(|data| data.get_temp::<Rect>(Id::unique("attention_filter_toggle").with("rect")))
+            .unwrap();
+        for pressed in [true, false] {
+            self.events(vec![
+                Event::PointerMoved(rect.center()),
+                Event::PointerButton {
+                    pos: rect.center(),
+                    button: PointerButton::Primary,
+                    pressed,
+                    modifiers: Modifiers::NONE,
+                },
+            ]);
+        }
     }
 
     fn capture(&mut self, output: &Path, name: &str, required: &[&str], forbidden: &[&str]) -> Value {
@@ -179,9 +205,8 @@ fn layout(output: &Path, name: &str, logical: [u32; 2], scale: f32) -> Vec<Value
         output,
         &format!("{name}-01-selected"),
         &[
-            aurora_i18n::tr!("host-attention-title"),
-            aurora_i18n::tr!("host-attention-nearby"),
-            aurora_i18n::tr!("host-attention-direct"),
+            aurora_i18n::tr!("host-attention-help"),
+            aurora_i18n::tr!("host-attention-filters"),
             aurora_i18n::tr!("host-attention-open"),
             aurora_i18n::tr!("host-attention-dismiss"),
             &identity,
@@ -190,6 +215,22 @@ fn layout(output: &Path, name: &str, logical: [u32; 2], scale: f32) -> Vec<Value
         ],
         &[],
     )];
+    f.toggle_filters();
+    records.push(f.capture(
+        output,
+        &format!("{name}-07-expanded-filters"),
+        &[
+            aurora_i18n::tr!("host-attention-filters"),
+            aurora_i18n::tr!("host-attention-profiles"),
+            aurora_i18n::tr!("host-attention-nearby"),
+            aurora_i18n::tr!("host-attention-direct"),
+            aurora_i18n::tr!("host-attention-open"),
+            aurora_i18n::tr!("host-attention-dismiss"),
+            &identity,
+        ],
+        &[],
+    ));
+    f.toggle_filters();
     let desired = Preferences {
         nearby: true,
         ..Preferences::default()
@@ -206,6 +247,7 @@ fn layout(output: &Path, name: &str, logical: [u32; 2], scale: f32) -> Vec<Value
         preferences: desired,
         error: Some(PRIVATE_ERROR.into()),
     });
+    f.host.attention_preferences.error = Some(PRIVATE_ERROR.into());
     records.push(f.capture(
         output,
         &format!("{name}-03-save-failed"),
@@ -242,6 +284,35 @@ fn layout(output: &Path, name: &str, logical: [u32; 2], scale: f32) -> Vec<Value
     records
 }
 
+fn short_layout(output: &Path) -> Vec<Value> {
+    let mut f = Fixture::new([380, 420], 1.0);
+    let mut records = vec![f.capture(
+        output,
+        "short-01-selected",
+        &[
+            aurora_i18n::tr!("host-attention-filters"),
+            aurora_i18n::tr!("host-attention-open"),
+            aurora_i18n::tr!("host-attention-dismiss"),
+            SELECTED_TITLE,
+        ],
+        &[],
+    )];
+    f.toggle_filters();
+    records.push(f.capture(
+        output,
+        "short-02-expanded-filters",
+        &[
+            aurora_i18n::tr!("host-attention-filters"),
+            aurora_i18n::tr!("host-attention-profiles"),
+            aurora_i18n::tr!("host-attention-open"),
+            aurora_i18n::tr!("host-attention-dismiss"),
+            SELECTED_TITLE,
+        ],
+        &[],
+    ));
+    records
+}
+
 #[test]
 #[ignore = "explicit synthetic CPU capture; run alone with AURORA_ATTENTION_VISUAL_DIR and AURORA_ATTENTION_VISUAL_LANGUAGE"]
 fn attention_cpu_visual_fixture() {
@@ -268,8 +339,9 @@ fn attention_cpu_visual_fixture() {
             "Japanese capture requires CJK fallback fonts"
         );
     }
-    let mut captures = layout(&output, "normal", [680, 760], 1.0);
-    captures.extend(layout(&output, "narrow-150pct", [380, 760], 1.5));
+    let mut captures = layout(&output, "normal", [540, 580], 1.0);
+    captures.extend(layout(&output, "narrow-150pct", [380, 580], 1.5));
+    captures.extend(short_layout(&output));
     let manifest = json!({"fixture": "production AttentionUi + SoftwareWindow CPU painter, synthetic data", "locale": language, "native_window_acceptance": false, "network_or_grid": false, "no_transcript_or_draft_copy": true, "captures": captures});
     std::fs::write(output.join("manifest.json"), serde_json::to_vec_pretty(&manifest).unwrap()).unwrap();
 }

@@ -31,7 +31,7 @@ impl Intent {
     fn valid(self, model: &Attention, state: &PreferenceState) -> bool {
         match self {
             Self::Select(ticket) | Self::Open(ticket) | Self::Dismiss(ticket) => model.validate(ticket),
-            Self::Preferences { base, .. } => state.writable && state.error.is_none() && state.preferences == base,
+            Self::Preferences { base, .. } => state.writable && state.preferences == base,
         }
     }
 }
@@ -40,11 +40,22 @@ impl Intent {
 enum Trigger {
     Pointer,
     Key(Key),
+    Accessibility,
 }
 
 struct Gesture {
     widget: Id,
     trigger: Trigger,
+    intent: Intent,
+    frame: u64,
+    press_index: usize,
+}
+
+struct PaintedControl {
+    id: Id,
+    widget: Id,
+    rect: egui::Rect,
+    layer: egui::LayerId,
     intent: Intent,
 }
 
@@ -59,6 +70,11 @@ pub(super) struct AttentionUi {
     gesture: Option<Gesture>,
     save: Option<Save>,
     save_failed: bool,
+    ime_composing: bool,
+    controls: Vec<PaintedControl>,
+    painting: Vec<PaintedControl>,
+    input_frame: Option<u64>,
+    filters_open: bool,
 }
 
 impl AttentionUi {
@@ -66,6 +82,9 @@ impl AttentionUi {
     /// including when no egui pass will run before reopening.
     pub fn cancel_gestures(&mut self) {
         self.gesture = None;
+        self.ime_composing = false;
+        self.controls.clear();
+        self.painting.clear();
     }
 
     pub fn queued(&mut self, ticket: u64, preferences: Preferences) {
@@ -77,6 +96,15 @@ impl AttentionUi {
     pub fn queue_failed(&mut self) {
         self.save = None;
         self.save_failed = true;
+        self.cancel_gestures();
+    }
+
+    /// A surface can fail after producing an intent but before Shell admits
+    /// it. Recover that local intent without forgetting an actual IO ticket.
+    pub fn surface_failed(&mut self) {
+        if matches!(self.save, Some(Save::Admitting)) {
+            self.queue_failed();
+        }
         self.cancel_gestures();
     }
 
@@ -94,6 +122,22 @@ impl AttentionUi {
         }
     }
 
+    /// Shell calls this after every model sync, including while minimized or
+    /// closed, so revoked policies/observations cannot linger in hit mappings.
+    pub fn sync(&mut self, model: &Attention, state: &PreferenceState) {
+        self.sync_preferences(state);
+        if !state.writable || self.save.is_some() {
+            self.gesture = None;
+            self.controls.clear();
+        } else {
+            if self.gesture.as_ref().is_some_and(|gesture| !gesture.intent.valid(model, state)) {
+                self.gesture = None;
+            }
+            self.controls.retain(|control| control.intent.valid(model, state));
+        }
+        self.painting.clear();
+    }
+
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
@@ -103,87 +147,147 @@ impl AttentionUi {
         mode: InputMode,
     ) -> Option<Action> {
         let state = &snapshot.attention_preferences;
-        self.sync_preferences(state);
-        let available = state.writable && state.error.is_none() && !snapshot.stopped;
+        self.sync(model, state);
+        let available = state.writable && !snapshot.stopped;
+        let focused = ui.input(|input| input.focused);
+        let focus_changed = ui.input(|input| input.events.iter().any(|event| matches!(event, egui::Event::WindowFocused(_))));
+        let was_composing = self.ime_composing;
+        let ime_event = ui.input(|input| {
+            let mut seen = false;
+            for event in &input.events {
+                if let egui::Event::Ime(event) = event {
+                    seen = true;
+                    match event {
+                        egui::ImeEvent::Preedit { text, .. } => self.ime_composing = !text.is_empty(),
+                        egui::ImeEvent::Commit(_) => self.ime_composing = false,
+                        #[allow(deprecated)]
+                        egui::ImeEvent::Disabled => self.ime_composing = false,
+                        _ => {}
+                    }
+                }
+            }
+            seen
+        });
+        if !focused || focus_changed || mode == InputMode::Closing {
+            self.cancel_gestures();
+        }
         let live = available
             && self.save.is_none()
             && mode == InputMode::Live
-            && ui.input(|input| input.focused)
+            && focused
+            && !focus_changed
+            && !was_composing
+            && !self.ime_composing
+            && !ime_event
             && !egui::Popup::is_any_open(ui.ctx());
         if !live || self.gesture.as_ref().is_some_and(|gesture| !gesture.intent.valid(model, state)) {
-            self.cancel_gestures();
+            self.gesture = None;
         }
+        self.capture_press(ui, model, state, live);
+        self.painting.clear();
         let mut activated = None;
         egui::Panel::top(Id::unique("attention_filters"))
             .frame(widgets::overlay_frame(ui.ctx(), p))
             .show(ui, |ui| {
-                ui.heading(aurora_i18n::tr!("host-attention-title"));
                 ui.label(RichText::new(aurora_i18n::tr!("host-attention-help")).color(p.muted));
-                ui.add_enabled_ui(live, |ui| {
-                    ui.label(RichText::new(aurora_i18n::tr!("host-attention-profiles")).strong());
-                    ui.horizontal_wrapped(|ui| {
-                        for slot in SlotId::all() {
-                            let name = aurora_i18n::tr!("host-profile-default", number = i64::from(slot.number()));
-                            let custom = snapshot.slots.iter().find(|item| item.id == slot).map(|item| item.label.as_str());
-                            let caption = custom
-                                .filter(|label| !label.is_empty())
-                                .map_or(name.clone(), |label| format!("{name} · {label}"));
-                            let index = usize::from(u8::from(slot));
-                            let response = published_checkbox(
-                                ui,
-                                p,
-                                state.preferences.include_slots[index],
-                                caption,
-                                Id::unique(("attention_slot", slot)),
-                            );
-                            let mut desired = state.preferences;
-                            desired.include_slots[index] = !desired.include_slots[index];
-                            self.control(
-                                ui,
-                                response,
-                                Id::unique(("attention_slot", slot)),
-                                Some(Intent::Preferences {
-                                    base: state.preferences,
-                                    desired,
-                                }),
-                                live,
-                                &mut activated,
-                            );
-                        }
-                    });
-                    ui.horizontal_wrapped(|ui| {
-                        for (kind, label, value) in [
-                            ("nearby", aurora_i18n::tr!("host-attention-nearby"), state.preferences.nearby),
-                            ("direct", aurora_i18n::tr!("host-attention-direct"), state.preferences.direct),
-                        ] {
-                            let response = published_checkbox(ui, p, value, label, Id::unique(("attention_kind", kind)));
-                            let mut desired = state.preferences;
-                            if kind == "nearby" {
-                                desired.nearby = !value;
-                            } else {
-                                desired.direct = !value;
-                            }
-                            self.control(
-                                ui,
-                                response,
-                                Id::unique(("attention_kind", kind)),
-                                Some(Intent::Preferences {
-                                    base: state.preferences,
-                                    desired,
-                                }),
-                                live,
-                                &mut activated,
-                            );
-                        }
-                    });
-                });
-                if state.error.is_some() {
+                let filters = ui
+                    .push_id("attention_filter_toggle", |ui| {
+                        ui.add_enabled(
+                            mode == InputMode::Live && focused && !focus_changed && !was_composing && !self.ime_composing && !ime_event,
+                            egui::Button::new(aurora_i18n::tr!("host-attention-filters")).selected(self.filters_open),
+                        )
+                    })
+                    .inner;
+                #[cfg(test)]
+                ui.ctx()
+                    .data_mut(|data| data.insert_temp(Id::unique("attention_filter_toggle").with("rect"), filters.rect));
+                if filters.clicked() {
+                    self.filters_open = !self.filters_open;
+                    self.cancel_gestures();
+                    activated = None;
+                }
+                if self.filters_open {
+                    // At the native minimum size the filters scroll one row at
+                    // a time, preserving room for reminders and their actions.
+                    let height = (ui.ctx().content_rect().height() - 340.0).clamp(40.0, 160.0);
+                    let scroll = egui::ScrollArea::vertical()
+                        .id_salt("attention_filter_rows")
+                        .max_height(height)
+                        .min_scrolled_height(0.0)
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| {
+                            ui.add_enabled_ui(live, |ui| {
+                                ui.label(RichText::new(aurora_i18n::tr!("host-attention-profiles")).strong());
+                                ui.horizontal_wrapped(|ui| {
+                                    for slot in SlotId::all() {
+                                        let name = aurora_i18n::tr!("host-profile-default", number = i64::from(slot.number()));
+                                        let custom = snapshot.slots.iter().find(|item| item.id == slot).map(|item| item.label.as_str());
+                                        let caption = custom
+                                            .filter(|label| !label.is_empty())
+                                            .map_or(name.clone(), |label| format!("{name} · {label}"));
+                                        let index = usize::from(u8::from(slot));
+                                        let response = published_checkbox(
+                                            ui,
+                                            p,
+                                            state.preferences.include_slots[index],
+                                            caption,
+                                            Id::unique(("attention_slot", slot)),
+                                        );
+                                        let mut desired = state.preferences;
+                                        desired.include_slots[index] = !desired.include_slots[index];
+                                        self.control(
+                                            ui,
+                                            response,
+                                            Id::unique(("attention_slot", slot)),
+                                            Some(Intent::Preferences {
+                                                base: state.preferences,
+                                                desired,
+                                            }),
+                                            live,
+                                            &mut activated,
+                                        );
+                                    }
+                                });
+                                ui.horizontal_wrapped(|ui| {
+                                    for (kind, label, value) in [
+                                        ("nearby", aurora_i18n::tr!("host-attention-nearby"), state.preferences.nearby),
+                                        ("direct", aurora_i18n::tr!("host-attention-direct"), state.preferences.direct),
+                                    ] {
+                                        let response = published_checkbox(ui, p, value, label, Id::unique(("attention_kind", kind)));
+                                        let mut desired = state.preferences;
+                                        if kind == "nearby" {
+                                            desired.nearby = !value;
+                                        } else {
+                                            desired.direct = !value;
+                                        }
+                                        self.control(
+                                            ui,
+                                            response,
+                                            Id::unique(("attention_kind", kind)),
+                                            Some(Intent::Preferences {
+                                                base: state.preferences,
+                                                desired,
+                                            }),
+                                            live,
+                                            &mut activated,
+                                        );
+                                    }
+                                });
+                            });
+                        });
+                    #[cfg(test)]
+                    ui.ctx()
+                        .data_mut(|data| data.insert_temp(Id::unique("attention_filter_scroll"), scroll.inner_rect));
+                    #[cfg(not(test))]
+                    let _ = scroll;
+                }
+                if !state.writable && state.error.is_some() {
                     ui.label(RichText::new(aurora_i18n::tr!("host-attention-load-failed")).color(p.warn));
                 } else if !state.writable {
                     ui.label(aurora_i18n::tr!("host-attention-loading"));
                 } else if self.save.is_some() {
                     ui.label(aurora_i18n::tr!("host-attention-saving"));
-                } else if self.save_failed {
+                } else if self.save_failed || state.error.is_some() {
                     ui.label(RichText::new(aurora_i18n::tr!("host-attention-save-failed")).color(p.warn));
                 }
             });
@@ -192,20 +296,6 @@ impl AttentionUi {
             .frame(widgets::overlay_frame(ui.ctx(), p))
             .show(ui, |ui| {
                 ui.add_enabled_ui(live, |ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        for (name, direction, label) in [
-                            ("previous", Direction::Previous, aurora_i18n::tr!("host-attention-previous")),
-                            ("next", Direction::Next, aurora_i18n::tr!("host-attention-next")),
-                        ] {
-                            let intent = model.capture_navigation(direction).map(Intent::Open);
-                            let response = ui
-                                .push_id(("attention_action", name), |ui| {
-                                    ui.add_enabled(intent.is_some(), egui::Button::new(label))
-                                })
-                                .inner;
-                            self.control(ui, response, Id::unique(("attention_action", name)), intent, live, &mut activated);
-                        }
-                    });
                     let ticket = model.selected().and_then(|key| model.capture(key));
                     let width = ui.available_width();
                     let response = ui
@@ -224,19 +314,33 @@ impl AttentionUi {
                         live,
                         &mut activated,
                     );
-                    let response = ui
-                        .push_id("attention_dismiss", |ui| {
-                            ui.add_enabled(ticket.is_some(), egui::Button::new(aurora_i18n::tr!("host-attention-dismiss")))
-                        })
-                        .inner;
-                    self.control(
-                        ui,
-                        response,
-                        Id::unique("attention_dismiss"),
-                        ticket.map(Intent::Dismiss),
-                        live,
-                        &mut activated,
-                    );
+                    ui.horizontal_wrapped(|ui| {
+                        for (name, direction, label) in [
+                            ("previous", Direction::Previous, aurora_i18n::tr!("host-attention-previous")),
+                            ("next", Direction::Next, aurora_i18n::tr!("host-attention-next")),
+                        ] {
+                            let intent = model.capture_navigation(direction).map(Intent::Open);
+                            let response = ui
+                                .push_id(("attention_action", name), |ui| {
+                                    ui.add_enabled(intent.is_some(), egui::Button::new(label))
+                                })
+                                .inner;
+                            self.control(ui, response, Id::unique(("attention_action", name)), intent, live, &mut activated);
+                        }
+                        let response = ui
+                            .push_id("attention_dismiss", |ui| {
+                                ui.add_enabled(ticket.is_some(), egui::Button::new(aurora_i18n::tr!("host-attention-dismiss")))
+                            })
+                            .inner;
+                        self.control(
+                            ui,
+                            response,
+                            Id::unique("attention_dismiss"),
+                            ticket.map(Intent::Dismiss),
+                            live,
+                            &mut activated,
+                        );
+                    });
                 });
                 ui.label(
                     RichText::new(aurora_i18n::tr!("host-attention-passive-help"))
@@ -263,6 +367,9 @@ impl AttentionUi {
                     .id_salt("attention_rows")
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
+                        #[cfg(test)]
+                        ui.ctx()
+                            .data_mut(|data| data.insert_temp(Id::unique("attention_list_clip"), ui.clip_rect()));
                         for row in model.rows() {
                             let identity = aurora_i18n::tr!("host-chat-identity", account = row.account.as_str(), grid = row.grid.as_str());
                             let unread = aurora_i18n::tr!("host-attention-unread", count = row.read.unread);
@@ -292,8 +399,12 @@ impl AttentionUi {
 
         // A release has authority only from a matching press on this widget.
         // The current selection/list index is never consulted to retarget it.
+        if ui.ctx().will_discard() {
+            return None;
+        }
+        self.controls = std::mem::take(&mut self.painting);
         if let Some(intent) = activated.filter(|intent| intent.valid(model, state)) {
-            self.cancel_gestures();
+            self.gesture = None;
             return match intent {
                 Intent::Select(ticket) => {
                     model.select(ticket.key());
@@ -309,14 +420,38 @@ impl AttentionUi {
                 }
             };
         }
-        if ui.input(|input| {
-            input.pointer.any_released()
-                || input
-                    .events
-                    .iter()
-                    .any(|event| matches!(event, egui::Event::Key { pressed: false, .. }))
-        }) {
-            self.cancel_gestures();
+        let frame = ui.ctx().cumulative_frame_nr();
+        if self.gesture.as_ref().is_some_and(|gesture| {
+            ui.input(|input| {
+                input.events.iter().enumerate().any(|(index, event)| {
+                    (gesture.frame != frame || index > gesture.press_index)
+                        && match (gesture.trigger, event) {
+                            (
+                                Trigger::Pointer,
+                                egui::Event::PointerButton {
+                                    button: egui::PointerButton::Primary,
+                                    pressed: false,
+                                    ..
+                                },
+                            ) => true,
+                            (
+                                Trigger::Key(key),
+                                egui::Event::Key {
+                                    key: released,
+                                    pressed: false,
+                                    ..
+                                },
+                            ) => key == *released,
+                            _ => false,
+                        }
+                })
+            })
+        }) || self
+            .gesture
+            .as_ref()
+            .is_some_and(|gesture| matches!(gesture.trigger, Trigger::Accessibility))
+        {
+            self.gesture = None;
         }
         None
     }
@@ -335,72 +470,145 @@ impl AttentionUi {
             data.insert_temp(id.with("rect"), response.rect);
             data.insert_temp(id.with("widget"), response.id);
         });
-        if !live || !response.enabled() || intent.is_none() {
+        let Some(intent) = intent.filter(|_| live && response.enabled()) else {
             return;
-        }
-        let hit = ui.input(|input| {
-            input
-                .pointer
-                .interact_pos()
-                .is_some_and(|pos| response.rect.intersect(ui.clip_rect()).contains(pos))
+        };
+        self.painting.push(PaintedControl {
+            id,
+            widget: response.id,
+            rect: response.interact_rect.intersect(ui.clip_rect()),
+            layer: response.layer_id,
+            intent,
         });
-        let pointer_press = hit && ui.input(|input| input.pointer.primary_pressed());
-        let key_press = response
-            .has_focus()
-            .then(|| {
-                ui.input(|input| {
-                    input.events.iter().find_map(|event| match event {
-                        egui::Event::Key {
-                            key,
-                            pressed: true,
-                            repeat: false,
-                            modifiers,
-                            ..
-                        } if matches!(key, Key::Enter | Key::Space) && modifiers.is_none() => Some(*key),
-                        _ => None,
-                    })
-                })
-            })
-            .flatten();
-        if self.gesture.is_none() {
-            if pointer_press {
-                self.gesture = intent.map(|intent| Gesture {
-                    widget: id,
-                    trigger: Trigger::Pointer,
-                    intent,
-                });
-            } else if let Some(key) = key_press {
-                self.gesture = intent.map(|intent| Gesture {
-                    widget: id,
-                    trigger: Trigger::Key(key),
-                    intent,
-                });
-            }
-        }
+        let owns =
+            |pos| response.interact_rect.intersect(ui.clip_rect()).contains(pos) && ui.ctx().layer_id_at(pos) == Some(response.layer_id);
         if let Some(gesture) = &self.gesture
             && gesture.widget == id
         {
+            let frame = ui.ctx().cumulative_frame_nr();
+            let after_press = |index| gesture.frame != frame || index > gesture.press_index;
             let released = match gesture.trigger {
-                Trigger::Pointer => hit && ui.input(|input| input.pointer.primary_released()),
-                Trigger::Key(key) => response.has_focus() && ui.input(|input| input.key_released(key)),
+                Trigger::Pointer => ui
+                    .input(|input| {
+                        input.events.iter().enumerate().find_map(|(index, event)| match event {
+                            egui::Event::PointerButton {
+                                pos,
+                                button: egui::PointerButton::Primary,
+                                pressed: false,
+                                ..
+                            } if after_press(index) => Some(*pos),
+                            _ => None,
+                        })
+                    })
+                    .is_some_and(owns),
+                Trigger::Key(key) => {
+                    response.has_focus()
+                        && ui.input(|input| {
+                            input.events.iter().enumerate().any(|(index, event)| {
+                                matches!(event,
+                                    egui::Event::Key { key: released, pressed: false, .. } if *released == key && after_press(index)
+                                )
+                            })
+                        })
+                }
+                Trigger::Accessibility => {
+                    response.has_focus()
+                        && ui.input(|input| input.has_accesskit_action_request(response.id, egui::accesskit::Action::Click))
+                }
             };
             if released && activated.is_none() {
                 *activated = Some(gesture.intent);
             }
         }
     }
+
+    fn capture_press(&mut self, ui: &egui::Ui, model: &Attention, state: &PreferenceState, live: bool) {
+        // A native press can arrive before a new snapshot replaces what was
+        // painted. Resolve it against those previous pixels and their exact
+        // ticket, then validate against current authority. Never lend an old
+        // row's pixels the replacement row's ticket. Repeated layout passes
+        // cannot reconsider the same press against newly painted controls.
+        let previous = &self.controls;
+        let frame = ui.ctx().cumulative_frame_nr();
+        if self.input_frame == Some(frame) {
+            return;
+        }
+        self.input_frame = Some(frame);
+        if !live || self.gesture.is_some() {
+            return;
+        }
+        let press = ui.input(|input| {
+            input.events.iter().enumerate().find_map(|(index, event)| match event {
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    ..
+                } => Some((index, *pos)),
+                _ => None,
+            })
+        });
+        let captured = if let Some((index, pos)) = press {
+            previous
+                .iter()
+                .rev()
+                .find(|control| control.rect.contains(pos) && ui.ctx().layer_id_at(pos) == Some(control.layer))
+                .map(|control| (index, Trigger::Pointer, control))
+        } else {
+            let ambiguous = ui.input(|input| {
+                input
+                    .events
+                    .iter()
+                    .any(|event| matches!(event, egui::Event::Key { key: Key::Tab, .. }))
+            });
+            let focus = ui.ctx().memory(|memory| memory.focused());
+            let key = (!ambiguous)
+                .then(|| {
+                    ui.input(|input| {
+                        input.events.iter().enumerate().find_map(|(index, event)| match event {
+                            egui::Event::Key {
+                                key,
+                                pressed: true,
+                                repeat: false,
+                                modifiers,
+                                ..
+                            } if matches!(key, Key::Enter | Key::Space) && modifiers.is_none() => Some((index, *key)),
+                            _ => None,
+                        })
+                    })
+                })
+                .flatten();
+            key.and_then(|(index, key)| {
+                previous
+                    .iter()
+                    .find(|control| Some(control.widget) == focus)
+                    .map(|control| (index, Trigger::Key(key), control))
+            })
+            .or_else(|| {
+                previous
+                    .iter()
+                    .find(|control| {
+                        Some(control.widget) == focus
+                            && ui.input(|input| input.has_accesskit_action_request(control.widget, egui::accesskit::Action::Click))
+                    })
+                    .map(|control| (0, Trigger::Accessibility, control))
+            })
+        };
+        if let Some((press_index, trigger, control)) = captured.filter(|(_, _, control)| control.intent.valid(model, state)) {
+            self.gesture = Some(Gesture {
+                widget: control.id,
+                trigger,
+                intent: control.intent,
+                frame,
+                press_index,
+            });
+        }
+    }
 }
 
-fn published_checkbox(ui: &mut egui::Ui, p: &Palette, mut on: bool, label: impl Into<egui::WidgetText>, id: Id) -> egui::Response {
-    // The shared checkbox normally paints its new value on click. Paint the
-    // published setting and use its real bounds for a separate gesture, so a
-    // queued or failed disk save never appears as a persisted check mark.
-    let painted = ui
-        .push_id(id, |ui| {
-            ui.add_enabled_ui(false, |ui| widgets::checkbox(ui, p, &mut on, label)).inner
-        })
-        .inner;
-    ui.interact(painted.rect, id.with("input"), egui::Sense::click())
+fn published_checkbox(ui: &mut egui::Ui, p: &Palette, on: bool, label: impl Into<egui::WidgetText>, id: Id) -> egui::Response {
+    // A save intent leaves the shared widget's published check mark unchanged.
+    ui.push_id(id, |ui| widgets::checkbox_value(ui, p, on, label)).inner
 }
 
 #[cfg(test)]

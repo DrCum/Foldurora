@@ -13406,3 +13406,4 @@ host-attention-save-failed = お知らせの設定を保存できませんでし
 host-attention-unread = 未読{ $count }件
 host-attention-show = 未読のお知らせを開く
 host-attention-count = 未読の会話{ $count }件
+host-attention-filters = 絞り込み
