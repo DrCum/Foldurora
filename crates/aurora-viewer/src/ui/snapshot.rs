@@ -1756,6 +1756,7 @@ mod tests {
         viewfinder: crate::ui::viewfinder::Viewfinder,
         frozen: egui::TextureHandle,
         native_scale: f32,
+        native_size: (u32, u32),
         edge_subjects: bool,
     }
 
@@ -1801,6 +1802,7 @@ mod tests {
                 viewfinder: Default::default(),
                 frozen,
                 native_scale,
+                native_size: (3200, 2000),
                 edge_subjects: false,
             }
         }
@@ -1808,7 +1810,7 @@ mod tests {
         fn native(&self) -> Rect {
             Rect::from_min_size(
                 egui::pos2(7.0, 11.0),
-                Vec2::new(3200.0, 2000.0) / (self.native_scale * self.ctx.zoom_factor()),
+                Vec2::new(self.native_size.0 as f32, self.native_size.1 as f32) / (self.native_scale * self.ctx.zoom_factor()),
             )
         }
 
@@ -1818,7 +1820,7 @@ mod tests {
                 ..self.viewport.clone()
             };
             configured
-                .toolbar_rect((3200, 2000), self.native())
+                .toolbar_rect(self.native_size, self.native())
                 .unwrap_or_else(|| self.native())
         }
 
@@ -1845,8 +1847,8 @@ mod tests {
             let world = self.viewport.enabled.then(|| self.bounds());
             let catalog = crate::world::env_select::SettingsCatalog::default();
             let view = View {
-                window: (3200, 2000),
-                photo: self.settings.size((3200, 2000)),
+                window: self.native_size,
+                photo: self.settings.size(self.native_size),
                 tiles: 1,
                 preview: None,
                 busy: None,
@@ -1891,7 +1893,7 @@ mod tests {
                 photo: view.photo,
                 window: view.window,
                 fps: 60.0,
-                focal_mm: 50.0,
+                focal_mm: crate::snapshot::focal_of_fov(self.fov),
                 ev: 0.0,
                 base_exposure: 0.0,
                 roll: 0.0,
@@ -1945,7 +1947,7 @@ mod tests {
             let mut output = self.ctx.run_ui(raw, |ui| {
                 layout::begin_canvas(ui.ctx(), false);
                 layout::set_world_canvas(ui.ctx(), world);
-                layout::set_toolbar_canvas(ui.ctx(), self.viewport.toolbar_rect((3200, 2000), native));
+                layout::set_toolbar_canvas(ui.ctx(), self.viewport.toolbar_rect(self.native_size, native));
                 layout::set_work_area(ui.ctx(), native);
                 layout::set_move_area(ui.ctx(), native);
                 layout::set_window_edges(ui.ctx(), layout::Edges::OPEN);
@@ -2007,6 +2009,71 @@ mod tests {
                     pressed,
                     modifiers: egui::Modifiers::NONE,
                 }]);
+            }
+        }
+    }
+
+    #[test]
+    fn actual_viewfinder_dock_leaves_scene_wheel_input_and_ring_buttons_available() {
+        use crate::snapshot::viewfinder::{Display, OnScreen};
+        for (native_scale, zoom) in [(1.0, 1.0), (1.25, 1.2), (2.0, 1.0)] {
+            for restricted in [false, true] {
+                let mut f = ViewportPhotoFixture::new_at_scale(false, native_scale, zoom);
+                f.native_size = (3200, 2000);
+                f.viewport.left = 50.0;
+                f.viewport.right = 0.0;
+                f.viewport.top = 0.0;
+                f.viewport.bottom = 0.0;
+                f.viewport.restrict_ui = restricted;
+                f.scene = PhotoScene::Viewfinder;
+                f.settings.viewfinder.display = Display::Full;
+                f.settings.viewfinder.controls = OnScreen::Always;
+                f.viewfinder.hinted = true;
+                f.fov = crate::snapshot::fov_of_focal(50.0);
+                f.frames(5);
+                let area = |f: &ViewportPhotoFixture, name| {
+                    f.ctx.memory(|m| m.area_rect(egui::Id::unique(name))).expect("actual viewfinder area")
+                };
+                let bounds = f.bounds();
+                let dock = area(&f, "vf_dock");
+                assert!(dock.width() <= 90.0, "dock owns an oversized hit region: {dock:?}");
+                assert!((dock.right() - (bounds.right() - 20.0)).abs() < 2.0, "dock must follow the scene's right edge");
+                let ring = area(&f, "vf_ring");
+                assert!((ring.center().x - bounds.center().x).abs() < 2.0, "ring must follow the scene's centre");
+                assert!(bounds.contains_rect(ring));
+                assert!(!dock.intersects(ring), "dock must not intercept the lens ring");
+                for modifiers in [egui::Modifiers::NONE, egui::Modifiers::ALT] {
+                    let point = bounds.center();
+                    f.show(vec![egui::Event::ModifiersChanged(modifiers), egui::Event::PointerMoved(point)]);
+                    assert!(!widgets::pointer_over_ui(&f.ctx, point), "scene wheel is blocked before the camera handler");
+                }
+                for cycle in 0..3 {
+                    // Open and close the real settings drawer: this raises its
+                    // foreground layer, the same state transition as the dock.
+                    let dock = area(&f, "vf_dock");
+                    let settings_button = Pos2::new(dock.center().x, dock.top() + 54.0 + 22.0);
+                    f.click(settings_button);
+                    assert!(f.viewfinder.drawer);
+                    f.frames(2);
+                    f.click(settings_button);
+                    assert!(!f.viewfinder.drawer);
+                    f.frames(2);
+                    let ring = area(&f, "vf_ring");
+                    let before = f.fov;
+                    f.click(Pos2::new(ring.right() - 16.0, ring.bottom() - 23.0));
+                    assert!(f.fov < before, "focal + stopped responding after drawer cycle {cycle}");
+                    f.click(Pos2::new(ring.left() + 16.0, ring.bottom() - 23.0));
+                    assert!((f.fov - before).abs() < 1e-5, "focal - must restore the preceding stop");
+                    let point = Pos2::new(ring.center().x, ring.bottom() - 23.0);
+                    f.show(vec![egui::Event::PointerMoved(point)]);
+                    f.show(vec![egui::Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Line,
+                        delta: Vec2::new(0.0, 1.0),
+                        modifiers: egui::Modifiers::NONE,
+                    }]);
+                    assert!(f.fov < before, "ring wheel stopped responding after drawer cycle {cycle}");
+                    f.click(Pos2::new(ring.left() + 16.0, ring.bottom() - 23.0));
+                }
             }
         }
     }

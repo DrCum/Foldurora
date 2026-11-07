@@ -1,5 +1,7 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Viewfinder dock and input (human report, 2026-11-07; task `camera-input-dock`; no issue): diagnose oversized control hit regions, anchor the dock to the scene right edge, and preserve scene wheel and lens controls after changing photo settings. Source regressions and integration validation in progress.
+
 - 🔧 Selective upstream catch-up (human request, 2026-11-07; no issue): apply
   sixteen reviewed upstream commits individually with `-x` to frozen photo/
   branding base `f5ae21d5`, from upstream snapshot `576dd54a`. Production
