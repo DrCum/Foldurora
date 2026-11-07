@@ -23,6 +23,27 @@ impl Painter {
         scale: f32,
         background: Color32,
     ) {
+        self.paint_with_private(pixels, size, primitives, delta, scale, background, None);
+    }
+
+    /// The private image is borrowed for this call and never enters the texture
+    /// cache. Ordinary recovery/font uploads keep their existing semantics.
+    #[allow(clippy::too_many_arguments)] // Preserve the existing paint inputs plus the private borrow/gate.
+    pub(crate) fn paint_with_private(
+        &mut self,
+        pixels: &mut [u32],
+        size: [usize; 2],
+        primitives: &[ClippedPrimitive],
+        delta: &egui::TexturesDelta,
+        scale: f32,
+        background: Color32,
+        private: Option<(TextureId, &ColorImage)>,
+    ) -> bool {
+        if private.is_some_and(|(id, _)| {
+            !matches!(id, TextureId::User(_)) || self.textures.contains_key(&id) || delta.set.contains_key(&id) || delta.free.contains(&id)
+        }) {
+            return false;
+        }
         for (id, changes) in &delta.set {
             for change in changes {
                 let egui::ImageData::Color(image) = &change.image;
@@ -45,9 +66,11 @@ impl Painter {
         pixels.fill(rgb(background));
         for primitive in primitives {
             let Primitive::Mesh(mesh) = &primitive.primitive else { continue };
-            let Some(texture) = self.textures.get(&mesh.texture_id) else {
-                continue;
-            };
+            let texture = private
+                .filter(|(id, _)| *id == mesh.texture_id)
+                .map(|(_, image)| image)
+                .or_else(|| self.textures.get(&mesh.texture_id));
+            let Some(texture) = texture else { continue };
             if texture.width() == 0 || texture.height() == 0 {
                 continue;
             }
@@ -70,6 +93,7 @@ impl Painter {
         for id in &delta.free {
             self.textures.remove(id);
         }
+        true
     }
 }
 
@@ -188,5 +212,67 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn cpu_painter_ordinary_full_partial_and_free_order_remain_unchanged_with_private_borrow() {
+        let mut painter = Painter::default();
+        let ordinary = TextureId::Managed(3);
+        let private = ColorImage::filled([1, 1], Color32::BLUE);
+        let mut delta = egui::TexturesDelta::default();
+        delta.push(
+            ordinary,
+            egui::epaint::ImageDelta::full(ColorImage::filled([2, 2], Color32::RED), egui::TextureOptions::LINEAR),
+        );
+        let mut pixels = [0; 1];
+        assert!(painter.paint_with_private(
+            &mut pixels,
+            [1, 1],
+            &[],
+            &delta,
+            1.0,
+            Color32::BLACK,
+            Some((TextureId::User(7), &private))
+        ));
+        delta.clear();
+        assert_eq!(painter.textures[&ordinary].pixels, vec![Color32::RED; 4]);
+        assert!(!painter.textures.contains_key(&TextureId::User(7)));
+        delta.push(
+            ordinary,
+            egui::epaint::ImageDelta::partial([1, 0], ColorImage::filled([1, 1], Color32::GREEN), egui::TextureOptions::LINEAR),
+        );
+        painter.paint(&mut pixels, [1, 1], &[], &delta, 1.0, Color32::BLACK);
+        delta.clear();
+        assert_eq!(
+            painter.textures[&ordinary].pixels,
+            [Color32::RED, Color32::GREEN, Color32::RED, Color32::RED]
+        );
+        let mesh = egui::Mesh::with_texture(ordinary);
+        let primitive = ClippedPrimitive {
+            clip_rect: egui::Rect::EVERYTHING,
+            primitive: Primitive::Mesh(mesh),
+        };
+        delta.free(ordinary);
+        painter.paint(&mut pixels, [1, 1], &[primitive], &delta, 1.0, Color32::BLACK);
+        delta.clear();
+        assert!(!painter.textures.contains_key(&ordinary));
+        delta.push(
+            TextureId::User(7),
+            egui::epaint::ImageDelta::full(private.clone(), egui::TextureOptions::LINEAR),
+        );
+        painter.paint(&mut pixels, [1, 1], &[], &delta, 1.0, Color32::BLACK);
+        delta.clear();
+        assert!(
+            !painter.paint_with_private(
+                &mut pixels,
+                [1, 1],
+                &[],
+                &delta,
+                1.0,
+                Color32::BLACK,
+                Some((TextureId::User(7), &private))
+            ),
+            "a previously cached User ID cannot be repurposed as private"
+        );
     }
 }

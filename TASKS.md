@@ -1,5 +1,16 @@
 # Aurora Viewer — task tracking
 
+- 🔧 CPU monitor image/surface lifetime prerequisite (2026-11-07; no issue):
+  shared 24 MiB private pixel credits, immutable source-sized ColorImage storage,
+  borrowed User texture IDs, single pending image, exact local presentation
+  tickets and fully charged physical Windows bitmap resize overlap. Retirement
+  preserves Shell-owned canonical chat via delivered-input flush, rejects stale
+  outputs and hides/drops owned surfaces before bitmap credit release. Source
+  tests cover real CPU triangles, ordinary uploads, pool/clone/drop accounting,
+  zero-size storage and injected errors; they are authored and unrun. New owner
+  registration remains cfg(test)-only; no monitor UI/endpoint/native producer is
+  enabled. Windows hide/recreate, DPI and physical allocation acceptance is later.
+
 - 🔧 Recoverable render-owner handoff prerequisite (2026-11-07; no issue):
   `render_thread::Owner::try_submit_owned` returns the original rejected job on
   Busy or worker/owner shutdown; accepted work and its previous output transfer

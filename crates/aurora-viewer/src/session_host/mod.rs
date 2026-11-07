@@ -21,6 +21,9 @@ mod review;
 // Unused prerequisite only; native IO/bootstrap/authority integration is absent.
 #[cfg(test)]
 mod preview_transport;
+// Dormant CPU private-image lifetime prerequisite; no native monitor caller.
+#[cfg(test)]
+mod private_image;
 mod shared_chat;
 pub(crate) mod slots;
 mod software;

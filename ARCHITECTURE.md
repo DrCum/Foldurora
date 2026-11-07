@@ -1,5 +1,18 @@
 # Aurora Viewer architecture
 
+`session_host/private_image.rs` and `private_image/{surface,tests}.rs` form a
+cfg(test)-only CPU monitor-image lifetime prerequisite. One injected 24 MiB
+byte-credit pool follows immutable ColorImage allocations and entire physical
+Windows DIB payloads, including old/new resize overlap. Private User texture IDs
+borrow pixels into the recovery painter without entering egui texture deltas or
+the painter cache; ordinary painting keeps its prior upload/free behavior. Exact
+context/binding/image tickets reject stale output; retirement flushes delivered
+old-context edits through the parent, hides/drops its owned surface before bitmap
+credits release, and requires recreation before a different source can show.
+Fonts, allocator metadata and compositor storage are outside this private payload
+bound. No Shell monitor, image endpoint, renderer or native producer is enabled;
+authored CPU/lifecycle tests and Windows adapter remain unrun.
+
 Foldurora application branding is embedded from `assets/branding/foldurora-*`.
 `cli::with_desktop_id` supplies a small cached RGBA icon to CPU and initial GPU
 windows while retaining the existing desktop identity. Main-window recovery

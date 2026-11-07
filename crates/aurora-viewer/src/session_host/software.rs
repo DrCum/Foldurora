@@ -133,6 +133,51 @@ impl SoftwareWindow {
         Ok(delay)
     }
 
+    /// Dormant private monitor path. The caller reserves the entire physical
+    /// Windows DIB before this resize and destroys this owned window on error.
+    #[cfg(all(test, windows))]
+    #[allow(clippy::too_many_arguments)] // Preserve the existing paint inputs plus the private borrow/gate.
+    pub(super) fn present_private(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        context: &Context,
+        mut output: egui::FullOutput,
+        background: Color32,
+        expected_size: [u32; 2],
+        private: Option<(egui::TextureId, &egui::ColorImage)>,
+        current: &mut dyn FnMut() -> bool,
+    ) -> anyhow::Result<Duration> {
+        self.pending.append(std::mem::take(&mut output.textures_delta));
+        let delay = output
+            .viewport_output
+            .get(&egui::ViewportId::ROOT)
+            .map_or(Duration::MAX, |viewport| viewport.repaint_delay);
+        let size = self.window.inner_size();
+        let (Some(width), Some(height)) = (NonZeroU32::new(size.width), NonZeroU32::new(size.height)) else {
+            anyhow::bail!("private surface became zero-sized");
+        };
+        anyhow::ensure!([size.width, size.height] == expected_size, "private surface geometry changed");
+        let primitives = context.tessellate(output.shapes, output.pixels_per_point);
+        self.surface.resize(width, height).map_err(|error| anyhow::anyhow!("{error}"))?;
+        let mut pixels = self.surface.buffer_mut().map_err(|error| anyhow::anyhow!("{error}"))?;
+        let painted = self.painter.paint_with_private(
+            &mut pixels,
+            [size.width as usize, size.height as usize],
+            &primitives,
+            &self.pending,
+            output.pixels_per_point,
+            background,
+            private,
+        );
+        self.pending.clear();
+        anyhow::ensure!(painted, "private texture namespace collision");
+        anyhow::ensure!(current(), "private image authority changed before present");
+        pixels.present().map_err(|error| anyhow::anyhow!("{error}"))?;
+        self.input
+            .handle_platform_output_with_event_loop(&self.window, event_loop, output.platform_output);
+        Ok(delay)
+    }
+
     /// Only an owned, visible Windows HWND can be a hosting target. Other
     /// platforms retain ordinary independent worker windows at this stage.
     pub fn viewport(&self, area: Rect, pixels_per_point: f32) -> Option<HostedViewport> {
