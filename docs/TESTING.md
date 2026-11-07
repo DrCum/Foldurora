@@ -116,14 +116,32 @@ native window IDs; the Attention title is
 `Test attention-native-os [AUTOMATION - DO NOT TOUCH] <pid>` (owner adds ` owner`).
 `attention` is null while closed. Otherwise `painted` and `frame` report an
 actual completed production frame; `controls` contains
-`open/dismiss/previous/next/filters/nearby/direct`, each with `rect` and `focused`.
+`open/dismiss/previous/next/filters/nearby/direct`, each with a committed paint
+probe: `rect`, `interact_rect`, `clip_rect`, `hit_rect`, `layer`, `layer_at_hit`,
+`focused`, `committed`, `enabled`, `live`, `valid`, `actionable` and `frame`.
 `attention.rows` contains full `key`, `policy`, `read`, zero-based `slot`, reminder
 `incarnation` and `control`. `attention.slots` also uses zero-based slots.
 Rects are logical `[left,top,right,bottom]`; apply `pixels_per_point` and
 `client_origin`, then recheck exact identity/geometry before each pointer edge.
-Hidden filter controls may retain previous rects: require `ui.filters_open`, a
-fresh painted frame and stable in-client geometry before using them. Geometry
-requires a painted mapped surface and stable rects across three state publishes.
+`hit_rect` is the positive intersection of the actual interaction rectangle and
+the actual UI/content clip; it is null when clipped out. `layer_at_hit` checks the
+hit rectangle's center against the actual current egui layer. Choose that center
+for each native edge and verify it remains inside `hit_rect`, `interact_rect`,
+`clip_rect` and the native client. Require `ui.filters_open` for filter rows,
+`committed/enabled/live/valid/actionable/layer_at_hit=true`, a fresh actual
+committed control frame after the relevant focus/modal/source/surface lifecycle,
+and stable exact identity/geometry across three state publishes. Recheck all
+predicates immediately before press and release. Merely fitting the client or
+stabilizing an old raw response rectangle never establishes visibility.
+
+These test-only probes commit only with the production controls after a real
+undiscarded paint, clear on cancellation and prune revoked captured intents
+during model synchronization. The Filters toggle records its separate actual
+presentation response even though it has no action Ticket. Disabled controls
+still publish a fresh committed visible probe with `enabled/live/actionable`
+false. For a pending-save negative click require that explicit disabled state,
+valid visible clipped geometry/current frame and owned layer, then unchanged
+intents; never use a previously enabled stale rectangle as its target.
 Activation readiness additionally requires `ui.open_ready=true`: the committed
 previous live paint must contain the actually enabled Open control, its full
 captured Ticket must validate against the current model and selected key, and

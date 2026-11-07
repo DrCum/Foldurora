@@ -255,11 +255,8 @@ impl Fixture {
         let attention = self.attention.as_ref().map(|window| {
             let context = &window.context;
             let control = |id: egui::Id| {
-                let rect = context
-                    .data(|data| data.get_temp::<egui::Rect>(id.with("rect")))
-                    .map(|rect| [rect.min.x, rect.min.y, rect.max.x, rect.max.y]);
-                let widget = context.data(|data| data.get_temp::<egui::Id>(id.with("widget")));
-                json!({"rect": rect, "focused": widget.is_some() && widget == context.memory(|memory| memory.focused())})
+                self.body
+                    .native_fixture_control(id, &self.model, &self.snapshot.attention_preferences, context)
             };
             let rows: Vec<_> = self
                 .model

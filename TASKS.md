@@ -7,7 +7,9 @@
   close/reopen acceptance steps are documented. Actual enabled live-painted Open
   captures gate telemetry eligibility, with per-key effect-time paint traces;
   full identities are interned in bounded trace tables rather than repeated in
-  every predicate. Actual-egui cancellation/repaint and 512-event serialized-size
+  every predicate. Current committed response probes expose clipped visible hit
+  geometry, enabled/live state and frames, including disabled pending controls.
+  Actual-egui clipping/cancellation/repaint and 512-event serialized-size
   regressions are authored. Compilation and every native
   acceptance case remain unexecuted; no host IO, worker or grid is started.
 

@@ -1313,3 +1313,79 @@ fn attention_fixture_open_readiness_requires_valid_live_paint_after_cancellation
     f.settle();
     assert_eq!(status(&f)["open_ready"], true);
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn attention_fixture_control_probes_respect_scroll_clip_and_current_authority() {
+    let mut compact = Frames::for_size([380.0, 340.0]);
+    compact.click(Id::unique("attention_filter_toggle"));
+    compact.settle();
+    let canvas = compact.context.content_rect();
+    let clipped = compact
+        .body
+        .native_probes
+        .iter()
+        .find(|probe| {
+            !probe.presentation && canvas.contains_rect(probe.rect) && !probe.interact_rect.intersect(probe.clip_rect).is_positive()
+        })
+        .expect("a compact scrolled filter can have in-client pixels outside its actual clip");
+    let status = compact
+        .body
+        .native_fixture_control(clipped.id, &compact.model, &compact.host.attention_preferences, &compact.context);
+    assert_eq!(status["committed"], true);
+    assert!(status["hit_rect"].is_null());
+    assert_eq!(status["actionable"], false);
+
+    let mut f = Frames::new();
+    f.choose(f.first());
+    f.click(Id::unique("attention_filter_toggle"));
+    f.settle();
+    let id = Id::unique(("attention_kind", "nearby"));
+    let control = |f: &Frames, id| {
+        f.body
+            .native_fixture_control(id, &f.model, &f.host.attention_preferences, &f.context)
+    };
+    let live = control(&f, id);
+    assert_eq!(live["committed"], true);
+    assert_eq!(live["enabled"], true);
+    assert_eq!(live["live"], true);
+    assert_eq!(live["actionable"], true);
+    assert!(!live["hit_rect"].is_null());
+    f.body.queued(
+        83,
+        Preferences {
+            nearby: true,
+            ..Preferences::default()
+        },
+    );
+    assert_eq!(
+        control(&f, id)["committed"],
+        false,
+        "queue cancellation clears old painted geometry"
+    );
+    f.settle();
+    let disabled = control(&f, id);
+    assert_eq!(disabled["committed"], true);
+    assert_eq!(disabled["enabled"], false);
+    assert_eq!(disabled["live"], false);
+    assert_eq!(disabled["actionable"], false);
+    assert!(
+        !disabled["hit_rect"].is_null(),
+        "disabled negative input still needs a visible target"
+    );
+    assert!(disabled["frame"].as_u64().unwrap() > live["frame"].as_u64().unwrap());
+    assert_eq!(control(&f, Id::unique("attention_filter_toggle"))["actionable"], true);
+    f.body.queue_failed();
+    f.settle();
+    let open = Id::unique("attention_open");
+    assert_eq!(control(&f, open)["actionable"], true);
+    f.model.select(f.model.rows()[1].key);
+    f.body.sync(&f.model, &f.host.attention_preferences);
+    assert_eq!(
+        control(&f, open)["committed"],
+        false,
+        "a revoked Ticket cannot retain its old hit map"
+    );
+    f.body.cancel_gestures();
+    assert_eq!(control(&f, id)["committed"], false);
+}

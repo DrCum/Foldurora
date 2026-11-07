@@ -70,6 +70,21 @@ struct PaintedControl {
     frame: u64,
 }
 
+#[cfg(all(test, target_os = "linux"))]
+struct NativeControlProbe {
+    id: Id,
+    widget: Id,
+    rect: egui::Rect,
+    interact_rect: egui::Rect,
+    clip_rect: egui::Rect,
+    layer: egui::LayerId,
+    enabled: bool,
+    live: bool,
+    frame: u64,
+    intent: Option<Intent>,
+    presentation: bool,
+}
+
 #[derive(Clone, Copy)]
 enum Save {
     Admitting,
@@ -103,6 +118,10 @@ pub(super) struct AttentionUi {
     filters_open: bool,
     reviewing: Option<Reviewing>,
     review_failed: bool,
+    #[cfg(all(test, target_os = "linux"))]
+    native_probes: Vec<NativeControlProbe>,
+    #[cfg(all(test, target_os = "linux"))]
+    native_painting: Vec<NativeControlProbe>,
 }
 
 impl AttentionUi {
@@ -223,6 +242,11 @@ impl AttentionUi {
         self.ime_composing = false;
         self.controls.clear();
         self.painting.clear();
+        #[cfg(all(test, target_os = "linux"))]
+        {
+            self.native_probes.clear();
+            self.native_painting.clear();
+        }
     }
 
     pub fn queued(&mut self, ticket: u64, preferences: Preferences) {
@@ -282,6 +306,12 @@ impl AttentionUi {
             self.controls.retain(|control| control.intent.valid(model, state));
         }
         self.painting.clear();
+        #[cfg(all(test, target_os = "linux"))]
+        {
+            self.native_probes
+                .retain(|probe| probe.intent.is_none_or(|intent| intent.valid(model, state)));
+            self.native_painting.clear();
+        }
     }
 
     pub fn show(
@@ -334,6 +364,8 @@ impl AttentionUi {
         }
         self.capture_press(ui, model, state, live, cancel_live);
         self.painting.clear();
+        #[cfg(all(test, target_os = "linux"))]
+        self.native_painting.clear();
         let mut activated = None;
         egui::Panel::top(Id::unique("attention_filters"))
             .frame(widgets::overlay_frame(ui.ctx(), p))
@@ -355,6 +387,15 @@ impl AttentionUi {
                     self.cancel_gestures();
                     activated = None;
                 }
+                #[cfg(all(test, target_os = "linux"))]
+                self.native_probe(
+                    ui,
+                    &filters,
+                    Id::unique("attention_filter_toggle"),
+                    None,
+                    mode == InputMode::Live && focused && !focus_changed && !was_composing && !self.ime_composing && !ime_event,
+                    true,
+                );
                 if self.filters_open {
                     // Fit the heading and a wrapped first profile row even at
                     // native minimum size; longer contents remain scrollable.
@@ -647,6 +688,10 @@ impl AttentionUi {
             return None;
         }
         self.controls = std::mem::take(&mut self.painting);
+        #[cfg(all(test, target_os = "linux"))]
+        {
+            self.native_probes = std::mem::take(&mut self.native_painting);
+        }
         if let Some(intent) = activated.filter(|intent| intent.valid(model, state)) {
             self.gesture = None;
             return match intent {
@@ -717,6 +762,8 @@ impl AttentionUi {
             data.insert_temp(id.with("rect"), response.rect);
             data.insert_temp(id.with("widget"), response.id);
         });
+        #[cfg(all(test, target_os = "linux"))]
+        self.native_probe(ui, &response, id, intent, live, false);
         let Some(intent) = intent.filter(|_| live && response.enabled()) else {
             return;
         };
@@ -869,6 +916,49 @@ pub(super) fn native_fixture_host() -> HostSnapshot {
 
 #[cfg(all(test, target_os = "linux"))]
 impl AttentionUi {
+    fn native_probe(&mut self, ui: &egui::Ui, response: &egui::Response, id: Id, intent: Option<Intent>, live: bool, presentation: bool) {
+        assert!(self.native_painting.len() < super::attention::MAX_ROWS + 16);
+        self.native_painting.push(NativeControlProbe {
+            id,
+            widget: response.id,
+            rect: response.rect,
+            interact_rect: response.interact_rect,
+            clip_rect: ui.clip_rect().intersect(ui.ctx().content_rect()),
+            layer: response.layer_id,
+            enabled: response.enabled(),
+            live,
+            frame: ui.ctx().cumulative_frame_nr(),
+            intent,
+            presentation,
+        });
+    }
+
+    pub(super) fn native_fixture_control(
+        &self,
+        id: Id,
+        model: &Attention,
+        state: &PreferenceState,
+        context: &egui::Context,
+    ) -> serde_json::Value {
+        let Some(probe) = self.native_probes.iter().find(|probe| probe.id == id) else {
+            return serde_json::json!({"rect": null, "hit_rect": null, "focused": false,
+                "committed": false, "enabled": false, "live": false, "valid": false, "actionable": false, "frame": null});
+        };
+        let coordinates = |rect: egui::Rect| [rect.min.x, rect.min.y, rect.max.x, rect.max.y];
+        let hit = probe.interact_rect.intersect(probe.clip_rect);
+        let visible = hit.is_positive();
+        let layer_at_hit = visible && context.layer_id_at(hit.center()) == Some(probe.layer);
+        let valid = probe.presentation || probe.intent.is_some_and(|intent| intent.valid(model, state));
+        let admitted = probe.presentation || (state.writable && self.save.is_none() && !self.ime_composing);
+        serde_json::json!({"rect": coordinates(probe.rect), "interact_rect": coordinates(probe.interact_rect),
+            "clip_rect": coordinates(probe.clip_rect), "hit_rect": visible.then(|| coordinates(hit)),
+            "layer": format!("{:?}", probe.layer), "layer_at_hit": layer_at_hit,
+            "focused": context.memory(|memory| memory.focused()) == Some(probe.widget),
+            "committed": true, "enabled": probe.enabled, "live": probe.live, "valid": valid,
+            "actionable": probe.enabled && probe.live && valid && admitted && layer_at_hit,
+            "frame": probe.frame})
+    }
+
     pub(super) fn native_fixture_status(&self, model: &Attention, state: &PreferenceState) -> serde_json::Value {
         let save = self.save.map(|save| match save {
             Save::Admitting => serde_json::json!({"state": "admitting"}),
