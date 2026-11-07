@@ -137,6 +137,10 @@ Navigation and closing cancel the exact original request, without claiming a
 post-dispatch cancellation succeeded. Source/policy/incarnation loss purges the
 retained target even while closed. Offers, automatic reading and preview monitors
 remain separate increments; Review source integration needs compiled/native checks.
+The Linux-only ignored `attention_window/native_fixture.rs` uses that real
+surface with test-only synthetic snapshots and captured local intents, without
+constructing a host controller or opening preference storage. Its private X11
+driver contract is in `docs/TESTING.md`; it does not establish native delivery.
 
 `ChatUi` owns a bounded policy-stamped draft map, including each editor's Undo
 state. A pass moves editor state into egui only for its exact source/conversation/

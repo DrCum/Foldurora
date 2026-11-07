@@ -243,3 +243,6 @@ mod tests {
         assert!(keys.suppress(&Key::Named(NamedKey::Space), ElementState::Pressed, false, false));
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+mod native_fixture;

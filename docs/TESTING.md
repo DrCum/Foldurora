@@ -73,6 +73,113 @@ Windows ownership/IME or real-grid acceptance. Expanded top/bottom captures use
 real wheel input to show every profile and category across the pair; a control
 outside the filter scroll clip is not counted as visibly available.
 
+**Native Linux Attention CPU input fixture.**
+
+| Variable | Effect |
+|---|---|
+| `AURORA_ATTENTION_NATIVE_DIR=<directory>` | Fresh owned 0700 batch for ignored native Attention fixture state/control |
+| `AURORA_ATTENTION_NATIVE_DISPLAY=<display>` | Must equal the separately owned X11 `DISPLAY` |
+
+These variables exist only in Linux test builds. The exact ignored test is
+`session_host::attention_window::native_fixture::attention_native_os_fixture`:
+
+```bash
+cargo test --workspace attention_native_os_fixture -- --ignored --test-threads=1 --nocapture
+```
+
+It creates the real production `AttentionWindow`, egui-winit and CPU painter,
+and retains the production `Attention`/`AttentionUi` across native surface
+close/reopen. The shared test snapshot contains only synthetic identities,
+policies and body-free unread metadata. There is no HostController, host IO,
+preference file, worker, login, grid or World. Captured Open Chat calls only
+the local model validator/navigation; it does not create Shared Chat or prove
+the Shell integration. Dismiss calls only the local reminder book. Preferences
+are queued synthetically, leaving published filters unchanged until an exact
+synthetic completion. No Read, Activate or Send capability exists in the fixture.
+Native Windows ownership, minimize, real IME and grid behavior remain untested.
+
+The external driver owns an authenticated Xvfb display with TCP disabled, a
+fresh test process group and all cleanup. Before launch it creates private
+`XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_RUNTIME_DIR` (0700)
+and `XAUTHORITY` (0600) as direct children of the batch, without symlinks.
+It never overrides `HOME`, `home` or `CODEX_HOME`. Use a frozen test executable
+with an exact source commit/SHA256 receipt and only the exact test above. Before
+every XTest action verify PID/start ticks, source version, exact title, native
+window ID/PID property, display/auth path, mapped geometry and actual X focus.
+Keep actions within 300 seconds and reserve 120 seconds for owned cleanup;
+the fixture has a 420-second wall limit. Do not drive the shared desktop.
+
+The atomic 0600 `state.json` includes source version, PID, owner and Attention
+native window IDs; the Attention title is
+`Test attention-native-os [AUTOMATION - DO NOT TOUCH] <pid>` (owner adds ` owner`).
+`attention` is null while closed. Otherwise `painted` and `frame` report an
+actual completed production frame; `controls` contains
+`open/dismiss/previous/next/filters/nearby/direct`, each with `rect` and `focused`.
+`attention.rows` contains full `key`, `policy`, `read`, zero-based `slot`, reminder
+`incarnation` and `control`. `attention.slots` also uses zero-based slots.
+Rects are logical `[left,top,right,bottom]`; apply `pixels_per_point` and
+`client_origin`, then recheck exact identity/geometry before each pointer edge.
+Hidden filter controls may retain previous rects: require `ui.filters_open`, a
+fresh painted frame and stable in-client geometry before using them. Readiness
+requires a painted mapped surface and stable rects across three state publishes.
+
+Write atomic private `control.json` of at most 4096 bytes, with increasing
+`serial`, printable `phase` of at most 64 characters, and exactly one `command`.
+For example `{"serial":1,"phase":"ready","command":{"kind":"block","blocked":false}}`.
+Closed command kinds are `observe`, `block` (`blocked` bool), `replace_source`,
+`revise_policy`, `incoming` (each `slot` **1–5**), `complete_preferences`
+(`success` bool), `reopen` and `finish`. Unknown fields fail. Replacement advances
+the exact synthetic session generation; revision advances policies; incoming
+advances unread observations. Completion requires an actual queued preference
+intent and publishes only its exact ticket/values, or a synthetic failure.
+Only the external driver sends pointer/key/focus/WM_DELETE_WINDOW events.
+Controls cannot select a reminder, focus an egui widget, inject RawInput or
+submit an action. State is bounded to 512 KiB, 512 native events and 64 intents.
+
+Driver acceptance sequence (preserve every assertion state and screenshot):
+
+1. Unblock, focus the mapped Attention surface, wait for native focus to settle,
+   and select a row using its actual pointer edges. Require exact selected full
+   key. Move/click Open Chat to focus it, recording that baseline open intent.
+   Record an eligible settled state: native window and Open control focused,
+   selected row/current policy valid, unblocked, writable preferences, no save.
+2. For Return and Space separately, hold the key, focus the owned owner window,
+   and require Attention focus loss. Refocus Attention with the key still held,
+   settle actual focus and use only native Tab if needed to focus Open again.
+   Preserve the first real held press even if `repeat=false`, then a real repeat.
+   Every key event records `before` and `after` predicates including exact full
+   selection, Open focus, eligibility and prior intent count. Require the
+   original selection and eligibility on the first real held press, unchanged
+   intents through both press and physical release, then exactly one Open Chat
+   from a fresh press/release. Synthetic focus releases cannot rearm either key.
+   Also release while away and require the first fresh key after refocus to work.
+3. Press Open, replace that row's source, then release at its old location:
+   no intent and no replacement selection. Repeat using policy revision and
+   incoming observation changes. Native press must be observed before each
+   control mutation; require `ui.gesture=true` before the mutation. Controls and
+   settled frames cannot establish same-egui-frame ordering. Native Next and
+   Previous must open the exact adjacent full key from the pre-press row order;
+   holding Next while replacing its captured target must never substitute the
+   next row at release.
+4. Select a current reminder and native-click Dismiss. Require one exact local
+   intent, row removal and unchanged `native_reads` (all receipt/operation counts
+   remain zero). Native close/reopen must retain that dismissal and full explicit
+   selection. A later synthetic incoming advance may reveal it with a new
+   incarnation; the old gesture must never apply to the revealed row.
+5. Expand Filters and toggle a visible profile/category by native input. Require
+   one Preferences intent and `ui.save.state=queued`, with published preferences
+   unchanged. Send native WM_DELETE_WINDOW, require null Attention and a close
+   event, then `reopen`: full selection, dismissal, filter expansion and exact
+   queued preference ticket/desired values survive. Further filter input cannot
+   enqueue a second save. Complete explicitly with failure: published values
+   stay unchanged and retry works. A subsequent exact successful synthetic
+   completion publishes only the queued desired values, with no persistence IO.
+6. Require all captured intents to be `open_chat`, `dismiss` or `preferences`,
+   no Read/Activate/Send or native unread mutation, and all required cases above.
+   Request `finish`, preserve `finished=true`, require normal test exit zero,
+   and verify cleanup of only the owned test/display process groups. Finish
+   itself makes no coverage claim; the driver receipts determine acceptance.
+
 **Native Linux Shared Chat CPU input fixture.**
 
 | Variable | Effect |

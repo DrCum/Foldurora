@@ -858,6 +858,23 @@ fn published_checkbox(ui: &mut egui::Ui, p: &Palette, on: bool, label: impl Into
     ui.push_id(id, |ui| widgets::checkbox_value(ui, p, on, label)).inner
 }
 
+#[cfg(all(test, target_os = "linux"))]
+pub(super) fn native_fixture_host() -> HostSnapshot {
+    tests::host()
+}
+
+#[cfg(all(test, target_os = "linux"))]
+impl AttentionUi {
+    pub(super) fn native_fixture_status(&self) -> serde_json::Value {
+        let save = self.save.map(|save| match save {
+            Save::Admitting => serde_json::json!({"state": "admitting"}),
+            Save::Queued { ticket, preferences } => serde_json::json!({"state": "queued", "ticket": ticket, "preferences": preferences}),
+        });
+        serde_json::json!({"gesture": self.gesture.is_some(), "save": save, "save_failed": self.save_failed,
+            "filters_open": self.filters_open, "controls": self.controls.len(), "ime_composing": self.ime_composing})
+    }
+}
+
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
