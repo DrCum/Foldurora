@@ -506,6 +506,11 @@ pub struct CaptureQueue {
 }
 
 impl CaptureQueue {
+    #[cfg(test)]
+    pub(crate) fn last_epoch_for_test(&mut self) {
+        self.epoch = u64::MAX;
+    }
+
     pub(crate) fn instance(&self) -> u64 {
         self.instance
     }

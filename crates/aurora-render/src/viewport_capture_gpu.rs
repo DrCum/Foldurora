@@ -212,8 +212,10 @@ impl Shared {
         }
         // A consumed result can still be held by IO. Revoke its exact token;
         // an old cancellation must never retire a newer issued capture.
-        state.queue.invalidate()?;
+        // Atomic revocation precedes fallible epoch retirement: exhaustion
+        // must not leave an already minted IO guard eligible.
         self.invalidate();
+        state.queue.invalidate()?;
         Ok(())
     }
 
@@ -1049,6 +1051,20 @@ mod tests {
                 "packing/retry cannot remap an already released buffer"
             );
         }
+    }
+
+    #[test]
+    fn viewport_guard_exact_cancel_revokes_publication_even_when_queue_epoch_retirement_exhausts() {
+        let shared = shared();
+        shared.state.try_lock().unwrap().queue.last_epoch_for_test();
+        let image = ready_image(&shared);
+        let published = shared.publication_guard(&image).unwrap();
+        let retained = shared.retention_guard().unwrap();
+        assert!(published.current());
+        assert!(matches!(shared.cancel(image.request().token()), Err(CaptureError::Exhausted)));
+        assert!(!published.current(), "an epoch error cannot skip the exact atomic cancellation");
+        assert!(shared.publication_guard(&image).is_none());
+        assert!(retained.current(), "capture counter exhaustion is not physical loss");
     }
 
     #[test]

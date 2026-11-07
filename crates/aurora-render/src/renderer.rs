@@ -5654,6 +5654,9 @@ impl Backend {
                 log::info!("XR world ended: {e}");
                 self.vr.finish(false);
                 self.motion_cut = true;
+                if let Some(capture) = &mut self.viewport_capture {
+                    capture.invalidate_physical();
+                }
                 crate::present::configure(&self.surface, &self.device, &self.config);
                 return Err(Box::new(packet));
             }
@@ -5737,6 +5740,9 @@ impl Backend {
             log::error!("XR world submission failed: {e}");
             self.vr.finish(true);
             self.motion_cut = true;
+            if let Some(capture) = &mut self.viewport_capture {
+                capture.invalidate_physical();
+            }
             crate::present::configure(&self.surface, &self.device, &self.config);
         } else {
             self.xr_world = Some(world);
