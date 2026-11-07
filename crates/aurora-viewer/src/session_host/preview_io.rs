@@ -105,3 +105,10 @@ impl PreviewCommand {
 
 #[cfg(test)]
 mod tests;
+
+/// Serialize owned test endpoints with the existing fixtures and global pools.
+/// This guard is absent from production; no service operation waits on it.
+#[cfg(test)]
+pub(crate) fn owned_fixture_guard() -> std::sync::MutexGuard<'static, ()> {
+    tests::OWNED.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}

@@ -81,7 +81,7 @@ struct Owned {
 }
 impl Owned {
     fn new(capture: bool) -> Self {
-        let serial = OWNED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let serial = owned_fixture_guard();
         let source = source(1);
         let control = control(source);
         let host = HostChannel::start(source.worker().installation, source.worker().host).unwrap();
@@ -214,6 +214,7 @@ impl Owned {
             .unwrap();
         let handoff = until(|| self.host.take_update()?.sources.into_iter().find_map(|u| u.frame));
         assert!(handoff.received_at <= Instant::now());
+        assert_eq!(handoff.claim(), claim);
         (model, handoff, budget)
     }
 }
@@ -468,7 +469,7 @@ fn preview_io_owned_loopback_pending_handshake_cap_and_unknown_hello_never_repla
 }
 #[test]
 fn preview_io_owned_loopback_no_online_source_never_connects_and_full_source_mac_rejects_relog_mismatch() {
-    let _serial = OWNED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _serial = owned_fixture_guard();
     let s = source(1);
     let host = HostChannel::start(s.worker().installation, s.worker().host).unwrap();
     let port = until(|| host.port());
@@ -529,7 +530,7 @@ fn preview_io_owned_loopback_full_reconnect_never_replays_old_commands_or_revive
 
 #[test]
 fn preview_io_owned_loopback_partial_handshake_progress_does_not_reset_absolute_deadline() {
-    let _serial = OWNED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _serial = owned_fixture_guard();
     let s = source(1);
     let host = HostChannel::start(s.worker().installation, s.worker().host).unwrap();
     let port = until(|| host.port());
@@ -909,4 +910,68 @@ fn preview_io_v4_demand_receipt_rejects_wrong_source_connection_config_and_old_t
     assert!(latest.sources().iter().any(|o| o.accepted_demand() == Some(&good)));
     assert!(io.host.try_command(token, PreviewCommand::Stop { demand: 1 }, None).is_err());
     assert!(io.host.try_command(token, PreviewCommand::Stop { demand: 2 }, None).is_ok());
+}
+
+#[test]
+fn preview_io_handoff_claim_cancels_only_exact_pending_not_recreated_owner_request_one() {
+    let io = Owned::new(true);
+    let (_original_model, handoff, _capture_budget) = io.capture(PreviewSize::Small);
+    let original = handoff.claim();
+    let original_received_at = handoff.received_at;
+    let charged = io.host.image_budget().used();
+    assert_eq!(charged, original.geometry().payload_bytes());
+    assert_eq!(handoff.claim(), original);
+    assert_eq!(handoff.received_at, original_received_at);
+    assert_eq!(
+        io.host.image_budget().used(),
+        charged,
+        "metadata access cannot copy/refund the held allocation"
+    );
+    let observed = io.ready();
+    let mut replacement = SourceImages::new(original.source(), io.host.image_budget()).unwrap();
+    let now = io.host.shared.clock(Instant::now());
+    replacement
+        .sync_observed(
+            observed.policy.unwrap(),
+            io.host.shared.clock(observed.policy_received_at.unwrap()),
+            now,
+        )
+        .unwrap();
+    let fresh = replacement
+        .request(original.connection(), original.demand(), original.geometry(), now)
+        .unwrap();
+    assert_eq!(fresh.request(), original.request());
+    assert_ne!(fresh, original, "model ownership is part of the immutable full claim");
+    assert!(!replacement.cancel_capture(handoff.claim()));
+    assert!(matches!(
+        replacement.request(fresh.connection(), fresh.demand(), fresh.geometry(), now),
+        Err(aurora_session::preview_image::ImageError::Busy)
+    ));
+    assert_eq!(io.host.image_budget().used(), charged);
+    drop(handoff);
+    assert_eq!(
+        io.host.image_budget().used(),
+        0,
+        "discard releases only its own unadmitted allocation"
+    );
+    assert!(replacement.cancel_capture(fresh));
+    let next = replacement
+        .request(fresh.connection(), fresh.demand(), fresh.geometry(), now)
+        .unwrap();
+    assert_eq!(next.request(), fresh.request() + 1);
+}
+#[test]
+fn preview_io_exported_owned_fixture_guard_excludes_the_existing_mutex_on_another_thread() {
+    let held = owned_fixture_guard();
+    let blocked = std::thread::scope(|scope| {
+        scope
+            .spawn(|| matches!(OWNED.try_lock(), Err(std::sync::TryLockError::WouldBlock)))
+            .join()
+            .unwrap()
+    });
+    assert!(blocked, "projection and existing IO fixtures must share one exclusion domain");
+    drop(held);
+    // Reacquire through the same exported entry after releasing it. Other normal
+    // fixtures may run between these calls; no second lock/order is introduced.
+    drop(owned_fixture_guard());
 }

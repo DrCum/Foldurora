@@ -994,7 +994,7 @@ mod tests {
     }
     #[test]
     fn preview_io_host_raw_pool_survives_service_generation_and_preserves_ui_reserve() {
-        let _serial = super::super::tests::OWNED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _serial = super::super::owned_fixture_guard();
         let a = host_budget();
         let baseline = a.used();
         let g = aurora_session::preview_image::PreviewGeometry::new([640, 360], [0, 0, 640, 360], PreviewSize::Large).unwrap();

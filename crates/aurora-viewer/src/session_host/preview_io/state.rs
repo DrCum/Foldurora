@@ -242,6 +242,12 @@ pub(crate) struct FrameHandoff {
     pub(super) emergency: Arc<AtomicBool>,
 }
 impl FrameHandoff {
+    /// Exact unadmitted target for cancellation/bookkeeping only. No pixel or
+    /// credit escapes, and reading this claim grants no admission authority.
+    pub fn claim(&self) -> CaptureClaim {
+        self.pixels.claim()
+    }
+
     pub fn admit(
         self,
         owner: &mut aurora_session::preview_image::SourceImages,
@@ -251,7 +257,7 @@ impl FrameHandoff {
         if self.emergency.load(Ordering::Acquire)
             || !self.retention.current()
             || !self.capture.current()
-            || !self.original_capture.current(self.pixels.claim(), Instant::now())
+            || !self.original_capture.current(self.claim(), Instant::now())
             || !control.witness.same(&self.original_capture.control.witness)
             || control.source != self.token.source
             || !control.current(Instant::now())
