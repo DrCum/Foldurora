@@ -80,15 +80,37 @@ fn fixed_quick_policy_maps_empty_starting_online_and_ordinary_without_detached_o
 #[test]
 fn fixed_quick_captured_slot_and_action_ignore_card_order_or_management_selection() {
     let mut tracker = Tracker::new(installation(), host());
+    let mut captured = Vec::new();
     for id in SlotId::all() {
-        tracker.observe(id, running(Phase::Online)).unwrap();
+        let mut facts = running(Phase::Online);
+        facts.occupant.as_mut().unwrap().binding.worker.worker = WorkerId::from_bytes([id.number() + 10; 16]).unwrap();
+        facts.occupant.as_mut().unwrap().binding.session.as_mut().unwrap().session = SessionId::from_bytes([id.number() + 20; 16]).unwrap();
+        tracker.observe(id, facts).unwrap();
+        captured.push((id, facts, tracker.capture(id).unwrap()));
     }
-    let tickets: Vec<_> = SlotId::all().map(|id| tracker.capture(id).unwrap()).collect();
-    for ticket in tickets.into_iter().rev() {
+    // Iteration/presentation order changes no captured target. Distinct actual
+    // metadata identities make selecting a replacement source observable here.
+    for (id, facts, ticket) in captured.iter().rev().copied() {
+        assert_eq!(ticket.slot(), id);
         assert_eq!(ticket.action(), Choice::Activate);
-        assert_eq!(ticket.expected(), running(Phase::Online));
+        assert_eq!(ticket.expected(), facts);
         assert!(tracker.current(ticket));
-        assert!(tracker.current(tracker.capture(ticket.slot()).unwrap()));
+    }
+    tracker
+        .observe(
+            slot(0),
+            Facts {
+                reserved: true,
+                ..Facts::default()
+            },
+        )
+        .unwrap();
+    for (id, _, ticket) in captured {
+        assert_eq!(
+            tracker.current(ticket),
+            id != slot(0),
+            "one source replacement cannot retarget another slot"
+        );
     }
 }
 #[test]
