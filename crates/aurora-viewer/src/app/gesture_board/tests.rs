@@ -370,3 +370,20 @@ fn board_app_old_stop_cannot_drop_new_cache_context_before_exact_runtime_validat
     assert!(f.actor.pending.is_empty());
     assert!(f.actor.runtime.pending(target.item()).is_none());
 }
+
+#[test]
+fn board_native_actual_availability_gate_preserves_temporary_borrow_and_denies_absence_or_lost_device() {
+    use std::cell::Cell;
+    let mut slot = Some(Cell::new(true));
+    assert!(available(slot.as_ref(), None, Cell::get));
+    let actual = slot.take().unwrap();
+    assert!(available(slot.as_ref(), Some(&actual), Cell::get));
+    assert!(!available::<Cell<bool>>(slot.as_ref(), None, Cell::get));
+    actual.set(false);
+    assert!(!available(slot.as_ref(), Some(&actual), Cell::get));
+    actual.set(true);
+    slot = Some(actual);
+    assert!(available(slot.as_ref(), None, Cell::get));
+    // This is a physical availability predicate only: it never mints a managed
+    // NativeActionScope or bypasses the separate App source/action permission.
+}

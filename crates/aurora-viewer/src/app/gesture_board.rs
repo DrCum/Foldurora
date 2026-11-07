@@ -20,6 +20,22 @@ use std::{
 };
 use uuid::Uuid;
 
+/// Borrowed from the actual Gfx during draw_ui's temporary take. This is only
+/// window/device availability; genuine managed NativeActionScope stays separate.
+#[derive(Clone, Copy)]
+pub(super) struct Presentation<'a> {
+    renderer: &'a aurora_render::Renderer,
+    window: &'a winit::window::Window,
+}
+impl<'a> Presentation<'a> {
+    pub(super) fn new(renderer: &'a aurora_render::Renderer, window: &'a winit::window::Window) -> Self {
+        Self { renderer, window }
+    }
+}
+fn available<T>(owned: Option<&T>, borrowed: Option<&T>, current: impl FnOnce(&T) -> bool) -> bool {
+    owned.or(borrowed).is_some_and(current)
+}
+
 /// Captured by actual App observation only. Retaining this value does not renew
 /// the original native lease or the pointer/key press's thirty-second lifetime.
 #[derive(Clone, Copy)]
@@ -130,7 +146,7 @@ impl State {
             at: now,
         })
     }
-    fn reconcile(&mut self, app: &App) -> Option<Proof> {
+    fn reconcile(&mut self, app: &App, presentation: Option<Presentation<'_>>) -> Option<Proof> {
         let observation = app.board_observation(self.facts);
         let facts = observation.map(|o| o.0);
         let identity_changed = !self.facts.zip(facts).is_some_and(|(a, b)| a.same_source(b));
@@ -169,7 +185,7 @@ impl State {
             || self.epoch == 0
             || self.actions == 0
             || !self.open
-            || !app.board_effect_ready()
+            || !app.board_effect_ready(presentation)
         {
             return None;
         }
@@ -179,7 +195,7 @@ impl State {
         }
         self.proof(native, Instant::now())
     }
-    fn current(&self, app: &App, proof: Proof) -> bool {
+    fn current(&self, app: &App, proof: Proof, presentation: Option<Presentation<'_>>) -> bool {
         let Some((facts, _)) = app.board_observation(self.facts) else {
             return false;
         };
@@ -191,7 +207,7 @@ impl State {
             && self.actions == app.board_actions
             && self.proof(proof.native, proof.at).is_some_and(|p| p.same_owner(proof))
             && facts == proof.facts
-            && app.board_effect_ready()
+            && app.board_effect_ready(presentation)
             && Instant::now()
                 .checked_duration_since(proof.at)
                 .is_some_and(|age| age < Duration::from_secs(30))
@@ -214,8 +230,8 @@ impl State {
             facts: self.facts?,
         })
     }
-    fn queue(&mut self, app: &App, proof: Proof, change: Option<Change>, initial: bool) -> bool {
-        if !self.current(app, proof) || self.job.is_some() {
+    fn queue(&mut self, app: &App, proof: Proof, change: Option<Change>, initial: bool, presentation: Option<Presentation<'_>>) -> bool {
+        if !self.current(app, proof, presentation) || self.job.is_some() {
             return false;
         }
         let Some(next) = self.next_operation.checked_add(1) else {
@@ -291,7 +307,7 @@ impl State {
         }
         self.job.take()
     }
-    fn poll(&mut self, app: &App) {
+    fn poll(&mut self, app: &App, presentation: Option<Presentation<'_>>) {
         let result = match self.lane.as_ref().map(store::Lane::poll) {
             Some(Ok(Some(reply))) => reply,
             Some(Err(())) => {
@@ -313,7 +329,7 @@ impl State {
                 self.select_existing();
                 // Only a still-current explicit first Open may create the first
                 // empty board. A later heartbeat cannot renew that intent.
-                if let Some(proof) = job.initial.filter(|p| self.current(app, *p))
+                if let Some(proof) = job.initial.filter(|p| self.current(app, *p, presentation))
                     && self.snapshot.as_ref().is_some_and(|s| s.original().is_none())
                 {
                     self.queue(
@@ -324,6 +340,7 @@ impl State {
                             name: aurora_i18n::tr!("board-default-name").into(),
                         }),
                         false,
+                        presentation,
                     );
                 }
             }
@@ -341,12 +358,12 @@ impl State {
     fn resolve(app: &App, target: PlaybackItem) -> bool {
         actions::resolve_playback_item(&app.world.inventory, target.reference(), target.kind()) == Ok(target)
     }
-    fn ready(&mut self, app: &mut App, proof: Proof, target: PlaybackItem, ready: Ready) {
-        if !self.current(app, proof) || !Self::resolve(app, target) || app.world.rlva.has("sendgesture") {
+    fn ready(&mut self, app: &mut App, proof: Proof, target: PlaybackItem, ready: Ready, presentation: Option<Presentation<'_>>) {
+        if !self.current(app, proof, presentation) || !Self::resolve(app, target) || app.world.rlva.has("sendgesture") {
             return;
         }
         app.gesture_prefetch(ready.definition());
-        if !self.current(app, proof) || !Self::resolve(app, target) {
+        if !self.current(app, proof, presentation) || !Self::resolve(app, target) {
             return;
         }
         let Some(data) = self.snapshot.as_ref().map(|s| s.data.clone()) else {
@@ -362,10 +379,10 @@ impl State {
             app.tick_gestures();
         }
     }
-    fn complete(&mut self, app: &mut App) {
+    fn complete(&mut self, app: &mut App, presentation: Option<Presentation<'_>>) {
         let work: Vec<_> = self.pending.values().copied().collect();
         for (ticket, proof, target) in work {
-            if !self.current(app, proof)
+            if !self.current(app, proof, presentation)
                 || !Self::resolve(app, target)
                 || app.world.rlva.has("sendgesture")
                 || app.gesture_state.board_cache_failed(target)
@@ -384,7 +401,7 @@ impl State {
             {
                 Ok(ready) => {
                     self.pending.remove(&ticket.item());
-                    self.ready(app, proof, target, ready);
+                    self.ready(app, proof, target, ready, presentation);
                 }
                 Err(playback::Error::Loading) => {}
                 Err(_) => {
@@ -394,8 +411,8 @@ impl State {
             }
         }
     }
-    fn dispatch(&mut self, app: &mut App, action: Action) {
-        if !self.current(app, action.proof) {
+    fn dispatch(&mut self, app: &mut App, action: Action, presentation: Option<Presentation<'_>>) {
+        if !self.current(app, action.proof, presentation) {
             self.status = "board-stale";
             return;
         }
@@ -421,7 +438,9 @@ impl State {
                     return;
                 }
                 if target.kind() == PlaybackKind::Sound {
-                    if self.runtime.validate_sound(ticket, &data, target, Instant::now()).is_ok() && self.current(app, action.proof) {
+                    if self.runtime.validate_sound(ticket, &data, target, Instant::now()).is_ok()
+                        && self.current(app, action.proof, presentation)
+                    {
                         app.apply_inventory_action(crate::ui::inventory::InvAction::TriggerSound(target.asset()));
                     }
                     return;
@@ -434,7 +453,7 @@ impl State {
                     .runtime
                     .click(ticket, &data, target, &mut app.gesture_state.manager, Instant::now())
                 {
-                    Ok(playback::Click::Ready(ready)) => self.ready(app, action.proof, target, ready),
+                    Ok(playback::Click::Ready(ready)) => self.ready(app, action.proof, target, ready, presentation),
                     Ok(playback::Click::Stopped(effects)) => app.gesture_effects(effects),
                     Ok(playback::Click::NeedsCache(ticket)) => {
                         if app.board_cache_request(target) {
@@ -478,7 +497,7 @@ impl State {
                         },
                     },
                 };
-                self.edit(app, action.proof, &data, Some(board), Change::Add { board, tile });
+                self.edit(app, action.proof, &data, Some(board), Change::Add { board, tile }, presentation);
             }
             Command::Edit(change) => {
                 let affected = match &change {
@@ -486,7 +505,7 @@ impl State {
                     Change::Rename { board, .. } | Change::Delete { board } | Change::Remove { board, .. } => Some(*board),
                     Change::Add { .. } => return,
                 };
-                self.edit(app, action.proof, &data, affected, change);
+                self.edit(app, action.proof, &data, affected, change, presentation);
             }
         }
     }
@@ -505,7 +524,15 @@ impl State {
         self.pending.retain(|_, (t, _, _)| t.board() != board);
         Ok(effects)
     }
-    fn edit(&mut self, app: &App, proof: Proof, data: &Catalogue, affected: Option<BoardId>, change: Change) {
+    fn edit(
+        &mut self,
+        app: &App,
+        proof: Proof,
+        data: &Catalogue,
+        affected: Option<BoardId>,
+        change: Change,
+        presentation: Option<Presentation<'_>>,
+    ) {
         if self.job.is_some() {
             return;
         }
@@ -517,7 +544,7 @@ impl State {
             }
             self.pending.retain(|_, (ticket, _, _)| ticket.board() != board);
         }
-        self.queue(app, proof, Some(change), false);
+        self.queue(app, proof, Some(change), false, presentation);
     }
 }
 pub(crate) fn resolve(inv: &crate::world::inventory::Inventory, item: Reference) -> Option<PlaybackItem> {
@@ -545,9 +572,12 @@ impl App {
         self.board_state = None;
         self.panels.gesture_board = false;
     }
-    fn board_effect_ready(&self) -> bool {
+    fn board_effect_ready(&self, presentation: Option<Presentation<'_>>) -> bool {
         matches!(self.screen, Screen::World)
-            && self.gfx.is_some()
+            && available(self.gfx.as_ref().map(|g| &g.renderer), presentation.map(|p| p.renderer), |r| {
+                !r.failed() && !r.device_lost()
+            })
+            && presentation.is_none_or(|p| p.window.inner_size().width != 0 && p.window.inner_size().height != 0)
             && !self.exit_prompt.open
             && !self.login_form.busy
             && self.options_ui.capture.is_none()
@@ -592,28 +622,31 @@ impl App {
             native,
         ))
     }
-    fn with_boards(&mut self, body: impl FnOnce(&mut State, &mut App)) {
+    fn with_boards(&mut self, presentation: Option<Presentation<'_>>, body: impl FnOnce(&mut State, &mut App)) {
         let mut state = self.board_state.take().unwrap_or_default();
         body(&mut state, self);
         // A native callback may have reset the source while state was borrowed.
         // Never reinstall that old source's private state over a replacement.
         if self.board_state.is_none() && state.epoch == self.board_epoch {
-            state.reconcile(self);
+            state.reconcile(self, presentation);
             self.board_state = Some(state);
         }
     }
     pub(super) fn tick_boards(&mut self) {
+        self.tick_boards_presented(None);
+    }
+    fn tick_boards_presented(&mut self, presentation: Option<Presentation<'_>>) {
         if self.board_state.is_none() && !self.panels.gesture_board {
             return;
         }
-        self.with_boards(|state, app| {
-            let proof = state.reconcile(app);
-            state.poll(app);
+        self.with_boards(presentation, |state, app| {
+            let proof = state.reconcile(app, presentation);
+            state.poll(app, presentation);
             if !state.loaded
                 && state.job.is_none()
                 && let Some(proof) = proof
             {
-                if state.queue(app, proof, None, true) && app.demo {
+                if state.queue(app, proof, None, true, presentation) && app.demo {
                     state.queue(
                         app,
                         proof,
@@ -622,19 +655,21 @@ impl App {
                             name: aurora_i18n::tr!("board-default-name").into(),
                         }),
                         false,
+                        presentation,
                     );
                 }
             }
-            state.complete(app);
+            state.complete(app, presentation);
         });
     }
-    pub(super) fn show_boards(&mut self, ctx: &egui::Context, p: &crate::theme::Palette) {
+    pub(super) fn show_boards(&mut self, ctx: &egui::Context, p: &crate::theme::Palette, frame: Presentation<'_>) {
         if !self.panels.gesture_board {
             return;
         }
-        self.tick_boards();
-        self.with_boards(|state, app| {
-            let proof = state.reconcile(app);
+        let presentation = Some(frame);
+        self.tick_boards_presented(presentation);
+        self.with_boards(presentation, |state, app| {
+            let proof = state.reconcile(app, presentation);
             let data = state.snapshot.as_ref().map(|s| s.data.clone());
             let mut open = app.panels.gesture_board;
             let selection = if app.inventory_ui.selection.len() == 1 {
@@ -666,11 +701,11 @@ impl App {
             );
             app.panels.gesture_board = open;
             if !open {
-                state.reconcile(app);
+                state.reconcile(app, presentation);
                 return;
             }
             if let Some(action) = action {
-                state.dispatch(app, action);
+                state.dispatch(app, action, presentation);
             }
         });
     }
