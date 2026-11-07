@@ -1,5 +1,15 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Native conversation Review receipt prerequisite (2026-11-07; no issue):
+  closed body-free captures/requests/receipts and a separate bounded immutable
+  ledger bind the original chat source, policy, native observation and exact
+  activation. Reserve before a separately authorized native action; same-source
+  reconnect retains unfinished operations and evicted IDs cannot replay. Query
+  and reply matching reject another conversation/capture/grant. Source tests
+  cover bounds, closed schemas, duplicate/uncertain-recovery behavior and source
+  retirement. No command/event, native UI, send/read mutation or protocol version
+  change is exposed in this prerequisite. Compiled validation remains pending.
+
 - 🔧 Host-only conversation Attention (2026-11-07; no issue): bounded unread
   reminders for five stable profiles and existing Nearby/Direct conversations,
   defaults all profiles/Direct on and Nearby off. Local Dismiss preserves native

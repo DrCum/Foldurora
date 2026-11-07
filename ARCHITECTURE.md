@@ -184,6 +184,17 @@ policy-reopened and unavailable states at normal and narrow/150% layouts. Its
 locale-isolated ignored fixture writes ten synthetic PNG/JSON pairs per process;
 these captures and the new Shared Chat regressions still need root validation.
 
+`aurora-session/src/chat/review.rs` provides a source-only prerequisite for
+explicit native conversation review: closed body-free captures, requests and
+receipts bind the full chat source, native policy/observation and exact activation.
+Its 32-entry single-flight ledger reserves before an independently authorized
+native operation, retains immutable outcomes across same-source reconnects, and
+fences evicted IDs with a high-water mark. Receipt queries validate the exact
+conversation/request, and replies can be matched against the complete original
+capture/grant. No Review command/event, version change, native action or UI is
+exposed by this prerequisite; chat V2 and control V1 remain unchanged. Source
+tests are authored; compiled and native validation remain pending.
+
 `session_host/ui/visual.rs` similarly captures the production compact controller
 with five synthetic bound workers. Its explicit locale-isolated fixture covers
 the strip, management drawer, popup, Rename/Close dialogs and narrow native-DPI
