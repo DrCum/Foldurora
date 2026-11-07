@@ -321,7 +321,7 @@ const PAUSED_RESOLUTION_DIVISOR: u32 = 16;
 /// The wolf logo (window icon, login and loading screens, About, system
 /// notifications), read from the branding folder: one file for the viewer,
 /// the README and the exe icon.
-pub(crate) const LOGO_PNG: &[u8] = include_bytes!("../../../assets/branding/aurora-logo.png");
+pub(crate) const LOGO_PNG: &[u8] = include_bytes!("../../../assets/branding/foldurora-logo.png");
 
 struct LogoData {
     ui: egui::ColorImage,

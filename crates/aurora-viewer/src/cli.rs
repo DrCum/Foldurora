@@ -265,8 +265,11 @@ pub fn window_title() -> String {
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub const DESKTOP_ID: &str = "aurora-viewer";
 
-/// Window attributes with the [`DESKTOP_ID`] on Linux; elsewhere unchanged.
-pub fn with_desktop_id(attrs: winit::window::WindowAttributes) -> winit::window::WindowAttributes {
+/// Shared application icon, plus the matching [`DESKTOP_ID`] on Linux.
+pub fn with_desktop_id(mut attrs: winit::window::WindowAttributes) -> winit::window::WindowAttributes {
+    if attrs.window_icon.is_none() {
+        attrs = attrs.with_window_icon(small_window_icon());
+    }
     #[cfg(target_os = "linux")]
     {
         // one field behind both traits: the Wayland app_id is `general`,
@@ -276,6 +279,23 @@ pub fn with_desktop_id(attrs: winit::window::WindowAttributes) -> winit::window:
     }
     #[cfg(not(target_os = "linux"))]
     attrs
+}
+
+fn small_window_icon() -> Option<winit::window::Icon> {
+    // CPU host, tools and crash windows never run App's asynchronous large-logo
+    // decoder. Cache only small RGBA data, not platform-specific icon handles.
+    type Pixels = (Vec<u8>, u32, u32);
+    static PIXELS: std::sync::OnceLock<Option<Pixels>> = std::sync::OnceLock::new();
+    let (rgba, width, height) = PIXELS
+        .get_or_init(|| {
+            let image = image::load_from_memory(include_bytes!("../../../assets/branding/foldurora-window.png"))
+                .ok()?
+                .into_rgba8();
+            let (width, height) = image.dimensions();
+            Some((image.into_raw(), width, height))
+        })
+        .as_ref()?;
+    winit::window::Icon::from_rgba(rgba.clone(), *width, *height).ok()
 }
 
 fn title_with(title: Option<&str>, profile_dir: &str, version: &str) -> String {

@@ -316,15 +316,15 @@ pub fn top(
         // a right click on the island or its buttons: show the bug button
         let back = ui.interact(menu_rect, Id::unique("bars_island_menu_back"), Sense::click());
         menu_options(&back, p, st, &mut action);
-        let wolf = Rect::from_min_size(
+        let brand = Rect::from_min_size(
             Pos2::new(menu_rect.left() + PAD, menu_rect.center().y - SLOT / 2.0),
             Vec2::splat(SLOT),
         );
-        let resp = ui.interact(wolf, Id::unique("bars_island_menu"), Sense::click());
+        let resp = ui.interact(brand, Id::unique("bars_island_menu"), Sense::click());
         menu_options(&resp, p, st, &mut action);
         let open = egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&resp));
-        slot_face(ui, p, wolf, resp.hovered() || open, false);
-        paint_icon(ui, icons, "wolf", wolf, 18.0, p.ink);
+        slot_face(ui, p, brand, resp.hovered() || open, false);
+        paint_icon(ui, icons, "wolf", brand, 18.0, icons.brand_tint(p.ink));
         menu::dropdown_placed(
             &resp,
             p,

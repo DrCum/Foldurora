@@ -1854,15 +1854,17 @@ pub fn top_bars(
                 ui.set_min_width(ui.available_width());
                 ui.spacing_mut().item_spacing.x = 4.0;
                 ui.style_mut().visuals.button_frame = false;
-                // Aurora menu (white wolf): Me, Communicate, World, Build, Contents, Advanced, Help
+                // Foldurora menu: Me, Communicate, World, Build, Contents, Advanced, Help
                 if let Some(t) = icons.get("wolf") {
-                    let img = egui::Image::new(t).fit_to_exact_size(Vec2::new(18.0, 18.0)).tint(p.ink);
+                    let img = egui::Image::new(t)
+                        .fit_to_exact_size(Vec2::new(18.0, 18.0))
+                        .tint(icons.brand_tint(p.ink));
                     menu::button(ui, p, egui::Button::image(img), |ui| {
                         menu::searchable(ui, p, |ui| main_menus(ui, p, panels, st, &mut action, true));
                     })
                     .on_hover_text(aurora_i18n::tr!("ui-bars-aurora-menu"));
                 }
-                // Firestorm's notification well: the bell next to the wolf
+                // The Legacy Viewer's notification well: the bell next to the brand
                 if !bell.aurora {
                     let resp = super::notifications::bell(ui, p, icons, bell.unread, notif.open, bell.dnd, false);
                     notif.anchor = Some(resp.rect.left_bottom());

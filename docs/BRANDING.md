@@ -4,6 +4,13 @@ The Aurora interface is **clean, modern and slightly glassy**: dark, calm
 surfaces, a single strong accent colour (violet), readable text, crisp and
 consistent icons. Every screen must look polished and finished.
 
+The Foldurora fork uses its maintainer-supplied purple folder artwork for the
+application, startup/window icon and main-menu mark. Keep that artwork in full
+color and preserve its transparent background; it is content, not a tintable
+Tabler control. Source, generated sizes and regeneration are documented in
+[`assets/branding/FOLDURORA.md`](../assets/branding/FOLDURORA.md). Existing
+upstream copyright and attribution remain unchanged.
+
 ## Palette
 
 The colours come from `crates/aurora-viewer/src/theme.rs` (`Theme::default`).
@@ -129,7 +136,7 @@ dragging a handle switch to `violet_light`, like any selection.
   current step; at the bottom right, the tile of the region on the world map
   with the arrival point, and the progress in figures; the progress itself
   is a luminous hairline with the brand gradient along the whole bottom
-  edge. The brand (wolf and name) stays discreet at the top left.
+  edge. The brand artwork and name stay discreet at the top left.
 - **Discreet rounding.** Flat design, almost square corners. Buttons:
   radius 5; windows, cards and pills of the toolbar: radius 3, with corners
   close to those of the build tools, including when collapsed.
@@ -293,7 +300,10 @@ dragging a handle switch to `violet_light`, like any selection.
 
 ## Logos
 
-Files in [`assets/branding/`](../assets/branding/):
+The active Foldurora files and their uses are listed in
+[`assets/branding/FOLDURORA.md`](../assets/branding/FOLDURORA.md). The following
+catalogue describes the retained upstream artwork in
+[`assets/branding/`](../assets/branding/), not this fork's active icon paths:
 
 | File | Use |
 |---|---|
@@ -305,7 +315,7 @@ Files in [`assets/branding/`](../assets/branding/):
 | `aurora.icns` | full logo on its navy background in Apple's rounded square (an 824 px body with 185 px corners on a 1024 px canvas, 16 to 1024 px, taken from `aurora-logo-bg.png`): icon of `Aurora Viewer.app` on macOS |
 | `aurora.ico` | full logo as a Windows icon (16 to 256 px, taken from `aurora-logo.png`): icon of `aurora-viewer.exe` (embedded by its `build.rs`), "Aurora Tools" and "Aurora PR" shortcuts |
 
-The logo is a howling wolf's head in profile, facing up and to the right,
+The upstream logo is a howling wolf's head in profile, facing up and to the right,
 its mane made of aurora ribbons, in a circle. Its colours: violet `#8B5CF6`
 and indigo `#4F46E5` for the head, turquoise `#5EEAD4` and a deeper
 turquoise `#56CAA9` for the ribbons. Do not distort it, recolour it or add

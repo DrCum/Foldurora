@@ -1,5 +1,14 @@
 # Aurora Viewer architecture
 
+Foldurora application branding is embedded from `assets/branding/foldurora-*`.
+`cli::with_desktop_id` supplies a small cached RGBA icon to CPU and initial GPU
+windows while retaining the existing desktop identity. Main-window recovery
+keeps that icon until App's asynchronous large-logo decoder supplies its normal
+icon. Toolbar brand artwork uses the color-preserving PNG path, separate from
+the tintable Tabler masks; the historical `wolf` texture key remains compatible
+with existing skins. Windows resources and Linux/macOS packaging use the same
+artwork. See `assets/branding/FOLDURORA.md` for sizes and provenance.
+
 Native host movement closes the controller cutout immediately and requests
 `Coordinator::refresh_viewport`, which earns a new revoke/drain/prepare/grant
 sequence even when a drag ends at its original rectangle. Only same-worker

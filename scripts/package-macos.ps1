@@ -35,7 +35,7 @@ $plist = Get-Content -LiteralPath (Join-Path $Source 'packaging/macos/Info.plist
 Set-Content -LiteralPath (Join-Path $contents 'Info.plist') -Value $plist.Replace('@VERSION@', $Matches[1]) -Encoding utf8NoBOM -NoNewline
 Set-Content -LiteralPath (Join-Path $contents 'PkgInfo') -Value 'APPL????' -Encoding ascii -NoNewline
 
-Copy-Item -LiteralPath (Join-Path $Source 'assets/branding/aurora.icns') -Destination (Join-Path $resources 'Aurora.icns')
+Copy-Item -LiteralPath (Join-Path $Source 'assets/branding/foldurora.icns') -Destination (Join-Path $resources 'Aurora.icns')
 Get-ChildItem -LiteralPath (Join-Path $Source 'packaging/macos') -Directory -Filter '*.lproj' | ForEach-Object {
     Copy-Item -LiteralPath $_.FullName -Destination $resources -Recurse
 }

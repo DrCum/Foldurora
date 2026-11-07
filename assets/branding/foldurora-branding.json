@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "source": "foldurora-logo.svg",
+  "source_sha256": "da86b21f892ac5d0ab90241285ef77eb42e95b1c5dd4fdc1d4fe44a6c1df1d1f",
+  "renderer": {
+    "librsvg": "2.60.0",
+    "cairo": "1.18.4"
+  },
+  "png_sizes": {
+    "foldurora-logo.png": 720,
+    "foldurora-mark.png": 40,
+    "foldurora-window.png": 64
+  },
+  "ico_sizes": [
+    16,
+    24,
+    32,
+    48,
+    64,
+    128,
+    256
+  ],
+  "icns_sizes": {
+    "icp4": 16,
+    "icp5": 32,
+    "icp6": 64,
+    "ic07": 128,
+    "ic08": 256,
+    "ic09": 512,
+    "ic10": 1024,
+    "ic11": 32,
+    "ic12": 64,
+    "ic13": 256,
+    "ic14": 512
+  },
+  "sha256": {
+    "foldurora-logo.png": "65b23b1c95d8ca06a44f2b586026b190b992a4d06332ff50494efaf3ab37acb0",
+    "foldurora-mark.png": "cb3df187072afe31ee66a61f3e5b32c37751e96cb92ee4c50ae0c462997e3e9d",
+    "foldurora-window.png": "4d6a03133a8ed9ae4908d02e5e3092a6648c56c23cffc3ee9fc1904954c6ef42",
+    "foldurora.ico": "bedef7614a5590d86d95f2489b77e223828279b615ef12ebdafc10038eea6a9f",
+    "foldurora.icns": "130c19223d558cf7e892725f9e96150a9e802c500b223bcb3d04045659208a3c"
+  }
+}

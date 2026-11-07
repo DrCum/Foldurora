@@ -472,8 +472,8 @@ const FILLED: &[(&str, &[u8])] = svg_list!(
     "zoom-scan",
 );
 
-/// Brand SVGs (white wolf silhouette of assets/branding/), drawn untinted or tinted.
-const BRAND_SVGS: &[(&str, &[u8])] = &[("wolf", include_bytes!("../../../../assets/branding/aurora-logo-white.svg"))];
+/// Full-color application artwork. Keep the historical key for compatible skins.
+const BRAND_PNGS: &[(&str, &[u8])] = &[("wolf", include_bytes!("../../../../assets/branding/foldurora-mark.png"))];
 
 /// Raster images kept as PNG (brand logo).
 const PNGS: &[(&str, &[u8])] = &[("phoenix_18", include_bytes!("../../assets/icons/phoenix_18.png"))];
@@ -752,11 +752,6 @@ pub(crate) fn embedded(name: &str) -> bool {
 /// Raster size of SVG icons (crisp up to ~2x UI scale at 24 px).
 const RASTER_PX: u32 = 64;
 
-/// Raster size of the brand wolf, drawn at 18 px (twice that at most with the
-/// UI scale). Sampled down from far larger without mipmaps, its thin aurora
-/// ribbons broke into jagged dots; resvg draws them clean at this size.
-const BRAND_RASTER_PX: u32 = 40;
-
 /// Last loaded icon set, for widgets drawn without access to the skin
 /// (floater title buttons).
 static GLOBAL: std::sync::RwLock<Option<HashMap<String, egui::TextureHandle>>> = std::sync::RwLock::new(None);
@@ -769,6 +764,7 @@ pub fn global(name: &str) -> Option<egui::TextureHandle> {
 #[derive(Default)]
 pub struct Icons {
     map: HashMap<String, egui::TextureHandle>,
+    brand_is_mask: bool,
 }
 
 fn rasterize_svg(bytes: &[u8], px: u32) -> Option<egui::ColorImage> {
@@ -841,6 +837,7 @@ impl Icons {
     /// Built-in icons, overridden/extended by PNG or SVG files in `override_dir`.
     pub fn load(ctx: &egui::Context, override_dir: Option<&std::path::Path>) -> Icons {
         let mut map: HashMap<String, egui::TextureHandle> = HashMap::new();
+        let mut brand_is_mask = false;
         let opts = egui::TextureOptions::LINEAR;
         for (name, bytes) in OUTLINE.iter().chain(FILLED) {
             match rasterize_svg(bytes, RASTER_PX) {
@@ -857,8 +854,10 @@ impl Icons {
                 log::warn!("icon {name}: invalid shortcut SVG");
             }
         }
-        for (name, bytes) in BRAND_SVGS {
-            if let Some(ci) = rasterize_svg(bytes, BRAND_RASTER_PX).map(center_on_content) {
+        for (name, bytes) in BRAND_PNGS {
+            // The folder's eyes and wings need their RGB data. Tabler glyphs
+            // above remain tintable masks; application artwork does not.
+            if let Some(ci) = decode_png(bytes).map(center_on_content) {
                 map.insert((*name).to_owned(), ctx.load_texture(*name, ci, opts));
             }
         }
@@ -890,6 +889,11 @@ impl Icons {
                     _ => None,
                 };
                 if let Some(ci) = ci {
+                    if stem == "wolf" {
+                        // Existing SVG skin overrides are theme-tinted masks;
+                        // PNG brand overrides retain their original colors.
+                        brand_is_mask = ext.as_deref() == Some("svg");
+                    }
                     map.insert(stem.to_owned(), ctx.load_texture(stem, ci, opts));
                 }
             }
@@ -897,11 +901,19 @@ impl Icons {
         if let Ok(mut g) = GLOBAL.write() {
             *g = Some(map.clone());
         }
-        Icons { map }
+        Icons { map, brand_is_mask }
     }
 
     pub fn get(&self, name: &str) -> Option<&egui::TextureHandle> {
         self.map.get(name)
+    }
+
+    pub fn brand_tint(&self, mask_tint: egui::Color32) -> egui::Color32 {
+        if self.brand_is_mask {
+            mask_tint
+        } else {
+            crate::ui::widgets::PICTURE_TINT
+        }
     }
 }
 
@@ -915,6 +927,20 @@ mod tests {
             let ci = rasterize_svg(bytes, 32).unwrap_or_else(|| panic!("{name} failed"));
             assert!(ci.pixels.iter().any(|p| p.a() > 0), "{name} is empty");
         }
+    }
+
+    #[test]
+    fn application_mark_keeps_opaque_colors_and_transparent_background() {
+        let image = decode_png(BRAND_PNGS[0].1).expect("the application mark is a committed PNG");
+        let image = center_on_content(image);
+        let colors: std::collections::BTreeSet<_> = image
+            .pixels
+            .iter()
+            .filter(|pixel| pixel.a() == 255)
+            .map(|pixel| [pixel.r(), pixel.g(), pixel.b()])
+            .collect();
+        assert!(colors.len() > 8, "brand artwork must not become a white alpha mask");
+        assert!(image.pixels.iter().any(|pixel| pixel.a() == 0));
     }
 
     #[test]

@@ -180,7 +180,7 @@ function Invoke-Logs {
 function Invoke-Shortcut {
     Write-Title 'Shortcuts to the Aurora tools'
     $target = Join-Path $Paths.Repo 'aurora-tools.cmd'
-    $icon = Join-Path $Paths.Repo 'assets\branding\aurora.ico'
+    $icon = Join-Path $Paths.Repo 'assets\branding\foldurora.ico'
     $places = @(
         @{ Name = 'Desktop'; Dir = [Environment]::GetFolderPath('Desktop') }
         @{ Name = 'Start menu'; Dir = [Environment]::GetFolderPath('Programs') }

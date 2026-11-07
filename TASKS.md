@@ -1,5 +1,13 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Foldurora application artwork (human request, 2026-11-06; no issue): use
+  the supplied purple folder SVG for application and toolbar branding, preserving
+  its colors and transparency. Add multi-resolution Windows and macOS icons,
+  desktop SVG, small cached startup icons for CPU/main windows, and full-color
+  menu artwork without changing Tabler controls or product/desktop identifiers.
+  Source/asset validation is recorded in `assets/branding/FOLDURORA.md`;
+  integrated compilation and native icon acceptance remain pending.
+
 - 🔧 Compact session-host controls (human request, 2026-11-06; no issue): replace
   the permanent roster and large heading with one 38-point profile/action/character
   strip, following `layoutCharacters` in `tools/session-host/main.cpp`. Keep

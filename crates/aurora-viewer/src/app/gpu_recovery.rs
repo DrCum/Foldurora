@@ -24,9 +24,12 @@ impl App {
             .with_active(plan.active)
             .with_inner_size(plan.size)
             .with_min_inner_size(winit::dpi::LogicalSize::new(800, 560))
-            .with_fullscreen(plan.fullscreen.clone())
-            // none yet at start (it is decoded in the background)
-            .with_window_icon(self.window_icon.clone());
+            .with_fullscreen(plan.fullscreen.clone());
+        // Retain the small startup icon until the asynchronous large-logo
+        // decode completes, and reuse that decoded icon after recovery.
+        if let Some(icon) = &self.window_icon {
+            attrs = attrs.with_window_icon(Some(icon.clone()));
+        }
         if let Some(position) = plan.position {
             attrs = attrs.with_position(position);
         }

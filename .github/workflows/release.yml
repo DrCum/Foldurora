@@ -27,7 +27,7 @@ on:
       - packaging/linux/**
       - packaging/macos/**
       - scripts/package-macos.ps1
-      - assets/branding/aurora.icns
+      - assets/branding/foldurora.icns
       - scripts/verify-version.ps1
 
 # a new push to a pull request stops its previous dry run; a release (a
