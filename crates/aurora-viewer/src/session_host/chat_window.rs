@@ -8,8 +8,9 @@ use super::transport::HostController;
 use crate::theme::Theme;
 use crate::ui::fonts;
 use std::time::{Duration, Instant};
-use winit::event::WindowEvent;
+use winit::event::{ElementState, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
+use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowId};
 
 const MIN_FRAME: Duration = Duration::from_millis(33);
@@ -22,6 +23,7 @@ pub(super) struct ChatWindow {
     last_frame: Option<Instant>,
     blocked: bool,
     pending_textures: egui::TexturesDelta,
+    native_modifiers: ModifiersState,
 }
 
 impl ChatWindow {
@@ -47,6 +49,7 @@ impl ChatWindow {
             last_frame: None,
             blocked: false,
             pending_textures: Default::default(),
+            native_modifiers: ModifiersState::empty(),
         })
     }
 
@@ -75,15 +78,15 @@ impl ChatWindow {
             return;
         };
         if let Some(edits) = edit_prefix(&mut raw, Some(composer), egui::Popup::is_any_open(&self.context)) {
-            self.apply_edits(edits, model);
+            self.apply_edits(edits, model, InputMode::Closing);
         }
-        self.apply_edits(edit_input(raw), model);
+        self.apply_edits(edit_input(raw), model, InputMode::Closing);
     }
 
-    fn apply_edits(&mut self, raw: egui::RawInput, model: &mut SharedChat) {
+    fn apply_edits(&mut self, raw: egui::RawInput, model: &mut SharedChat, mode: InputMode) {
         let palette = self.theme.palette();
         let mut output = self.context.run_ui(raw, |ui| {
-            let _ = model.show(ui, &palette, InputMode::Closing);
+            let _ = model.show(ui, &palette, mode);
         });
         // A navigation flush reuses this context. Keep any new font/image
         // uploads until the following visible pass instead of losing them.
@@ -107,6 +110,16 @@ impl ChatWindow {
         if matches!(event, WindowEvent::Destroyed) {
             model.cancel_gestures();
             return Ok(true);
+        }
+        match event {
+            WindowEvent::ModifiersChanged(modifiers) => self.native_modifiers = modifiers.state(),
+            WindowEvent::Focused(false) => self.native_modifiers = ModifiersState::empty(),
+            _ => {}
+        }
+        if let WindowEvent::KeyboardInput { event, .. } = event
+            && suppress_enter_repeat(&event.logical_key, event.state, event.repeat, self.native_modifiers)
+        {
+            return Ok(false);
         }
         if matches!(event, WindowEvent::Focused(false)) {
             self.flush_edits(controller, model);
@@ -166,7 +179,7 @@ impl ChatWindow {
             egui::Popup::is_any_open(&self.context),
         ) {
             suppress_send |= edits.events.iter().any(|event| matches!(event, egui::Event::Ime(_)));
-            self.apply_edits(edits, model);
+            self.apply_edits(edits, model, InputMode::Editing);
         }
         let context = self.context.clone();
         let palette = self.theme.palette();
@@ -190,6 +203,17 @@ impl ChatWindow {
         }
         Ok(())
     }
+}
+
+/// ComposerReturn::character (indra/newview/fssessionchatbehavior.h) rejects
+/// OS repeats. egui-winit drops this flag and egui clears its held-key set on
+/// focus loss, so reject send repeats before either can make them look fresh.
+/// Shift+Enter remains an ordinary multiline editing key.
+pub(super) fn suppress_enter_repeat(key: &winit::keyboard::Key, state: ElementState, repeat: bool, modifiers: ModifiersState) -> bool {
+    *key == winit::keyboard::Key::Named(winit::keyboard::NamedKey::Enter)
+        && state == ElementState::Pressed
+        && repeat
+        && !modifiers.shift_key()
 }
 
 /// Drain delivered editing input before close/focus loss, without turning a

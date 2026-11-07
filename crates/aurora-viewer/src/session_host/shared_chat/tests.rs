@@ -1,5 +1,5 @@
 use super::*;
-use crate::session_host::chat_window::{edit_input, edit_prefix};
+use crate::session_host::chat_window::{edit_input, edit_prefix, suppress_enter_repeat};
 use crate::session_host::slots::{SlotLabel, SlotSummary};
 use crate::session_host::transport::WorkerSummary;
 use aurora_session::chat::{ChatKey, Conversation, ConversationInfo, NativeChatPolicy, SendOutcome, SendReceipt};
@@ -157,7 +157,7 @@ impl Frames {
         {
             let ime = edits.events.iter().any(|event| matches!(event, Event::Ime(_)));
             let mut output = self.context.run_ui(edits, |ui| {
-                assert!(self.model.show(ui, &palette, InputMode::Closing).is_none());
+                assert!(self.model.show(ui, &palette, InputMode::Editing).is_none());
             });
             output.textures_delta.clear();
             if ime {
@@ -498,6 +498,10 @@ fn shared_chat_source_popup_replacement_cancels_its_held_row() {
 fn shared_chat_enter_is_fresh_focus_bound_and_suppressed_by_popup_modal_or_ime() {
     let mut frames = Frames::new();
     frames.type_text("Explicit draft");
+    // egui derives repeat from its held-key set, ignoring the raw repeat flag.
+    // Begin with a real press rejected by the modal/navigation gate, then hold.
+    let raw = frames.raw(vec![key(Key::Enter, true, false, Modifiers::NONE)]);
+    assert!(frames.pass(raw, InputMode::Navigating).is_none());
     assert!(frames.show(vec![key(Key::Enter, true, true, Modifiers::NONE)]).is_none());
     frames.show(vec![key(Key::Enter, false, false, Modifiers::NONE)]);
     let raw = frames.raw(vec![key(Key::Enter, true, false, Modifiers::NONE)]);
@@ -535,6 +539,55 @@ fn shared_chat_enter_is_fresh_focus_bound_and_suppressed_by_popup_modal_or_ime()
     egui::Popup::close_all(&frames.context);
     frames.click(Id::unique("host_chat_input_rect"));
     assert!(frames.show(vec![key(Key::Enter, true, false, Modifiers::NONE)]).is_some());
+}
+
+#[test]
+fn shared_chat_native_enter_repeat_remains_suppressed_after_focus_loss() {
+    use winit::event::ElementState;
+    use winit::keyboard::{Key as NativeKey, ModifiersState, NamedKey};
+
+    let mut frames = Frames::new();
+    frames.type_text("Held across focus loss");
+    let native_enter = |pressed, repeat, shift| {
+        let state = if pressed { ElementState::Pressed } else { ElementState::Released };
+        let modifiers = if shift { ModifiersState::SHIFT } else { ModifiersState::empty() };
+        // Use the production native boundary before egui-winit's conversion,
+        // which always delivers repeat:false and lets egui infer held keys.
+        if suppress_enter_repeat(&NativeKey::Named(NamedKey::Enter), state, repeat, modifiers) {
+            Vec::new()
+        } else {
+            vec![key(
+                Key::Enter,
+                pressed,
+                false,
+                if shift { Modifiers::SHIFT } else { Modifiers::NONE },
+            )]
+        }
+    };
+    assert!(
+        frames.show(native_enter(true, true, false)).is_none(),
+        "a surface may first observe an OS repeat"
+    );
+    assert!(frames.show(native_enter(true, false, true)).is_none());
+    assert!(frames.show(native_enter(true, true, true)).is_none());
+    frames.show(native_enter(false, false, true));
+    frames.show(vec![Event::Text("Still here".into())]);
+    let raw = frames.raw(native_enter(true, false, false));
+    assert!(frames.pass(raw, InputMode::Navigating).is_none());
+    let mut raw = frames.raw(vec![Event::WindowFocused(false)]);
+    raw.focused = false;
+    assert!(frames.pass(raw, InputMode::Live).is_none());
+    frames.show(vec![Event::WindowFocused(true)]);
+    frames.click(Id::unique("host_chat_input_rect"));
+    assert!(
+        frames.show(native_enter(true, true, false)).is_none(),
+        "focus loss cleared egui's held-key set"
+    );
+    frames.show(native_enter(false, false, false));
+    assert_eq!(
+        frames.show(native_enter(true, false, false)).unwrap().text.as_str(),
+        "Held across focus loss\n\nStill here"
+    );
 }
 
 #[test]

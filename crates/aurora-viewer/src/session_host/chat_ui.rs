@@ -40,6 +40,9 @@ enum Warning {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum InputMode {
     Live,
+    /// Apply an ordered edit prefix without actions. Keep the full enabled
+    /// layout: egui hit-tests the following navigation against this pass.
+    Editing,
     /// A selection changed this pass: show its state without interpreting
     /// input that began in the preceding conversation or character.
     Navigating,
@@ -503,13 +506,14 @@ impl ChatUi {
                     aurora_i18n::tr!("host-chat-send"),
                     ActionKind::Primary,
                     vec2(0.0, 30.0),
-                    ready && mode == InputMode::Live && focused && !focus_changed && !navigating && !popup_open && !self.ime_composing && !ime_event,
+                    ready && matches!(mode, InputMode::Live | InputMode::Editing) && focused && !focus_changed && !navigating && !popup_open && !self.ime_composing && !ime_event,
                 )).inner;
                 #[cfg(test)]
                 ui.ctx()
                     .data_mut(|data| data.insert_temp(Id::unique("host_chat_send_rect"), send.rect));
                 let text = if shortcut { shortcut_text } else { text };
                 if editable
+                    && mode == InputMode::Live
                     && (send.clicked() || shortcut)
                     && let (Some(policy), Some(text)) = (self.policy, text)
                 {
@@ -561,7 +565,7 @@ impl ChatUi {
                                 && info.policy.ready
                         }) {
                             let response = ui
-                                .add_enabled_ui(mode == InputMode::Live, |ui| {
+                                .add_enabled_ui(matches!(mode, InputMode::Live | InputMode::Editing), |ui| {
                                     ui.push_id(policy_id(info.policy), |ui| {
                                         ui.selectable_value(&mut picked, info.policy.key.conversation, info.title.as_str())
                                     })
@@ -582,7 +586,9 @@ impl ChatUi {
                 .data_mut(|data| data.insert_temp(Id::unique("host_chat_combo_rect"), combo.response.rect));
             #[cfg(not(test))]
             let _ = combo;
-            self.select(picked);
+            if mode == InputMode::Live {
+                self.select(picked);
+            }
         });
         self.sync(snapshot);
         let conversation_changed = std::mem::take(&mut self.changed);

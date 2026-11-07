@@ -185,7 +185,7 @@ impl SharedChat {
             if mode != InputMode::Closing {
                 source_selector(ui, p, &entries, selected, &mut picked, mode);
             }
-            picked != selected
+            mode == InputMode::Live && picked != selected
         };
         let action = if let Some(state) = self.states.iter_mut().find(|state| Some(state.ui.source()) == selected) {
             let body_mode = if changed && mode == InputMode::Live {
@@ -205,7 +205,7 @@ impl SharedChat {
                 });
             None
         };
-        if picked != selected {
+        if mode == InputMode::Live && picked != selected {
             if let Some(source) = picked {
                 self.select(source);
                 ui.ctx().request_repaint();
@@ -232,7 +232,7 @@ fn source_selector(
     egui::Panel::top(Id::unique("shared_chat_source"))
         .frame(crate::ui::widgets::overlay_frame(ui.ctx(), p))
         .show(ui, |ui| {
-            if mode != InputMode::Live {
+            if !matches!(mode, InputMode::Live | InputMode::Editing) {
                 ui.disable();
             }
             ui.label(RichText::new(aurora_i18n::tr!("host-chat-send-as")).strong());
