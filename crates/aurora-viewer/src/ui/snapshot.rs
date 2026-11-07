@@ -2247,6 +2247,82 @@ mod tests {
     }
 
     #[test]
+    fn actual_viewfinder_header_leaves_the_guide_control_clickable() {
+        let mut f = ViewportPhotoFixture::new_at_scale(false, 1.0, 1.0);
+        f.native_size = (2048, 1080);
+        f.viewport.left = 50.0;
+        f.viewport.right = 0.0;
+        f.viewport.top = 0.0;
+        f.viewport.bottom = 0.0;
+        f.scene = PhotoScene::Viewfinder;
+        f.settings.viewfinder.display = crate::snapshot::viewfinder::Display::Full;
+        f.viewfinder.hinted = true;
+        f.frames(5);
+        let area = |name| f.ctx.memory(|m| m.area_rect(egui::Id::unique(name))).expect("actual header area");
+        let guide = area("vf_top_left");
+        let header = area("vf_top_right");
+        let before = f.settings.guide;
+        f.click(guide.center());
+        assert_ne!(f.settings.guide, before, "header intercepts the actual guide button");
+        assert!(
+            !guide.intersects(header),
+            "header's blank hit region covers the guide: {header:?} over {guide:?}"
+        );
+    }
+
+    #[test]
+    fn actual_viewfinder_overflow_ring_wheel_changes_focal_without_scrolling_its_container() {
+        let mut f = ViewportPhotoFixture::new_at_scale(false, 1.0, 1.0);
+        f.native_size = (2048, 1080);
+        f.viewport.left = 50.0;
+        f.viewport.right = 0.0;
+        f.viewport.top = 50.0;
+        f.viewport.bottom = 45.0;
+        f.scene = PhotoScene::Viewfinder;
+        f.settings.viewfinder.display = crate::snapshot::viewfinder::Display::Essential;
+        f.settings.viewfinder.controls = crate::snapshot::viewfinder::OnScreen::Always;
+        f.viewfinder.hinted = true;
+        f.fov = crate::snapshot::fov_of_focal(50.0);
+        f.frames(5);
+        let ruler = |shapes: Vec<egui::epaint::ClippedShape>| {
+            let p = crate::theme::Theme::default().palette();
+            shapes
+                .into_iter()
+                .find_map(|shape| match shape.shape {
+                    egui::Shape::Rect(rect) if rect.rect.height() == 46.0 && rect.fill == p.navy.gamma_multiply(0.35) => Some(rect.rect),
+                    _ => None,
+                })
+                .expect("painted lens ruler")
+        };
+        let bounds = f.control_bounds();
+        let point = Pos2::new(bounds.center().x, bounds.bottom() - 3.0);
+        let before = ruler(f.show(vec![egui::Event::PointerMoved(point)]));
+        assert!(
+            before.contains(point),
+            "pointer must be on the visible part of the overflowing ruler"
+        );
+        assert_eq!(
+            f.ctx.layer_id_at(point),
+            Some(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("vf_ring")))
+        );
+        let fov = f.fov;
+        f.show(vec![egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Line,
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Unknown,
+            delta: Vec2::new(0.0, -1.0),
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        assert!(f.fov > fov, "the wheel must adjust the actual focal length");
+        f.frames(8);
+        let after = ruler(f.show(Vec::new()));
+        assert!(
+            (after.top() - before.top()).abs() < 0.5,
+            "one wheel also scrolled the ring: {before:?} -> {after:?}"
+        );
+    }
+
+    #[test]
     fn actual_snapshot_panel_and_classic_window_keep_full_frame_output_independent_of_tool_bounds() {
         for classic in [false, true] {
             for restricted in [false, true] {
