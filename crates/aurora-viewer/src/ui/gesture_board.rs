@@ -11,7 +11,7 @@ use crate::{
     theme::Palette,
     world::inventory::{Inventory, actions::PlaybackItem},
 };
-use std::{collections::BTreeMap, time::Instant};
+use std::{collections::HashMap, time::Instant};
 
 #[derive(Clone)]
 pub(crate) enum Command {
@@ -82,8 +82,8 @@ pub(crate) struct State {
     dialog: Option<Dialog>,
     last_press: Option<u64>,
     frame: Option<u64>,
-    painted: BTreeMap<egui::Id, Painted>,
-    building: BTreeMap<egui::Id, Painted>,
+    painted: HashMap<egui::Id, Painted>,
+    building: HashMap<egui::Id, Painted>,
     composing: bool,
     input_blocked: bool,
     suspended: bool,
@@ -95,7 +95,6 @@ impl State {
         self.retire_focus = self
             .focus
             .filter(|id| self.painted.contains_key(id) || self.building.contains_key(id))
-            .or_else(|| self.building.iter().find_map(|(id, painted)| painted.focused.then_some(*id)))
             .or(self.retire_focus);
         self.owner = None;
         self.composing = false;
@@ -171,6 +170,13 @@ impl State {
         {
             self.held = None;
         }
+        // Remember the actual final focus, never a map iteration's first row.
+        // The maps are identity lookups; their iteration order has no UI role.
+        let focus = ctx.memory(|memory| memory.focused());
+        if self.held.as_ref().is_some_and(|held| held.key.is_some() && focus != Some(held.id)) {
+            self.held = None;
+        }
+        self.focus = focus;
     }
     fn capture(&mut self, response: &egui::Response, make: impl FnOnce() -> Option<Action>) -> Option<Action> {
         let frame = response.ctx.cumulative_frame_nr();
@@ -458,13 +464,13 @@ pub(crate) fn show(ctx: &egui::Context, p: &Palette, state: &mut State, open: &m
         state.cancel();
         return None;
     }
-    if let Some(a) = output.take() {
-        let dialog = match a.command {
+    if let Some(Action { proof, revision, command }) = output.take() {
+        let dialog = match command {
             Command::BeginNew => Some((None, false, String::new())),
             Command::BeginRename(id) => data.and_then(|d| d.board(id)).map(|b| (Some(id), false, b.name.clone())),
             Command::BeginDelete(id) => data.and_then(|d| d.board(id)).map(|b| (Some(id), true, b.name.clone())),
             _ => {
-                output = Some(a);
+                output = Some(Action { proof, revision, command });
                 None
             }
         };
@@ -473,8 +479,8 @@ pub(crate) fn show(ctx: &egui::Context, p: &Palette, state: &mut State, open: &m
             state.painted.clear();
             state.building.clear();
             state.dialog = Some(Dialog {
-                origin: a.proof,
-                revision: a.revision,
+                origin: proof,
+                revision,
                 board,
                 delete,
                 name,
