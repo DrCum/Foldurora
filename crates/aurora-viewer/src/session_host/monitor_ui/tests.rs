@@ -785,7 +785,7 @@ fn monitor_body_draws_only_current_admitted_source_and_actual_texture_namespace_
     f.bodies[0].context = f.contexts[1].clone();
     f.model.close(View::Fixed1).unwrap();
     f.model
-        .open_fixed(Source::new(SlotId::try_from(1).unwrap(), source(2), true).unwrap())
+        .open_fixed(Source::new(SlotId::try_from(1).unwrap(), self::source(2), true).unwrap())
         .unwrap();
     let frame = draw_private(&mut f, 1, &mut slot, &admitted.admitted);
     assert!(
@@ -805,7 +805,7 @@ fn monitor_bound_facade_clears_latent_ui_read_on_mismatch_and_preserves_queued_o
         let context = f.contexts[1].clone();
         let palette = crate::theme::Theme::default().palette();
         let surface = View::Fixed1.surface();
-        let mut bound = |f: &mut Frames, expected, events| {
+        let bound = |f: &mut Frames, expected, events| {
             f.frame += 1;
             f.chat.sync(&f.host, false);
             let raw = RawInput {

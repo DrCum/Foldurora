@@ -13,7 +13,7 @@ fn slot(budget: &UiPixelBudget) -> PrivateImageSlot {
     slot.stage(1, image(budget, [255, 0, 0, 255])).unwrap();
     slot
 }
-fn frame(slot: &mut PrivateImageSlot) -> (Context, PrivateFrame) {
+fn fixture_frame(slot: &mut PrivateImageSlot) -> (Context, PrivateFrame) {
     let context = slot.context.clone();
     let frame = slot
         .draw(
@@ -112,7 +112,7 @@ fn private_cpu_slot_coalesces_one_pending_and_old_callbacks_do_not_mutate_new_ow
 fn private_cpu_painter_borrows_real_pixels_without_cache_or_texture_manager_entries() {
     let budget = UiPixelBudget::new();
     let mut slot = slot(&budget);
-    let (context, frame) = frame(&mut slot);
+    let (context, frame) = fixture_frame(&mut slot);
     assert!(!frame.output().shapes.is_empty());
     let (ticket, mut output) = frame.into_parts();
     assert!(!output.textures_delta.set.contains_key(&slot.texture));
@@ -155,7 +155,7 @@ fn private_cpu_visual_fixture_consumes_only_exact_sealed_frame_and_current_admis
     let mut slot = slot(&budget);
     let mut painter = crate::crash::software::Painter::default();
     let mut pixels = [0; 16];
-    let (context, old) = frame(&mut slot);
+    let (context, old) = fixture_frame(&mut slot);
     let mut inspected_clone = old.output().clone();
     slot.stage(1, image(&budget, [0, 255, 0, 255])).unwrap();
     assert_eq!(
@@ -166,11 +166,11 @@ fn private_cpu_visual_fixture_consumes_only_exact_sealed_frame_and_current_admis
     // Inspection/cloning supplies no sealed ticket or frame constructor. It
     // cannot be submitted to paint_fixture or attached to a fresh local frame.
     inspected_clone.textures_delta.clear();
-    let (context, fresh) = frame(&mut slot);
+    let (context, fresh) = fixture_frame(&mut slot);
     slot.paint_fixture(&context, fresh, &mut painter, &mut pixels, [4, 4], Color32::BLACK, &mut || true)
         .unwrap();
     assert!(pixels.iter().all(|pixel| *pixel == 0x00ff00));
-    let (context, denied) = frame(&mut slot);
+    let (context, denied) = fixture_frame(&mut slot);
     pixels.fill(0);
     assert_eq!(
         slot.paint_fixture(&context, denied, &mut painter, &mut pixels, [4, 4], Color32::BLACK, &mut || false),
@@ -322,20 +322,20 @@ fn private_cpu_surface_charges_physical_resize_overlap_and_keeps_minimized_bitma
     let budget = UiPixelBudget::new();
     let trace = Rc::new(RefCell::new(Trace::default()));
     let mut owner = PrivateSoftwareSurface::new(FakeSurface::new(budget.clone(), trace.clone()), slot(&budget));
-    let (context, frame) = frame(&mut owner.slot);
+    let (context, frame) = fixture_frame(&mut owner.slot);
     owner
         .present(&(), &context, frame, &mut || true, &mut |_, raw| flush(&trace, raw))
         .unwrap();
     assert_eq!(budget.used(), 16 + 4 * 4 * 4);
     assert_eq!(trace.borrow().last_uniform_color, Some(0xff0000));
     owner.native.as_mut().unwrap().size = [8, 8]; // physical DPI/native resize, not source image dimensions
-    let (context, frame) = frame(&mut owner.slot);
+    let (context, frame) = fixture_frame(&mut owner.slot);
     owner
         .present(&(), &context, frame, &mut || true, &mut |_, raw| flush(&trace, raw))
         .unwrap();
     assert_eq!(budget.used(), 16 + 8 * 8 * 4);
     owner.native.as_mut().unwrap().size = [0, 0];
-    let (context, frame) = frame(&mut owner.slot);
+    let (context, frame) = fixture_frame(&mut owner.slot);
     owner
         .present(&(), &context, frame, &mut || true, &mut |_, raw| flush(&trace, raw))
         .unwrap();
@@ -353,7 +353,7 @@ fn private_cpu_surface_stale_frame_cannot_draw_or_close_newer_image_and_failures
         let budget = UiPixelBudget::new();
         let trace = Rc::new(RefCell::new(Trace::default()));
         let mut owner = PrivateSoftwareSurface::new(FakeSurface::new(budget.clone(), trace.clone()), slot(&budget));
-        let (context, mut old) = frame(&mut owner.slot);
+        let (context, mut old) = fixture_frame(&mut owner.slot);
         let ordinary = TextureId::Managed(999);
         old.output.textures_delta.push(
             ordinary,
@@ -369,7 +369,7 @@ fn private_cpu_surface_stale_frame_cannot_draw_or_close_newer_image_and_failures
             owner.slot.pending_ui.set.contains_key(&ordinary),
             "same-context ordinary font upload survives discarded geometry"
         );
-        let (context, frame) = frame(&mut owner.slot);
+        let (context, frame) = fixture_frame(&mut owner.slot);
         owner
             .present(&(), &context, frame, &mut || true, &mut |_, raw| flush(&trace, raw))
             .unwrap();
@@ -378,7 +378,7 @@ fn private_cpu_surface_stale_frame_cannot_draw_or_close_newer_image_and_failures
         if final_denial {
             owner.native.as_mut().unwrap().size = [8, 8];
         }
-        let (context, frame) = frame(&mut owner.slot);
+        let (context, frame) = fixture_frame(&mut owner.slot);
         let mut checks = 0;
         let result = owner.present(
             &(),
@@ -412,13 +412,13 @@ fn private_cpu_surface_budget_exhaustion_refuses_resize_without_unaccounted_bitm
     let budget = UiPixelBudget::new();
     let trace = Rc::new(RefCell::new(Trace::default()));
     let mut owner = PrivateSoftwareSurface::new(FakeSurface::new(budget.clone(), trace.clone()), slot(&budget));
-    let (context, frame) = frame(&mut owner.slot);
+    let (context, frame) = fixture_frame(&mut owner.slot);
     owner
         .present(&(), &context, frame, &mut || true, &mut |_, raw| flush(&trace, raw))
         .unwrap();
     let held = budget.reserve(UI_PIXEL_BYTES - budget.used() - 64).unwrap();
     owner.native.as_mut().unwrap().size = [8, 8];
-    let (context, frame) = frame(&mut owner.slot);
+    let (context, frame) = fixture_frame(&mut owner.slot);
     assert_eq!(
         owner.present(&(), &context, frame, &mut || true, &mut |_, raw| flush(&trace, raw)),
         Err(Error::Capacity)
@@ -438,7 +438,7 @@ fn private_cpu_surface_unwind_retires_retained_owner_and_keeps_bitmap_credits_th
         let budget = UiPixelBudget::new();
         let trace = Rc::new(RefCell::new(Trace::default()));
         let mut owner = PrivateSoftwareSurface::new(FakeSurface::new(budget.clone(), trace.clone()), slot(&budget));
-        let (context, first) = frame(&mut owner.slot);
+        let (context, first) = fixture_frame(&mut owner.slot);
         owner
             .present(&(), &context, first, &mut || true, &mut |_, raw| flush(&trace, raw))
             .unwrap();
@@ -455,7 +455,7 @@ fn private_cpu_surface_unwind_retires_retained_owner_and_keeps_bitmap_credits_th
             owner.native.as_mut().unwrap().size = [8, 8];
             owner.native.as_mut().unwrap().panic_size = failure == "size";
             owner.native.as_mut().unwrap().panic_paint = failure == "paint";
-            let (context, mut next) = frame(&mut owner.slot);
+            let (context, mut next) = fixture_frame(&mut owner.slot);
             // A pending ordinary upload must not cause a second panic while
             // the original permission/native failure is being unwound.
             next.output.textures_delta.push(
@@ -512,7 +512,7 @@ fn private_cpu_minimized_nonzero_client_size_never_queries_size_allocates_or_pre
     let budget = UiPixelBudget::new();
     let trace = Rc::new(RefCell::new(Trace::default()));
     let mut owner = PrivateSoftwareSurface::new(FakeSurface::new(budget.clone(), trace.clone()), slot(&budget));
-    let (context, first) = frame(&mut owner.slot);
+    let (context, first) = fixture_frame(&mut owner.slot);
     owner
         .present(&(), &context, first, &mut || true, &mut |_, raw| flush(&trace, raw))
         .unwrap();
@@ -520,7 +520,7 @@ fn private_cpu_minimized_nonzero_client_size_never_queries_size_allocates_or_pre
     native.minimized = true;
     native.size = [8, 8];
     native.panic_size = true; // IsIconic must win over even a nonzero client rect.
-    let (context, next) = frame(&mut owner.slot);
+    let (context, next) = fixture_frame(&mut owner.slot);
     assert_eq!(
         owner
             .present(&(), &context, next, &mut || true, &mut |_, raw| flush(&trace, raw))
