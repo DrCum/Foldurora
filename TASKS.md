@@ -1,17 +1,32 @@
 # Aurora Viewer — task tracking
 
-- 🔧 Viewfinder dock and input (human report, 2026-11-07; task `camera-input-dock`; no issue): keep the vertical dock at the selected control canvas's right edge, bound header mouse areas, keep guide/ring input independent, and preserve exact toolbar restriction scope. Actual egui tests reproduced the oversized old header, blocked guide, and simultaneous lens/container wheel action; all six initial integrated checks pass after the fixes. Very short canvases retain positive scroll bounds and clipped decoration; ring/value/pad wheel belongs to the controls, with scrollbar/touch access retained. Final full-workspace checks, the expanded header-width matrix, normal build and native Windows/camera acceptance remain pending. See [the candidate guide](docs/FOLDURORA.md).
-  `camera-input-dock`; no issue): constrain the centred dock column to the
-  shutter's width so its foreground area no longer covers world input. Anchor
-  it at the right edge of the selected control canvas, retaining unrestricted
-  full-workspace controls when the toolbar restriction is off. Keep the lens
-  ring centred, clear of the dock and responsive at narrow widths; give the AF
-  choices their own row when the lens values need the bottom row, and bound
-  scrolling/help/menu controls. The scene/export projection, frozen frame,
-  wheel/dial semantics and ordinary floaters remain unchanged. Real egui
-  regressions exercise pointer ownership, drawer cycles, lens +/- and wheel,
-  aperture-to-focal selection, narrow widths and fractional DPI/zoom.
-  Integration checks, native visual checks and human Windows acceptance pending.
+- 🔧 Shared Chat first stage (Folderstorm port, 2026-11-07; no issue): one owned
+  CPU window explicitly selects a character and its Nearby/existing resident IM,
+  with one Shell-owned canonical composer per complete source (at most five).
+  Slot labels remain separate from actual account/grid identity. All retained
+  sources synchronize policy/receipt loss while closed or minimized; source loss
+  purges text/Undo without choosing another sender. Captured-key admission never
+  follows a later selection or replays uncertainty. Exact widget/allocation IDs,
+  ordered edit draining and fresh Enter/Shift+Enter/IME guards fence navigation,
+  focus and Close. Seventeen new actual-egui/model regressions and an ignored
+  EN/FR/JA CPU fixture are authored; direct formatting/diff checks pass, while
+  compiled tests, captures, native Windows and human grid acceptance are pending.
+  No protocol, Group/New IM/contacts, read acknowledgment or monitor capability
+  is added. See [docs/SESSION_HOST.md](docs/SESSION_HOST.md).
+
+- 🔧 Viewfinder dock and input (human report, 2026-11-07; task
+  `camera-input-dock`; no issue): keep the dock at the selected control canvas's
+  right edge, bound header mouse areas and preserve independent guide/ring input
+  with the exact toolbar restriction scope. Narrow/short canvases retain positive
+  scroll bounds, clipped decoration and separate AF/value rows. Ring/value/pad
+  wheel belongs to those controls; scrollbar/touch access and ordinary floaters
+  remain. Frozen `6a3009f2` passed all six actual-egui checks, including drawer
+  cycles, aperture-to-focal selection and fractional DPI/zoom. Its full Linux run
+  was 7,907 passed, one inherited terrain GPU precision failure, 50 ignored;
+  formatting, lint and normal build passed. Native camera and human Windows
+  acceptance remain pending. These receipts do not validate later combined source.
+  Scene/export projection and camera/dial semantics are retained. See
+  [the candidate guide](docs/FOLDURORA.md).
 
 - 🔧 Selective upstream catch-up (human request, 2026-11-07; no issue): apply
   sixteen reviewed upstream commits individually with `-x` to frozen photo/

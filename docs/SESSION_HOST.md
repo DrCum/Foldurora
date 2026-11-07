@@ -108,20 +108,34 @@ compatibility is claimed.
   first detaches the fitted worker so host geometry is not saved as the user's
   ordinary window placement.
 - The native inactive-chat path is connected for literal Nearby and existing
-  resident IM conversations, with its CPU tool window bound to one immutable
-  source. It needs integrated tests/native acceptance before publication; groups,
+  resident IM conversations. One CPU Shared Chat tool explicitly selects among
+  the five live character sources and their initialized conversations. It needs
+  integrated tests/native acceptance before publication; groups,
   offers and other interactive actions are not exported. Controls require a live
   authenticated worker and actual native permission metadata. A distinct private
   bootstrap key authenticates both socket peers; chat text never enters IPC
   files, logs or process arguments. IO is separate from control, and native
   restrictions/account/lease are checked again at submission. Uncertain sends
   are not automatically retried, and policy gaps purge cached text/titles.
-- Each popout retains separate bounded Nearby/existing-IM drafts and editor Undo
-  state under its exact source and native policy. Ordinary Close drops the native
-  surface while the host retains session UI state; reopening the same live source
-  restores it into a fresh context. Closed and minimized states still process
+- Each character/conversation retains its own bounded draft and editor Undo
+  state under its exact source and native policy. The host owns one canonical
+  composer per source; this first stage exclusively uses the shared window.
+  Future monitor or per-character views must borrow that state rather than copy
+  drafts, Undo or pending sends. Ordinary Close drops the native surface while
+  the host retains the model; reopening restores it into a fresh context.
+  Closed and minimized states still process
   policy/receipt updates. Lost authority discards affected text and Undo history;
   host shutdown ends all retention. No draft files or restart persistence are added.
+- Chat buttons select and focus the Shared Chat window. Its Send as selector
+  shows the slot label alongside the actual account and grid; world switching
+  never retargets it. An unavailable selected sender stays disabled until an
+  explicit available selection. Source/conversation browsing neither activates
+  the world nor acknowledges unread. Enter sends literal text, Shift+Enter adds
+  a line, and Ctrl/Command+Enter also sends. Held-key repeats, IME confirmation,
+  popup/modal input and target changes cannot submit a send. Delivered edits
+  before navigation/Close stay with the old sender; ambiguous input after a
+  navigation boundary is suppressed. A queued Cut is ignored on the close-only
+  pass so that discarding clipboard output cannot delete the draft.
 - Reduced-resolution monitors are a later stage; protocol/budget models or an
   uninvoked renderer backend alone are not that feature.
 
@@ -148,7 +162,14 @@ windows.
 Native Windows acceptance must check compact drop-downs/tooltips over the world,
 keyboard access, narrow/enlarged-UI controls, management open/close, and the same
 title-bar drag, switch and detach paths as the earlier host. The layout does not
-add shared Chat, Attention or preview monitors.
+add Attention or preview monitors. Shared Chat is a separate source stage,
+with compilation, synthetic captures and native acceptance still pending.
+
+The Shared Chat behavior follows the pinned reference's
+[`saveDraft` / `refreshChat` / `queueChat`](https://github.com/DrCum/Folderstorm/blob/abbe3cb0ca66ee2484f277219f6a27706fab7fc6/tools/session-host/main.cpp#L2980)
+and [`ComposerReturn`](https://github.com/DrCum/Folderstorm/blob/abbe3cb0ca66ee2484f277219f6a27706fab7fc6/indra/newview/fssessionchatbehavior.h#L11).
+This first stage does not offer inactive New IM, Friends, contacts, groups or
+read controls whose native transport is not implemented.
 
 ## Acceptance before recommending a build
 

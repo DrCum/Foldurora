@@ -28,7 +28,32 @@ single crate resolves the features of its dependencies on its own, so Cargo
 builds a second copy of them (`cargo test -p aurora-render` alone: 67 s of
 dependencies, then again for the next `--workspace` build).
 
-**CPU chat popout captures.**
+**Shared Chat CPU captures.**
+
+| Variable | Effect |
+|---|---|
+| `AURORA_SHARED_CHAT_VISUAL_DIR=<directory>` | Empty output directory for the ignored production Shared Chat CPU fixture |
+| `AURORA_SHARED_CHAT_VISUAL_LANGUAGE=en\|fr\|ja` | Locale of the isolated capture test process |
+
+These variables exist only under `cfg(test)` and add no executable startup mode.
+Run one locale per process with a fresh output directory:
+
+```powershell
+$env:AURORA_SHARED_CHAT_VISUAL_DIR = '.scratch/shared-chat-visual-fr'
+$env:AURORA_SHARED_CHAT_VISUAL_LANGUAGE = 'fr'
+cargo test --workspace shared_chat_cpu_visual_fixture -- --ignored --test-threads=1 --nocapture
+```
+
+The fixture uses the production `SharedChat`, real egui input and the same CPU
+painter as `SoftwareWindow`. Ten PNG/JSON pairs cover normal and narrow/150%
+identity, five duplicate-label source rows, pending admission, policy loss while
+closed followed by a fresh context, and an unavailable selected sender. Its
+manifest records painted labels and popup/control bounds. All sources and text
+are synthetic; no native window, controller, profile, socket, grid or GPU is
+created. Passing these checks does not establish native Windows focus/ownership
+or real-grid routing. Japanese captures require the installed CJK fallback font.
+
+**CPU chat component captures.**
 
 | Variable | Effect |
 |---|---|

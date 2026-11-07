@@ -96,9 +96,12 @@ Native permission gaps purge cached text and titles before fresh metadata.
 the owning App thread, including standby CPU ticks. The literal Nearby/existing
 resident-IM adapter rechecks actual World/account and native restrictions at
 submission. Its ledger survives socket reconnects, and an uncertain enqueue is
-never automatically resubmitted. `chat_window.rs`/`chat_ui.rs` provide CPU owned
-tool windows bound to one immutable source, with no taskbar entry or world
-activation. Only authenticated live native policies enable the controls. The
+never automatically resubmitted. `chat_window.rs` provides one disposable CPU
+tool window, with no taskbar entry or world activation. Shell's `SharedChat`
+owns at most five canonical, exact-source `ChatUi` composers independently of
+that surface. Its explicit character/conversation selectors never activate a
+world or acknowledge read; an unavailable selected source has no fallback.
+Only authenticated live native policies enable the controls. The
 active world's scheduling recognizes only its exact host PID/owned-window
 family; keyboard focus remains an independent native fact. Integrated builds,
 privacy/failure tests and native acceptance are required before publication.
@@ -106,17 +109,34 @@ privacy/failure tests and native acceptance are required before publication.
 `ChatUi` owns a bounded policy-stamped draft map, including each editor's Undo
 state. A pass moves editor state into egui only for its exact source/conversation/
 policy/incarnation and removes it afterward, so background authority changes can
-purge text without waiting for a repaint. `ChatUiCache` keeps moved session UI
-across ordinary native popout Close/reopen, revalidates closed states on every
-host poll, and drops them on source loss or shutdown. Native surfaces and contexts
-are disposable. Queue admission consumes only matching policy/text, never a newer
-draft; receipt uncertainty remains independent of conversation navigation.
+purge text without waiting for a repaint. Shell synchronizes every retained
+composer on every host poll, including while closed or minimized, and drops it
+on source loss or shutdown. Monotonic allocation epochs prevent a reauthenticated
+source from reusing a revoked editor's still-focused ID. Native surfaces and
+contexts are disposable. Queue admission routes by the captured full source and
+consumes only matching policy/text, never a newer draft; receipt uncertainty
+remains independent of conversation navigation.
+
+`chat_window::edit_prefix` drains delivered edits into the old focused composer
+before processing navigation, with ambiguous trailing input suppressed. Close
+uses an edit-only pass that cannot send or select a target; Cut is excluded
+because that pass produces no clipboard output. Font texture deltas survive
+same-context flushes. Exact source/conversation/policy widget IDs and gesture
+cancellation fence navigation, catalogue changes, focus loss and popup/modal
+input. Enter sends once, Shift+Enter inserts a line, and command-Enter remains
+supported; repeat and IME-confirmation keys do not send.
 
 The test-only `session_host/chat_ui/visual.rs` drives that same popout body with
 real egui input and paints through `crash::software::Painter`, as
 `SoftwareWindow` does. Its ignored, explicitly configured EN/FR/JA fixture
 writes synthetic PNG/JSON evidence without a native window, controller, profile,
 socket or graphics adapter. It does not replace native-window acceptance.
+
+`session_host/shared_chat/visual.rs` additionally captures the production shared
+source selector, duplicate labels with actual account/grid, pending receipt,
+policy-reopened and unavailable states at normal and narrow/150% layouts. Its
+locale-isolated ignored fixture writes ten synthetic PNG/JSON pairs per process;
+these captures and the new Shared Chat regressions still need root validation.
 
 `session_host/ui/visual.rs` similarly captures the production compact controller
 with five synthetic bound workers. Its explicit locale-isolated fixture covers
