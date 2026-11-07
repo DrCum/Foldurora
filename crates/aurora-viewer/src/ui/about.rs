@@ -87,6 +87,9 @@ pub struct Section {
 /// What the window shows, built by the app while it is open.
 pub struct AboutView<'a> {
     pub sections: Vec<Section>,
+    /// Separate from ordinary diagnostics; never painted/copied without the
+    /// current per-open choice, including on the pass that clears that choice.
+    pub location: Option<Section>,
     pub logo: Option<&'a egui::TextureHandle>,
 }
 
@@ -106,6 +109,32 @@ pub struct AboutUi {
     /// Scroll the tab to its end at the next frame (AURORA_DEMO_ABOUT's
     /// `:end`, to capture the last cards).
     pub scroll_to_end: bool,
+    location: LocationChoice,
+    was_open: bool,
+}
+
+#[derive(Default)]
+struct LocationChoice {
+    include: bool,
+    available: bool,
+    epoch: u64,
+    reset_paint: bool,
+    exhausted: bool,
+}
+impl LocationChoice {
+    fn reset(&mut self) {
+        self.include = false;
+        self.reset_paint = true;
+        if let Some(epoch) = self.epoch.checked_add(1) {
+            self.epoch = epoch;
+        } else {
+            self.exhausted = true;
+            self.available = false;
+        }
+    }
+    fn included(&self) -> bool {
+        self.include && self.available && !self.exhausted
+    }
 }
 
 /// The release page of this version, for a published version only (a
@@ -118,7 +147,7 @@ pub fn release_notes(version: &str) -> Option<String> {
 /// The text "Copy to clipboard" gives: the version, its release page, then
 /// a block per card, a line per value (LLFloaterAbout::getInfo's order,
 /// its English labels).
-pub fn copy_text(sections: &[Section]) -> String {
+pub fn copy_text<'a>(sections: impl IntoIterator<Item = &'a Section>) -> String {
     let version = aurora_version::version();
     let mut out = format!("Aurora Viewer {version}\n");
     if let Some(url) = release_notes(version) {
@@ -137,13 +166,48 @@ impl AboutUi {
     /// Open the window on `tab`.
     pub fn open(&mut self, ctx: &egui::Context, tab: Tab, open: &mut bool) {
         self.tab = tab;
+        self.location.reset();
+        self.copied_at = None;
+        self.value_copied = None;
         widgets::open_floater(ctx, WINDOW, open);
+    }
+
+    /// App supplies fresh actual source/region/readiness/privacy facts before
+    /// constructing the view. This UI state is memory-only, never a preference.
+    pub(crate) fn location_context(&mut self, available: bool, changed: bool) {
+        if changed || self.location.available != available {
+            self.location.reset();
+            self.copied_at = None;
+            self.value_copied = None;
+        }
+        self.location.available = available && !self.location.exhausted;
+    }
+    pub(crate) fn includes_location(&self) -> bool {
+        self.location.included()
+    }
+    pub(crate) fn closed(&mut self) {
+        if self.was_open {
+            self.location.reset();
+        }
+        self.location.available = false;
+        self.was_open = false;
+    }
+    fn visible_location<'a>(&self, view: &'a AboutView<'_>) -> Option<&'a Section> {
+        self.includes_location().then_some(view.location.as_ref()).flatten()
+    }
+    fn report_text(&self, view: &AboutView<'_>) -> String {
+        copy_text(view.sections.iter().chain(self.visible_location(view)))
     }
 
     /// Draw the window while `open`.
     pub fn show(&mut self, ctx: &egui::Context, p: &Palette, view: &AboutView, open: &mut bool) {
         if !*open {
+            self.closed();
             return;
+        }
+        if !self.was_open {
+            self.location.reset();
+            self.was_open = true;
         }
         let mut floater = Floater::new(
             WINDOW,
@@ -169,20 +233,38 @@ impl AboutUi {
             });
             ui.add_space(8.0);
             match self.tab {
-                Tab::Info => self.info(ui, p, &view.sections),
+                Tab::Info => self.info(ui, p, view),
                 Tab::Licences => licences(ui, p, std::mem::take(&mut self.scroll_to_end)),
             }
         });
+        if !*open {
+            self.closed();
+        }
     }
 
-    fn info(&mut self, ui: &mut egui::Ui, p: &Palette, sections: &[Section]) {
+    fn info(&mut self, ui: &mut egui::Ui, p: &Palette, view: &AboutView<'_>) {
         let now = Instant::now();
+        let reset_paint = std::mem::take(&mut self.location.reset_paint);
+        ui.push_id(("about_location_choice", self.location.epoch), |ui| {
+            ui.add_enabled_ui(self.location.available && !reset_paint, |ui| {
+                if widgets::checkbox(ui, p, &mut self.location.include, aurora_i18n::tr!("about-include-location")).changed() {
+                    self.copied_at = None;
+                    self.value_copied = None;
+                    ui.ctx().request_repaint();
+                }
+            });
+        });
+        ui.add(egui::Label::new(RichText::new(aurora_i18n::tr!("about-location-choice-hint")).small().color(p.muted)).wrap());
+        ui.add_space(6.0);
+        // Re-filter AFTER input: a prebuilt location card cannot survive a
+        // same-pass uncheck into either its row-copy or the full Copy action.
+        let location = self.visible_location(view);
         let (mut body, foot) = widgets::above_footer(ui);
         egui::ScrollArea::vertical()
             .id_salt("about_info")
             .auto_shrink([false, false])
             .show(&mut body, |ui| {
-                for (s, section) in sections.iter().enumerate() {
+                for (s, section) in view.sections.iter().chain(location).enumerate() {
                     let mut card = sheet::card_begin(ui);
                     let c = &mut card.child;
                     sheet::card_title(c, p, section.icon, aurora_i18n::text(section.title), None);
@@ -218,7 +300,7 @@ impl AboutUi {
                     button
                 });
                 if button.inner.clicked() {
-                    ui.ctx().copy_text(copy_text(sections));
+                    ui.ctx().copy_text(self.report_text(view));
                     self.copied_at = Some(now);
                 }
             });
@@ -475,5 +557,18 @@ mod tests {
                 aurora_i18n::text_in("en", "about-hidden-rlva")
             )
         );
+    }
+    #[test]
+    fn about_location_choice_reset_epoch_exhaustion_never_revives_disclosure() {
+        let mut ui = AboutUi::default();
+        ui.location_context(true, true);
+        ui.location.include = true;
+        assert!(ui.includes_location());
+        ui.location.epoch = u64::MAX;
+        ui.location_context(true, true);
+        assert!(!ui.includes_location());
+        ui.location_context(true, false);
+        assert!(!ui.includes_location());
+        assert!(ui.location.exhausted && !ui.location.available);
     }
 }

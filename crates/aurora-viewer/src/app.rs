@@ -8915,6 +8915,7 @@ impl App {
             if let Some(app_ev) = self.bridge_runtime.receive(&mut self.world, ev, Instant::now(), sent) {
                 self.on_app_event(app_ev);
             }
+            self.observe_about_location();
             if workspace_boundary {
                 self.workspace_tick();
             }
