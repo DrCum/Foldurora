@@ -160,7 +160,13 @@ precision failure, 56 ignored**, with all **333 required names passing once**.
 All **90 synthetic CPU Attention captures** passed (30 each EN/FR/JA). Its
 separate six-case native Linux CPU Attention run also passed, using test ELF
 SHA-256 `a385a6aabb6229d92820aaf62004668d8a459a15b220b7c0592d94eca03abe92`
-and unchanged driver `f0f80738`; suite `suite-onywebhu` took **63.629 seconds**.
+and unchanged driver `f0f80738`; suite `suite-onywebhu` took **63.560 seconds**.
+The independent archived audit checked **96 predicates, 102 states and all 36
+PNG hashes/dimensions**; all six fixtures exited normally and were reaped without
+forced cleanup. Xvfb was already Z/exited-unreaped at its first grace observation,
+so no actual S-to-Z grace transition was exercised. Its receipt is
+`.scratch/review-monitor-integration-024ff943/native-driver-f0f80738-independent/NATIVE-ATTENTION-024FF943-F0F80738-RECEIPT.json`,
+SHA-256 `97d82496d114f16a514e6d1f85d6b1824ea782ad43212e7f5cf58c9afeeede1d`.
 These remain synthetic component checks: all seven filters fit, native wheel
 edges were zero, and no World/Shared Chat/authentication/preferences IO/Windows/
 grid/real IME/native Review acceptance is established. Full receipts are retained
