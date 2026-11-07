@@ -270,6 +270,36 @@ driver geometry revision. Windows-specific input, IME, native World behavior and
 human-managed grid acceptance remain separate. Attention and monitors follow
 this foundation.
 
+## Upstream catch-up refresh
+
+The sixteen reviewed imports from upstream snapshot `576dd54a` remain included
+in the current candidate; twenty-five other commits retain the dependency plan
+in its `docs/FOLDURORA.md`. A read-only refresh at 09:34 UTC found upstream main
+`8d360a2f`, exactly two newer commits: clicked sit offsets (`c6a4d06c`, #2784)
+and object linking (`8d360a2f`, #2785). Their source/dependency/applicability review
+is for a separate candidate; they are not included in frozen `6b512b1a`.
+
+The deferred cache/rights chain `026651a8` → `316e5e06` → `1ae9a375` → `3ce55eba`
+was rechecked against `6b512b1a`; none of the four whole patches independently
+applies cleanly. Its concrete plan preserves worker-profile-before-settings/
+private-key initialization and per-process cache ownership, requires atomic
+no-clobber migration, updates the fork's asset-ID cache to the shared effective
+rights with invalidation, and fences the new no-copy modal against host/source
+changes. Treat the last three commits as one acceptance unit: the intermediate
+worn-texture behavior is weaker than the final base/attachment-lock checks.
+
+Twelve cited implementation/header files were independently fetched from the
+Legacy source pinned at `abbe3cb0`. `LLPanelFace`'s copy/transfer worn filters,
+`LLToolDragAndDrop::willObjectAcceptInventory`'s unrestricted base requirement
+and texture-application/RLVa attachment checks support the final cumulative
+worn policy. Whole-chain parity still requires resolving two specific gaps:
+nonnil requester with nil foreign/task owner must not gain owner rights over
+`LLPermissions::allowOperationBy`'s everyone fallback; seated-root `@unsit`/
+`@sittp` refusal must remain alongside attachment locks. No rights/runtime change
+was introduced by this review. The detailed source plan, apply-check logs and
+pinned file manifest remain in the isolated `cache-rights-integration-review`
+worktree's `.scratch` directory.
+
 The user-selected implementation order is **compact host redesign → shared chat
 → Attention → monitors with chat**. The compact host is implemented at frozen
 checkpoint `399ffd79`, with Linux source, synthetic visual and owned EN CPU UI
