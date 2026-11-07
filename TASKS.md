@@ -1,5 +1,13 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Locale-independent mouse binding identity prerequisite (2026-11-07; no issue):
+  preserve the Input JSON shape while recognizing earlier EN/FR/JA stored aliases;
+  constructors/defaults and re-encoding use stable native tokens. Visible labels
+  remain localized, unknown tokens and Other buttons remain unchanged. Three
+  pure native-input/serde/explicit-locale regressions are authored UNRUN. No
+  selective profile-copy UI/IO is enabled; independent review and Root checks
+  remain required before that consumer joins.
+
 - 🔧 Account-local named landmark Favorite menus (2026-11-07; no issue):
   first-member folders share the original ordered landmarks across menu, row and
   grid. Separate bounded account/profile/grid metadata uses original submitted

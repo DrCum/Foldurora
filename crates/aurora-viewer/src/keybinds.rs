@@ -16,7 +16,34 @@ use winit::keyboard::KeyCode;
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Input {
     Key(String),
-    Mouse(String),
+    Mouse(#[serde(serialize_with = "serialize_mouse", deserialize_with = "deserialize_mouse")] String),
+}
+
+// Persisted mouse identity must not depend on the UI locale. These are every
+// actual legacy token emitted by our EN/FR/JA catalogues. Unknown tokens remain
+// opaque/nonmatching, preserving forward-compatible settings without repair.
+fn canonical_mouse(token: &str) -> &str {
+    match token {
+        "Middle" | "中央" => "Middle",
+        "Back" | "戻る" => "Back",
+        "Forward" | "前進" => "Forward",
+        other => other,
+    }
+}
+fn serialize_mouse<S: serde::Serializer>(token: &str, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(canonical_mouse(token))
+}
+fn deserialize_mouse<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    let token = String::deserialize(deserializer)?;
+    Ok(canonical_mouse(&token).to_owned())
+}
+fn mouse_label_key(token: &str) -> Option<&'static str> {
+    match canonical_mouse(token) {
+        "Middle" => Some("keybinds-middle-click"),
+        "Back" => Some("keybinds-mouse-back"),
+        "Forward" => Some("keybinds-mouse-forward"),
+        _ => None,
+    }
 }
 
 impl Input {
@@ -29,9 +56,9 @@ impl Input {
     pub fn mouse(b: MouseButton) -> Option<Input> {
         match b {
             MouseButton::Left | MouseButton::Right => None,
-            MouseButton::Middle => Some(Input::Mouse(aurora_i18n::tr!("keybinds-middle").into())),
-            MouseButton::Back => Some(Input::Mouse(aurora_i18n::tr!("keybinds-back").into())),
-            MouseButton::Forward => Some(Input::Mouse(aurora_i18n::tr!("keybinds-forward").into())),
+            MouseButton::Middle => Some(Input::Mouse("Middle".into())),
+            MouseButton::Back => Some(Input::Mouse("Back".into())),
+            MouseButton::Forward => Some(Input::Mouse("Forward".into())),
             MouseButton::Other(n) => Some(Input::Mouse(format!("Other{n}"))),
         }
     }
@@ -53,11 +80,9 @@ impl Input {
 
     pub fn label(&self) -> String {
         match self {
-            Input::Mouse(m) => match m.as_str() {
-                "Middle" => aurora_i18n::tr!("keybinds-middle-click").into(),
-                "Back" => aurora_i18n::tr!("keybinds-mouse-back").into(),
-                "Forward" => aurora_i18n::tr!("keybinds-mouse-forward").into(),
-                other => aurora_i18n::tr!("keybinds-mouse", value0 = other.trim_start_matches("Other").to_string()),
+            Input::Mouse(m) => match mouse_label_key(m) {
+                Some(key) => aurora_i18n::text(key).into(),
+                None => aurora_i18n::tr!("keybinds-mouse", value0 = m.trim_start_matches("Other").to_string()),
             },
             Input::Key(k) => key_label(k),
         }
@@ -787,10 +812,7 @@ impl KeyBindings {
             // menu_viewer.xml: Nearby Chat, shortcut="control|H" use_mac_ctrl="true"
             (Action::NearbyChat, [kmod(K::KeyH, true, false), None]),
             // SL default push-to-talk: middle mouse button
-            (
-                Action::PushToTalk,
-                [Some(Binding::plain(Input::Mouse(aurora_i18n::tr!("keybinds-middle").into()))), None],
-            ),
+            (Action::PushToTalk, [Some(Binding::plain(Input::Mouse("Middle".into()))), None]),
             (Action::ToggleMic, [None, None]),
             (Action::Conversations, [kmod(K::KeyT, true, false), None]),
             (Action::People, [kmod(K::KeyA, true, true), None]),
@@ -1461,6 +1483,110 @@ impl KeyBindings {
 mod tests {
     use super::*;
     use crate::build::ui::Shortcut;
+
+    #[test]
+    fn mouse_binding_legacy_locale_tokens_decode_to_actual_native_event_identity_and_reencode_canonically() {
+        for (event, stable, aliases) in [
+            (MouseButton::Middle, "Middle", ["Middle", "中央"]),
+            (MouseButton::Back, "Back", ["Back", "戻る"]),
+            (MouseButton::Forward, "Forward", ["Forward", "前進"]),
+        ] {
+            let native = Input::mouse(event).unwrap();
+            assert_eq!(native, Input::Mouse(stable.into()));
+            for alias in aliases {
+                let old = serde_json::json!({"map":[
+                    ["PushToTalk",[{"input":{"Mouse":alias}},null]],
+                    ["People",[{"input":{"Mouse":alias},"ctrl":true},null]]
+                ]});
+                let bindings: KeyBindings = serde_json::from_value(old).unwrap();
+                let down = HashSet::from([native.clone()]);
+                assert!(bindings.held(Action::PushToTalk, &down, Mods::default()));
+                assert_eq!(
+                    bindings.triggered(
+                        &native,
+                        Mods {
+                            ctrl: true,
+                            ..Default::default()
+                        }
+                    ),
+                    Some(Action::People)
+                );
+                let persisted = serde_json::to_value(&bindings).unwrap();
+                assert_eq!(persisted["map"][0][1][0]["input"], serde_json::json!({"Mouse":stable}));
+                assert_eq!(persisted["map"][1][1][0]["input"], serde_json::json!({"Mouse":stable}));
+                let reread: KeyBindings = serde_json::from_value(persisted).unwrap();
+                assert_eq!(reread, bindings);
+            }
+        }
+        assert_eq!(
+            KeyBindings::default().get(Action::PushToTalk)[0].as_ref().unwrap().input,
+            Input::mouse(MouseButton::Middle).unwrap()
+        );
+    }
+
+    #[test]
+    fn mouse_binding_known_labels_resolve_explicit_locales_without_changing_native_tokens_or_global_locale() {
+        for (token, alias, key, labels) in [
+            (
+                "Middle",
+                "中央",
+                "keybinds-middle-click",
+                ["Middle click", "Clic molette", "中クリック"],
+            ),
+            (
+                "Back",
+                "戻る",
+                "keybinds-mouse-back",
+                ["Mouse back", "Souris précédent", "マウスの戻る"],
+            ),
+            (
+                "Forward",
+                "前進",
+                "keybinds-mouse-forward",
+                ["Mouse forward", "Souris suivant", "マウスの進む"],
+            ),
+        ] {
+            assert_eq!(mouse_label_key(token), Some(key));
+            assert_eq!(mouse_label_key(alias), Some(key));
+            for (language, expected) in ["en", "fr", "ja"].into_iter().zip(labels) {
+                assert_eq!(aurora_i18n::text_in(language, mouse_label_key(token).unwrap()), expected);
+                assert_eq!(aurora_i18n::text_in(language, mouse_label_key(alias).unwrap()), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn mouse_binding_other_buttons_and_unknown_tokens_keep_original_shape_without_settings_repair_or_substitution() {
+        for number in [0, 1, 9, u16::MAX] {
+            let value = serde_json::json!({"Mouse":format!("Other{number}")});
+            let decoded: Input = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(Some(decoded.clone()), Input::mouse(MouseButton::Other(number)));
+            assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+        }
+        for token in ["FutureMouse9", "中", "Other65536", "", "Back "] {
+            let value = serde_json::json!({"Mouse":token});
+            let decoded: Input = serde_json::from_value(value.clone()).unwrap();
+            assert_eq!(decoded, Input::Mouse(token.into()));
+            assert_ne!(Some(decoded.clone()), Input::mouse(MouseButton::Middle));
+            assert_ne!(Some(decoded.clone()), Input::mouse(MouseButton::Back));
+            assert_ne!(Some(decoded.clone()), Input::mouse(MouseButton::Forward));
+            assert_eq!(serde_json::to_value(decoded).unwrap(), value);
+        }
+        assert_eq!(Input::mouse(MouseButton::Left), None);
+        assert_eq!(Input::mouse(MouseButton::Right), None);
+        let key = serde_json::json!({"Key":"KeyQ"});
+        assert_eq!(
+            serde_json::to_value(serde_json::from_value::<Input>(key.clone()).unwrap()).unwrap(),
+            key
+        );
+        let settings = serde_json::json!({"keybinds":{"map":[["People",[{"input":{"Mouse":"FutureMouse9"}},null]]]}});
+        let read = crate::tolerant::from_value::<crate::settings::Settings>(settings, "synthetic mouse bindings").unwrap();
+        assert!(!read.repaired());
+        assert_eq!(
+            read.value.keybinds.get(Action::People)[0].as_ref().unwrap().input,
+            Input::Mouse("FutureMouse9".into())
+        );
+    }
 
     #[test]
     fn gesture_chat_uses_the_typed_slash_without_ctrl_or_alt() {

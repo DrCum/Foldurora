@@ -1,5 +1,12 @@
 # Aurora Viewer architecture
 
+`keybinds::Input` persists Middle/Back/Forward mouse identities independently of
+UI locale. Serde accepts earlier EN/FR/JA token aliases and emits the stable
+existing English tokens; constructors and native defaults use those same values.
+Unknown strings and Other buttons remain opaque unchanged, without settings
+repair or action substitution. Visible labels still use the existing catalogues.
+This prerequisite enables no profile-copy UI, IO, or automatic native action.
+
 `session_host/monitor_manager.rs` is the Shell-owned bounded binding/operation
 front for four fixed monitors and one cycling view. It depends on the separately
 authored real `preview_projection` facade; no local IO stub or inferred image
