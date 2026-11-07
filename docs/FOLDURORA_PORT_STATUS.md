@@ -14,7 +14,15 @@ regressions passing exactly once in both the packaged and raw job logs. Parser,
 formatting, strict Clippy, viewer build and packaging passed. Both archive CRC
 checks, manifest source, AMD64/PE32+ identity, executable version and all seven
 embedded icon payloads match. This package has the two known follow-ups below.
-The separate local Windows build/native report is still being collected.
+The separate local Windows builder reports the same version and test counts,
+passing parser/format/strict Clippy, and a clean pinned source. Its owned offline
+demo exercised controls, photo saving, resizing, 110% UI scale and both toolbar
+scopes, then quit normally with exit 0. Alt+wheel remains manual there because
+the local input API cannot hold Alt while scrolling. The local ZIP/executable
+hashes differ from CI and remain a separate reported receipt; its native bundle
+and extra observations have not been independently inspected here. Neither
+report resolves the frozen-source follow-ups below or establishes grid/physical
+multi-monitor acceptance.
 The earlier `388b299c` download below predates it.
 
 The CI package version is `0.9.3-beta.20261106.1+168.g6a3009f27`.
@@ -23,6 +31,8 @@ Executable SHA-256: `ea01f2212fe42f572cb04abcb81ea0699086ef2c6e145a98c12c4b98091
 The source-worktree records are `.scratch/windows-ci-42343210582/receipt.json`
 and `icon-resource-verification.json`; these are CI results, independent of any
 local Windows rebuild or human/grid acceptance.
+The local-builder report is retained separately as
+`.scratch/windows-native-6a-local-builder-reported-receipt.json`.
 
 Final Linux formatting/diff checks, lint with the existing Linux dead-code
 qualification and normal build passed. Full Linux tests: **7,907 passed, one
@@ -59,12 +69,29 @@ corrections passed the `7b2298e8` runtime checkpoint: all **139 host/chat tests*
 and **seven camera regressions** pass. The full Linux result is **7,925 passed,
 one inherited terrain GPU precision failure, 51 ignored**. Thirty EN/FR/JA
 production CPU captures passed required-text/privacy checks; selected normal and
-narrow screens were inspected. These captures do not exercise native OS delivery
+narrow screens were inspected. [Selected unchanged CPU captures](https://github.com/DrCum/Foldurora/blob/916081ff/foldurora/20261107-7b2298e8-shared-chat-cpu/README.md)
+are source-scoped. These captures do not exercise native OS delivery
 or a live grid. Independent source review found no concrete blocker.
 
-Exact-source final checks/build are proceeding at `1ef87bf6`, which adds two
-lint-equivalent expressions and documentation. Its package and native acceptance
-remain pending; do not transfer earlier binary receipts. The native unread and
+Exact-source final checks/build completed at
+[`1ef87bf6`](https://github.com/DrCum/Foldurora/commit/1ef87bf6d4cfbe54c071009539cdc99cca4d4f34),
+which adds two lint-equivalent expressions and documentation. The final full
+Linux `--no-fail-fast` run again reports **7,925 passed, one inherited terrain
+precision failure, 51 ignored**, with all **109 required camera/chat regressions**
+passing once. Formatting and Linux Clippy with the existing platform dead-code
+qualification passed; the normal dev build passed in 297 seconds from clean
+tracked source. Its executable is `0.0.0+1553.g1ef87bf6d`, SHA-256
+`1c8c2caa79275caaa9607010e5b235d1ce7ace6dde3033c91ab0e9135f768f1f`.
+The exact-source records are `.scratch/shared-1ef-full-workspace-receipt.json`
+and `.scratch/shared-1ef-final-binary-receipt.json`. An earlier default fail-fast
+run stopped at the inherited renderer failure; it is explicitly partial and is
+not used as this full receipt.
+
+The source is pushed on `feat/shared-chat-integration` and its
+[Windows run 42348714309](https://github.com/DrCum/Foldurora/actions/runs/42348714309)
+is active. Windows package verification and the owned combined-source native
+camera check remain pending; do not transfer earlier binary receipts. Native
+Shared Chat and human grid acceptance also remain pending. The native unread and
 explicit-Read first slice is being authored on a separate branch from this
 checkpoint, without altering this candidate. Attention and monitors follow it.
 
