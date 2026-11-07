@@ -34,8 +34,10 @@ on pushed `feat/foldurora-upstream-integration`: frozen `f5ae21d5` plus 16
 reviewed upstream commits, leaving 25 for staged integration. Provenance, source
 review, formatting/diff checks and Linux Clippy passed (34.70s). Full Linux tests
 reported 7,902 passed, one inherited terrain precision failure and 50 ignored;
-new HUD/cache and retained regressions passed. Its normal binary built in 4m35s;
-exact-source software-GPU checks have started without results yet.
+new HUD/cache and retained regressions passed. Its normal binary built in 4m35s.
+Bounded software-Vulkan landscape/isolation and HUD visibility checks passed;
+landscape/isolation exited normally, but the HUD harness reached its deadline
+with Quit confirmation open, so normal HUD Quit acceptance is unproven.
 Its exact-source Windows run is
 [42337795785](https://github.com/DrCum/Foldurora/actions/runs/42337795785).
 GPU/native and package acceptance remain pending. The optional build-only prompt
@@ -53,7 +55,7 @@ was given to the user; delivery/start at the local builder are unconfirmed. The 
 | `399ffd796ccba8e9468bbc9ff7b19eff5017d4bc` | Earlier verified compact package, `feat/compact-host-integration`: compact strip, full-width world, explicit management drawer and popup islands | [Windows run 42327859777](https://github.com/DrCum/Foldurora/actions/runs/42327859777) passed: 7,827 tests passed, 0 failed, 50 ignored; all 36 applicable named regressions passed exactly once. Parser, formatting, strict Clippy, tests, build and packaging passed. Downloaded manifests, checksums and executable/PE identity were verified. Linux and visual evidence is recorded below. | Native popup-island composition/hit testing, world input/handoff/recovery, profiles/drafts, physical GPU/multi-monitor, performance and human grid acceptance remain pending. Earlier local `8b738ea8` native results do not transfer to this binary. |
 | `f5ae21d535da3a338bace51ffb03af7beeb040c6` | Current verified Windows download: frozen photo/branding source, including compact host and narrow scene/output/preview corrections | [Windows run 42334134158](https://github.com/DrCum/Foldurora/actions/runs/42334134158) passed: 7,842/0/50, all 51 named regressions once, all checks/build/package successful. Manifest, hashes, CRCs, executable identity and seven PE icon frames verified. Linux: 7,870/1 inherited terrain/50; normal build and bounded software-Vulkan exports/icon checks passed. | Restricted 480-pixel control overlap/clipping remains. Native Windows host/photo/export/icon, physical GPU, performance and human grid acceptance remain pending. Separate local-builder delivery/start are unconfirmed. |
 | `8750450f0161e03fe6ef48194aa58b28d49a2cb9` | Preserved 15-import upstream baseline | Linux Clippy passed (1m29s); full tests: 7,900 passed, one inherited terrain failure, 50 ignored. Its completed Windows test step reports 7,872/0/50 and all 83 named tests once before expected same-branch cancellation. | Viewer build was cancelled and packaging skipped; no usable `8750450f` package. Superseded by `388b299c`, not a failed-test result or validation of the final source. |
-| `388b299c429d776b3fc7a9890162cd3d940b9dc3` | Final frozen, pushed 16-import source, `feat/foldurora-upstream-integration`; 25 upstream commits deferred | Source/provenance proof, formatting/diff checks and Linux Clippy passed (34.70s). Full Linux tests: 7,902 passed, one inherited terrain precision failure, 50 ignored; new HUD/cache and retained regressions passed. Normal build passed (4m35s). [Windows run 42337795785](https://github.com/DrCum/Foldurora/actions/runs/42337795785) is in progress. | Exact binary's landscape/isolation/HUD smoke has started without outcomes. Verified Windows package and native host/profile/photo/icon/grid acceptance remain pending. Optional local-build delivery/start are unconfirmed; earlier source receipts do not transfer. |
+| `388b299c429d776b3fc7a9890162cd3d940b9dc3` | Final frozen, pushed 16-import source, `feat/foldurora-upstream-integration`; 25 upstream commits deferred | Source/provenance proof, formatting/diff checks and Linux Clippy passed (34.70s). Full Linux tests: 7,902 passed, one inherited terrain precision failure, 50 ignored; new HUD/cache and retained regressions passed. Normal build passed (4m35s). [Windows run 42337795785](https://github.com/DrCum/Foldurora/actions/runs/42337795785) is in progress. | Exact-binary software-Vulkan landscape/isolation and HUD visibility passed. Landscape/isolation exited normally; a 240-second guard interrupted HUD Quit confirmation, so normal HUD Quit remains unproven. Restricted controls still crowd/clip. Verified Windows package and native host/profile/photo/icon/grid acceptance remain pending. Optional local-build delivery/start are unconfirmed; earlier source receipts do not transfer. |
 
 Keep these sources and their packages separate. No candidate is merged into main, installed
 or released by this work. Both the verified `70c1b5cd` package checkpoint and
@@ -468,9 +470,9 @@ with new HUD/cache and retained regressions passing. The receipt is
 **4m35s**, version `0.0.0+1529.g388b299c4`, SHA-256
 `9e3b71cce97e3f4ad5a1dba77f26617f0d26bc01c2b06c3ae246126a56acdcbf`;
 its receipt is `.scratch/upstream-388-binary-receipt.json`. Exact-binary
-landscape/isolation/HUD checks have started in the owned
-`.scratch/upstream-render-smoke/batch-8YOrwLUf` fixture, without outcomes yet.
-GPU/native, Windows package and grid acceptance remain pending. The first 17
+software-Vulkan results from the owned
+`.scratch/upstream-render-smoke/batch-8YOrwLUf` fixture are recorded below.
+Physical GPU/native, Windows package and grid acceptance remain pending. The first 17
 imports and this selective batch are
 not a merge of the entire upstream branch. No new PR, merge to main or release
 is claimed.
@@ -487,6 +489,55 @@ baseline package. The raw cancellation receipt is
 `.scratch/windows-ci-42335589961/cancelled-run-receipt.json`; no obsolete artifact
 was downloaded. Final [run 42337795785](https://github.com/DrCum/Foldurora/actions/runs/42337795785)
 started at 04:17:32 UTC and remains a separate unfinished receipt.
+
+### Bounded renderer/photo/HUD checks — source 388b299c
+
+The exact normal binary above passed owned offline Linux software-Vulkan
+landscape framing/export and selected-subject isolation checks. The 960×640
+workspace kept the scene in its right half; the matching clean export is
+640×360, with sampled panel edges within 1.34 output pixels of their expected
+positions. Real Remove/All actions produced 480×320 exports with 4,943 visible
+pixels for the selected subject, zero for the empty choice, and all 153,600 for
+restored All. The empty image is fully transparent; restored All is opaque RGB.
+This establishes the zero-visible-subject CPU behavior; GPU dispatch/draw-call
+counts and debug-profile assertions were not measured. Both cases exited normally
+with status 0.
+
+HUD visibility passed for synthetic mask cutoffs 128/200/255 at exact HUD zoom
+0.5 and 1.0 after the real World → HUDs → Normal size action. Panel dimensions
+increased by 2.00–2.03×, allowing for rasterized edges. The independent world
+render scale remained 50%.
+
+**HUD shutdown limitation:** the 240-second harness guard sent SIGTERM with the
+final Quit confirmation open, before its confirmation command processed. Normal
+HUD Quit acceptance is **not established**. Harness/Xvfb wrapper status was 1;
+the viewer's raw wait status was not retained, so no numeric viewer exit status is
+inferred. All known owned app/driver processes and process groups are absent; no
+GPU stall/loss or panic marker was detected. No retry was run. Landscape/isolation
+normal exits do not establish HUD shutdown acceptance. The bounded receipt is
+`.scratch/upstream-render-smoke/batch-8YOrwLUf/VALIDATION-388-RECEIPT.json`.
+
+Restricted 480-pixel photo controls/help still overlap and clip. Task-local caches,
+software Vulkan and the intentional 15 FPS cap do not establish cold-start,
+physical GPU, performance or Windows embedding/input/taskbar acceptance. No grid,
+ordinary profiles or credentials were used.
+
+The [nine-image gallery and sanitized provenance](https://github.com/DrCum/Foldurora/blob/c7c7f46b8f57893f736118863a6dd2688dd19906/foldurora/20261107-388b299c/README.md)
+contains unchanged, reviewed synthetic PNGs only. Earlier capture history is
+preserved; raw logs, private JSON/settings, bootstrap data and user reports remain
+private.
+
+| Check | PNG |
+| --- | --- |
+| Landscape workspace, frame 680 | [Open](https://raw.githubusercontent.com/DrCum/Foldurora/c7c7f46b8f57893f736118863a6dd2688dd19906/foldurora/20261107-388b299c/01-landscape-frame-680.png) |
+| Matching clean landscape export | [Open](https://raw.githubusercontent.com/DrCum/Foldurora/c7c7f46b8f57893f736118863a6dd2688dd19906/foldurora/20261107-388b299c/02-landscape-clean-export.png) |
+| Selected-subject isolation UI | [Open](https://raw.githubusercontent.com/DrCum/Foldurora/c7c7f46b8f57893f736118863a6dd2688dd19906/foldurora/20261107-388b299c/03-selected-isolation-ui.png) |
+| Selected transparent export | [Open](https://raw.githubusercontent.com/DrCum/Foldurora/c7c7f46b8f57893f736118863a6dd2688dd19906/foldurora/20261107-388b299c/04-selected-transparent-export.png) |
+| Empty-subject UI | [Open](https://raw.githubusercontent.com/DrCum/Foldurora/c7c7f46b8f57893f736118863a6dd2688dd19906/foldurora/20261107-388b299c/05-empty-subjects-ui.png) |
+| Empty transparent export | [Open](https://raw.githubusercontent.com/DrCum/Foldurora/c7c7f46b8f57893f736118863a6dd2688dd19906/foldurora/20261107-388b299c/06-empty-transparent-export.png) |
+| Restored-All export | [Open](https://raw.githubusercontent.com/DrCum/Foldurora/c7c7f46b8f57893f736118863a6dd2688dd19906/foldurora/20261107-388b299c/07-restored-all-export.png) |
+| HUD zoom 50% | [Open](https://raw.githubusercontent.com/DrCum/Foldurora/c7c7f46b8f57893f736118863a6dd2688dd19906/foldurora/20261107-388b299c/08-hud-zoom-50.png) |
+| HUD zoom Normal / 100% | [Open](https://raw.githubusercontent.com/DrCum/Foldurora/c7c7f46b8f57893f736118863a6dd2688dd19906/foldurora/20261107-388b299c/09-hud-zoom-100.png) |
 
 ### Deferred FSR and recovery plan — source 388b299c
 
@@ -581,9 +632,9 @@ to that capture commit; they do not depend on the cloud `.scratch` directories.
 | Fade and Birdseye switches | Native activation exists; Folderstorm's visual transitions are not ported. | Preserve fenced GPU/input handoff; design each transition around native camera/render actions after host acceptance. |
 | Assistant and other tools | Aurora has native inventory/appearance/camera actions; Folderstorm's adapter and some tools remain. | Port bounded typed actions after the supporting account/workspace models, rather than generic input injection. |
 | Profile import/migration | Stable new slots exist; migration of old generated profiles or ordinary viewer preferences is not implemented. | Decide explicit import/copy behavior later; keep credentials, writable caches and live-session authority separate. Moving installations does not silently migrate profiles. |
-| Foldurora branding — separate follow-up | Verified `f5ae21d5` Windows package has seven icon frames matching the ICO; actual Linux 64-pixel icon inspection passed. Native Windows appearance remains pending. It is not included in `399ffd79`. | Accept native icon/taskbar appearance and repeat exact-source runtime checks on `388b299c`. |
-| Photo/camera viewport — separate follow-up | Verified `f5ae21d5` package includes the source that passed bounded software-Vulkan clean/Interface exports. Restricted 480-pixel controls still overlap/clip; native Windows photo/export acceptance is pending. The older scene expansion remains in `399ffd79`. | Fix/validate narrow control usability and native Windows photo/export behavior; repeat scope/isolation checks on integrated `388b299c`. |
-| Selective upstream catch-up — separate integration | Pushed `388b299c` adds 16 reviewed upstream commits to `f5ae21d5`, with exact provenance proof and 25 deferred. Linux lint/tests and normal build passed except the inherited terrain precision test; GPU smoke has started without outcomes and Windows package proof is pending. | Validate exact-source runtime/package behavior; preserve earlier evidence and the deferred dependency groups. |
+| Foldurora branding — separate follow-up | Verified `f5ae21d5` Windows package has seven icon frames matching the ICO; actual Linux 64-pixel icon inspection passed. Native Windows appearance remains pending. It is not included in `399ffd79`. | Accept native Windows icon/taskbar appearance; bounded `388b299c` rendering checks do not establish this. |
+| Photo/camera viewport — separate follow-up | Verified `f5ae21d5` package includes the source that passed bounded software-Vulkan clean/Interface exports. Restricted 480-pixel controls still overlap/clip; native Windows photo/export acceptance is pending. The older scene expansion remains in `399ffd79`. | Fix/validate narrow control usability and native Windows photo/export behavior. Integrated `388b299c` passed the bounded landscape/isolation checks recorded above. |
+| Selective upstream catch-up — separate integration | Pushed `388b299c` adds 16 reviewed upstream commits to `f5ae21d5`, with exact provenance proof and 25 deferred. Linux lint/tests and normal build passed except the inherited terrain precision test; bounded software-Vulkan rendering checks passed with HUD normal Quit unproven after the harness deadline; Windows package proof is pending. | Validate exact-source runtime/package behavior; preserve earlier evidence and the deferred dependency groups. |
 
 Folderstorm can later acknowledge a visible, following, at-tail transcript after
 a configured delay (default 60 seconds with visible-read acknowledgment enabled).
