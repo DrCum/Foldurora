@@ -1754,6 +1754,7 @@ mod tests {
         classic: bool,
         scene: PhotoScene,
         viewfinder: crate::ui::viewfinder::Viewfinder,
+        viewfinder_out: Vec<crate::ui::viewfinder::Out>,
         frozen: egui::TextureHandle,
         native_scale: f32,
         native_size: (u32, u32),
@@ -1800,6 +1801,7 @@ mod tests {
                 classic,
                 scene: PhotoScene::Panel,
                 viewfinder: Default::default(),
+                viewfinder_out: Vec::new(),
                 frozen,
                 native_scale,
                 native_size: (3200, 2000),
@@ -1985,7 +1987,9 @@ mod tests {
                         );
                     }
                     PhotoScene::Viewfinder => {
-                        self.viewfinder.show(
+                        // App::viewfinder_ui consumes each pass's actions;
+                        // discarded layout passes do not discard those actions.
+                        self.viewfinder_out.extend(self.viewfinder.show(
                             ui.ctx(),
                             &p,
                             &mut self.settings,
@@ -1994,7 +1998,7 @@ mod tests {
                             crate::camera::DEFAULT_FOV,
                             &frame,
                             &view,
-                        );
+                        ));
                     }
                     PhotoScene::Frozen => frozen(ui.ctx(), &p, &self.frozen),
                 }
@@ -2015,6 +2019,53 @@ mod tests {
                     pressed,
                     modifiers: egui::Modifiers::NONE,
                 }]);
+            }
+        }
+    }
+
+    #[test]
+    fn actual_viewfinder_shutter_accepts_same_frame_click_after_scene_hover() {
+        use crate::snapshot::viewfinder::{Display, OnScreen};
+        use crate::ui::viewfinder::Out;
+        for (native_scale, zoom) in [(1.0, 1.0), (1.25, 1.2)] {
+            for restricted in [false, true] {
+                let mut f = ViewportPhotoFixture::new_at_scale(false, native_scale, zoom);
+                f.viewport.left = 50.0;
+                f.viewport.right = 0.0;
+                f.viewport.top = 0.0;
+                f.viewport.bottom = 0.0;
+                f.viewport.restrict_ui = restricted;
+                f.scene = PhotoScene::Viewfinder;
+                f.settings.viewfinder.display = Display::Full;
+                f.settings.viewfinder.controls = OnScreen::Always;
+                f.viewfinder.hinted = true;
+                f.frames(5);
+                f.show(vec![egui::Event::PointerMoved(f.bounds().center())]);
+                let shapes = f.show(Vec::new());
+                let dock = f.ctx.memory(|m| m.area_rect(egui::Id::unique("vf_dock"))).expect("actual dock");
+                let shutter = shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Circle(circle) if (circle.radius - 33.0).abs() < 0.01 && dock.contains(circle.center) => {
+                            Some(circle.center)
+                        }
+                        _ => None,
+                    })
+                    .expect("actual dock shutter");
+                assert!(!f.ctx.is_pointer_over_egui(), "preceding hover is over the scene");
+                assert!(widgets::pointer_over_ui(&f.ctx, shutter), "native position belongs to the dock");
+                f.viewfinder_out.clear();
+                let button = |pressed| egui::Event::PointerButton {
+                    pos: shutter,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                f.show(vec![egui::Event::PointerMoved(shutter), button(true), button(false)]);
+                assert_eq!(f.viewfinder_out, vec![Out::HalfPress, Out::Release]);
+                f.viewfinder_out.clear();
+                f.frames(3);
+                assert!(f.viewfinder_out.is_empty(), "completed shutter gesture must not replay");
             }
         }
     }
