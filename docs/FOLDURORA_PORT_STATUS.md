@@ -4,6 +4,12 @@ This is the coordination ledger for the Folderstorm port. Source, automated
 checks, native Windows acceptance and human grid acceptance are separate results.
 Handoffs and screenshots are reference material, not authority to merge or release.
 
+The user-selected implementation order is **compact host redesign → shared chat
+→ Attention → monitors with chat**. Compact host UI work is now in progress from
+frozen source `70c1b5cd`, following the Folderstorm demo's compact presentation.
+The verified package below remains the earlier test candidate and does not
+contain the ongoing redesign. Native Windows acceptance remains pending.
+
 ## Frozen test candidates
 
 | Source | Purpose | Evidence | Remaining acceptance |
@@ -11,12 +17,13 @@ Handoffs and screenshots are reference material, not authority to merge or relea
 | `d10473efff52ceaea2d7b22d111319b0efc4f28e` | Combined upstream, viewport and session-host/chat baseline | Local Windows checks: 7,791 passed, 0 failed, 49 ignored; build/package passed. [GitHub run](https://github.com/DrCum/Foldurora/actions/runs/42291668355) passed. | Human confirmed toolbar containment and full-workspace floaters; reported oversized menu, host drag/detach failure and one standalone switch device loss. |
 | `8b738ea8b2c700b7538b7e16135a7de19c192d43` | Host movement/recovery and compact dropdown fixes | [Windows run 42304532039](https://github.com/DrCum/Foldurora/actions/runs/42304532039) passed: 7,798 tests passed, 0 failed, 49 ignored; all seven focused regressions passed. Scripts, formatting, Clippy, normal viewer build and packaging passed. Downloaded artifact, manifest, checksums, executable version and Windows x64 identity were verified. | Native title-bar drag, resize, post-drag switch, detach, confirmed host closure, taskbar and responsive redraw. Separate standalone GPU loss is unresolved. |
 | `8cd9a2aa005491b651e5bb8591d94fd6fb891520` | Combined backend/profile checkpoint: host/menu fixes, retained conversation drafts, crash details fallback and five persistent renameable slots | [Windows run 42311181216](https://github.com/DrCum/Foldurora/actions/runs/42311181216) passed: 7,818 tests passed, 0 failed, 49 ignored. Scripts, formatting, strict Clippy, normal build and packaging passed; downloaded package identity, manifest and checksums were verified. | This checkpoint has a known profile-popup margin overlap corrected by `70c1b5cd`. Native host/profile/chat and human grid acceptance remain pending. |
-| `70c1b5cda927547b28e5a5ff9713e861771aaee7` | Latest corrected candidate, `fix/profile-popup-bounds`: bounds the profile popup including its frame and wraps occupied-profile help inline | [Windows run 42315300611](https://github.com/DrCum/Foldurora/actions/runs/42315300611) passed: 7,819 tests passed, 0 failed, 49 ignored; all 28 applicable named regressions passed exactly once. Scripts, formatting, strict Clippy, normal build and packaging passed. Downloaded manifest, checksums and executable/PE identity were verified. Fresh Linux CPU UI and sequential demo-worker evidence is recorded below. | Offline native Windows host/profile/chat, human grid, physical GPU/multi-monitor and performance acceptance remain pending. |
+| `70c1b5cda927547b28e5a5ff9713e861771aaee7` | Latest verified test candidate, `fix/profile-popup-bounds`: bounds the profile popup including its frame and wraps occupied-profile help inline | [Windows run 42315300611](https://github.com/DrCum/Foldurora/actions/runs/42315300611) passed: 7,819 tests passed, 0 failed, 49 ignored; all 28 applicable named regressions passed exactly once. Scripts, formatting, strict Clippy, normal build and packaging passed. Downloaded manifest, checksums and executable/PE identity were verified. Fresh Linux CPU UI and sequential demo-worker evidence is recorded below. | Offline native Windows host/profile/chat, human grid, physical GPU/multi-monitor and performance acceptance remain pending. |
 
 Keep these sources and their packages separate. No candidate is merged, installed
-or released by this work. The runtime branch remains frozen while this ledger is
-updated on `docs/foldurora-progress-20261106`; documentation changes do not replace
-or restart its validation run.
+or released by this work. The verified `70c1b5cd` candidate remains frozen while
+compact UI work proceeds separately. This ledger is updated on
+`docs/foldurora-progress-20261106`; its documentation changes do not alter the
+runtime candidates or their validation results.
 
 The verified host/menu [Windows artifact 13548583765](https://github.com/DrCum/Foldurora/actions/runs/42304532039/artifacts/13548583765)
 contains `Foldurora-test-8b738ea8b2c7-windows-x64.zip`. Its manifest names the exact
@@ -223,12 +230,14 @@ to that capture commit; they do not depend on the cloud `.scratch` directories.
 
 | Feature | Current gap | Next concrete work |
 | --- | --- | --- |
+| Compact host redesign — first | In progress from frozen `70c1b5cd`; the existing verified package has the earlier layout. | Match the Folderstorm demo's compact host presentation while retaining native handoff, input and profile boundaries. New UI validation will be recorded separately. |
+| Shared chat — second | Source-bound popouts exist; the shared source/conversation selector is not implemented. | Reuse Nearby/resident-IM transport and one canonical `ChatUi` per exact source, with native identities/restrictions. Explicit character selection may update displayed Send as; unrelated world switching must not retarget the sender. |
+| Attention — third | Explicit review/mark-read/dismiss behavior is incomplete. | Add a separate typed protocol with native observed-watermark metadata. Attention selection alone must not acknowledge read or activate the world, but may update displayed Send as. |
+| Monitors with chat — fourth | Reduced-target caller/scene/UI and aggregate admission are unfinished. | Complete actual small render targets and latest-only delivery under a shared acknowledged/pending budget, alongside source-bound chat. Models alone are not a working monitor. |
 | Five stable, renameable character slots | Implemented and compiled; corrected `70c1b5cd` Windows package verified. Linux UI rename/restart and actual sequential slot-1/2 IO passed. Earlier host/menu packages used per-launch profiles. | Check native Windows five-slot persistence and labels, exclusive ownership through detach/host death, and fresh session authority on reopen. |
 | Per-character/per-conversation drafts | Memory-only navigation and Close/reopen retention is implemented and passed synthetic checks. | Native popout focus/reopen and human grid routing/restrictions remain to be checked. |
-| Shared chat and Attention | Source-bound popouts exist; shared sender selection and explicit review/mark-read/dismiss behavior are incomplete. | Use native conversation identities and restrictions. Attention selection alone must not acknowledge read or activate the world. Explicit character/Attention selection may update displayed Send as; unrelated world switching must not retarget the sender. |
 | Named workspaces | Viewport and native floater geometry exist; selective named arrangements, previews, favorites and HUD restore are incomplete. | Map Folderstorm's restore groups onto Aurora's typed settings/actions after stable character storage is established. |
 | Fade and Birdseye switches | Native activation exists; Folderstorm's visual transitions are not ported. | Preserve fenced GPU/input handoff; design each transition around native camera/render actions after host acceptance. |
-| Inactive monitors | Reduced-target caller/scene/UI and aggregate admission are unfinished. | Complete actual small render targets and latest-only delivery under a shared acknowledged/pending budget; models alone are not a working monitor. |
 | Assistant and other tools | Aurora has native inventory/appearance/camera actions; Folderstorm's adapter and some tools remain. | Port bounded typed actions after the supporting account/workspace models, rather than generic input injection. |
 | Profile import/migration | Stable new slots exist; migration of old generated profiles or ordinary viewer preferences is not implemented. | Decide explicit import/copy behavior later; keep credentials, writable caches and live-session authority separate. Moving installations does not silently migrate profiles. |
 
@@ -237,9 +246,9 @@ a configured delay (default 60 seconds with visible-read acknowledgment enabled)
 That automatic acknowledgment is a separate unported behavior; no current parity
 is claimed for it.
 
-Proposed next milestone, pending user priority: a shared CPU chat
-source/conversation selector using the existing Nearby/resident-IM transport and
-one canonical `ChatUi` per exact source. Attention remains a separate typed
+After the compact host redesign, the selected next milestone is a shared CPU
+chat source/conversation selector using the existing Nearby/resident-IM transport
+and one canonical `ChatUi` per exact source. Attention follows as a separate typed
 protocol milestone. See the pinned Folderstorm
 [host selection behavior](https://github.com/DrCum/Folderstorm/blob/abbe3cb0ca66ee2484f277219f6a27706fab7fc6/tools/session-host/main.cpp#L1508)
 and [worker unread handling](https://github.com/DrCum/Folderstorm/blob/abbe3cb0ca66ee2484f277219f6a27706fab7fc6/indra/newview/fssessionworker.cpp#L482).
@@ -378,6 +387,10 @@ touching unrelated windows.
 - If the standalone graphics loss recurs, retain the report folder and identify
   which viewer/process was active and which switch was requested. The crash label
   detects graphics-device loss; it does not establish the operating-system cause.
+  Earlier user-supplied rows identify an RTX 3060 with NVIDIA driver 610.88,
+  unfinished frame 5747 at about 1.002 seconds and last finished frame 5745.
+  The cause remains unresolved; the full sanitized `public-report.md` has been
+  requested but is not yet attached.
 - No immediate preference blocks new stable slots starting from defaults. Importing
   an old generated profile, copying ordinary viewer preferences, or sharing slots
   across moved installations needs an explicit later choice; no migration is planned
