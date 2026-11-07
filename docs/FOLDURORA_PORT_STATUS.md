@@ -4,9 +4,38 @@ This is the coordination ledger for the Folderstorm port. Source, automated
 checks, native Windows acceptance and human grid acceptance are separate results.
 Handoffs and screenshots are reference material, not authority to merge or release.
 
-## Attention MVP: verified Windows fix and preserved negative checkpoint
+## Latest Attention Review: verified Windows package
 
-The latest fix source is frozen at
+The current Windows test package is verified for exact source
+[`eb5e49f167a437391f1d9e42d35a62129cf52784`](https://github.com/DrCum/Foldurora/commit/eb5e49f167a437391f1d9e42d35a62129cf52784),
+tree `4d25fd8d9f82fe6937640819a10777af8ad24d2b`, branch `fix/attention-review-windows`.
+[Windows run 42401453027](https://github.com/DrCum/Foldurora/actions/runs/42401453027),
+attempt 1, passed parser, formatting, strict Clippy, workspace tests, build and
+package; the packaged manifest and final gate agree. Both raw and packaged logs
+report **8,121 passed, zero failed, 54 ignored**, across **33 summaries**, with
+all **333 required tests passing exactly once**. Both ZIP CRCs, source/run/profile,
+AMD64/PE32+ versions and all seven source icon payloads passed verification.
+
+[Download verified artifact 13587936566](https://github.com/DrCum/Foldurora/actions/runs/42401453027/artifacts/13587936566)
+(**71,956,138 bytes**). Version: `0.9.3-beta.20261106.1+243.geb5e49f16`.
+Outer artifact SHA-256: `6efaf4596d52c9d91c1bc22a559fa3e587761651198aef8285beed5918e2082d`.
+Portable ZIP SHA-256: `c4ca060fbc584a75640045828cf567b22232916b895caaa7acff06761faedd80`.
+Executable SHA-256: `eb2ddf6aaa8eadbfb45d1ba9e1b77cf0f982fe326ff8bccf5402c2dc799bf6c7`.
+Receipt: `.scratch/windows-ci-42401453027/receipt.json`, SHA-256
+`093b90e0d5dfc3c452d4ee4d63ef73e38f639058cefbcdc4866c8bbbddc43f7e`.
+
+The package adds explicit **Review in viewer** for existing conversations beside
+canonical **Shared Chat**. **Usable monitors and live previews are not available
+yet**. The [native/human handoff below](#review-eb5-windows-acceptance-handoff)
+uses this exact package. No executable was installed or launched for verification;
+native Windows input, human Review, GPU/multiple monitors, real IME and grid
+acceptance remain pending. No camera/GPU-loss fix or full monitor parity is
+established. The earlier 15d MVP, negative 024 Windows run and exact 024 Linux
+component results below keep their separate scope; none transfers to newer code.
+
+## Earlier Attention MVP: verified Windows fix and preserved negative checkpoint
+
+The earlier MVP fix source is frozen at
 [`15d33e6c9225bb476f224df02446e3d8c8c94c8d`](https://github.com/DrCum/Foldurora/commit/15d33e6c9225bb476f224df02446e3d8c8c94c8d),
 on `fix/attention-windows-clippy`. It uses the equivalent production
 `Preferences::includes` helper and adds that branch to the Windows workflow
@@ -191,8 +220,13 @@ The separate newline-tolerant test/workflow fix is published at
 tree `4d25fd8d9f82fe6937640819a10777af8ad24d2b`, branch
 `fix/attention-review-windows`.
 [Windows run 42401453027](https://github.com/DrCum/Foldurora/actions/runs/42401453027)
-is **in progress and unverified at this checkpoint**. Its artifact identity,
-Windows package version and hashes remain pending; no prior green result transfers.
+is **verified green for exact eb5**, with **8,121 passed, zero failed, 54 ignored**
+and all **333 required names passing once** in raw and packaged logs. All six
+commands, manifest/final gate, ZIP CRCs, PE/version and seven icons passed.
+The [verified package details above](#latest-attention-review-verified-windows-package)
+identify its artifact/version/checksums; the earlier negative 024 result remains
+negative. Windows native/human acceptance is still pending.
+
 Exact eb5 Linux qualified Clippy passed in **114.740 seconds**, the targeted
 scanner test passed, and the normal viewer build passed in **347.870 seconds**.
 That separate Linux executable is **672,080,440 bytes**, version
@@ -208,10 +242,10 @@ monitor parity is established by these receipts. Earlier source-only checkpoints
 and the 2d native gallery remain distinct from exact 024 and eb5 evidence.
 
 The [Review eb5 Windows acceptance handoff](#review-eb5-windows-acceptance-handoff)
-below is a prepared recipe for the eventual exact package; no human result or
+below is a prepared recipe for the verified exact package; no human result or
 handoff delivery is implied.
 
-Human/platform follow-up for the exact eventual package:
+Human/platform follow-up for the exact verified package:
 
 - Confirm the bell/drawer entry, exact profile/account/grid/conversation labels,
   collapsed filters and usable scrolling/actions at 380×340 and 150% UI scale,
@@ -231,16 +265,20 @@ Human/platform follow-up for the exact eventual package:
 
 ## Review eb5 Windows acceptance handoff
 
-Prepared recipe only; Windows/human acceptance is pending. No test request is
-being sent by this document. Continue other work while human testing is unavailable.
+Prepared native/human recipe only; package checks are verified, human acceptance
+is pending. No test request is sent by this document; continue other work meanwhile.
 
-Candidate source: `eb5e49f167a437391f1d9e42d35a62129cf52784`;
+Verified source: [`eb5e49f167a437391f1d9e42d35a62129cf52784`](https://github.com/DrCum/Foldurora/commit/eb5e49f167a437391f1d9e42d35a62129cf52784);
 tree `4d25fd8d9f82fe6937640819a10777af8ad24d2b`;
 branch `fix/attention-review-windows`;
 [Windows run 42401453027](https://github.com/DrCum/Foldurora/actions/runs/42401453027).
-The final eb5 artifact ID, Windows package version and ZIP/executable SHA-256
-values are **pending verification**. The preceding 024 Windows run is negative;
-its single CRLF scanner failure is not a passing result or an acceptance package.
+[Verified artifact 13587936566](https://github.com/DrCum/Foldurora/actions/runs/42401453027/artifacts/13587936566), version `0.9.3-beta.20261106.1+243.geb5e49f16`.
+Outer SHA-256: `6efaf4596d52c9d91c1bc22a559fa3e587761651198aef8285beed5918e2082d`.
+Portable ZIP SHA-256: `c4ca060fbc584a75640045828cf567b22232916b895caaa7acff06761faedd80`.
+Executable SHA-256: `eb2ddf6aaa8eadbfb45d1ba9e1b77cf0f982fe326ff8bccf5402c2dc799bf6c7`.
+Verified: 8,121/0/54, all 333 required names once, all six commands, both CRCs,
+source/PE/version and seven icons. The preceding 024 Windows run remains negative.
+Review/Shared Chat are available; usable monitors/live previews are not yet available.
 
 The separate MVP at `15d33e6c9225bb476f224df02446e3d8c8c94c8d` has
 [verified artifact 13583034550](https://github.com/DrCum/Foldurora/actions/runs/42390650825/artifacts/13583034550),
@@ -248,7 +286,7 @@ version `0.9.3-beta.20261106.1+207.g15d33e6c9`. It has no native Review;
 its green checks do not validate eb5. Keep that baseline and all **14 prior local
 artifacts and their source heads** intact. Add a separate eb5 folder/worktree.
 
-The builder may use the eb5 CI artifact once verified, or a cached local build
+The builder may use the verified eb5 CI artifact above, or a cached local build
 from that exact commit with its own recorded checks/version/hashes. Do not mix
 controller and worker executables: both must come from the same eb5 package.
 No installation, profile migration/deletion, merge or release is part of this handoff.
