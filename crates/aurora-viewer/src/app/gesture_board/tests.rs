@@ -538,3 +538,32 @@ fn board_native_ui_modal_and_newly_rebound_controls_require_fresh_painted_intent
     }
     assert!(!f.manager.has_playing());
 }
+#[test]
+fn board_native_ui_batched_pointer_uses_actual_press_and_release_positions_without_b_retarget() {
+    let mut f = Frames::new();
+    let a = f.position(aurora_i18n::tr!("board-add"));
+    let b = f.position(aurora_i18n::tr!("common-play"));
+    let pointer = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Default::default(),
+    };
+    assert!(
+        f.draw(vec![pointer(a, true), egui::Event::PointerMoved(b), pointer(b, false)])
+            .0
+            .is_none()
+    );
+    // A complete quick click at A may commit A or be conservatively rejected;
+    // the trailing move must never turn it into B's Play operation.
+    if let Some(action) = f.draw(vec![pointer(a, true), pointer(a, false), egui::Event::PointerMoved(b)]).0 {
+        assert!(matches!(action.command,Command::Add(_,target)if Some(target)==f.add));
+    }
+    assert!(
+        f.draw(vec![pointer(b, false), pointer(a, true), egui::Event::PointerMoved(b)])
+            .0
+            .is_none()
+    );
+    assert!(f.draw(vec![pointer(b, false)]).0.is_none());
+    assert!(!f.manager.has_playing());
+}
