@@ -240,7 +240,7 @@ mod tests {
         });
         let b = c.encode().unwrap();
         let mut v: serde_json::Value = serde_json::from_slice(&b).unwrap();
-        v["records"][0]["layout"]["secret"] = "ignored?";
+        v["records"][0]["layout"]["secret"] = "ignored?".into();
         assert!(Catalogue::decode(&serde_json::to_vec(&v).unwrap(), c.account, &c.grid).is_err());
         v = serde_json::from_slice(&b).unwrap();
         v["version"] = 2.into();

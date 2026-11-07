@@ -10954,7 +10954,7 @@ impl App {
             }
             windows_ms += t.elapsed().as_secs_f32() * 1000.0;
         });
-        self.workspace_after_ui(actions.workspace.take(), &gfx);
+        self.workspace_after_ui(actions.workspace.take(), &gfx.renderer, &gfx.window);
         // a capture leaves the user's layout as it is (as at exit)
         self.photo_validate_canvas(&mut gfx.renderer, full.pixels_per_point);
         if self.capture.is_none() {

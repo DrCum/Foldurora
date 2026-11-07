@@ -1,6 +1,6 @@
 //! Native workspace effects stay on the App thread. The store only publishes
 //! definitions to its captured profile; replies never apply geometry.
-use super::{App, Gfx, Screen, ui};
+use super::{App, Renderer, Screen, Window, ui};
 use crate::workspace::{
     controller::{Action, Command, Pending, Source, Status},
     model::{Bars, Catalogue, LIMIT, Layout, Record, Viewport, valid_name},
@@ -50,15 +50,15 @@ impl App {
             hosted,
         })
     }
-    fn workspace_permit(&self, gfx: &Gfx) -> bool {
-        let size = gfx.window.inner_size();
+    fn workspace_permit(&self, renderer: &Renderer, window: &Window) -> bool {
+        let size = window.inner_size();
         let canvas = self.egui_ctx.viewport_rect().size() * self.egui_ctx.pixels_per_point();
         if !matches!(self.screen, Screen::World)
             || self.workspace_source().is_none()
             || !self.focused
-            || !gfx.window.has_focus()
-            || gfx.window.is_minimized().unwrap_or(true)
-            || gfx.window.is_visible() != Some(true)
+            || !window.has_focus()
+            || window.is_minimized().unwrap_or(true)
+            || window.is_visible() != Some(true)
             || size.width == 0
             || size.height == 0
             || (canvas.x - size.width as f32).abs() > 2.0
@@ -68,7 +68,7 @@ impl App {
             || self.snapshots.capturing.is_some()
             || self.snapshots.ui.full_frame
             || self.snapshots.ui.freeze
-            || gfx.renderer.vr_engaged()
+            || renderer.vr_engaged()
             || self.exit_prompt.open
             || self.login_form.busy
             || self.options_ui.capture.is_some()
@@ -80,7 +80,7 @@ impl App {
             Some(b) => self
                 .workspace_source()
                 .and_then(|s| s.hosted)
-                .is_some_and(|(s, a)| b.layout_authorized(s, a, &gfx.window)),
+                .is_some_and(|(s, a)| b.layout_authorized(s, a, window)),
             None => true,
         }
     }
@@ -131,7 +131,7 @@ impl App {
             self.workspaces.bind(source);
             self.workspace_ui.reset();
         }
-        let permit = self.workspace_ui.open && self.gfx.as_ref().is_some_and(|g| self.workspace_permit(g));
+        let permit = self.workspace_ui.open && self.gfx.as_ref().is_some_and(|g| self.workspace_permit(&g.renderer, &g.window));
         if self.workspaces.permit != permit {
             self.workspaces.advance();
         }
@@ -238,7 +238,7 @@ impl App {
         self.workspace_ui.open = true;
         self.egui_ctx.request_repaint();
     }
-    pub(super) fn workspace_action(&mut self, action: Action, gfx: &Gfx) {
+    pub(super) fn workspace_action(&mut self, action: Action, renderer: &Renderer, window: &Window) {
         let target = match &action.command {
             Command::Rename(id, _) | Command::Delete(id) | Command::Preview(id) | Command::Switch(id) => Some(*id),
             _ => None,
@@ -248,7 +248,7 @@ impl App {
         }
         if !self.workspaces.accepts(&action.ticket)
             || self.workspace_source().as_ref() != Some(&action.ticket.source)
-            || !self.workspace_permit(gfx)
+            || !self.workspace_permit(renderer, window)
             || self.panels.settings
         {
             return;
@@ -384,7 +384,7 @@ impl App {
         }
         self.egui_ctx.request_repaint();
     }
-    pub(super) fn workspace_after_pass(&mut self, gfx: &Gfx) {
+    pub(super) fn workspace_after_pass(&mut self, renderer: &Renderer, window: &Window) {
         if self.workspaces.placement.is_none() {
             return;
         }
@@ -392,7 +392,7 @@ impl App {
             self.workspace_cancel_preview(false);
             return;
         }
-        if !self.workspace_permit(gfx) {
+        if !self.workspace_permit(renderer, window) {
             self.workspace_cancel_preview(true);
             return;
         }
@@ -422,16 +422,16 @@ impl App {
     }
     /// A Cancel captured by this pass wins over a pending Switch's last
     /// placement pass. Other gestures start after settling earlier placement.
-    pub(super) fn workspace_after_ui(&mut self, action: Option<Action>, gfx: &Gfx) {
+    pub(super) fn workspace_after_ui(&mut self, action: Option<Action>, renderer: &Renderer, window: &Window) {
         if action.as_ref().is_some_and(|a| matches!(a.command, Command::Cancel)) {
             if let Some(action) = action {
-                self.workspace_action(action, gfx);
+                self.workspace_action(action, renderer, window);
             }
-            self.workspace_after_pass(gfx);
+            self.workspace_after_pass(renderer, window);
         } else {
-            self.workspace_after_pass(gfx);
+            self.workspace_after_pass(renderer, window);
             if let Some(action) = action {
-                self.workspace_action(action, gfx);
+                self.workspace_action(action, renderer, window);
             }
         }
     }
