@@ -204,6 +204,18 @@ impl PreviewPolicy {
         }
         Ok(Self { source, epochs, access })
     }
+    /// Compare immutable native policy facts, including an expired prior floor.
+    /// This does not refresh authority, revive images or validate receipt time.
+    /// Shared with sync_observed so reconstruction cannot weaken its ordering.
+    pub fn validate_successor(self, previous: Self) -> Result<(), ImageError> {
+        if self.source != previous.source || !self.epochs.follows(previous.epochs) || self.access.activation < previous.access.activation {
+            return Err(ImageError::Stale);
+        }
+        if self.epochs == previous.epochs && self.access.retain_last_active != previous.access.retain_last_active {
+            return Err(ImageError::Invalid);
+        }
+        Ok(())
+    }
     pub fn source(self) -> PreviewSource {
         self.source
     }
@@ -704,13 +716,9 @@ impl SourceImages {
             return Err(ImageError::Stale);
         }
         if let Some(old) = self.policy {
-            if !policy.epochs.follows(old.epochs) || policy.access.activation < old.access.activation {
+            if let Err(error) = policy.validate_successor(old) {
                 self.purge()?;
-                return Err(ImageError::Stale);
-            }
-            if policy.epochs == old.epochs && policy.access.retain_last_active != old.access.retain_last_active {
-                self.purge()?;
-                return Err(ImageError::Invalid);
+                return Err(error);
             }
             if policy.epochs != old.epochs {
                 self.purge()?;
@@ -1294,5 +1302,99 @@ mod tests {
             ..duplicates[0]
         };
         assert!(unique_preview_demands(&[duplicates[0], conflicting]).is_err());
+    }
+    #[test]
+    fn preview_policy_successor_matches_real_model_source_epoch_activation_and_equal_epoch_flag_rejections() {
+        let old = PreviewPolicy::new(source(1), PreviewEpochs::new(7, 5, 9, 6, 9).unwrap(), policy(1).access()).unwrap();
+        let remake = |source, epochs, access| PreviewPolicy::new(source, epochs, access).unwrap();
+        let mut cases = vec![(policy(2), ImageError::Stale)];
+        for epochs in [
+            PreviewEpochs::new(6, 5, 9, 6, 9),
+            PreviewEpochs::new(7, 4, 9, 6, 9),
+            PreviewEpochs::new(7, 5, 8, 6, 9),
+            PreviewEpochs::new(7, 5, 9, 5, 9),
+            PreviewEpochs::new(7, 5, 9, 6, 8),
+        ] {
+            cases.push((remake(source(1), epochs.unwrap(), old.access()), ImageError::Stale));
+        }
+        cases.push((
+            remake(
+                source(1),
+                old.epochs(),
+                PreviewAccess {
+                    activation: 6,
+                    ..old.access()
+                },
+            ),
+            ImageError::Stale,
+        ));
+        cases.push((
+            remake(
+                source(1),
+                old.epochs(),
+                PreviewAccess {
+                    retain_last_active: false,
+                    capture_active: false,
+                    ..old.access()
+                },
+            ),
+            ImageError::Invalid,
+        ));
+        for (new, error) in cases {
+            let budget = ImageBudget::new(MAX_IMAGE_BYTES * 2).unwrap();
+            let mut images = SourceImages::new(old.source(), budget.clone()).unwrap();
+            images.sync(old, 0).unwrap();
+            let claim = images.request(1, 1, geometry(), 1).unwrap();
+            let stamp = PreviewStamp::new(claim, 1, 9, 0, geometry()).unwrap();
+            let held = images.admit(stamp, budget.reserve(geometry()).unwrap(), 2).unwrap();
+            assert!(held.current(3));
+            assert_eq!(new.validate_successor(old), Err(error));
+            assert!(held.current(3), "comparison must not mutate authority/history");
+            assert_eq!(images.sync(new, 3), Err(error));
+            assert!(!held.current(3));
+            assert_eq!(budget.used(), geometry().payload_bytes(), "held allocation remains credited");
+        }
+    }
+    #[test]
+    fn preview_policy_successor_allows_normal_park_and_render_scoped_surface_replacement_without_refreshing_old_floor() {
+        let old = PreviewPolicy::new(source(1), PreviewEpochs::new(7, 5, 9, 6, 9).unwrap(), policy(1).access()).unwrap();
+        let parked = PreviewPolicy::new(
+            source(1),
+            old.epochs(),
+            PreviewAccess {
+                active: false,
+                capture_active: false,
+                ..old.access()
+            },
+        )
+        .unwrap();
+        let replacement = PreviewPolicy::new(source(1), PreviewEpochs::new(8, 5, 10, 6, 1).unwrap(), old.access()).unwrap();
+        assert_eq!(old.validate_successor(old), Ok(()));
+        assert_eq!(parked.validate_successor(old), Ok(()));
+        assert_eq!(replacement.validate_successor(old), Ok(()));
+        assert_eq!(old.validate_successor(replacement), Err(ImageError::Stale));
+        let budget = ImageBudget::new(MAX_IMAGE_BYTES * 2).unwrap();
+        let mut images = SourceImages::new(source(1), budget.clone()).unwrap();
+        images.sync(old, 0).unwrap();
+        let claim = images.request(1, 1, geometry(), 1).unwrap();
+        let held = images
+            .admit(
+                PreviewStamp::new(claim, 1, 9, 0, geometry()).unwrap(),
+                budget.reserve(geometry()).unwrap(),
+                2,
+            )
+            .unwrap();
+        images.sync_observed(parked, 0, 900).unwrap();
+        assert!(held.current(999));
+        assert!(!held.current(1000));
+        assert_eq!(
+            replacement.validate_successor(old),
+            Ok(()),
+            "expired floor is still comparable data"
+        );
+        assert!(!held.current(1000), "comparison cannot renew expired authority");
+        images.sync_observed(replacement, 1000, 1000).unwrap();
+        assert!(!held.current(1000));
+        assert_eq!(images.policy, Some(replacement));
     }
 }
