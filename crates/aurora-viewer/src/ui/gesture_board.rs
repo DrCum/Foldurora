@@ -35,6 +35,8 @@ struct Held {
     id: egui::Id,
     action: Action,
     key: Option<egui::Key>,
+    press_frame: u64,
+    press_index: usize,
 }
 struct Dialog {
     origin: Proof,
@@ -120,11 +122,18 @@ impl State {
     }
     fn capture(&mut self, response: &egui::Response, make: impl FnOnce() -> Option<Action>) -> Option<Action> {
         let frame = response.ctx.cumulative_frame_nr();
-        let (pointer_press, pointer_release, key_press, enter_release, space_release) = response.ctx.input(|input| {
+        let (pointer_press, key_press) = response.ctx.input(|input| {
             (
-                input.pointer.button_pressed(egui::PointerButton::Primary),
-                input.pointer.button_released(egui::PointerButton::Primary),
-                input.events.iter().find_map(|event| match event {
+                input.events.iter().enumerate().find_map(|(index, event)| match event {
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        ..
+                    } => Some((index, *pos)),
+                    _ => None,
+                }),
+                input.events.iter().enumerate().find_map(|(index, event)| match event {
                     egui::Event::Key {
                         key,
                         pressed: true,
@@ -132,25 +141,36 @@ impl State {
                         modifiers,
                         ..
                     } if matches!(key, egui::Key::Enter | egui::Key::Space) && !modifiers.ctrl && !modifiers.alt && !modifiers.command => {
-                        Some(*key)
+                        Some((index, *key))
                     }
                     _ => None,
                 }),
-                input.key_released(egui::Key::Enter),
-                input.key_released(egui::Key::Space),
             )
         });
         let interactive = response.ctx.memory(|memory| memory.allows_interaction(response.layer_id)) && !self.suspended;
-        let pointer = interactive
-            && pointer_press
-            && response.contains_pointer()
-            && (response.is_pointer_button_down_on() || response.clicked_by(egui::PointerButton::Primary));
+        let pointer = pointer_press.filter(|(_, pos)| {
+            interactive
+                && response.interact_rect.contains(*pos)
+                && response.ctx.layer_id_at(*pos) == Some(response.layer_id)
+                && (response.is_pointer_button_down_on() || response.clicked_by(egui::PointerButton::Primary))
+        });
         let key = key_press.filter(|_| interactive && response.has_focus());
-        if !self.input_blocked && response.enabled() && (pointer || key.is_some()) && self.last_press != Some(frame) && self.held.is_none()
+        if !self.input_blocked
+            && response.enabled()
+            && (pointer.is_some() || key.is_some())
+            && self.last_press != Some(frame)
+            && self.held.is_none()
         {
             self.last_press = Some(frame);
-            // A queued press can only bind the action actually painted BEFORE
-            // this input pass. New link targets/runs/rows require a fresh paint.
+            let (press_index, key) = if let Some((index, _)) = pointer {
+                (index, None)
+            } else {
+                let (index, key) = key?;
+                (index, Some(key))
+            };
+            // A queued press only binds the exact previously painted clipped
+            // control. Its actual event position/order, not the final pointer
+            // position of an input batch, determines the captured target.
             self.held = self
                 .painted
                 .get(&response.id)
@@ -164,6 +184,8 @@ impl State {
                     id: response.id,
                     action: painted.action.clone(),
                     key,
+                    press_frame: frame,
+                    press_index,
                 });
         }
         if interactive
@@ -182,29 +204,39 @@ impl State {
                 },
             );
         }
-        let released = self.held.as_ref().is_some_and(|held| {
-            held.id == response.id
-                && match held.key {
-                    Some(egui::Key::Enter) => enter_release,
-                    Some(egui::Key::Space) => space_release,
-                    Some(_) => false,
-                    None => pointer_release,
-                }
+        let released = self.held.as_ref().filter(|held| held.id == response.id).and_then(|held| {
+            response.ctx.input(|input| {
+                input.events.iter().enumerate().find_map(|(index, event)| {
+                    if held.press_frame == frame && index <= held.press_index {
+                        return None;
+                    }
+                    match (held.key, event) {
+                        (
+                            None,
+                            egui::Event::PointerButton {
+                                pos,
+                                button: egui::PointerButton::Primary,
+                                pressed: false,
+                                ..
+                            },
+                        ) => Some(Some(*pos)),
+                        (Some(expected), egui::Event::Key { key, pressed: false, .. }) if expected == *key => Some(None),
+                        _ => None,
+                    }
+                })
+            })
         });
-        if released {
+        if let Some(position) = released {
             let held = self.held.take()?;
-            if interactive
-                && !self.input_blocked
-                && response.enabled()
-                && if held.key.is_some() {
-                    response.has_focus()
-                } else {
-                    response.contains_pointer()
-                }
-            {
+            let owns_release = position.map_or_else(
+                || response.has_focus(),
+                |pos| response.interact_rect.contains(pos) && response.ctx.layer_id_at(pos) == Some(response.layer_id),
+            );
+            if interactive && !self.input_blocked && response.enabled() && owns_release {
                 return Some(held.action);
             }
         }
+
         None
     }
 }
