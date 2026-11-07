@@ -2215,6 +2215,25 @@ mod tests {
                 assert!(rect.is_finite() && rect.is_positive(), "{name}: invalid short-canvas area {rect:?}");
                 assert!(bounds.expand(1.0).contains_rect(rect), "{name}: {rect:?} escapes {bounds:?}");
             }
+            // Area bounds alone miss the decorative bottom row: its fixed
+            // baseline lies above this tiny canvas. Check the actual dot
+            // and label painters, rather than only their computed positions.
+            let mut dot = false;
+            let mut label = false;
+            for shape in f.show(Vec::new()) {
+                let is_dot = matches!(&shape.shape, egui::Shape::Circle(circle) if circle.radius == 5.25);
+                let is_label =
+                    matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == aurora_i18n::tr!("photo-vf-sharp-from"));
+                if is_dot || is_label {
+                    assert!(
+                        bounds.expand(1.0).contains_rect(shape.clip_rect),
+                        "short-canvas decoration spills: {shape:?}"
+                    );
+                    dot |= is_dot;
+                    label |= is_label;
+                }
+            }
+            assert!(dot && label, "exercise the actual AF dot and sharp-range label");
             // Resizing out of the tiny canvas must restore the usable ring,
             // rather than retain a zero-sized scroll region or stuck input.
             f.viewport.top = 0.0;

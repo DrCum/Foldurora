@@ -523,6 +523,10 @@ impl Viewfinder {
         let front = ctx.layer_painter(egui::LayerId::new(Order::Middle, Id::unique("vf_front")));
         let scene_back = back.with_clip_rect(screen);
         let scene_front = front.with_clip_rect(screen);
+        // Decorative controls share their selected canvas with the Areas.
+        // Fixed bottom/top offsets can lie outside a very short viewport.
+        let control_back = back.with_clip_rect(controls);
+        let control_front = front.with_clip_rect(controls);
 
         // the photo's proportions: the rest darkened, a fine frame, the guide
         let include_interface = s.interface && crate::snapshot::same_proportions(f.photo, f.window) && !panel.freeze;
@@ -543,7 +547,7 @@ impl Viewfinder {
         let ctl = shows && !self.menu && self.controls_shown(ctx, s, controls, f.now);
         let pad = ctl && s.viewfinder.pad;
         if full {
-            self.top_bar(ctx, p, &back, controls, s, panel, f, &mut out);
+            self.top_bar(ctx, p, &control_back, controls, s, panel, f, &mut out);
         }
         self.af_point(ctx, p, &scene_front, s, f);
         // (the last photo's card takes its place while it shows)
@@ -575,10 +579,10 @@ impl Viewfinder {
         if ctl {
             self.ring_deck(ctx, p, controls, s, panel, fov, f, &mut out);
         } else if !self.menu && (manual || active || full) {
-            self.scale(ctx, p, &front, controls, s, f);
+            self.scale(ctx, p, &control_front, controls, s, f);
         }
         if shows {
-            self.bottom_bar(ctx, p, &back, controls, s, panel, fov, f, ctl, &mut out);
+            self.bottom_bar(ctx, p, &control_back, controls, s, panel, fov, f, ctl, &mut out);
             self.dock(ctx, p, controls, s, panel, f, &mut out);
         } else if ghost_disp(ctx, p, controls) {
             s.viewfinder.display = display.next();
