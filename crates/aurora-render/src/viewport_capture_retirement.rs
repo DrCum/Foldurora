@@ -252,10 +252,11 @@ mod tests {
     }
     #[test]
     fn viewport_retirement_recreated_frontend_rejects_old_probe_with_same_local_counters() {
-        let mut old = Retirement::default();
-        old.request(token()).unwrap();
-        let previous = old.probe(Purpose::Retire).unwrap().unwrap();
-        drop(old);
+        let previous = {
+            let mut old = Retirement::default();
+            old.request(token()).unwrap();
+            old.probe(Purpose::Retire).unwrap().unwrap()
+        };
         let mut replacement = Retirement::default();
         replacement.request(token()).unwrap();
         let current = replacement.probe(Purpose::Retire).unwrap().unwrap();

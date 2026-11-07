@@ -272,7 +272,6 @@ mod tests {
             chat_type: aurora_net::ChatType::OwnerSay,
             position: glam::Vec3::ZERO,
             message: text.into(),
-            ..Default::default()
         }));
     }
 

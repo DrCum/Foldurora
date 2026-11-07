@@ -269,11 +269,11 @@ impl Connected {
         {
             let _ = stream.shutdown(Shutdown::Both);
         }
-        let pixels = if shared.stall_pixels.load(Ordering::Acquire) {
-            None
-        } else {
-            self.pixels.as_mut()
-        };
+        #[cfg(test)]
+        let stalled = shared.stall_pixels.load(Ordering::Acquire);
+        #[cfg(not(test))]
+        let stalled = false;
+        let pixels = if stalled { None } else { self.pixels.as_mut() };
         let packets = match self.pair.poll_roles(&mut self.metadata, pixels, clock, &mut tick) {
             Ok(p) => p,
             Err(Error::CaptureRevoked) => {

@@ -1,6 +1,8 @@
 //! Own the renderer's already-credited allocation; never allocate/copy RGBA.
 use super::Error;
-use aurora_render::viewport_capture::{CapturePublicationGuard, CaptureToken, CapturedViewport};
+#[cfg(test)]
+use aurora_render::viewport_capture::CaptureToken;
+use aurora_render::viewport_capture::{CapturePublicationGuard, CapturedViewport};
 use aurora_session::preview_image::PreviewStamp;
 
 enum Publication {

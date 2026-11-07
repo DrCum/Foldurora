@@ -655,7 +655,7 @@ impl Pair {
         })
     }
     pub fn set_source_guard(&mut self, guard: super::super::preview_io::guards::IoSourceGuard) -> Result<(), Error> {
-        if guard.control.source != self.metadata.auth.scope.source || !guard.current() {
+        if guard.control.source() != self.metadata.auth.scope.source || !guard.current() {
             self.close();
             return Err(Error::Binding);
         }

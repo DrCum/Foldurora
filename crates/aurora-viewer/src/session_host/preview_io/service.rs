@@ -58,7 +58,7 @@ pub(super) struct Shared<T> {
     pub incarnation: u64,
 }
 impl<T> Shared<T> {
-    fn new(mailbox: T) -> Self {
+    pub(super) fn new(mailbox: T) -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(1);
         let incarnation = NEXT
             .try_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_add(1))

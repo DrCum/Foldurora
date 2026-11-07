@@ -12,10 +12,14 @@ use aurora_session::preview_image::PreviewSource;
 use aurora_session::preview_wire::{Direction, Lane, WireError};
 use std::io;
 
+#[cfg(test)]
 pub(super) use super::preview_bootstrap::PreviewSecret;
+#[cfg(test)]
 pub(super) use admission::{Admissions, RoundRobin};
 pub(super) use auth::{Authenticated, HostHandshake, WorkerHandshake};
-pub(super) use stream::{AdmittedPixels, Pair, Received, TickBudget, UnadmittedPixels, worker_storage_ceiling};
+#[cfg(test)]
+pub(super) use stream::worker_storage_ceiling;
+pub(super) use stream::{AdmittedPixels, Pair, Received, TickBudget, UnadmittedPixels};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Error {

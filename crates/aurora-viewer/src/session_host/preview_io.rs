@@ -21,14 +21,15 @@ use std::time::{Duration, Instant};
 
 pub(crate) use super::preview_transport::Error;
 pub(crate) use guards::{CaptureControlGuard, CapturePermitGuard, ControlGuard, EpochFence, SourceRetentionGuard};
-pub(crate) use publication::{
-    LayoutReceipt, ObservationDomain, PolicyReceipt, PublicationGuard, PublicationStamp, ReceiptOrigin, VersionedObservation,
-    VersionedObservationSet,
-};
-pub(crate) use service::{HostChannel, WorkerChannel};
-pub(crate) use state::{
-    FrameHandoff, HostPermit, HostUpdate, Observation, ReceivedCommand, RetainedFrame, SourceLease, SourceUpdate, Status, WorkerState,
-};
+pub(crate) use publication::{LayoutReceipt, ObservationDomain, PolicyReceipt, ReceiptOrigin, VersionedObservationSet};
+#[cfg(any(windows, test))]
+pub(crate) use publication::{PublicationGuard, PublicationStamp, VersionedObservation};
+#[cfg(any(windows, test))]
+pub(crate) use service::HostChannel;
+pub(crate) use service::WorkerChannel;
+#[cfg(any(windows, test))]
+pub(crate) use state::{FrameHandoff, HostPermit, RetainedFrame, SourceUpdate};
+pub(crate) use state::{HostUpdate, ReceivedCommand, SourceLease, WorkerState};
 
 const PERIOD: Duration = Duration::from_millis(10);
 const DEADLINE: Duration = Duration::from_secs(1);

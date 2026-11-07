@@ -21,7 +21,6 @@ impl PreviewSecret {
     pub(super) fn synthetic(bytes: [u8; 32]) -> Result<Self, &'static str> {
         Self::from_bytes(bytes)
     }
-    #[cfg(test)]
     pub fn random() -> Result<Self, &'static str> {
         use ring::rand::SecureRandom;
         let mut bytes = [0; 32];
@@ -30,15 +29,12 @@ impl PreviewSecret {
             .map_err(|_| "preview randomness unavailable")?;
         Self::from_bytes(bytes)
     }
-    #[cfg(test)]
     pub(super) fn context(&self) -> ring::hmac::Context {
         ring::hmac::Context::with_key(&ring::hmac::Key::new(ring::hmac::HMAC_SHA256, self.0.as_ref()))
     }
-    #[cfg(test)]
     pub(super) fn sign(&self, input: &[u8]) -> ring::hmac::Tag {
         ring::hmac::sign(&ring::hmac::Key::new(ring::hmac::HMAC_SHA256, self.0.as_ref()), input)
     }
-    #[cfg(test)]
     pub(super) fn verifies(&self, input: &[u8], tag: &[u8]) -> bool {
         ring::hmac::verify(&ring::hmac::Key::new(ring::hmac::HMAC_SHA256, self.0.as_ref()), input, tag).is_ok()
     }
