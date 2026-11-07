@@ -1,6 +1,9 @@
 //! The controller shows acknowledged local sessions only. Chat is offered
 //! only for its authenticated live native backend; logins remain manual.
 
+#[cfg(test)]
+mod visual;
+
 use super::slots::{SlotId, SlotLabel, SlotSummary};
 use super::transport::{HostError, HostSnapshot, WorkerSummary};
 use crate::theme::Palette;

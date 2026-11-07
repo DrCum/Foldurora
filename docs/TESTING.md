@@ -63,6 +63,25 @@ profile, socket, grid, native window or graphics adapter is created. These
 captures validate the CPU UI body; native ownership, taskbar and focus behavior
 still need separate Windows acceptance.
 
+**CPU compact controller captures.**
+
+| Variable | Effect |
+|---|---|
+| `AURORA_COMPACT_HOST_VISUAL_DIR=<directory>` | Empty output directory for the explicit test-only compact controller fixture |
+| `AURORA_COMPACT_HOST_VISUAL_LANGUAGE=en\|fr\|ja` | Locale of that isolated test process |
+
+Run `cargo test --workspace compact_host_cpu_visual_fixture -- --ignored
+--test-threads=1 --nocapture` with both variables set, once per locale. These
+variables are test-only and add no viewer startup mode. Seven PNG/JSON scenes
+show five synthetic workers, the compact strip, management drawer, actual
+profile dropdown, Rename/Close dialogs and a narrow layout at 150% native DPI.
+Actual widget/world bounds and acknowledged active identity are checked; a
+requested character switch alone never changes the active highlight. Inspect
+the PNGs for clipping and localized glyphs. The fixture paints production UI
+through the CPU painter without opening native windows, workers, profiles,
+sockets, a world renderer or a grid. Native embedding, focus and hit testing
+remain separate Windows checks. Native DPI and UI zoom are distinct settings.
+
 **To add a variable**: one short line in the table of its topic (the name
 alone in the first column, one sentence in the second); if it takes more
 than one sentence, or if there are several modes, a "Details" paragraph

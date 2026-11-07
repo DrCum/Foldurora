@@ -109,6 +109,12 @@ real egui input and paints through `crash::software::Painter`, as
 writes synthetic PNG/JSON evidence without a native window, controller, profile,
 socket or graphics adapter. It does not replace native-window acceptance.
 
+`session_host/ui/visual.rs` similarly captures the production compact controller
+with five synthetic bound workers. Its explicit locale-isolated fixture covers
+the strip, management drawer, popup, Rename/Close dialogs and narrow native-DPI
+layouts, recording actual widget/world geometry and acknowledgement-only active
+state. It never creates a controller, worker, native window, profile or renderer.
+
 `app/busy_pause.rs` chooses shared-viewer background pause before the packet's
 world resolution and draw lists. A live peer from the same or an unknown GPU
 counts even at the login screen or with zero reported memory. The existing
