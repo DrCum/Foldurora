@@ -66,6 +66,12 @@ impl Image<'_> {
     }
 }
 
+// A bounded painted-control set keeps complete captured proofs inline and Copy,
+// avoiding per-paint allocations or a weaker reconstructed navigation target.
+#[expect(
+    clippy::large_enum_variant,
+    reason = "bounded Copy captures retain the original immutable navigation proof inline"
+)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Command {
     Exchange(Ticket),
@@ -80,6 +86,12 @@ pub(super) enum Command {
 /// Parent revalidates the captured local ticket, binding, published base,
 /// playing/interval observations and any strong command ticket after its latest
 /// sync, then flushes before applying changes. These values confer no authority.
+// One transient dispatch carries the complete original view/source/base guards;
+// this value contains neither queued pixel data nor an operation ledger.
+#[expect(
+    clippy::large_enum_variant,
+    reason = "one ephemeral action retains all original guards together for parent revalidation"
+)]
 #[derive(Debug)]
 pub(super) enum Action {
     Control {
