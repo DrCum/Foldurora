@@ -1,6 +1,6 @@
 use super::auth::{Authenticated, Keys};
 use super::{Error, Side};
-use aurora_session::preview_image::{ImageBudget, ImageCredit, PreviewPolicy, PreviewStamp};
+use aurora_session::preview_image::{AdmittedImage, ImageBudget, ImageCredit, ImageError, PreviewPolicy, PreviewStamp, SourceImages};
 use aurora_session::preview_wire::{self as wire, HEADER_BYTES, Header, Lane, MAX_METADATA_BYTES, Metadata, MetadataBytes, TAG_BYTES};
 use ring::hmac;
 use std::collections::VecDeque;
@@ -55,15 +55,22 @@ impl Allowance<'_> {
     }
 }
 
-/// Actual allocation credit travels with the only owned pixel Vec. No Clone
-/// implementation can silently duplicate a physical image without reservation.
-pub(crate) struct Pixels {
+/// Authenticated transport bytes, explicitly NOT an admitted/drawable image.
+/// Scope/MAC/format checks cannot prove a current capture claim, native grant,
+/// control lease or policy. The owner must sync SourceImages from fresh control
+/// and authenticated policy, then consume this through `admit` before any UI
+/// publication, texture copy or image cache replacement.
+///
+/// Actual allocation credit travels with the only owned Vec. Field order frees
+/// bytes before credit on rejection/drop; no split Vec/credit accessor or Clone
+/// can silently keep a physical image after refunding its reservation.
+pub(crate) struct UnadmittedPixels {
     stamp: PreviewStamp,
     bytes: Vec<u8>,
     credit: ImageCredit,
     validity: Option<(Arc<AtomicU64>, u64)>,
 }
-impl Pixels {
+impl UnadmittedPixels {
     fn blank(stamp: PreviewStamp, budget: &ImageBudget) -> Result<Self, Error> {
         let credit = budget.reserve(stamp.geometry()).map_err(|_| Error::Capacity)?;
         let mut bytes = Vec::new();
@@ -84,29 +91,56 @@ impl Pixels {
         pixels.bytes.copy_from_slice(input);
         Ok(pixels)
     }
-    pub fn current(&self) -> bool {
+    pub fn transport_current(&self) -> bool {
         self.validity
             .as_ref()
             .is_none_or(|(current, epoch)| *epoch != 0 && current.load(Ordering::Acquire) == *epoch)
     }
-    pub fn bytes(&self) -> Option<&[u8]> {
-        self.current().then_some(self.bytes.as_slice())
+    #[cfg(test)]
+    pub(super) fn test_bytes(&self) -> Option<&[u8]> {
+        self.transport_current().then_some(self.bytes.as_slice())
     }
-    pub fn into_parts(self) -> Result<(PreviewStamp, Vec<u8>, ImageCredit), Error> {
-        if !self.current() {
-            return Err(Error::Binding);
+    /// Owns both bytes and their original credit through final model admission.
+    /// A failed `SourceImages::admit` drops its trial clone while this object's
+    /// reservation still exists; rejection then frees bytes before refunding.
+    pub fn admit(self, owner: &mut SourceImages, now: u64) -> Result<AdmittedPixels, ImageError> {
+        if !self.transport_current() {
+            return Err(ImageError::Stale);
         }
-        Ok((self.stamp, self.bytes, self.credit))
+        let image = owner.admit(self.stamp, self.credit.clone(), now)?;
+        Ok(AdmittedPixels { bytes: self.bytes, image })
     }
 }
-impl std::fmt::Debug for Pixels {
+impl std::fmt::Debug for UnadmittedPixels {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("PreviewPixels([redacted])")
+        f.write_str("UnadmittedPreviewPixels([redacted])")
+    }
+}
+
+/// The final admission handle and its exact allocation stay inseparable. The
+/// caller must still recheck `bytes(now)` immediately before any physical copy
+/// or present, reserve separate credit for copies, and erase revoked textures.
+pub(crate) struct AdmittedPixels {
+    // Free the physical allocation before dropping its model-held credit.
+    bytes: Vec<u8>,
+    image: AdmittedImage,
+}
+impl AdmittedPixels {
+    pub fn image(&self) -> &AdmittedImage {
+        &self.image
+    }
+    pub fn bytes(&self, now: u64) -> Option<&[u8]> {
+        self.image.current(now).then_some(self.bytes.as_slice())
+    }
+}
+impl std::fmt::Debug for AdmittedPixels {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("AdmittedPreviewPixels([redacted])")
     }
 }
 pub(crate) enum Received {
     Metadata(Metadata),
-    Pixels(Pixels),
+    UnadmittedPixels(UnadmittedPixels),
 }
 impl std::fmt::Debug for Received {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -118,14 +152,14 @@ struct Outgoing {
     header: Header,
     metadata: MetadataBytes,
     header_tag: [u8; TAG_BYTES],
-    pixels: Option<Pixels>,
+    pixels: Option<UnadmittedPixels>,
     body: Option<hmac::Context>,
     finish: Option<[u8; TAG_BYTES]>,
     position: usize,
     began: Option<u64>,
 }
 impl Outgoing {
-    fn new(header: Header, metadata: MetadataBytes, pixels: Option<Pixels>, keys: &Keys) -> Self {
+    fn new(header: Header, metadata: MetadataBytes, pixels: Option<UnadmittedPixels>, keys: &Keys) -> Self {
         let header_tag = keys.header(header, metadata.as_slice());
         let body = Some(keys.body(header, metadata.as_slice(), &header_tag));
         Self {
@@ -193,7 +227,7 @@ struct Incoming {
     position: usize,
     began: Option<u64>,
     decoded: Option<Metadata>,
-    pixels: Option<Pixels>,
+    pixels: Option<UnadmittedPixels>,
     body: Option<hmac::Context>,
 }
 impl Incoming {
@@ -296,7 +330,7 @@ impl Incoming {
                     if stamp.claim().source() != auth.scope.source {
                         return Err(Error::Binding);
                     }
-                    self.pixels = Some(Pixels::blank(stamp, budget)?);
+                    self.pixels = Some(UnadmittedPixels::blank(stamp, budget)?);
                 }
             }
             self.body = Some(auth.receive.body(header, metadata, &self.header_tag));
@@ -307,7 +341,7 @@ impl Incoming {
             auth.receive.verify_finish(self.body.take().ok_or(Error::Invalid)?, &self.finish)?;
             return match header.lane() {
                 Lane::Metadata => Ok(Some(Received::Metadata(self.decoded.take().ok_or(Error::Invalid)?))),
-                Lane::Pixels => Ok(Some(Received::Pixels(self.pixels.take().ok_or(Error::Invalid)?))),
+                Lane::Pixels => Ok(Some(Received::UnadmittedPixels(self.pixels.take().ok_or(Error::Invalid)?))),
             };
         }
         Ok(None)
@@ -338,7 +372,7 @@ impl Endpoint {
         self.incoming = Incoming::new();
         self.outgoing.clear();
     }
-    fn enqueue(&mut self, metadata: MetadataBytes, pixels: Option<Pixels>) -> Result<(), Error> {
+    fn enqueue(&mut self, metadata: MetadataBytes, pixels: Option<UnadmittedPixels>) -> Result<(), Error> {
         if self.closed {
             return Err(Error::Closed);
         }
@@ -520,10 +554,10 @@ impl Pair {
         }
         result
     }
-    pub fn queue_pixels(&mut self, pixels: Pixels) -> Result<(), Error> {
+    pub fn queue_pixels(&mut self, pixels: UnadmittedPixels) -> Result<(), Error> {
         if pixels.stamp.claim().source() != self.pixels.auth.scope.source
             || pixels.stamp.claim().connection() != self.pixels.auth.scope.connection
-            || !pixels.current()
+            || !pixels.transport_current()
         {
             self.close();
             return Err(Error::Binding);
@@ -576,7 +610,7 @@ impl Pair {
             }
             let epoch = self.validity.load(Ordering::Acquire);
             for packet in &mut output[before..] {
-                if let Received::Pixels(pixels) = packet {
+                if let Received::UnadmittedPixels(pixels) = packet {
                     pixels.validity = Some((self.validity.clone(), epoch));
                 }
             }

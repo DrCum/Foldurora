@@ -5,7 +5,10 @@
   roles, fresh mutually authenticated source/lease/connection/nonce contexts and
   per-packet MACs. Header authentication precedes shared image-credit allocation;
   bounded fragmented IO drops partial work on loss/expiry and never revives
-  pixels after restoration. Pure codec and fake-IO/auth/credit/parking regressions
+  pixels after restoration. Raw transport output is explicitly unadmitted;
+  an owned SourceImages admission seam rejects mismatched capture authority or
+  native sequence without replacing the cache or releasing credit before bytes.
+  Pure codec and fake-IO/auth/credit/parking/admission regressions
   are authored; execution and independent review remain pending. Viewer code is
   cfg(test)-only: no endpoint, service thread, bootstrap, native adapter, image
   surface, capture enablement or inactive rendering is shipped. Future service

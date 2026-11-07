@@ -13,7 +13,7 @@ use std::io;
 
 pub(super) use admission::{Admissions, RoundRobin};
 pub(super) use auth::{HostHandshake, PreviewSecret, WorkerHandshake};
-pub(super) use stream::{Pair, Pixels, Received, TickBudget};
+pub(super) use stream::{AdmittedPixels, Pair, Received, TickBudget, UnadmittedPixels};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Error {

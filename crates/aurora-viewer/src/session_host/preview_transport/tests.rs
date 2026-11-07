@@ -201,7 +201,7 @@ impl Harness {
             pixel.copy_from_slice(&color(index));
         }
         self.worker
-            .queue_pixels(Pixels::copy_from(self.stamp, &raw, &self.budget).unwrap())
+            .queue_pixels(UnadmittedPixels::copy_from(self.stamp, &raw, &self.budget).unwrap())
             .unwrap();
     }
     fn worker_tick(&mut self, now: u64) -> Result<Vec<Received>, Error> {
@@ -212,11 +212,14 @@ impl Harness {
         self.host
             .poll(&mut self.host_meta, &mut self.host_pixels, now, &mut TickBudget::new())
     }
-    fn receive(&mut self) -> Pixels {
+    fn receive(&mut self) -> UnadmittedPixels {
+        self.receive_at(10)
+    }
+    fn receive_at(&mut self, now: u64) -> UnadmittedPixels {
         for _ in 0..20_000 {
-            self.worker_tick(10).unwrap();
-            for packet in self.host_tick(10).unwrap() {
-                if let Received::Pixels(pixels) = packet {
+            self.worker_tick(now).unwrap();
+            for packet in self.host_tick(now).unwrap() {
+                if let Received::UnadmittedPixels(pixels) = packet {
                     return pixels;
                 }
             }
@@ -391,15 +394,15 @@ fn preview_stream_reordered_or_replayed_frame_retires_held_pixels_without_reopen
     let replay = h.host_pixels.input.borrow().bytes.clone();
     let mut held = None;
     for packet in h.host_tick(10).unwrap() {
-        if let Received::Pixels(pixels) = packet {
+        if let Received::UnadmittedPixels(pixels) = packet {
             held = Some(pixels);
         }
     }
     let held = held.unwrap();
-    assert!(held.current());
+    assert!(held.transport_current());
     h.host_pixels.input.borrow_mut().bytes.extend(replay);
     assert!(matches!(h.host_tick(20), Err(Error::Sequence)));
-    assert!(held.bytes().is_none());
+    assert!(held.test_bytes().is_none());
     drop(held);
     assert_eq!(h.budget.used(), 0);
 }
@@ -449,10 +452,10 @@ fn preview_stream_fragmented_read_write_matrix_roundtrips_exact_opaque_pixels_an
             let mut harness = Harness::new(read, write, PreviewSize::Small, false);
             harness.queue();
             let pixels = harness.receive();
-            assert_eq!(pixels.bytes().unwrap().len(), harness.stamp.geometry().payload_bytes());
+            assert_eq!(pixels.test_bytes().unwrap().len(), harness.stamp.geometry().payload_bytes());
             assert!(
                 pixels
-                    .bytes()
+                    .test_bytes()
                     .unwrap()
                     .chunks_exact(4)
                     .enumerate()
@@ -565,7 +568,8 @@ fn preview_stream_metadata_revoke_overtakes_stalled_image_and_allowed_cannot_res
     );
     let raw = vec![255; h.stamp.geometry().payload_bytes()];
     assert!(matches!(
-        h.worker.queue_pixels(Pixels::copy_from(h.stamp, &raw, &h.budget).unwrap()),
+        h.worker
+            .queue_pixels(UnadmittedPixels::copy_from(h.stamp, &raw, &h.budget).unwrap()),
         Err(Error::Closed)
     ));
     assert_eq!(h.budget.used(), 0);
@@ -577,7 +581,7 @@ fn preview_stream_metadata_eof_silence_and_pair_drop_invalidate_unhanded_images(
         let mut h = Harness::new(4096, 4096, PreviewSize::Small, false);
         h.queue();
         let pixels = h.receive();
-        assert!(pixels.current());
+        assert!(pixels.transport_current());
         match failure {
             0 => {
                 h.host_meta.input.borrow_mut().closed = true;
@@ -591,7 +595,7 @@ fn preview_stream_metadata_eof_silence_and_pair_drop_invalidate_unhanded_images(
             }
             _ => unreachable!(),
         }
-        assert!(pixels.bytes().is_none());
+        assert!(pixels.test_bytes().is_none());
         assert!(h.budget.used() > 0, "held allocations stay charged until their owner drops them");
         drop(pixels);
         assert_eq!(h.budget.used(), 0);
@@ -603,10 +607,9 @@ fn preview_stream_normal_park_retains_only_already_source_admitted_history() {
     let mut h = Harness::new(4096, 4096, PreviewSize::Small, false);
     h.queue();
     let received = h.receive();
-    let (stamp, raw, credit) = received.into_parts().unwrap();
-    let admitted = h.images.admit(stamp, credit, 10).unwrap();
-    assert!(admitted.current(10));
-    assert!(!raw.is_empty());
+    let admitted: AdmittedPixels = received.admit(&mut h.images, 10).unwrap();
+    assert!(admitted.image().current(10));
+    assert!(!admitted.bytes(10).unwrap().is_empty());
     let parked = PreviewPolicy::new(
         source(3),
         policy().epochs(),
@@ -632,13 +635,113 @@ fn preview_stream_normal_park_retains_only_already_source_admitted_history() {
         }
     }
     assert!(h.images.retained(20).unwrap().is_some());
-    assert!(admitted.current(20));
+    assert!(admitted.image().current(20));
+    assert!(admitted.bytes(20).is_some());
     h.host_meta.input.borrow_mut().closed = true;
     assert!(h.host_tick(30).is_err());
     // Future adapter's mandatory error handling: loss retires SourceImages;
     // a capture-grant change above deliberately did not do that.
     h.images.retire();
-    assert!(!admitted.current(30));
+    assert!(!admitted.image().current(30));
+    assert!(admitted.bytes(30).is_none());
+    drop(admitted);
+    assert_eq!(h.budget.used(), 0);
+}
+
+enum CorruptCapture {
+    Policy,
+    Activation,
+    Claim,
+    NativeSequence,
+}
+
+fn reject_authenticated_capture_without_cache_replacement(corruption: CorruptCapture) {
+    let mut h = Harness::new(4096, 4096, PreviewSize::Small, false);
+    h.queue();
+    let cached = h.receive().admit(&mut h.images, 10).unwrap();
+    let original = cached.image().stamp();
+    let charged = h.budget.used();
+    assert_eq!(charged, original.geometry().payload_bytes());
+    let pending = h.images.request(8, 1, original.geometry(), 20).unwrap();
+    let mut fields = serde_json::to_value(pending).unwrap();
+    match corruption {
+        CorruptCapture::Policy => fields["epochs"]["revision"] = 2.into(),
+        CorruptCapture::Activation => fields["activation"] = 2.into(),
+        CorruptCapture::Claim => fields["request"] = (pending.request() + 1).into(),
+        CorruptCapture::NativeSequence => {}
+    }
+    // Existing checked serde constructors validate the forged descriptor's
+    // shape. It is self-consistent and genuinely MACed by the authenticated
+    // worker, but it is not the captured authority/request issued by this host.
+    let forged = serde_json::from_value(fields).unwrap();
+    let sequence = if matches!(corruption, CorruptCapture::NativeSequence) {
+        1
+    } else {
+        2
+    };
+    let descriptor = PreviewStamp::new(forged, sequence, 1, 2, original.geometry()).unwrap();
+    let raw = vec![255; original.geometry().payload_bytes()];
+    h.worker
+        .queue_pixels(UnadmittedPixels::copy_from(descriptor, &raw, &h.budget).unwrap())
+        .unwrap();
+    let unadmitted = h.receive_at(30);
+    assert!(
+        unadmitted.transport_current(),
+        "MAC/scope freshness is intentionally separate from capture authority"
+    );
+    assert_eq!(h.budget.used(), 2 * charged);
+    assert!(matches!(
+        unadmitted.admit(&mut h.images, 30),
+        Err(aurora_session::preview_image::ImageError::Stale)
+    ));
+    assert_eq!(
+        h.budget.used(),
+        charged,
+        "owned rejection drops bytes and refunds only the rejected frame"
+    );
+    assert_eq!(h.images.retained(30).unwrap().unwrap().stamp(), original);
+    assert_eq!(cached.image().stamp(), original);
+    assert!(
+        cached
+            .bytes(30)
+            .unwrap()
+            .chunks_exact(4)
+            .enumerate()
+            .all(|(index, pixel)| pixel == color(index))
+    );
+
+    // A rejected native sequence/claim cannot advance the model's accepted
+    // sequence or consume its original pending request. The next fresh wire
+    // packet can deliver that exact still-current request successfully.
+    let correct = PreviewStamp::new(pending, 2, 1, 3, original.geometry()).unwrap();
+    h.worker
+        .queue_pixels(UnadmittedPixels::copy_from(correct, &raw, &h.budget).unwrap())
+        .unwrap();
+    let replacement = h.receive_at(40).admit(&mut h.images, 40).unwrap();
+    assert_eq!(h.images.retained(40).unwrap().unwrap().stamp(), correct);
+    assert_eq!(replacement.image().stamp(), correct);
+    assert!(replacement.bytes(40).unwrap().iter().all(|byte| *byte == 255));
+    h.images.retire();
+    drop(cached);
+    drop(replacement);
+    assert_eq!(h.budget.used(), 0);
+}
+
+#[test]
+fn preview_admission_rejects_valid_mac_wrong_capture_policy_without_replacing_cache() {
+    reject_authenticated_capture_without_cache_replacement(CorruptCapture::Policy);
+}
+#[test]
+fn preview_admission_rejects_valid_mac_wrong_activation_without_replacing_cache() {
+    reject_authenticated_capture_without_cache_replacement(CorruptCapture::Activation);
+}
+#[test]
+fn preview_admission_rejects_valid_mac_wrong_claim_without_replacing_cache() {
+    reject_authenticated_capture_without_cache_replacement(CorruptCapture::Claim);
+}
+#[test]
+fn preview_admission_rejects_valid_mac_stale_native_sequence_without_replacing_cache() {
+    reject_authenticated_capture_without_cache_replacement(CorruptCapture::NativeSequence);
 }
 
 #[test]

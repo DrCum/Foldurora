@@ -153,6 +153,15 @@ bytes/syscalls, absolute partial deadlines, ten role-admission slots, rotating
 five-source budgets and independent metadata priority. No listener, connector,
 thread, bootstrap, App, native bridge or image surface is enabled.
 
+That handoff is explicitly `Received::UnadmittedPixels`: transport scope/MAC/
+layout validity does not make bytes drawable or validate their captured policy,
+activation, request or native stamp sequence. The future owner must synchronize
+current control and native policy into SourceImages, then consume the owned
+`UnadmittedPixels::admit` seam before UI publication, image-cache replacement or
+texture copies. It keeps allocation credit with bytes on rejected admission;
+`AdmittedPixels::bytes(now)` rechecks the final model handle before each use.
+There is no public raw-Vec/credit split or unadmitted drawing accessor.
+
 The unenabled transport uses header HMAC, then a streaming body HMAC followed by
 a separately keyed HMAC of that digest; ring verifies tags in constant time
 without concatenating a second full image. Policy/grant changes discard new
