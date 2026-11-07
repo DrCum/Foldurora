@@ -12,9 +12,11 @@ The newer unread/shutter follow-up is frozen at
 [`0e40e48f`](https://github.com/DrCum/Foldurora/commit/0e40e48f631b1b4fdd0d677013e07b83a4f5fc61)
 on `feat/native-read-integration`; its separate
 [Windows run 42352272886](https://github.com/DrCum/Foldurora/actions/runs/42352272886)
-has parser/format/strict Clippy success and is executing full tests. Its final
-package is not yet verified. The older camera and Shared Chat packages remain
-frozen; do not mix their executable/protocol or validation receipts.
+and [artifact 13567703046](https://github.com/DrCum/Foldurora/actions/runs/42352272886/artifacts/13567703046)
+are verified builds. **A Linux native held-Enter/refocus defect was subsequently
+reproduced; native acceptance is withheld and its release-guard fix is separate.**
+The older camera and Shared Chat packages remain frozen; do not mix their
+executable/protocol or validation receipts.
 
 The frozen camera source is [`6a3009f2`](https://github.com/DrCum/Foldurora/commit/6a3009f27a2a5e49e61ea0fdeb1f7e89e3eb2fa8),
 on `fix/camera-controls-integration`. Its [Windows run 42343210582](https://github.com/DrCum/Foldurora/actions/runs/42343210582)
@@ -165,12 +167,42 @@ keep those scopes separate. The source-worktree records are
 `.scratch/native-read-visual-latest.json` and
 `.scratch/shutter-input-smoke/batch-BpdunVpO/VALIDATION-0E40-SHUTTER-RECEIPT.json`.
 
-The `0e40e48f` Windows package and human-managed Shared Chat/Read grid acceptance
-remain pending. A separate test-only Linux CPU-window fixture is being prepared
-to exercise actual ChatWindow/egui-winit keyboard/focus delivery against synthetic
-snapshots and recorded intents; it changes neither frozen product candidate nor
-authentication/native-World behavior. No result is claimed before execution.
-Attention and monitors follow this foundation.
+The exact `0e40e48f` Windows build is verified: **7,923 passed, 0 failed, 51 ignored**,
+with all **135 required names** once in raw and packaged logs and four obsolete
+names absent. Parser, format, strict Clippy, build and packaging passed. Manifest,
+both archive CRCs, AMD64/PE32+ identity, version
+`0.9.3-beta.20261106.1+187.g0e40e48f6` and all seven embedded icon payloads match.
+Portable ZIP SHA-256: `be35821bb7ea16caaeb768dd77549706532ce4af33c17c76f3608f381eaa8c11`.
+Executable SHA-256: `b8e33c38fc7b7186a06e103a4e4466be7e4c0a9555b047687a6b4fcc30406570`.
+The receipt `.scratch/windows-ci-42352272886/receipt.json` explicitly records the
+later native finding; build success is not full native acceptance.
+
+A separate Linux test-only fixture runs actual ChatWindow/egui-winit/CPU input
+against synthetic snapshots and a bounded typed-intent inbox. It starts no real
+controller broker, profile, registry, socket, worker, authentication or World
+submission. The first attempt did not acquire editor focus before typing and is
+a failed setup, not input acceptance. A driver-only focus/click separation then
+satisfied actual selected-editor focus, editable/current Send permissions,
+nonempty draft and no Pending/earlier intent before the repeat scenario.
+
+That unchanged-production fresh case reproduced an **unintended synthetic Send
+intent while Return remained physically held across focus loss/refocus**. Winit
+reported a synthetic release/press for focus changes, then labeled the first held
+keydown after refocus as a non-synthetic **repeat=false** press. The first
+repeat=true event arrived only after the unexpected intent had consumed the
+draft; the test correctly rejected that masked evidence. No World send or grid
+delivery occurred. Both failed cases stopped with precise partial receipts and
+owned cleanup; no native keyboard/full-Chat acceptance is claimed.
+
+The failing fixture source is test-only `57184a5f` (equivalent to author `58d473ad`
+on product `0e40e48f`). Its fresh-case evidence is retained under
+`/workspace/work/shared-chat-native-os-fixture/.scratch/native-os-driver/batch-loJEJB0j`,
+including the indexed Enter/focus trace, driver Return inputs and
+`FAILED-57184-NATIVE-CPU-RECEIPT.json`. A native Enter release-guard follow-up is
+being developed from frozen `0e40e48f`, with the fixture/driver unchanged for
+negative-to-fixed proof. Windows-specific input, IME, native World behavior and
+human-managed grid acceptance remain separate. Attention and monitors follow
+this foundation.
 
 The user-selected implementation order is **compact host redesign → shared chat
 → Attention → monitors with chat**. The compact host is implemented at frozen
