@@ -1135,6 +1135,135 @@ fn monitor_body_accessibility_uses_committed_exact_binding_and_edit_prefix_keeps
 }
 
 #[test]
+fn monitor_native_retirement_flush_keeps_delivered_edit_prefix_and_undo_on_original_canonical_source() {
+    let mut f = Frames::new([680.0, 680.0], 1.0);
+    f.type_text(1, "Before retirement");
+    f.composer(1);
+    let view = View::Fixed1;
+    let old = f.model.binding(view).unwrap();
+    let context = f.contexts[1].clone();
+    f.frame += 120;
+    let raw = RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(680.0, 680.0))),
+        time: Some(f.frame as f64 / 60.0),
+        focused: true,
+        events: vec![
+            Event::Text(" + delivered".into()),
+            Event::PointerButton {
+                pos: Pos2::ZERO,
+                button: PointerButton::Primary,
+                pressed: true,
+                modifiers: Modifiers::NONE,
+            },
+            Event::Text(" forbidden tail".into()),
+            Event::Ime(egui::ImeEvent::Commit(" forbidden commit".into())),
+            key(Key::Enter, true, Modifiers::NONE),
+        ],
+        ..Default::default()
+    };
+    super::super::monitor_edits::close(&context, raw, view, old, &crate::theme::Theme::default().palette(), &mut f.chat);
+    assert!(
+        f.chat.take_read_action_for(view.surface()).is_none(),
+        "Closing cannot leave a later Read intent"
+    );
+    f.model.close(view).unwrap();
+    f.model
+        .open_fixed(Source::new(SlotId::try_from(1).unwrap(), source(2), true).unwrap())
+        .unwrap();
+    f.chat.select_for(view.surface(), source(2));
+    f.settle(1);
+    assert_eq!(
+        f.send(0).text.as_str(),
+        "Before retirement + delivered",
+        "prefix stayed with the old source after its owner dropped"
+    );
+    f.composer(2);
+    assert!(
+        f.show(2, vec![key(Key::Z, true, command_z()), key(Key::Z, false, command_z())])
+            .is_none()
+    );
+    assert_eq!(
+        f.send(0).text.as_str(),
+        "Before retirement",
+        "third context retains the same canonical Undo transaction"
+    );
+    f.type_text(1, "Replacement draft");
+    assert_eq!(f.send(1).key.source, source(2));
+    assert_eq!(f.send(1).text.as_str(), "Replacement draft");
+}
+
+#[test]
+fn monitor_native_drained_ime_prefix_retires_toolbar_confirmation_but_preserves_canonical_commit_once() {
+    let mut f = Frames::new([680.0, 680.0], 1.0);
+    f.settle(1);
+    let exchange = *f.bodies[0]
+        .controls
+        .iter()
+        .find(|control| matches!(control.intent.command, Command::Exchange(_)))
+        .unwrap();
+    f.contexts[1].memory_mut(|memory| memory.request_focus(exchange.widget));
+    assert!(f.bodies[0].command_focused(&f.contexts[1]));
+    assert!(
+        f.show(
+            1,
+            vec![Event::Ime(egui::ImeEvent::Preedit {
+                text: "candidate".into(),
+                cursor: None
+            })]
+        )
+        .is_none()
+    );
+    // Native edit-prefix handling observes the ORIGINAL terminal event before
+    // the canonical Editing pass consumes it. It never replays Commit to body.
+    let prefix = vec![Event::Ime(egui::ImeEvent::Commit("candidate".into()))];
+    assert!(f.bodies[0].observe_ime(&prefix));
+    assert!(!f.bodies[0].command_focused(&f.contexts[1]));
+    assert!(f.show(1, vec![key(Key::Enter, true, Modifiers::NONE)]).is_none());
+    assert!(f.show(1, vec![key(Key::Enter, false, Modifiers::NONE)]).is_none());
+    f.composer(1);
+    let focus = f.contexts[1].memory(|memory| memory.focused()).unwrap();
+    assert!(!f.bodies[0].command_focused(&f.contexts[1]));
+    assert!(
+        f.show(
+            1,
+            vec![Event::Ime(egui::ImeEvent::Preedit {
+                text: "accepted".into(),
+                cursor: None
+            })]
+        )
+        .is_none()
+    );
+    let prefix = vec![Event::Ime(egui::ImeEvent::Commit("accepted".into()))];
+    assert!(f.bodies[0].observe_ime(&prefix));
+    assert_eq!(f.contexts[1].memory(|memory| memory.focused()), Some(focus));
+    assert!(f.show_image(1, prefix, None, InputMode::Editing).is_none());
+    assert!(
+        f.show_image(1, vec![key(Key::Enter, true, Modifiers::NONE)], None, InputMode::Navigating)
+            .is_none()
+    );
+    assert!(f.show(1, vec![key(Key::Enter, false, Modifiers::NONE)]).is_none());
+    assert_eq!(
+        f.send(0).text.as_str(),
+        "accepted",
+        "original Commit reached the canonical source exactly once"
+    );
+    f.focus(1);
+    f.settle(1);
+    f.contexts[1].memory_mut(|memory| memory.request_focus(exchange.widget));
+    assert!(f.show(1, vec![key(Key::Enter, true, Modifiers::NONE)]).is_none());
+    assert!(
+        matches!(
+            f.show(1, vec![key(Key::Enter, false, Modifiers::NONE)]),
+            Some(Action::Control {
+                command: Command::Exchange(_),
+                ..
+            })
+        ),
+        "fresh explicit command focus remains usable"
+    );
+}
+
+#[test]
 fn monitor_body_ime_terminal_retires_only_owned_command_focus_before_later_confirmation_keys() {
     fn focus_exchange(f: &mut Frames) -> Painted {
         f.settle(1);

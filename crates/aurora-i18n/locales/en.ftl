@@ -13462,6 +13462,10 @@ host-attention-review-cancel-failed = Cancellation could not be queued. The revi
 
 # Compact monitor body; source-only CPU surface prerequisite.
 host-monitor-title = Character monitor
+host-monitor-open = Open monitor · { $profile }
+host-monitor-open-cycling = Open cycling monitor
+host-monitor-window-title = Monitor { $number } · { $profile }
+host-monitor-resume-cycling = Resume cycling monitor
 host-monitor-last-active = Last active image · captured { $youngest }–{ $oldest } s ago
 host-monitor-no-image = No captured image
 host-monitor-read-only = Read-only image · inactive images do not update

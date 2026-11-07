@@ -13429,6 +13429,10 @@ host-attention-review-cancel-failed = キャンセルの要求を受け付けら
 
 # Compact monitor body; source-only CPU surface prerequisite.
 host-monitor-title = キャラクターモニター
+host-monitor-open = モニターを開く · { $profile }
+host-monitor-open-cycling = 巡回モニターを開く
+host-monitor-window-title = モニター { $number } · { $profile }
+host-monitor-resume-cycling = 巡回モニターを再開
 host-monitor-last-active = 最後のアクティブ画像 · { $youngest }～{ $oldest } 秒前
 host-monitor-no-image = キャプチャ画像なし
 host-monitor-read-only = 表示専用の画像 · 非アクティブ中は更新されません

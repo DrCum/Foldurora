@@ -14,7 +14,15 @@ mod chat_window;
 // Real host/window front; Root promotes its existing prerequisite modules only
 // after the separately authored host projection and native proof join review.
 #[cfg(any(windows, test))]
+mod monitor_edits;
+#[cfg(any(windows, test))]
+mod monitor_input;
+#[cfg(any(windows, test))]
 mod monitor_manager;
+#[cfg(windows)]
+mod monitor_shell;
+#[cfg(windows)]
+mod monitor_window;
 // Pure monitor bindings only; no production surface or image service enabled.
 #[cfg(test)]
 mod monitor_model;
@@ -78,6 +86,10 @@ pub fn run() -> anyhow::Result<()> {
     let controller = HostController::start()?;
     let snapshot = controller.snapshot();
     let now = Instant::now();
+    #[cfg(windows)]
+    let monitor_reader = controller.preview_reader();
+    #[cfg(windows)]
+    let monitors = monitor_manager::MonitorManager::new().map_err(|error| anyhow::anyhow!("monitor model: {error:?}"))?;
     let mut app = Shell {
         context,
         theme,
@@ -93,6 +105,18 @@ pub fn run() -> anyhow::Result<()> {
         attention_ui: attention_ui::AttentionUi::default(),
         attention_window: None,
         attention_changed: true,
+        #[cfg(windows)]
+        monitor_reader,
+        #[cfg(windows)]
+        monitors,
+        #[cfg(windows)]
+        monitor_windows: std::array::from_fn(|_| None),
+        #[cfg(windows)]
+        monitor_started: now,
+        #[cfg(windows)]
+        monitor_focus: None,
+        #[cfg(windows)]
+        monitor_placements: [None; 5],
         error: None,
         next_poll: now,
         repaint: Some(now),
@@ -132,6 +156,18 @@ struct Shell {
     attention_ui: attention_ui::AttentionUi,
     attention_window: Option<attention_window::AttentionWindow>,
     attention_changed: bool,
+    #[cfg(windows)]
+    monitor_reader: preview_projection::PreviewReader,
+    #[cfg(windows)]
+    monitors: monitor_manager::MonitorManager,
+    #[cfg(windows)]
+    monitor_windows: [Option<monitor_window::MonitorWindow>; 5],
+    #[cfg(windows)]
+    monitor_started: Instant,
+    #[cfg(windows)]
+    monitor_focus: Option<(monitor_model::View, preview_projection::ViewNamespace)>,
+    #[cfg(windows)]
+    monitor_placements: [Option<private_image::Placement>; 5],
     error: Option<String>,
     next_poll: Instant,
     repaint: Option<Instant>,
@@ -158,6 +194,21 @@ impl Shell {
             return;
         }
         let result = match action.clone() {
+            #[cfg(windows)]
+            Action::OpenMonitor(source) => {
+                self.open_monitor(event_loop, Some(source));
+                return;
+            }
+            #[cfg(windows)]
+            Action::OpenCyclingMonitor => {
+                self.open_monitor(event_loop, None);
+                return;
+            }
+            #[cfg(windows)]
+            Action::ResumeCyclingMonitor(recovery) => {
+                self.resume_monitor(event_loop, *recovery);
+                return;
+            }
             Action::OpenChat(source) => {
                 self.open_chat(event_loop, source);
                 return;
@@ -174,6 +225,8 @@ impl Shell {
             },
             Action::Detach(worker) => self.controller.detach(worker),
             Action::Close => {
+                #[cfg(windows)]
+                self.hide_monitors(event_loop);
                 self.cancel_attention_review();
                 self.chat_window = None;
                 self.shared_chat.clear();
@@ -194,6 +247,8 @@ impl Shell {
                 // the requested target is also a transaction participant.
                 Action::Detach(worker) => self.snapshot.active == Some(worker) || self.snapshot.pending.is_some(),
                 Action::OpenChat(_) | Action::OpenAttention | Action::RenameSlot(_, _) | Action::Close => false,
+                #[cfg(windows)]
+                Action::OpenMonitor(_) | Action::OpenCyclingMonitor | Action::ResumeCyclingMonitor(_) => false,
             };
             if affects_active {
                 // The IO thread has not seen the intent yet. Do not reopen
@@ -472,11 +527,16 @@ impl Shell {
                     && worker.status.as_ref().is_some_and(|status| status.keyboard_focused)
             })
         });
+        #[cfg(windows)]
+        let monitor_focused = self.monitor_windows.iter().flatten().any(|window| window.focused());
+        #[cfg(not(windows))]
+        let monitor_focused = false;
         self.controller.set_workspace_foreground(
             surface.window.has_focus()
                 || worker_focused
                 || self.chat_window.as_ref().is_some_and(|window| window.focused())
-                || self.attention_window.as_ref().is_some_and(|window| window.focused()),
+                || self.attention_window.as_ref().is_some_and(|window| window.focused())
+                || monitor_focused,
         );
         let viewport = surface.viewport(self.world, self.context.pixels_per_point());
         let visible = surface.window.is_visible() == Some(true) && surface.window.is_minimized() == Some(false);
@@ -616,6 +676,10 @@ impl ApplicationHandler for Shell {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        #[cfg(windows)]
+        if self.monitor_event(event_loop, id, &event) {
+            return;
+        }
         if self.attention_window.as_ref().is_some_and(|window| window.id() == id) {
             self.refresh_attention();
             let blocked = self.ui.modal_open() || self.closing.is_some() || self.snapshot.stopped;
@@ -678,6 +742,10 @@ impl ApplicationHandler for Shell {
             return;
         }
         let response = surface.event(&event);
+        #[cfg(windows)]
+        if matches!(event, WindowEvent::Resized(_)) && surface.window.is_minimized() == Some(true) {
+            self.hide_monitors(event_loop);
+        }
         if matches!(event, WindowEvent::Focused(false)) {
             // A world-hole click goes to the independent worker, outside
             // egui's event stream. Native focus loss dismisses the old menu
@@ -748,6 +816,10 @@ impl ApplicationHandler for Shell {
             return;
         }
         let mut next = self.next_poll;
+        #[cfg(windows)]
+        if let Some(due) = self.poll_monitors(event_loop, now, native_poll || self.chat_changed) {
+            next = next.min(due);
+        }
         if let Some(window) = &mut self.chat_window
             && let Some(repaint) = window.poll(std::mem::take(&mut self.chat_changed), self.ui.modal_open(), now)
         {
@@ -778,6 +850,8 @@ impl ApplicationHandler for Shell {
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        #[cfg(windows)]
+        self.retire_monitor_windows();
         self.cancel_attention_review();
         self.close_region();
         self.controller.shutdown();

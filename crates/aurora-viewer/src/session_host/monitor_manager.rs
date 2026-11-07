@@ -13,9 +13,36 @@ use super::transport::HostController;
 use aurora_session::chat::ChatSource;
 use aurora_session::preview_image::PreviewSource;
 use aurora_session::{HostedViewport, MAX_WORKERS};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static NEXT_RECOVERY: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Recovery {
+    pub id: u64,
+    ticket: Ticket,
+    binding: Binding,
+    base: State,
+    playing: bool,
+    interval: u32,
+}
+impl Recovery {
+    fn action(self) -> Action {
+        Action::Control {
+            view: View::Cycling,
+            ticket: self.ticket,
+            binding: self.binding,
+            base: self.base,
+            playing: self.playing,
+            interval: self.interval,
+            command: Command::Play,
+        }
+    }
+}
 
 /// Always called while the OLD model/source/state still exists. The native
-/// parent drains that surface's delivered edit prefix, then retires its owner.
+/// parent drains that surface's delivered edit prefix. Subsequent reconciliation
+/// retires the owner only if its source/namespace/visibility actually changed.
 pub(super) type Flush<'a> = dyn FnMut(View, Binding, State) + 'a;
 
 pub(super) const fn index(view: View) -> usize {
@@ -47,6 +74,7 @@ struct ExchangePending {
 #[derive(Default)]
 struct Entry {
     state: State,
+    desired_pin: bool,
     namespace: Option<ViewNamespace>,
     identity: Option<(Source, u64)>,
     settings: Option<SettingsPending>,
@@ -64,6 +92,8 @@ pub(super) struct MonitorManager {
     exchange: Option<ExchangePending>,
     timer_suspended: bool,
     resume_at: Option<u64>,
+    failed_closed: bool,
+    recovery: Option<Recovery>,
 }
 
 impl MonitorManager {
@@ -80,6 +110,8 @@ impl MonitorManager {
             exchange: None,
             timer_suspended: false,
             resume_at: None,
+            failed_closed: false,
+            recovery: None,
         })
     }
     pub fn model(&self) -> &MonitorSet {
@@ -91,8 +123,61 @@ impl MonitorManager {
     pub fn namespace(&self, view: View) -> Option<ViewNamespace> {
         self.entries[index(view)].namespace
     }
-    pub fn sources(&self) -> &[Source] {
-        &self.sources
+    pub fn desired_pin(&self, view: View) -> bool {
+        self.entries[index(view)].desired_pin
+    }
+    pub fn observe_pin(&mut self, view: View, pinned: bool) -> Result<(), PreviewError> {
+        if self.entries[index(view)].state.pinned != pinned {
+            self.entries[index(view)].state.pinned = pinned;
+            self.bump(view)?;
+        }
+        Ok(())
+    }
+    pub fn exchange_request(&self) -> Option<u64> {
+        self.exchange.map(|pending| pending.request)
+    }
+    pub fn recovery(&mut self) -> Result<Option<Recovery>, PreviewError> {
+        let candidate = (!self.failed_closed)
+            .then(|| {
+                let binding = self
+                    .model
+                    .binding(View::Cycling)
+                    .filter(|binding| !binding.enabled && binding.visible)?;
+                Some(Recovery {
+                    id: 0,
+                    ticket: self.model.capture_view(View::Cycling)?,
+                    binding,
+                    base: self.state(View::Cycling),
+                    playing: self.model.playing(),
+                    interval: self.model.interval(),
+                })
+            })
+            .flatten();
+        let Some(mut candidate) = candidate else {
+            self.recovery = None;
+            return Ok(None);
+        };
+        if let Some(old) = self.recovery {
+            candidate.id = old.id;
+            if candidate == old {
+                return Ok(Some(old));
+            }
+        }
+        candidate.id = NEXT_RECOVERY
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |value| value.checked_add(1))
+            .map_err(|_| PreviewError::Exhausted)?;
+        self.recovery = Some(candidate);
+        Ok(Some(candidate))
+    }
+    /// Explicit unavailable-cycler recovery only. The old local ticket carries
+    /// no native/source/image permission; a fresh real view read is still
+    /// required before any resulting namespace can create/present a window.
+    pub fn resume(&mut self, recovery: Recovery, now: u64, flush: &mut Flush<'_>) -> Result<bool, PreviewError> {
+        if !self.validate(&recovery.action()) || recovery.binding.enabled {
+            return Ok(false);
+        }
+        self.play(View::Cycling, recovery.binding, recovery.base, now, flush)?;
+        Ok(true)
     }
     pub fn current_read(&self, view: View, read: &PreviewRead) -> bool {
         self.admitted.is_some_and(|request| {
@@ -109,8 +194,27 @@ impl MonitorManager {
     }
     fn bump(&mut self, view: View) -> Result<(), PreviewError> {
         let state = &mut self.entries[index(view)].state;
-        state.revision = state.revision.checked_add(1).ok_or(PreviewError::Exhausted)?;
+        let Some(revision) = state.revision.checked_add(1) else {
+            self.fail_closed();
+            return Err(PreviewError::Exhausted);
+        };
+        state.revision = revision;
         Ok(())
+    }
+    pub fn fail_closed(&mut self) {
+        self.failed_closed = true;
+        self.admitted = None;
+        self.exchange = None;
+        self.recovery = None;
+        self.dirty = true;
+        let _ = self.model.set_blocked(true);
+        for entry in &mut self.entries {
+            entry.namespace = None;
+            entry.identity = None;
+            entry.settings = None;
+            entry.state.revision = 0;
+            entry.state.request = None;
+        }
     }
     fn flush_all(&self, flush: &mut Flush<'_>) {
         for view in View::ALL {
@@ -120,6 +224,9 @@ impl MonitorManager {
         }
     }
     fn reconcile(&mut self) -> Result<(), PreviewError> {
+        if self.failed_closed {
+            return Err(PreviewError::Stopped);
+        }
         for view in View::ALL {
             let binding = self.model.binding(view).filter(|binding| binding.enabled && binding.visible);
             let identity = binding.map(|binding| (binding.source, binding.incarnation));
@@ -141,6 +248,9 @@ impl MonitorManager {
     /// Caller acquired this real try-only status immediately before dispatch.
     /// Stale/contended readers cannot mutate source history or receipt state.
     pub fn sync(&mut self, status: &PreviewStatus, order: [SlotId; MAX_WORKERS], flush: &mut Flush<'_>) -> Result<(), PreviewError> {
+        if self.failed_closed {
+            return Err(PreviewError::Stopped);
+        }
         if !status.current() {
             return Err(PreviewError::Stale);
         }
@@ -167,7 +277,10 @@ impl MonitorManager {
             if !status.current() {
                 return Err(PreviewError::Stale);
             }
-            self.model.sync(&sources, order, status.active()).map_err(model_error)?;
+            if let Err(error) = self.model.sync(&sources, order, status.active()) {
+                self.fail_closed();
+                return Err(model_error(error));
+            }
             self.sources = sources;
             self.active = status.active();
             self.order = order;
@@ -183,6 +296,9 @@ impl MonitorManager {
     }
 
     pub fn open(&mut self, source: PreviewSource, flush: &mut Flush<'_>) -> Result<View, PreviewError> {
+        if self.failed_closed {
+            return Err(PreviewError::Stopped);
+        }
         let source = self
             .sources
             .iter()
@@ -195,6 +311,9 @@ impl MonitorManager {
         Ok(view)
     }
     pub fn open_cycling(&mut self, now: u64, flush: &mut Flush<'_>) -> Result<View, PreviewError> {
+        if self.failed_closed {
+            return Err(PreviewError::Stopped);
+        }
         self.flush_all(flush);
         self.model.open_cycler(now).map_err(model_error)?;
         self.reconcile()?;
@@ -223,12 +342,18 @@ impl MonitorManager {
     /// Advances the real synchronous view fence even on queue failure. Existing
     /// owners must retire until a matching accepted read becomes available.
     pub fn publish(&mut self, controller: &HostController) -> Result<(), PreviewError> {
+        self.publish_with(|desired| controller.set_preview_views(desired))
+    }
+    fn publish_with(
+        &mut self,
+        submit: impl FnOnce(Vec<ViewDescriptor>) -> Result<ViewSetRequest, PreviewError>,
+    ) -> Result<(), PreviewError> {
         if !self.dirty {
             return Ok(());
         }
         let desired = self.desired();
         self.admitted = None;
-        let request = controller.set_preview_views(desired.clone())?;
+        let request = submit(desired.clone())?;
         self.descriptors = desired;
         self.admitted = Some(request);
         self.dirty = false;
@@ -242,7 +367,19 @@ impl MonitorManager {
                 Some(ViewDescriptor {
                     view,
                     namespace: self.namespace(view)?,
-                    ticket: self.model.capture_view(view)?,
+                    // Modal/Exchange input fences stop issuing local gestures,
+                    // not an already explicit subscription. Its old typed
+                    // correlation is retained; Host rechecks actual authority.
+                    ticket: self.model.capture_view(view).or_else(|| {
+                        self.descriptors
+                            .iter()
+                            .find(|descriptor| {
+                                descriptor.view == view
+                                    && Some(descriptor.namespace) == self.namespace(view)
+                                    && descriptor.source == binding.source.preview()
+                            })
+                            .map(|descriptor| descriptor.ticket)
+                    })?,
                     source: binding.source.preview(),
                     visible: true,
                     options: binding.options,
@@ -252,6 +389,9 @@ impl MonitorManager {
     }
 
     pub fn validate(&self, action: &Action) -> bool {
+        if self.failed_closed {
+            return false;
+        }
         let Action::Control {
             view,
             ticket,
@@ -264,7 +404,8 @@ impl MonitorManager {
         else {
             return false;
         };
-        if !self.model.validate_view(*ticket)
+        if ticket.view() != *view
+            || !self.model.validate_view(*ticket)
             || self.model.binding(*view) != Some(*binding)
             || self.state(*view) != *base
             || self.model.playing() != *playing
@@ -273,12 +414,18 @@ impl MonitorManager {
             return false;
         }
         match *command {
-            Command::Exchange(ticket) => self.exchange.is_none() && self.model.can_exchange(ticket),
-            Command::Chat(ticket, _) | Command::Pin(ticket, _) => self.model.validate(ticket),
+            Command::Exchange(command_ticket) => {
+                command_ticket == *ticket && self.exchange.is_none() && self.model.can_exchange(command_ticket)
+            }
+            Command::Chat(command_ticket, _) | Command::Pin(command_ticket, _) => {
+                command_ticket == *ticket && self.model.validate(command_ticket)
+            }
             Command::Settings {
-                ticket, base: original, ..
-            } => original == *base && base.request.is_none() && self.model.validate(ticket),
-            Command::Navigate(navigation) => self.model.validate_navigation(navigation),
+                ticket: command_ticket,
+                base: original,
+                ..
+            } => command_ticket == *ticket && original == *base && base.request.is_none() && self.model.validate(command_ticket),
+            Command::Navigate(navigation) => *view == View::Cycling && self.model.validate_navigation(navigation),
             Command::Pause | Command::Play | Command::Interval(_) => *view == View::Cycling,
         }
     }
@@ -315,8 +462,9 @@ impl MonitorManager {
                 self.bump(view)?;
                 self.cancel_input()?;
             }
-            Command::Pin(_, _) => {
+            Command::Pin(_, desired) => {
                 let pinned = observed_pin.ok_or(PreviewError::Unavailable)?;
+                self.entries[index(view)].desired_pin = desired;
                 self.entries[index(view)].state.pinned = pinned;
                 self.bump(view)?;
                 self.cancel_input()?;
@@ -375,9 +523,7 @@ impl MonitorManager {
                 self.model.pause().map_err(model_error)?;
             }
             Command::Play => {
-                flush(view, *binding, *base);
-                self.model.play(now).map_err(model_error)?;
-                self.reconcile()?;
+                self.play(view, *binding, *base, now, flush)?;
             }
             Command::Interval(seconds) => {
                 flush(view, *binding, *base);
@@ -385,6 +531,11 @@ impl MonitorManager {
             }
         }
         Ok(true)
+    }
+    fn play(&mut self, view: View, binding: Binding, base: State, now: u64, flush: &mut Flush<'_>) -> Result<(), PreviewError> {
+        flush(view, binding, base);
+        self.model.play(now).map_err(model_error)?;
+        self.reconcile()
     }
 
     fn settings_receipt(&mut self, receipt: SettingsReceipt, flush: &mut Flush<'_>) -> Result<(), PreviewError> {
@@ -412,7 +563,8 @@ impl MonitorManager {
             native_revision,
         } = receipt.outcome
             && options == pending.desired
-            && effective == pending.desired
+            && effective.size.bytes() >= pending.desired.size.bytes()
+            && effective.rate.half_fps() >= pending.desired.rate.half_fps()
             && demand != 0
             && native_revision != 0
             && self.model.binding(view) == Some(pending.binding)
@@ -460,6 +612,9 @@ impl MonitorManager {
     /// UI-only popup/gesture suspension must not invalidate its own Close button.
     /// Resume rebases one deadline; timers never catch up or perform native IO.
     pub fn tick(&mut self, now: u64, blocked: bool, input_busy: bool, flush: &mut Flush<'_>) -> Result<(), PreviewError> {
+        if self.failed_closed {
+            return Ok(());
+        }
         self.model.set_blocked(blocked).map_err(model_error)?;
         let suspended = blocked || input_busy;
         if suspended {
@@ -478,7 +633,9 @@ impl MonitorManager {
         }
         self.resume_at = None;
         if self.model.playing() && self.model.binding(View::Cycling).is_some() {
-            if let Some(binding) = self.model.binding(View::Cycling) {
+            if self.model.tick_will_change(now)
+                && let Some(binding) = self.model.binding(View::Cycling)
+            {
                 // Playing has no editable composer; only its own delivered
                 // input belongs to a possible timer-driven rebind.
                 flush(View::Cycling, binding, self.state(View::Cycling));

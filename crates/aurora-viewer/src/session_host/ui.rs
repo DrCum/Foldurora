@@ -19,6 +19,12 @@ pub(super) enum Action {
     Detach(WorkerId),
     OpenChat(aurora_session::chat::ChatSource),
     OpenAttention,
+    #[cfg(windows)]
+    OpenMonitor(aurora_session::preview_image::PreviewSource),
+    #[cfg(windows)]
+    OpenCyclingMonitor,
+    #[cfg(windows)]
+    ResumeCyclingMonitor(Box<super::monitor_manager::Recovery>),
     Close,
 }
 
@@ -38,6 +44,12 @@ pub(super) struct HostUi {
     pub close_prompt: bool,
     pub notice: Option<Notice>,
     pub attention_count: usize,
+    #[cfg(windows)]
+    pub monitor_sources: Vec<(SlotId, aurora_session::preview_image::PreviewSource)>,
+    #[cfg(windows)]
+    pub monitor_cycle_ready: bool,
+    #[cfg(windows)]
+    pub monitor_recovery: Option<super::monitor_manager::Recovery>,
 }
 
 pub(super) struct Output {
@@ -99,6 +111,8 @@ impl HostUi {
                     ui.add_space(10.0);
                     let query = self.search.trim().to_lowercase();
                     egui::ScrollArea::vertical().id_salt("session_host_rows").show(ui, |ui| {
+                        #[cfg(windows)]
+                        self.monitor_entries(ui, p, snapshot, closing, &mut action);
                         widgets::organization_header(ui, p, aurora_i18n::tr!("host-running-sessions"));
                         let mut count = 0;
                         for worker in snapshot.workers.iter().take(MAX_WORKERS).filter(|worker| {
@@ -689,6 +703,50 @@ impl HostUi {
         self.selected_slot != previous
     }
 
+    #[cfg(windows)]
+    fn monitor_entries(&self, ui: &mut egui::Ui, p: &Palette, snapshot: &HostSnapshot, closing: bool, action: &mut Option<Action>) {
+        if self.monitor_sources.is_empty() && self.monitor_recovery.is_none() {
+            return;
+        }
+        widgets::organization_header(ui, p, aurora_i18n::tr!("host-monitor-title"));
+        for (slot, source) in self.monitor_sources.iter().take(MAX_WORKERS) {
+            let Some(profile) = snapshot.slots.iter().find(|profile| profile.id == *slot) else {
+                continue;
+            };
+            let chat = aurora_session::chat::ChatSource {
+                worker: source.worker(),
+                session: source.session(),
+                lease_epoch: source.lease_epoch(),
+            };
+            // Ordinary egui press ownership is scoped to the complete source,
+            // including lease and session generation, never a reused slot row.
+            if monitor_open_button(
+                ui,
+                chat,
+                &aurora_i18n::tr!("host-monitor-open", profile = slot_name(profile)),
+                !closing && !snapshot.stopped,
+            )
+            .clicked()
+            {
+                *action = Some(Action::OpenMonitor(*source));
+            }
+        }
+        if let Some(recovery) = self.monitor_recovery {
+            if monitor_recovery_button(ui, recovery, !closing && !snapshot.stopped && self.monitor_cycle_ready).clicked() {
+                *action = Some(Action::ResumeCyclingMonitor(Box::new(recovery)));
+            }
+        } else if ui
+            .add_enabled(
+                !closing && !snapshot.stopped && self.monitor_cycle_ready,
+                egui::Button::new(aurora_i18n::tr!("host-monitor-open-cycling")).wrap(),
+            )
+            .clicked()
+        {
+            *action = Some(Action::OpenCyclingMonitor);
+        }
+        ui.add_space(10.0);
+    }
+
     fn slot_management(&mut self, ui: &mut egui::Ui, p: &Palette, snapshot: &HostSnapshot, closing: bool) {
         ui.label(RichText::new(aurora_i18n::tr!("host-profile-select")).small().color(p.muted));
         let selected = self.selected_slot.and_then(|id| snapshot.slots.iter().find(|slot| slot.id == id));
@@ -775,6 +833,22 @@ fn binding_id(binding: aurora_session::Binding) -> Id {
             .session
             .map(|session| (session.session, session.account, session.grid, session.generation)),
     ))
+}
+
+#[cfg(any(windows, test))]
+fn monitor_open_button(ui: &mut egui::Ui, source: aurora_session::chat::ChatSource, label: &str, enabled: bool) -> egui::Response {
+    ui.push_id(("host_monitor", binding_id(source.binding()), source.lease_epoch), |ui| {
+        ui.add_enabled(enabled, egui::Button::new(label).wrap())
+    })
+    .inner
+}
+
+#[cfg(any(windows, test))]
+pub(super) fn monitor_recovery_button(ui: &mut egui::Ui, recovery: super::monitor_manager::Recovery, enabled: bool) -> egui::Response {
+    ui.push_id(("host_monitor_recovery", recovery.id), |ui| {
+        ui.add_enabled(enabled, egui::Button::new(aurora_i18n::tr!("host-monitor-resume-cycling")).wrap())
+    })
+    .inner
 }
 
 fn compact_button(ui: &mut egui::Ui, p: &Palette, icon: &str, label: &str, kind: ActionKind, enabled: bool) -> egui::Response {
@@ -1023,6 +1097,108 @@ mod tests {
         assert!(
             !presentation_ready(&worker),
             "a prepared/completed frame is still required before showing the world"
+        );
+    }
+
+    #[test]
+    fn host_monitor_open_entry_keeps_full_source_press_ownership_across_reorder_and_queued_replacement() {
+        use aurora_session::chat::ChatSource;
+        struct Buttons {
+            ctx: egui::Context,
+            frame: u64,
+            rects: Vec<Rect>,
+        }
+        impl Buttons {
+            fn show(&mut self, rows: &[ChatSource], events: Vec<egui::Event>) -> Option<ChatSource> {
+                self.frame += 1;
+                self.rects.clear();
+                let mut action = None;
+                let mut output = self.ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(380.0, 420.0))),
+                        time: Some(self.frame as f64 / 60.0),
+                        focused: true,
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        for source in rows {
+                            let response = monitor_open_button(
+                                ui,
+                                *source,
+                                &aurora_i18n::tr!("host-monitor-open", profile = "Synthetic profile"),
+                                true,
+                            );
+                            self.rects.push(response.rect);
+                            if response.clicked() {
+                                action = Some(*source);
+                            }
+                        }
+                    },
+                );
+                output.textures_delta.clear();
+                action
+            }
+            fn edge(&mut self, rows: &[ChatSource], at: egui::Pos2, pressed: bool) -> Option<ChatSource> {
+                self.show(
+                    rows,
+                    vec![
+                        egui::Event::PointerMoved(at),
+                        egui::Event::PointerButton {
+                            pos: at,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                )
+            }
+        }
+        let host = five_workers();
+        let sources: Vec<_> = host
+            .workers
+            .iter()
+            .take(2)
+            .map(|worker| ChatSource {
+                worker: worker.binding.worker,
+                session: worker.binding.session.unwrap(),
+                lease_epoch: 7,
+            })
+            .collect();
+        let mut frames = Buttons {
+            ctx: egui::Context::default(),
+            frame: 0,
+            rects: Vec::new(),
+        };
+        crate::theme::Theme::default().apply(&frames.ctx, 1.0);
+        for _ in 0..4 {
+            assert!(frames.show(&sources, Vec::new()).is_none());
+        }
+        let at = frames.rects[0].center();
+        assert!(frames.edge(&sources, at, true).is_none());
+        assert!(
+            frames.edge(&[sources[1], sources[0]], at, false).is_none(),
+            "held row cannot choose its replacement at the old position"
+        );
+        for _ in 0..4 {
+            frames.show(&sources[..1], Vec::new());
+        }
+        let at = frames.rects[0].center();
+        let mut replacement = sources[0];
+        replacement.session.generation += 1;
+        // Source replacement occurs BEFORE the first egui pass carrying this
+        // native press; previous painted widget identity still owns that press.
+        assert!(frames.edge(&[replacement], at, true).is_none());
+        assert!(frames.edge(&[replacement], at, false).is_none());
+        for _ in 0..4 {
+            frames.show(&[replacement], Vec::new());
+        }
+        let at = frames.rects[0].center();
+        assert!(frames.edge(&[replacement], at, true).is_none());
+        assert_eq!(
+            frames.edge(&[replacement], at, false),
+            Some(replacement),
+            "fresh explicit entry remains usable"
         );
     }
 

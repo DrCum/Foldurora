@@ -25,10 +25,27 @@
   Exact settings/Exchange receipts preserve canonical Chat/pin state; local
   binding-only options acknowledgements cannot retarget a replaced source.
   Visibility changes allocate process-fresh namespaces and flush old delivered
-  edits first. Popup/modal timer suspension resumes without catch-up. Seven
-  portable manager regressions are authored/uncompiled/unrun. Native window and
-  Shell routing are the next source phase; existing prerequisite cfg(test)
-  promotion, actual producer enablement and execution remain Root-owned.
+  edits first. Popup/modal timer suspension resumes without catch-up; modal and
+  Exchange input fences retain already explicit subscriptions. Actual Windows
+  Shell entries/routes now use the sealed native facade and real try-only host
+  reader, exact prepared-image/admission pairing, final original-frame guards,
+  source-owned canonical edit-prefix flush and native Enter/Space fences.
+  Close/minimize Stop remains available on reader contention; an image-only
+  failure keeps canonical chat and background recreation never steals focus.
+  Native allocation/presentation failure Stops its invisible subscriber and
+  requires explicit Open at default geometry; placement is actual observed state,
+  restored only as a post-frame request. Timer flush planning reuses the same
+  pure model predicate, preserving queued Pause/Options on ordinary polls.
+  Published pin follows actual native observations, sampling follows typed ACKs.
+  A conditional Resume entry recovers only on an unchanged captured local-view
+  gesture; paused unavailable bindings never select a fallback on restoration.
+  Eleven manager + two key + two canonical-prefix/IME + one entry actual-egui
+  regressions are authored/uncompiled/unrun. Existing fake owner tests and
+  capture definitions are preserved. Existing prerequisite cfg(test) promotion,
+  real host/worker join, producer enablement and all execution remain Root-owned.
+  The approved original-expiry image-free view-only Busy fallback is the next
+  separate source follow-up; this bulk freeze still retires on reader Busy.
+  No Linux/macOS uncredited fallback, inactive producer or parity claim is added.
 
 - 🔧 Combined monitor validation (2026-11-07; no issue): the component entries
   below describe their frozen author checkpoints. Root subsequently corrected

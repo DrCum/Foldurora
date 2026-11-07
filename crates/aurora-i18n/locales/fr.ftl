@@ -13458,6 +13458,10 @@ host-attention-review-cancel-failed = L’annulation n’a pas pu être mise en 
 
 # Compact monitor body; source-only CPU surface prerequisite.
 host-monitor-title = Moniteur de personnage
+host-monitor-open = Ouvrir le moniteur · { $profile }
+host-monitor-open-cycling = Ouvrir le moniteur cyclique
+host-monitor-window-title = Moniteur { $number } · { $profile }
+host-monitor-resume-cycling = Reprendre le moniteur cyclique
 host-monitor-last-active = Dernière image active · capturée il y a { $youngest }–{ $oldest } s
 host-monitor-no-image = Aucune image capturée
 host-monitor-read-only = Image en lecture seule · aucune mise à jour inactive

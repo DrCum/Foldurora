@@ -213,6 +213,48 @@ impl MonitorUi {
         self.ime = false;
         self.options_open = false;
     }
+    /// Presentation observation only; native Space fencing must not swallow
+    /// ordinary repeated spaces in the canonical multiline composer.
+    pub fn command_focused(&self, context: &egui::Context) -> bool {
+        *context == self.context && context.memory(|memory| memory.focused().is_some_and(|id| self.focus_controls.contains(&id)))
+    }
+    pub fn timer_busy(&self) -> bool {
+        self.options_open || self.gesture.is_some() || self.ime || egui::Popup::is_any_open(&self.context)
+    }
+    fn scan_ime(&mut self, events: &[egui::Event]) -> bool {
+        let mut seen = false;
+        for event in events {
+            if let egui::Event::Ime(event) = event {
+                seen = true;
+                match event {
+                    egui::ImeEvent::Preedit { text, .. } => self.ime = !text.is_empty(),
+                    egui::ImeEvent::Commit(_) => self.ime = false,
+                    #[allow(deprecated)]
+                    egui::ImeEvent::Disabled => self.ime = false,
+                    _ => {}
+                }
+            }
+        }
+        seen
+    }
+    fn retire_command_focus(&mut self) {
+        self.gesture = None;
+        self.context.memory_mut(|memory| {
+            if let Some(id) = memory.focused().filter(|id| self.focus_controls.contains(id)) {
+                memory.surrender_focus(id);
+            }
+        });
+    }
+    /// Delivered editing prefixes can consume Commit before the visible pass.
+    /// Observe those ORIGINAL borrowed events without replaying them to egui or
+    /// taking canonical TextEdit focus. Never call while holding Context::input.
+    pub fn observe_ime(&mut self, events: &[egui::Event]) -> bool {
+        let seen = self.scan_ime(events);
+        if seen {
+            self.retire_command_focus();
+        }
+        seen
+    }
     /// Call after every model/state sync even when hidden. This removes stale
     /// captured identities; it does not erase a surface's external pixel cache.
     pub fn sync(&mut self, view: View, model: &MonitorSet, state: State) {
@@ -262,32 +304,12 @@ impl MonitorUi {
         let focused = ui.input(|input| input.focused);
         let focus_changed = ui.input(|input| input.events.iter().any(|event| matches!(event, egui::Event::WindowFocused(_))));
         let was_ime = self.ime;
-        let ime_event = ui.input(|input| {
-            let mut seen = false;
-            for event in &input.events {
-                if let egui::Event::Ime(event) = event {
-                    seen = true;
-                    match event {
-                        egui::ImeEvent::Preedit { text, .. } => self.ime = !text.is_empty(),
-                        egui::ImeEvent::Commit(_) => self.ime = false,
-                        #[allow(deprecated)]
-                        egui::ImeEvent::Disabled => self.ime = false,
-                        _ => {}
-                    }
-                }
-            }
-            seen
-        });
+        let ime_event = ui.input(|input| self.scan_ime(&input.events));
         if ime_event {
             // OS confirmation keys may arrive after Commit/Disabled in another
             // frame. Retire only Monitor command focus at the IME boundary;
             // canonical TextEdit keeps its source-owned composition and focus.
-            self.gesture = None;
-            ui.ctx().memory_mut(|memory| {
-                if let Some(id) = memory.focused().filter(|id| self.focus_controls.contains(id)) {
-                    memory.surrender_focus(id);
-                }
-            });
+            self.retire_command_focus();
         }
         let surface_live = state.revision != 0
             && mode == InputMode::Live

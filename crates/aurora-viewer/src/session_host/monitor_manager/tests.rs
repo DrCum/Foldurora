@@ -149,7 +149,19 @@ fn monitor_manager_out_of_order_views_and_uncertain_settings_remain_independent(
     let first = open(&mut manager, 1);
     let second = open(&mut manager, 2);
     let mut first_receipt = pending(&mut manager, first, 10);
-    let second_receipt = pending(&mut manager, second, 11);
+    let mut second_receipt = pending(&mut manager, second, 11);
+    // A duplicate view may already keep a higher actual native aggregate. The
+    // typed receipt acknowledges this view's exact desired preference, while
+    // its effective field truthfully describes the shared source configuration.
+    second_receipt.outcome = SettingsOutcome::Accepted {
+        options: desired(),
+        effective: Options {
+            size: PreviewSize::Large,
+            rate: PreviewRate::Five,
+        },
+        demand: 11,
+        native_revision: 2,
+    };
     manager.settings_receipt(second_receipt, &mut |_, _, _| {}).unwrap();
     first_receipt.outcome = SettingsOutcome::Uncertain;
     manager.settings_receipt(first_receipt, &mut |_, _, _| {}).unwrap();
@@ -245,6 +257,16 @@ fn monitor_manager_popup_and_modal_timer_resume_without_catchup_or_stale_local_t
     let original = manager.model.binding(View::Cycling).unwrap();
     let ticket = manager.model.capture_view(View::Cycling).unwrap();
     manager
+        .tick(100, false, false, &mut |_, _, _| {
+            panic!("an ordinary pre-deadline poll must preserve queued native Pause input")
+        })
+        .unwrap();
+    manager
+        .tick(9_999, false, false, &mut |_, _, _| {
+            panic!("no delivered edit flush without a transition")
+        })
+        .unwrap();
+    manager
         .tick(20_000, false, true, &mut |_, _, _| panic!("open Options suspends cycling"))
         .unwrap();
     manager.tick(30_000, false, false, &mut |_, _, _| {}).unwrap();
@@ -259,4 +281,207 @@ fn monitor_manager_popup_and_modal_timer_resume_without_catchup_or_stale_local_t
         !manager.model.validate_view(ticket),
         "block/unblock cannot revive an old local gesture"
     );
+    let mut one = fixture();
+    one.sources.retain(|source| [self::source(1), self::source(5)].contains(source));
+    one.model.sync(&one.sources, one.order, one.active).unwrap();
+    one.open_cycling(0, &mut |_, _, _| {}).unwrap();
+    let same = one.model.binding(View::Cycling);
+    one.tick(10_000, false, false, &mut |_, _, _| {
+        panic!("one inactive source does not change and must retain queued input")
+    })
+    .unwrap();
+    assert_eq!(one.model.binding(View::Cycling), same);
+}
+
+#[test]
+fn monitor_manager_modal_and_exchange_input_blockers_do_not_silently_stop_explicit_views() {
+    let mut manager = fixture();
+    let first = open(&mut manager, 1);
+    let second = open(&mut manager, 2);
+    let mut submitted = Vec::new();
+    manager
+        .publish_with(|set| {
+            submitted = set;
+            Ok(ViewSetRequest::admitted(7, 10))
+        })
+        .unwrap();
+    let published = submitted.clone();
+    manager.tick(0, true, false, &mut |_, _, _| {}).unwrap();
+    assert!(manager.model.capture_view(first).is_none());
+    let remaining = published.iter().find(|descriptor| descriptor.view == second).copied().unwrap();
+    let mut flushed = Vec::new();
+    manager.close(first, &mut |view, binding, _| flushed.push((view, binding))).unwrap();
+    assert_eq!(flushed[0].0, first);
+    assert!(manager.namespace(first).is_none());
+    manager
+        .publish_with(|set| {
+            submitted = set;
+            Ok(ViewSetRequest::admitted(8, 11))
+        })
+        .unwrap();
+    assert_eq!(submitted, [remaining], "closing one modal-blocked view cannot remove the other");
+    manager.tick(1, false, false, &mut |_, _, _| {}).unwrap();
+    manager
+        .model
+        .begin_exchange(manager.model.capture(second).unwrap())
+        .unwrap()
+        .unwrap();
+    assert!(manager.model.capture_view(second).is_none());
+    // Actual full-set submit while Exchange suppresses new gestures. A retained
+    // typed correlation carries source identity; it is never image permission.
+    manager.dirty = true;
+    manager
+        .publish_with(|set| {
+            submitted = set;
+            Ok(ViewSetRequest::admitted(9, 12))
+        })
+        .unwrap();
+    assert_eq!(submitted, [remaining], "Exchange cannot silently stop an explicit view");
+}
+
+#[test]
+fn monitor_ticket_same_binding_ignores_local_input_and_options_but_never_model_or_source_replacement() {
+    let mut manager = fixture();
+    let view = open(&mut manager, 1);
+    let original = manager.model.capture(view).unwrap();
+    manager.cancel_input().unwrap();
+    let focused = manager.model.capture(view).unwrap();
+    assert_ne!(original, focused);
+    assert!(original.same_binding(focused));
+    let binding = manager.model.binding(view).unwrap();
+    manager.model.ack_options(view, binding, desired()).unwrap();
+    assert!(original.same_binding(manager.model.capture(view).unwrap()));
+    let mut other = fixture();
+    let other_view = open(&mut other, 1);
+    assert!(
+        !original.same_binding(other.model.capture(other_view).unwrap()),
+        "a new manager cannot inherit an old namespace identity"
+    );
+    manager.close(view, &mut |_, _, _| {}).unwrap();
+    open(&mut manager, 1);
+    assert!(
+        !original.same_binding(manager.model.capture(view).unwrap()),
+        "reopened incarnation is distinct even for the same full source"
+    );
+}
+
+#[test]
+fn monitor_manager_published_revision_exhaustion_stops_views_without_reusing_a_state_or_namespace() {
+    let mut manager = fixture();
+    let view = open(&mut manager, 1);
+    let old = manager.namespace(view).unwrap();
+    manager.publish_with(|_| Ok(ViewSetRequest::admitted(1, 1))).unwrap();
+    manager.entries[index(view)].state.revision = u64::MAX;
+    assert_eq!(manager.observe_pin(view, true), Err(PreviewError::Exhausted));
+    assert!(manager.namespace(view).is_none());
+    assert_eq!(manager.state(view).revision, 0);
+    let mut stopped = false;
+    manager
+        .publish_with(|set| {
+            assert!(set.is_empty());
+            stopped = true;
+            Ok(ViewSetRequest::admitted(2, 2))
+        })
+        .unwrap();
+    assert!(stopped, "fail-closed state must reach the actual full-set publication path");
+    assert_eq!(manager.open(source(1).preview(), &mut |_, _, _| {}), Err(PreviewError::Stopped));
+    assert_ne!(manager.namespace(view), Some(old));
+}
+
+#[test]
+fn monitor_host_recovery_rejects_stale_press_and_only_explicit_fresh_play_rebinds_unavailable_cycler() {
+    let mut manager = fixture();
+    manager.open_cycling(0, &mut |_, _, _| {}).unwrap();
+    manager.model.pause().unwrap();
+    let old_namespace = manager.namespace(View::Cycling).unwrap();
+    manager.publish_with(|_| Ok(ViewSetRequest::admitted(1, 1))).unwrap();
+    manager.sources.retain(|source| *source != self::source(1));
+    manager.model.sync(&manager.sources, manager.order, manager.active).unwrap();
+    manager.reconcile().unwrap();
+    manager
+        .publish_with(|set| {
+            assert!(set.is_empty());
+            Ok(ViewSetRequest::admitted(2, 2))
+        })
+        .unwrap();
+    assert_eq!(manager.model.binding(View::Cycling).unwrap().source, source(1));
+    assert!(
+        manager.namespace(View::Cycling).is_none(),
+        "no invented view proof for the tombstone"
+    );
+    let old = manager.recovery().unwrap().unwrap();
+    let context = egui::Context::default();
+    crate::theme::Theme::default().apply(&context, 1.0);
+    let mut frame = 0;
+    let mut at = egui::Pos2::ZERO;
+    let mut show = |recovery: Recovery, pressed: Option<bool>| {
+        frame += 1;
+        let events = pressed
+            .map(|pressed| {
+                vec![
+                    egui::Event::PointerMoved(at),
+                    egui::Event::PointerButton {
+                        pos: at,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ]
+            })
+            .unwrap_or_default();
+        let mut captured = None;
+        let mut output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(380.0, 420.0))),
+                time: Some(frame as f64 / 60.0),
+                focused: true,
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                let response = crate::session_host::ui::monitor_recovery_button(ui, recovery, true);
+                at = response.rect.center();
+                if response.clicked() {
+                    captured = Some(recovery);
+                }
+            },
+        );
+        output.textures_delta.clear();
+        captured
+    };
+    for _ in 0..4 {
+        assert!(show(old, None).is_none());
+    }
+    assert!(show(old, Some(true)).is_none());
+    manager.cancel_input().unwrap();
+    let current = manager.recovery().unwrap().unwrap();
+    assert_ne!(old.id, current.id);
+    assert!(
+        show(current, Some(false)).is_none(),
+        "release cannot use a replacement local-view ticket"
+    );
+    assert!(
+        !manager
+            .resume(old, 10, &mut |_, _, _| panic!("stale recovery cannot flush/rebind"))
+            .unwrap()
+    );
+    assert_eq!(manager.model.binding(View::Cycling).unwrap().source, source(1));
+    for _ in 0..4 {
+        assert!(show(current, None).is_none());
+    }
+    assert!(show(current, Some(true)).is_none());
+    let captured = show(current, Some(false)).expect("real fresh recovery release");
+    let mut flushed = Vec::new();
+    assert!(
+        manager
+            .resume(captured, 20, &mut |view, binding, _| flushed.push((view, binding)))
+            .unwrap()
+    );
+    assert_eq!(flushed[0].1.source, source(1));
+    assert_eq!(manager.model.binding(View::Cycling).unwrap().source, source(2));
+    assert_ne!(manager.namespace(View::Cycling), Some(old_namespace));
+    assert!(manager.namespace(View::Cycling).is_some());
+    assert!(manager.recovery().unwrap().is_none());
+    assert!(manager.model.playing());
+    assert_eq!(manager.desired()[0].source, source(2).preview());
 }

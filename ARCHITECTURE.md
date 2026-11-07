@@ -9,9 +9,59 @@ receipt after actual Active sync. Old delivered edits flush before binding,
 visibility or accepted-options transitions. Local Chat/pin changes cannot consume
 or overwrite an unrelated sampling receipt. Global host-projection namespaces
 are distinct from model incarnations. Initial view demand is empty; settings
-defaults remain Small/1 FPS. This source front does not promote the existing
-test-only image/model/body prerequisites or create a native route by itself.
-Seven portable manager regressions are authored, uncompiled and unrun.
+defaults remain Small/1 FPS. This source phase does not promote the existing
+test-only image/model/body prerequisites.
+`monitor_shell.rs` adds actual Windows Shell/management-entry routing and one
+`monitor_window.rs` owner per visible view. The window uses only the sealed
+MonitorSurface facade, reader-injected global UI pool and original private frame.
+Each event obtains a fresh try-only view read; final presentation validates that
+same read and the staged immutable prepared image/admission pair. Same-revision
+guard refresh requires complete admitted stamp equality. An image-only loss
+retires its OS owner and permits a fresh image-free owner without clearing the
+canonical chat ledger. Close/minimize Stop does not wait for a readable image
+publication; ordinary activation retains the exact binding. Native focus is
+requested only by explicit Open, not by background/privacy recreation. Pin
+checkmarks follow actual owned-window observations; retained desired pin is
+reapplied without activation after a new sealed first frame.
+Actual placement queries are retained in Shell memory and restored only as a
+request after a guarded first frame. A native allocation/presentation failure
+removes its visible subscription and requires explicit Open at default geometry;
+it does not hot-loop allocation retries or retain capture for an invisible tool.
+
+`monitor_edits.rs` shares exact-bound old-context Closing passes with the native
+retirement callback. It preserves delivered editing prefixes and canonical
+Undo, rejects trailing navigation text, and emits no Send/Read/platform output.
+`monitor_input.rs` reuses independent native EnterRelease fences, observes Space
+even in the composer and suppresses it only for owned command focus. Delivered
+IME prefixes additionally notify the body's existing owned-command focus fence
+without replaying Commit or taking canonical TextEdit focus. All Context
+accessors stay outside Context::input closures in this extraction. These edits
+are separate from Root's pointer-lock correction.
+
+An unavailable paused cycler retains its chosen tombstone. One conditional host
+Resume entry carries an unchanged weak local-view ticket and process-nonreused
+widget identity; a stale held press cannot resume another assignment. Only that
+explicit gesture runs the existing local Play transition, allocates a fresh
+namespace and requests the real new view set. Roster restoration never resumes
+or chooses a source automatically. This local scope grants no image or native
+authority. `Ticket::same_binding` exposes only a pure identity comparison for the
+host namespace continuity check; options/focus changes do not create a binding.
+
+Eleven manager, two native-key, two canonical-prefix/IME and one source-entry
+actual-egui regression are authored, uncompiled and unrun. Existing CPU fake
+facade tests, 72 synthetic captures and canonical tests remain preserved. There
+is no Linux/macOS private-window fallback. Root alone promotes the existing
+test-only prerequisites after the real host/native proof join; this source
+front has explicit dependencies on that separately authored projection and does
+not establish native presentation, authenticated capture, IME OS or grid parity.
+The original body has 13 regular definitions in the exact base; these two new
+prefix regressions bring it to 15. Prior component counts below describe their
+earlier frozen checkpoints. The native join additionally requires Root's
+separate pointer Context-lock correction before any execution.
+This first native-front freeze still retires a surface on try-read Busy; the
+approved original-expiry `PreviewRead::view_only` image-free Chat fallback is a
+separate follow-up with the host owner. No frozen source/runtime claim covers
+that unfinished seam or the eventual production promotion.
 
 The disabled CPU/body integration preserves the reviewed private surface and
 Monitor body atoms on the existing disabled monitor foundations. Production

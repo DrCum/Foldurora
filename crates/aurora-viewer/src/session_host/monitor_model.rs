@@ -130,6 +130,14 @@ impl Ticket {
     pub fn view(self) -> View {
         self.view
     }
+    /// Local identity correlation only. Input, options and visibility changes
+    /// do not mint a new binding; a different model instance always does.
+    pub fn same_binding(self, other: Self) -> bool {
+        self.instance == other.instance
+            && self.view == other.view
+            && self.binding.source == other.binding.source
+            && self.binding.incarnation == other.binding.incarnation
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -562,6 +570,31 @@ impl MonitorSet {
         Ok(())
     }
 
+    fn cycle_current(&self, binding: Binding) -> bool {
+        binding.enabled && self.current(binding.source) && Some(binding.source.preview) != self.active
+    }
+    fn cycle_due(&self, now: u64) -> bool {
+        self.playing
+            && !self.blocked
+            && self.pending.is_none()
+            && self
+                .binding(View::Cycling)
+                .is_some_and(|binding| binding.visible && (!self.cycle_current(binding) || self.due.is_some_and(|due| now >= due)))
+    }
+    /// Local old-edit flush planning only. It predicts the same pure transition
+    /// used below; no native/source/image/chat permission is conferred. Ordinary
+    /// polls and a one-source no-op must not drain a queued Pause/Options press.
+    pub fn tick_will_change(&self, now: u64) -> bool {
+        if !self.cycle_due(now) || self.last_clock.is_some_and(|previous| now < previous) {
+            return false;
+        }
+        let Some(binding) = self.binding(View::Cycling) else { return false };
+        match self.next(Some(binding.source.slot), Direction::Next) {
+            Some(source) => source != binding.source || !binding.enabled,
+            None => binding.enabled,
+        }
+    }
+
     /// Timer output is a local binding transition only. It cannot acknowledge
     /// reads, send/activate, create image demand or change Shared Chat selection.
     pub fn tick(&mut self, now: u64) -> Result<Option<Changed>, Error> {
@@ -576,15 +609,12 @@ impl MonitorSet {
             self.due = None;
             return Ok(None);
         }
-        let valid = binding.enabled && self.current(binding.source) && Some(binding.source.preview) != self.active;
-        if valid {
-            let Some(due) = self.due else {
-                self.due = Some(self.deadline(now)?);
-                return Ok(None);
-            };
-            if now < due {
-                return Ok(None);
-            }
+        if self.cycle_current(binding) && self.due.is_none() {
+            self.due = Some(self.deadline(now)?);
+            return Ok(None);
+        }
+        if !self.cycle_due(now) {
+            return Ok(None);
         }
         // One transition maximum, never a catch-up loop after a slow frame.
         self.due = Some(self.deadline(now)?);
