@@ -162,7 +162,7 @@ impl State {
                 self.snapshot = None;
                 self.loaded = false;
                 self.selected = None;
-                self.ui = Default::default();
+                self.ui.cancel();
             }
             let _ = self.runtime.bind(facts);
             self.facts = facts;
