@@ -184,7 +184,9 @@ current count and click again. Uncertain operations are queried, never replayed.
 Reading a conversation does not answer or remove its pending offers. Its native
 UI retains its existing reading behavior in both styles; this stage adds no
 claim that all passive managed rendering is prevented from acknowledging read.
-Chat V2 peers are required; older chat peers fail closed. Inactive New IM,
+This read checkpoint required chat V2. The later native Review integration
+requires chat V3 and an exact acknowledged activation/native foreground check;
+older chat peers fail closed. Inactive New IM,
 Friends, contacts, groups and automatic host reading remain absent. See the
 separate [conversation Attention candidate](FOLDURORA.md#conversation-attention-candidate).
 The read stage's compiled, synthetic visual and native acceptance is pending.

@@ -250,6 +250,13 @@ Driver acceptance sequence (preserve every assertion state and screenshot):
 
 **Native Linux Shared Chat CPU input fixture.**
 
+The explicitly ignored `viewport_gpu_synthetic_crop_colors_srgb_channels_and_alpha`
+test exercises the asynchronous monitor sampler with owned synthetic textures.
+Run it alone with `cargo test --workspace viewport_gpu_synthetic_crop_colors_srgb_channels_and_alpha -- --ignored --test-threads=1 --nocapture`.
+It checks RGBA/BGRA and sRGB crop colors, orientation and opaque alpha through
+the real GPU path. It does not establish native permissions, swapchain
+composition, renderer cancellation, Windows performance or inactive rendering.
+
 | Variable | Effect |
 |---|---|
 | `AURORA_SHARED_CHAT_NATIVE_DIR=<directory>` | Fresh, owned 0700 batch directory for native test state/control files |

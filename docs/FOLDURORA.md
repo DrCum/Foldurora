@@ -1,5 +1,28 @@
 # Foldurora workspace and character preview
 
+## Native Review and monitor foundations under integration
+
+`feat/attention-review-integration` follows frozen Attention source `9a6918b4`.
+Its explicit **Review in viewer** captures an existing Nearby or resident-IM
+conversation, waits for its exact acknowledged activation grant, then rechecks
+native identity, permissions, window state and foreground before opening it.
+Cancellation identifies the original request; after dispatch, an unknown result
+is uncertain and is queried rather than replayed. Native read-on-draw behavior
+remains unchanged. The chat wire is V3; control/authentication stay V1. Host and
+workers must use the same packaged executable.
+
+Shared Chat now has bounded independent view state for the shared window and
+future monitor surfaces, with one canonical draft, Undo and pending operation
+owner per conversation. Monitor capture models, an asynchronous small GPU copy
+and an authenticated image-transport prerequisite are also integrated for checks.
+There is no native image producer, network endpoint or monitor image UI enabled;
+parked world loops remain unchanged. These foundations do not provide live
+inactive previews or resolve the earlier NVIDIA device-loss report.
+
+The combined source needs its own compilation, tests, synthetic GPU/native
+fixtures and Windows/human acceptance. The preceding `9a6918b4` package and its
+receipts remain frozen and do not establish validation for this later source.
+
 ## Conversation Attention candidate
 
 `feat/attention-integration` extends the frozen `6b512b1a` Shared Chat/Enter

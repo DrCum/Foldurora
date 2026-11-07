@@ -202,6 +202,14 @@ gets a fresh request token without charging the same pair twice. Layout,
 surface/device or owner-generation replacement retires the old pair before
 replacement. Every photo capture mode and tiled/photo context vetoes this tap.
 
+`chat_ui/view_state.rs` holds six bounded surface views. Source-owned `ChatUi`
+keeps canonical drafts, complete editor/Undo state and captured pending operations;
+only selection, caret, scroll and input fences belong to a view. Scoped passes
+move editor state into one context and remove it afterwards; passive/stale passes
+restore the canonical deep Undo state. Nonreused model instances fence delayed
+callbacks after recreation. Source-owned IME checkpoints retain committed text,
+cursor and Undo across view changes without publishing unfinished candidates.
+
 `ChatUi` owns a bounded policy-stamped draft map, including each editor's Undo
 state. A pass moves editor state into egui only for its exact source/conversation/
 policy/incarnation and removes it afterward, so background authority changes can
