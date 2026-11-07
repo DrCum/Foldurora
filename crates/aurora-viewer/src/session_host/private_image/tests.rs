@@ -150,6 +150,36 @@ fn private_cpu_painter_borrows_real_pixels_without_cache_or_texture_manager_entr
 }
 
 #[test]
+fn private_cpu_visual_fixture_consumes_only_exact_sealed_frame_and_current_admission() {
+    let budget = UiPixelBudget::new();
+    let mut slot = slot(&budget);
+    let mut painter = crate::crash::software::Painter::default();
+    let mut pixels = [0; 16];
+    let (context, old) = frame(&mut slot);
+    let mut inspected_clone = old.output().clone();
+    slot.stage(1, image(&budget, [0, 255, 0, 255])).unwrap();
+    assert_eq!(
+        slot.paint_fixture(&context, old, &mut painter, &mut pixels, [4, 4], Color32::BLACK, &mut || true),
+        Err(Error::Stale)
+    );
+    assert!(pixels.iter().all(|pixel| *pixel == 0));
+    // Inspection/cloning supplies no sealed ticket or frame constructor. It
+    // cannot be submitted to paint_fixture or attached to a fresh local frame.
+    inspected_clone.textures_delta.clear();
+    let (context, fresh) = frame(&mut slot);
+    slot.paint_fixture(&context, fresh, &mut painter, &mut pixels, [4, 4], Color32::BLACK, &mut || true)
+        .unwrap();
+    assert!(pixels.iter().all(|pixel| *pixel == 0x00ff00));
+    let (context, denied) = frame(&mut slot);
+    pixels.fill(0);
+    assert_eq!(
+        slot.paint_fixture(&context, denied, &mut painter, &mut pixels, [4, 4], Color32::BLACK, &mut || false),
+        Err(Error::Stale)
+    );
+    assert!(pixels.iter().all(|pixel| *pixel == 0));
+}
+
+#[test]
 fn private_cpu_texture_namespace_rejects_managed_and_delta_collisions() {
     let image = ColorImage::filled([1, 1], Color32::RED);
     let mut painter = crate::crash::software::Painter::default();

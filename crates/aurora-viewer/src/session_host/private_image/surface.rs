@@ -72,11 +72,10 @@ impl<S: OwnedSurface> PrivateSoftwareSurface<S> {
             output.textures_delta.clear();
             return Err(Error::Stale);
         }
-        let valid_delta = self.slot.check_delta(&output.textures_delta);
-        if valid_delta.is_err() || !current() {
+        if let Err(error) = self.slot.validate_frame(context, &ticket, &output.textures_delta, current) {
             output.textures_delta.clear();
             self.retire(flush);
-            return Err(valid_delta.err().unwrap_or(Error::Stale));
+            return Err(error);
         }
         self.slot.consume(context, ticket)?;
         let Some(native) = &mut self.native else {

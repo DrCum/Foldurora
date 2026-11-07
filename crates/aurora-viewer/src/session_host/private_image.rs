@@ -254,6 +254,70 @@ impl PrivateImageSlot {
             && ticket.image == self.revision
             && self.frame == Some(ticket.frame)
     }
+    fn validate_frame(
+        &self,
+        context: &Context,
+        ticket: &PrivateFrameTicket,
+        delta: &egui::TexturesDelta,
+        current: &mut dyn FnMut() -> bool,
+    ) -> Result<(), Error> {
+        if !self.accepts(context, ticket) {
+            return Err(Error::Stale);
+        }
+        self.check_delta(delta)?;
+        if !current() {
+            return Err(Error::Stale);
+        }
+        Ok(())
+    }
+    /// Synthetic CPU visuals only: consumes the original sealed frame and uses
+    /// the same local/admission validator as the owned surface. The fixture's
+    /// canvas allocation is not a production image/DIB budget or erasure proof.
+    #[allow(clippy::too_many_arguments)] // Explicit borrowed painter/canvas and authority for a dormant fixture.
+    pub(super) fn paint_fixture(
+        &mut self,
+        context: &Context,
+        frame: PrivateFrame,
+        painter: &mut crate::crash::software::Painter,
+        pixels: &mut [u32],
+        size: [usize; 2],
+        background: Color32,
+        current: &mut dyn FnMut() -> bool,
+    ) -> Result<(), Error> {
+        let (ticket, mut output) = frame.into_parts();
+        let valid = self.validate_frame(context, &ticket, &output.textures_delta, current);
+        if let Err(error) = valid {
+            output.textures_delta.clear();
+            return Err(error);
+        }
+        if size[0].checked_mul(size[1]) != Some(pixels.len()) || size.contains(&0) {
+            output.textures_delta.clear();
+            return Err(Error::Invalid);
+        }
+        self.consume(context, ticket)?;
+        self.pending_ui.append(std::mem::take(&mut output.textures_delta));
+        let delta = std::mem::take(&mut self.pending_ui);
+        let primitives = context.tessellate(output.shapes, output.pixels_per_point);
+        let painted = painter.paint_with_private(
+            pixels,
+            size,
+            &primitives,
+            &delta,
+            output.pixels_per_point,
+            background,
+            self.borrowed(),
+        );
+        let mut delta = delta;
+        delta.clear();
+        if !painted {
+            return Err(Error::Collision);
+        }
+        if !current() {
+            pixels.fill((u32::from(background.r()) << 16) | (u32::from(background.g()) << 8) | u32::from(background.b()));
+            return Err(Error::Stale);
+        }
+        Ok(())
+    }
     fn consume(&mut self, context: &Context, ticket: PrivateFrameTicket) -> Result<(), Error> {
         if !self.accepts(context, &ticket) {
             return Err(Error::Stale);
