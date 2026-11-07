@@ -2970,6 +2970,15 @@ human's request (#261). An animation change may change the height envelope.
 
 Gestures: `aurora-assets/src/gesture.rs` reads/writes the bounded Legacy Viewer v2 newline format. `gestures.rs` owns active definitions and a nonblocking playback state machine; `gestures/keys.rs` and `windows.rs` map SL key/mask and Windows virtual-key values and `builtins.rs` lists the Legacy Viewer's 69 stock animations. `app/gestures.rs` correlates loads/saves, restores login/COF gestures, preloads motion/sound assets and routes effects to the existing avatar/audio/chat systems. `ui/gestures.rs` and `ui/gestures/editor.rs` provide the Ctrl+G manager and independent draft editors through shared Aurora floaters. `ui/chat/completion.rs` selects inline trigger suffixes in both local-chat inputs, using the active manager's case-insensitive exact/common-prefix matching; `ui/chat/suggest.rs` lists the matching triggers under it (`Manager::matching`). Inventory links resolve to original items; activation labels are mirrored in `World::active_gestures`. Per-account enable/filter preferences live in settings; active gestures persist through the server. `aurora-net/src/session/gestures.rs` loads and parses on network/workers and sends the Legacy Viewer activation/sound messages; uploads use UpdateGestureAgentInventory and inventory read-back.
 
+Native gesture playback has exact `PlaybackId` values scoped by a nonreused
+Manager instance and checked per-run serial. `Manager::play` keeps its ordinary
+signature/restart behavior and reserves identity before replacing a run;
+exhaustion preserves the previous run. `stop_exact` can stop only that captured
+item/run, while ordinary `stop` and `stop_all` use the same path. This is the
+production ownership prerequisite for the approved first native Board slice;
+board definitions, independent pending-load intent, private-store consumer and UI
+remain subsequent work, not usable board completion in this phase.
+
 `shape_editor/` owns the worn shape draft. `catalog.rs` lists the 82 tweakable
 shape controls from the shipped `avatar_lad.xml`, including edit groups, order,
 sex filters, ranges and hint cameras; its test checks the catalogue against the

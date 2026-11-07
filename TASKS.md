@@ -3510,3 +3510,15 @@ Open-source technologies that could set Aurora apart (human request of 2026-10-1
   - ⬜ Existing linksets: verify canonical simulator link numbers independently of arrival order. ObjectUpdate supplies parents but no canonical link number; the confirmed ordering of newly linked objects is retained locally.
 
 - ✅ Preserve inventory link target icons with a shortcut overlay (human request, 2026-10-30; task `inventory-link-icons`; PR #1610). Added the human-authored shortcut layer to inventory type variants and wired cycle-safe target resolution, subtype flags, family tints and folder links across inventory views. Missing targets retain generic link icons. Added offline `link-icons` / `aurora-link-icons` scenarios and regression coverage. Full `scripts/check.ps1` green: 6,348 tests passed, zero failures, 31 ignored; formatting, PowerShell parsing and Clippy clean. Both inventory layouts captured and visually checked in offline demo mode. Validated by the human on 2026-10-30.
+
+
+- 🔧 Native Gesture / Sound Boards first slice (source-only): exact Manager
+  playback-run identity/stop prerequisite, with checked allocation before ordinary
+  restart and old-run preservation on exhaustion. Four portable regressions are
+  authored UNRUN for later hotkey replacement, unrelated item/activation retention,
+  original waits on exhaustion and Manager recreation/disabled attempts. Bounded
+  model and board-owned pending loads follow; actual menus/floater/store consumer
+  depend on the Workspace owner's frozen/reviewed hardened shared private adapter.
+  No Cargo/native/GPU/grid/socket execution by author, no endpoint changes or
+  board UI/playback-on-open enabled. Root combined validation and independent
+  source review remain pending; this is not full Board parity.

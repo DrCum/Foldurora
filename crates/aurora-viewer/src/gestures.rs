@@ -10,6 +10,7 @@ mod windows;
 
 use aurora_assets::gesture::{ANIM_STOP, Gesture, KEY_NONE, Step, WAIT_ANIMATIONS, WAIT_RELEASE, WAIT_TIME};
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
@@ -25,7 +26,16 @@ pub struct Entry {
     pub definition: Gesture,
 }
 
+/// Identity of one exact native run. A later restart or Manager recreation can
+/// never be stopped by a prior board's captured ownership record.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PlaybackId {
+    manager: u64,
+    serial: u64,
+}
+
 struct Playing {
+    id: PlaybackId,
     definition: Gesture,
     step: usize,
     wait: Option<Instant>,
@@ -46,11 +56,19 @@ pub struct Manager {
     pub revision: u64,
     playing: BTreeMap<Uuid, Playing>,
     random: u64,
+    instance: u64,
+    next_playback: u64,
 }
 
 impl Default for Manager {
     fn default() -> Self {
+        static NEXT_INSTANCE: AtomicU64 = AtomicU64::new(1);
+        let instance = NEXT_INSTANCE
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_add(1))
+            .unwrap_or(0);
         Self {
+            instance,
+            next_playback: 1,
             entries: BTreeMap::new(),
             active: BTreeSet::new(),
             enabled: true,
@@ -68,6 +86,9 @@ impl Manager {
     pub fn is_playing(&self, item: Uuid) -> bool {
         self.playing.contains_key(&item)
     }
+    pub fn playback_id(&self, item: Uuid) -> Option<PlaybackId> {
+        self.playing.get(&item).map(|run| run.id)
+    }
     pub fn has_playing(&self) -> bool {
         !self.playing.is_empty()
     }
@@ -78,12 +99,21 @@ impl Manager {
     /// Stopping them first made each press of a repeated hotkey stop and
     /// restart them.
     pub fn play(&mut self, item: Uuid, definition: Gesture, key: Option<u8>) {
-        if !self.enabled {
+        if !self.enabled || self.instance == 0 {
             return;
         }
+        // Reserve before touching the old Playing: exhaustion must not replace
+        // its definition, waits, animation ownership or release state.
+        let Some(next) = self.next_playback.checked_add(1) else { return };
+        let id = PlaybackId {
+            manager: self.instance,
+            serial: self.next_playback,
+        };
+        self.next_playback = next;
         self.playing.insert(
             item,
             Playing {
+                id,
                 definition,
                 step: 0,
                 wait: None,
@@ -97,6 +127,16 @@ impl Manager {
     }
 
     pub fn stop(&mut self, item: Uuid) -> Vec<Effect> {
+        self.playback_id(item).map_or_else(Vec::new, |id| self.stop_exact(item, id))
+    }
+
+    /// Board Stop follows FSGestureBoardController::stopBoard's owned subset
+    /// (fsgestureboardcontroller.cpp, abbe3cb0), with exact-run checks so a later
+    /// native hotkey/editor restart cannot inherit a board's old ownership.
+    pub fn stop_exact(&mut self, item: Uuid, id: PlaybackId) -> Vec<Effect> {
+        if self.playback_id(item) != Some(id) {
+            return Vec::new();
+        }
         self.playing.remove(&item).map_or_else(Vec::new, |p| {
             p.requested.union(&p.observed).map(|a| Effect::Animation(*a, false)).collect()
         })
