@@ -1359,31 +1359,46 @@ fn shared_chat_uncommitted_ime_rolls_back_on_two_context_focus_or_surface_close_
 
 #[test]
 fn shared_chat_one_native_batch_can_commit_then_preedit_without_lending_the_next_candidate() {
-    let mut frames = SurfaceFrames::new();
-    frames.type_text(0, "Prefix ");
-    frames.show(
-        0,
-        vec![Event::Ime(egui::ImeEvent::Preedit {
-            text: "first candidate".into(),
-            active_range_chars: None,
-        })],
-    );
-    assert!(
-        frames
-            .show(
-                0,
-                vec![
-                    Event::Ime(egui::ImeEvent::Commit("committed".into())),
-                    Event::Ime(egui::ImeEvent::Preedit {
-                        text: "NEXT CANDIDATE".into(),
-                        active_range_chars: None
-                    }),
-                ]
-            )
-            .is_none()
-    );
-    frames.focus(1);
-    assert_eq!(frames.click(1, "host_chat_send_rect").unwrap().text.as_str(), "Prefix committed");
+    for split_prefix in [false, true] {
+        let mut frames = SurfaceFrames::new();
+        frames.type_text(0, "Prefix ");
+        frames.show(
+            0,
+            vec![Event::Ime(egui::ImeEvent::Preedit {
+                text: "first candidate".into(),
+                active_range_chars: None,
+            })],
+        );
+        let events = vec![
+            Event::Ime(egui::ImeEvent::Commit("committed".into())),
+            Event::Ime(egui::ImeEvent::Preedit {
+                text: "NEXT CANDIDATE".into(),
+                active_range_chars: None,
+            }),
+        ];
+        if split_prefix {
+            assert!(frames.show(0, events).is_none());
+        } else {
+            // Exercise the production body directly as well as its usual native
+            // prefix pipeline: one TextEdit pass must preserve event ordering.
+            frames.model.sync(&frames.host, false);
+            frames.frame += 1;
+            let raw = RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(680.0, 680.0))),
+                time: Some(frames.frame as f64 / 60.0),
+                focused: true,
+                events,
+                ..Default::default()
+            };
+            let palette = crate::theme::Theme::default().palette();
+            let mut output = frames.contexts[0].run_ui(raw, |ui| {
+                assert!(frames.model.show_for(ChatSurface::Shared, ui, &palette, InputMode::Live).is_none());
+            });
+            output.textures_delta.clear();
+        }
+        frames.focus(1);
+        assert_eq!(frames.click(1, "host_chat_send_rect").unwrap().text.as_str(), "Prefix committed");
+    }
 }
 
 #[test]

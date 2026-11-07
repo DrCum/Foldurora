@@ -768,7 +768,10 @@ impl ChatUi {
                             egui::ImeEvent::Preedit { text, .. } => {
                                 composition_event |= !text.is_empty();
                                 self.view.ime_composing = !text.is_empty();
-                                if !text.is_empty() { composition_committed = false; }
+                                if !text.is_empty() {
+                                    commit_before_preedit |= saw_commit;
+                                    composition_committed = false;
+                                }
                             }
                             egui::ImeEvent::Commit(_) => {
                                 composition_committed = true;
