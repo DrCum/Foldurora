@@ -1,0 +1,34 @@
+[
+  {
+    "file": "viewfinder-reference.png",
+    "sha256": "a9a6cf204dfcff26652ccfadd279258dfe90a2bac10d0f4cf1f200e902cd8579"
+  },
+  {
+    "file": "guide-button-response.png",
+    "sha256": "401f56000b53dd38bfba380195fd24081ae718b9fa162a30448d7a3a144bad53"
+  },
+  {
+    "file": "baseline-scene-wheel.png",
+    "sha256": "75052d7e241817d8b1afcbcf781567168febc56a40e788aeca5550f9b7ffc7cd"
+  },
+  {
+    "file": "baseline-alt-focal.png",
+    "sha256": "ed0cb6e22f9e79f3d82634d8a558f16126539eb32c7eb725498c23f1d3607bc2"
+  },
+  {
+    "file": "settings-lower.png",
+    "sha256": "a9dbb39be64995d2123febf2f57a7fa82d01bbe0500e8426025dc357fd703b67"
+  },
+  {
+    "file": "photo-requested.png",
+    "sha256": "b61013f8bcdd5c0298aaa45686d53c058f6bb2f8196c78de379d0d01a3303a66"
+  },
+  {
+    "file": "after-photo-scene-wheel.png",
+    "sha256": "5451430c28deec135e74bbd796091c160cd9b6521f6e85ecf58c0b2625657925"
+  },
+  {
+    "file": "quit-confirmation.png",
+    "sha256": "990bf434c89c0be81813d4c20c8245ebcfbb281f950bbc4a5c6dc957199a727e"
+  }
+]
