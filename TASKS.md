@@ -1,5 +1,16 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Pure monitor binding prerequisite (2026-11-07; no issue): four fixed
+  views plus cycling, exact typed source/slot mapping to canonical ChatSurface,
+  explicit current-Active Open, checked binding/input identities, captured
+  navigation, paused-source retention and one-shot acknowledged Exchange.
+  Local timers suspend/rebase under visibility/modal blockers without emitting
+  Send, Read, Review or activation. Duplicate visible views share one source
+  identity; future IO owns demand admission, Stop/lowering receipts and cache
+  retirement. Seventeen pure regressions are authored and unrun; independent
+  source review cleared the code. Module registration remains cfg(test)-only:
+  no Monitor UI, image service, native endpoint or inactive rendering is enabled.
+
 - 🔧 Authenticated image-lane prerequisite (2026-11-07; no issue): closed,
   versioned last-active metadata/raw-RGBA framing, independent privacy and pixel
   roles, fresh mutually authenticated source/lease/connection/nonce contexts and

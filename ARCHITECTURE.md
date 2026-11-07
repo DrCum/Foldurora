@@ -37,6 +37,17 @@ already occupies the controller's world area, so it uses full-canvas geometry;
 the saved standalone margins are retained for detach. The controller and chat
 popouts keep their separate CPU-painted egui contexts.
 
+`session_host/monitor_model.rs` is a cfg(test)-only pure prerequisite for four
+fixed monitor bindings and one cycling view. Full worker/session/account/grid/
+generation/lease sources map explicitly to canonical ChatSurface slots; profile
+slots are presentation, never authority. Captured binding/navigation tickets
+cannot retarget on replacement or reordering. Exchange correlates one exact
+acknowledged outcome before changing only its initiating binding. Local cycle
+timers emit only binding changes, with no native/chat/image command. Explicit
+Open of current Active and binding survival across ordinary activation support
+the planned remembered-Active stage; no production UI, subscription or endpoint
+is enabled by this module. Source tests are authored and unrun.
+
 The opt-in session controller starts before the ordinary viewer App/EventLoop.
 `session_host/{mod,software,ui}.rs` uses egui and the existing softbuffer CPU
 painter; it never initializes `aurora-render::Renderer`. `session_host/transport.rs`
