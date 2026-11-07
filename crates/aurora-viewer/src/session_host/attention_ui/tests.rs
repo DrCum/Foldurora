@@ -267,6 +267,9 @@ impl Frames {
         self.model.rows()[0].key
     }
     fn choose(&mut self, key: ChatKey) {
+        // Host changes can replace/reorder a reminder incarnation. Resolve its
+        // ID only after those changes and the resulting pixels are committed.
+        self.settle();
         assert!(self.click(row_id(&self.model, key)).is_none());
         assert_eq!(self.model.selected(), Some(key));
     }
@@ -940,6 +943,43 @@ fn review_operation(f: &mut Frames, target: ReviewCapture, request: u64, status:
         activation: Some(7),
         status,
     }];
+}
+
+#[test]
+fn attention_policy_reincarnation_rejects_old_pixels_then_allows_fresh_exact_row_selection() {
+    let mut f = Frames::new();
+    let key = ChatKey {
+        source: source(1),
+        conversation: direct(),
+    };
+    let old_id = row_id(&f.model, key);
+    let old_rect = f.rect(old_id);
+    f.host.can_activate = true;
+    Arc::make_mut(&mut f.host.chat[0])
+        .conversations
+        .iter_mut()
+        .find(|info| info.policy.key == key)
+        .unwrap()
+        .policy
+        .can_send = false;
+    // This press was queued against the old painted row before the policy
+    // update is rendered. It cannot borrow the replacement row's authority.
+    assert!(f.pointer(old_rect.center(), true).is_none());
+    assert!(f.pointer(old_rect.center(), false).is_none());
+    assert_eq!(f.model.selected(), None);
+    assert_ne!(
+        row_id(&f.model, key),
+        old_id,
+        "changed native policy creates a new reminder incarnation"
+    );
+    assert_eq!(
+        f.model.rows()[0].key.source,
+        source(2),
+        "the old coordinates now contain another source"
+    );
+    f.choose(key); // Fresh, real pointer edges resolve the current row identity.
+    assert_eq!(f.model.selected(), Some(key));
+    assert_ne!(f.rect(row_id(&f.model, key)), old_rect);
 }
 
 #[test]
