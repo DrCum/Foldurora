@@ -3612,3 +3612,9 @@ Open-source technologies that could set Aurora apart (human request of 2026-10-1
   binding and cover incomplete grants, source/generation/activation changes,
   future receipts and immutable expiry across renewal; UNRUN. Actual Board App
   consumers, combined compiler/runtime checks and human validation remain.
+
+- Recoverable preview owned-admission prerequisite: exact rejected FrameHandoff /
+  UnadmittedPixels returned for outside-Store-lock retirement; old consuming API
+  behavior preserved. Seven pure budget/pointer/guard/retry/expiry/wrapper fixtures
+  authored UNRUN, no socket/native/GPU use. Actual Host garbage integration is
+  owned separately; source review and root validation required before acceptance.

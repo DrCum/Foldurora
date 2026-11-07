@@ -5164,3 +5164,17 @@ own App action epoch on source/handoff/lifecycle loss. Managed unavailable never
 implies standalone permission. This helper performs no render, input, focus,
 read, socket or native window operation. Actual Board consumers are a separate
 root-combined dependency; tests are source-authored UNRUN.
+
+### Recoverable preview admission ownership
+
+`FrameHandoff::try_admit` and `UnadmittedPixels::try_admit` return
+`Err((ImageError, original_owner))` on rejection. Raw allocation, physical credit,
+transport validity, original capture/control deadlines and exact identity remain
+indivisible; guard order and SourceImages pending/clock semantics are unchanged.
+The Host Store consumer must move this error owner into its bounded garbage and
+drop it after unlocking. Existing `admit` remains a consuming/drop-on-error wrapper;
+adding this seam alone does not fix a caller still using that wrapper under lock.
+No new getter, Clone payload, authority, reservation or replay route is introduced.
+The two bounded owned-result methods use narrowly documented Clippy expectations
+to avoid allocating metadata boxes under the same lock. Pure ownership fixtures
+are authored UNRUN; independent source review and root checks remain pending.

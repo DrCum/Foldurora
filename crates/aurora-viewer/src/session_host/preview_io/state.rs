@@ -254,6 +254,25 @@ impl FrameHandoff {
         control: &ControlGuard,
         now: u64,
     ) -> Result<RetainedFrame, aurora_session::preview_image::ImageError> {
+        self.try_admit(owner, control, now).map_err(|(error, rejected)| {
+            drop(rejected);
+            error
+        })
+    }
+
+    /// Same admission, returning exact rejected ownership so the caller can
+    /// retire raw storage after releasing its Store lock. No new validity or
+    /// replay permission is attached to the recovered handoff.
+    #[expect(
+        clippy::result_large_err,
+        reason = "Return the bounded original handoff intact without boxing or copying its owned pixel payload under the Store lock."
+    )]
+    pub fn try_admit(
+        self,
+        owner: &mut aurora_session::preview_image::SourceImages,
+        control: &ControlGuard,
+        now: u64,
+    ) -> Result<RetainedFrame, (aurora_session::preview_image::ImageError, Self)> {
         if self.emergency.load(Ordering::Acquire)
             || !self.retention.current()
             || !self.capture.current()
@@ -262,17 +281,39 @@ impl FrameHandoff {
             || control.source != self.token.source
             || !control.current(Instant::now())
         {
-            return Err(aurora_session::preview_image::ImageError::Stale);
+            return Err((aurora_session::preview_image::ImageError::Stale, self));
         }
-        let pixels = self.pixels.admit(owner, now)?;
-        Ok(RetainedFrame {
-            token: self.token,
+        let Self {
+            token,
+            received_at,
             pixels,
-            retention: self.retention,
-            emergency: self.emergency,
-            clock_anchor: (now, Instant::now()),
-            source_control: self.original_capture.control.witness.clone(),
-        })
+            original_capture,
+            retention,
+            capture,
+            emergency,
+        } = self;
+        match pixels.try_admit(owner, now) {
+            Ok(pixels) => Ok(RetainedFrame {
+                token,
+                pixels,
+                retention,
+                emergency,
+                clock_anchor: (now, Instant::now()),
+                source_control: original_capture.control.witness.clone(),
+            }),
+            Err((error, pixels)) => Err((
+                error,
+                Self {
+                    token,
+                    received_at,
+                    pixels,
+                    original_capture,
+                    retention,
+                    capture,
+                    emergency,
+                },
+            )),
+        }
     }
 }
 /// No current Active/capture fence is required after final admission. The later
@@ -311,6 +352,173 @@ impl RetainedFrame {
         let result = prepare(self.pixels.bytes(checked)?);
         self.current(control, now)?;
         Some(result)
+    }
+}
+
+#[cfg(test)]
+mod owned_admission_tests {
+    use super::*;
+    use aurora_session::preview_image::{ImageError, PreviewGeometry, SourceImages};
+    use aurora_session::{HostedViewport, PhysicalRect};
+
+    // Pure existing metadata/control fixtures only; no channel, socket, native
+    // window or Renderer authority is created by this ownership regression.
+    fn fixture() -> (SourceImages, FrameHandoff, ImageBudget, ControlGuard, PreviewGeometry) {
+        let source = super::super::tests::source(1);
+        let control = super::super::tests::control(source);
+        let state = super::super::tests::state(control.clone(), Some(EpochFence::new()));
+        let geometry = PreviewGeometry::new([640, 360], [0, 0, 640, 360], PreviewSize::Small).unwrap();
+        let budget = ImageBudget::new(geometry.payload_bytes()).unwrap();
+        let mut owner = SourceImages::new(source, budget.clone()).unwrap();
+        owner.sync(state.policy, 0).unwrap();
+        let claim = owner.request(8, 1, geometry, 1).unwrap();
+        let stamp = PreviewStamp::new(claim, 1, 1, 1, geometry).unwrap();
+        let pixels = UnadmittedPixels::copy_from(stamp, &vec![255; geometry.payload_bytes()], &budget).unwrap();
+        let frame = FrameHandoff {
+            token: ConnectionToken::transport_fixture(source, 8, 1, 1).unwrap(),
+            received_at: Instant::now(),
+            pixels,
+            original_capture: CaptureControlGuard {
+                control: control.clone(),
+                activation: 1,
+                viewport: HostedViewport {
+                    host_window: 1,
+                    rect: PhysicalRect {
+                        x: 0,
+                        y: 0,
+                        width: 640,
+                        height: 360,
+                    },
+                },
+                witness: EpochFence::new(),
+            },
+            retention: EpochFence::new(),
+            capture: EpochFence::new(),
+            emergency: Arc::new(AtomicBool::new(false)),
+        };
+        (owner, frame, budget, control, geometry)
+    }
+    fn rejected(result: Result<RetainedFrame, (ImageError, FrameHandoff)>) -> (ImageError, FrameHandoff) {
+        match result {
+            Err(value) => value,
+            Ok(_) => panic!("expected owned handoff rejection"),
+        }
+    }
+    #[test]
+    fn preview_handoff_owned_guard_rejection_keeps_exact_capture_and_credit_until_outside_store_drop() {
+        for case in 0..8 {
+            let (mut owner, mut frame, budget, control, geometry) = fixture();
+            let mut supplied = control.clone();
+            match case {
+                0 => frame.emergency.store(true, Ordering::Release),
+                1 => frame.retention.revoke(),
+                2 => frame.capture.revoke(),
+                3 => frame.original_capture.witness.revoke(),
+                4 => supplied.witness = EpochFence::new(),
+                5 => supplied.source = super::super::tests::source(2),
+                6 => supplied.expires_at = Instant::now() - Duration::from_millis(1),
+                7 => frame.original_capture.control.expires_at = Instant::now() - Duration::from_millis(1),
+                _ => unreachable!(),
+            }
+            let token = frame.token;
+            let received = frame.received_at;
+            let claim = frame.claim();
+            let deadline = frame.original_capture.control.expires_at;
+            let retention = frame.retention.clone();
+            let capture = frame.capture.clone();
+            let original = frame.original_capture.witness.clone();
+            let source_control = frame.original_capture.control.witness.clone();
+            let emergency = frame.emergency.clone();
+            let store = std::sync::Mutex::new(());
+            let lock = store.lock().unwrap();
+            let (error, frame) = rejected(frame.try_admit(&mut owner, &supplied, 2));
+            assert_eq!(error, ImageError::Stale);
+            assert_eq!(frame.token, token);
+            assert_eq!(frame.received_at, received);
+            assert_eq!(frame.claim(), claim);
+            assert_eq!(frame.original_capture.control.expires_at, deadline);
+            assert!(frame.retention.same(&retention));
+            assert!(frame.capture.same(&capture));
+            assert!(frame.original_capture.witness.same(&original));
+            assert!(frame.original_capture.control.witness.same(&source_control));
+            assert!(Arc::ptr_eq(&frame.emergency, &emergency));
+            assert!(owner.cancel_capture(claim), "outer rejection never called/mutated the image model");
+            assert_eq!(budget.used(), geometry.payload_bytes());
+            assert!(
+                budget.reserve(geometry).is_err(),
+                "the rejected allocation has not been destroyed/refunded under Store lock"
+            );
+            let garbage = Some(frame);
+            drop(lock);
+            assert!(store.try_lock().is_ok());
+            drop(garbage);
+            assert_eq!(budget.used(), 0);
+            assert!(budget.reserve(geometry).is_ok());
+        }
+    }
+    #[test]
+    fn preview_handoff_owned_model_rejection_returns_complete_handoff_for_exact_original_retry() {
+        let (mut owner, frame, budget, control, geometry) = fixture();
+        let token = frame.token;
+        let received = frame.received_at;
+        let claim = frame.claim();
+        let deadline = frame.original_capture.control.expires_at;
+        let capture = frame.capture.clone();
+        let retention = frame.retention.clone();
+        let mut wrong = SourceImages::new(control.source, budget.clone()).unwrap();
+        let policy = super::super::tests::state(control.clone(), Some(EpochFence::new())).policy;
+        wrong.sync(policy, 0).unwrap();
+        let wrong_claim = wrong.request(8, 1, geometry, 1).unwrap();
+        let (error, frame) = rejected(frame.try_admit(&mut wrong, &control, 2));
+        assert_eq!(error, ImageError::Stale);
+        assert!(wrong.cancel_capture(wrong_claim));
+        assert_eq!(frame.token, token);
+        assert_eq!(frame.received_at, received);
+        assert_eq!(frame.claim(), claim);
+        assert_eq!(frame.original_capture.control.expires_at, deadline);
+        assert!(frame.capture.same(&capture));
+        assert!(frame.retention.same(&retention));
+        assert_eq!(budget.used(), geometry.payload_bytes());
+        let retained = match frame.try_admit(&mut owner, &control, 2) {
+            Ok(frame) => frame,
+            Err((error, _)) => panic!("original pending rejected: {error:?}"),
+        };
+        assert_eq!(retained.token, token);
+        assert_eq!(
+            retained.with_pixels(&control, 2, |bytes| bytes.len()),
+            Some(geometry.payload_bytes())
+        );
+        drop(retained);
+        assert_eq!(
+            budget.used(),
+            geometry.payload_bytes(),
+            "model metadata still owns its conservative credit"
+        );
+        owner.retire();
+        assert_eq!(budget.used(), 0);
+    }
+    #[test]
+    fn preview_handoff_owned_recovery_does_not_refresh_original_expiry_and_legacy_wrapper_still_drops() {
+        let (mut owner, mut frame, budget, control, geometry) = fixture();
+        let expired = Instant::now() - Duration::from_millis(1);
+        frame.original_capture.control.expires_at = expired;
+        let (error, frame) = rejected(frame.try_admit(&mut owner, &control, 2));
+        assert_eq!(error, ImageError::Stale);
+        assert_eq!(frame.original_capture.control.expires_at, expired);
+        assert_eq!(budget.used(), geometry.payload_bytes());
+        let (error, frame) = rejected(frame.try_admit(&mut owner, &control, 2));
+        assert_eq!(error, ImageError::Stale);
+        assert_eq!(frame.original_capture.control.expires_at, expired);
+        drop(frame);
+        assert_eq!(budget.used(), 0);
+        let (mut owner, frame, budget, control, _) = fixture();
+        assert!(owner.cancel_capture(frame.claim()));
+        let error = match frame.admit(&mut owner, &control, 2) {
+            Err(error) => error,
+            Ok(_) => panic!("consuming wrapper accepted cancelled claim"),
+        };
+        assert_eq!(error, ImageError::Stale);
+        assert_eq!(budget.used(), 0);
     }
 }
 pub(crate) struct SourceUpdate {

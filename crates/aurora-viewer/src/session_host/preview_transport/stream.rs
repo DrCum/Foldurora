@@ -96,11 +96,11 @@ impl Allowance<'_> {
 /// Authenticated transport bytes, explicitly NOT an admitted/drawable image.
 /// Scope/MAC/format checks cannot prove a current capture claim, native grant,
 /// control lease or policy. The owner must sync SourceImages from fresh control
-/// and authenticated policy, then consume this through `admit` before any UI
+/// and authenticated policy, then consume this through admission before any UI
 /// publication, texture copy or image cache replacement.
 ///
 /// Actual allocation credit travels with the only owned Vec. Field order frees
-/// bytes before credit on rejection/drop; no split Vec/credit accessor or Clone
+/// bytes before credit on drop (recovery keeps both); no split Vec/credit accessor or Clone
 /// can silently keep a physical image after refunding its reservation.
 pub(crate) struct UnadmittedPixels {
     stamp: PreviewStamp,
@@ -145,11 +145,26 @@ impl UnadmittedPixels {
     /// A failed `SourceImages::admit` drops its trial clone while this object's
     /// reservation still exists; rejection then frees bytes before refunding.
     pub fn admit(self, owner: &mut SourceImages, now: u64) -> Result<AdmittedPixels, ImageError> {
+        self.try_admit(owner, now).map_err(|(error, rejected)| {
+            drop(rejected);
+            error
+        })
+    }
+    /// Recover rejected ownership for retirement outside the owner's lock.
+    /// Recovery grants no retry authority: model clock/pending changes and the
+    /// transport validity check remain exactly those of ordinary admission.
+    #[expect(
+        clippy::result_large_err,
+        reason = "Return the bounded indivisible stamped Vec/credit without boxing or copying under the owner lock."
+    )]
+    pub fn try_admit(self, owner: &mut SourceImages, now: u64) -> Result<AdmittedPixels, (ImageError, Self)> {
         if !self.transport_current() {
-            return Err(ImageError::Stale);
+            return Err((ImageError::Stale, self));
         }
-        let image = owner.admit(self.stamp, self.credit.clone(), now)?;
-        Ok(AdmittedPixels { bytes: self.bytes, image })
+        match owner.admit(self.stamp, self.credit.clone(), now) {
+            Ok(image) => Ok(AdmittedPixels { bytes: self.bytes, image }),
+            Err(error) => Err((error, self)),
+        }
     }
 }
 impl std::fmt::Debug for UnadmittedPixels {
@@ -960,6 +975,111 @@ impl Pair {
 impl Drop for Pair {
     fn drop(&mut self) {
         self.close();
+    }
+}
+
+#[cfg(test)]
+mod owned_admission_tests {
+    use super::super::tests::{policy, source};
+    use super::*;
+    use aurora_session::PreviewSize;
+    use aurora_session::preview_image::{IMAGE_AUTHORITY_MILLIS, PreviewGeometry};
+
+    fn fixture() -> (SourceImages, UnadmittedPixels, ImageBudget, PreviewGeometry) {
+        let geometry = PreviewGeometry::new([640, 360], [0, 0, 640, 360], PreviewSize::Small).unwrap();
+        let budget = ImageBudget::new(geometry.payload_bytes()).unwrap();
+        let mut model = SourceImages::new(source(3), budget.clone()).unwrap();
+        model.sync(policy(), 0).unwrap();
+        let claim = model.request(8, 1, geometry, 1).unwrap();
+        let stamp = PreviewStamp::new(claim, 1, 1, 1, geometry).unwrap();
+        let mut pixels = UnadmittedPixels::blank(stamp, &budget).unwrap();
+        pixels.bytes.fill(255);
+        (model, pixels, budget, geometry)
+    }
+    fn rejected(result: Result<AdmittedPixels, (ImageError, UnadmittedPixels)>) -> (ImageError, UnadmittedPixels) {
+        match result {
+            Err(value) => value,
+            Ok(_) => panic!("expected owned rejection"),
+        }
+    }
+    #[test]
+    fn preview_pixels_owned_model_rejection_returns_exact_allocation_and_can_retry_only_original_pending() {
+        let (mut owner, pixels, budget, geometry) = fixture();
+        let pointer = pixels.bytes.as_ptr();
+        let length = pixels.bytes.len();
+        let capacity = pixels.bytes.capacity();
+        let stamp = pixels.stamp;
+        let mut wrong = SourceImages::new(source(3), budget.clone()).unwrap();
+        wrong.sync(policy(), 0).unwrap();
+        let wrong_claim = wrong.request(8, 1, geometry, 1).unwrap();
+        let (error, pixels) = rejected(pixels.try_admit(&mut wrong, 2));
+        assert_eq!(error, ImageError::Stale);
+        assert_eq!(pixels.bytes.as_ptr(), pointer);
+        assert_eq!(pixels.bytes.len(), length);
+        assert_eq!(pixels.bytes.capacity(), capacity);
+        assert_eq!(pixels.stamp, stamp);
+        assert_eq!(budget.used(), length);
+        assert!(budget.reserve(geometry).is_err());
+        assert!(
+            wrong.cancel_capture(wrong_claim),
+            "failed admission did not consume another model's pending request"
+        );
+        let admitted = pixels.try_admit(&mut owner, 2).unwrap();
+        assert_eq!(admitted.bytes(2).unwrap().as_ptr(), pointer);
+        assert_eq!(admitted.image().stamp(), stamp);
+        owner.retire();
+        assert!(admitted.bytes(2).is_none());
+        assert_eq!(budget.used(), length);
+        drop(admitted);
+        assert_eq!(budget.used(), 0);
+    }
+    #[test]
+    fn preview_pixels_owned_transport_revocation_keeps_credit_and_never_revives_validity() {
+        let (mut owner, mut pixels, budget, geometry) = fixture();
+        let pointer = pixels.bytes.as_ptr();
+        let claim = pixels.claim();
+        let epoch = Arc::new(AtomicU64::new(7));
+        pixels.validity = Some((epoch.clone(), 7));
+        epoch.store(8, Ordering::Release);
+        let (error, pixels) = rejected(pixels.try_admit(&mut owner, 2));
+        assert_eq!(error, ImageError::Stale);
+        assert_eq!(pixels.bytes.as_ptr(), pointer);
+        assert_eq!(budget.used(), geometry.payload_bytes());
+        let (error, pixels) = rejected(pixels.try_admit(&mut owner, 2));
+        assert_eq!(error, ImageError::Stale);
+        assert!(!pixels.transport_current());
+        assert_eq!(epoch.load(Ordering::Acquire), 8);
+        assert!(owner.cancel_capture(claim), "transport guard rejected before model admission");
+        drop(pixels);
+        assert_eq!(budget.used(), 0);
+    }
+    #[test]
+    fn preview_pixels_owned_expiry_preserves_model_clock_purge_and_cannot_replay_into_fresh_pending() {
+        let (mut owner, pixels, budget, geometry) = fixture();
+        let old = pixels.claim();
+        let pointer = pixels.bytes.as_ptr();
+        let (error, pixels) = rejected(pixels.try_admit(&mut owner, IMAGE_AUTHORITY_MILLIS));
+        assert_eq!(error, ImageError::Stale);
+        assert!(!owner.cancel_capture(old));
+        assert_eq!(pixels.bytes.as_ptr(), pointer);
+        assert_eq!(budget.used(), geometry.payload_bytes());
+        owner.sync(policy(), IMAGE_AUTHORITY_MILLIS + 1).unwrap();
+        let fresh = owner.request(8, 1, geometry, IMAGE_AUTHORITY_MILLIS + 2).unwrap();
+        assert_ne!(old, fresh);
+        let (error, pixels) = rejected(pixels.try_admit(&mut owner, IMAGE_AUTHORITY_MILLIS + 3));
+        assert_eq!(error, ImageError::Stale);
+        assert_eq!(pixels.bytes.as_ptr(), pointer);
+        assert!(owner.cancel_capture(fresh));
+        assert!(owner.retained(IMAGE_AUTHORITY_MILLIS + 3).unwrap().is_none());
+        drop(pixels);
+        assert_eq!(budget.used(), 0);
+    }
+    #[test]
+    fn preview_pixels_consuming_wrapper_still_drops_rejected_allocation() {
+        let (mut owner, pixels, budget, _) = fixture();
+        assert!(owner.cancel_capture(pixels.claim()));
+        assert_eq!(pixels.admit(&mut owner, 2).unwrap_err(), ImageError::Stale);
+        assert_eq!(budget.used(), 0);
     }
 }
 
