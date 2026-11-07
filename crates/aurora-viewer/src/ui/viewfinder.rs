@@ -705,14 +705,8 @@ impl Viewfinder {
         f: &Frame,
         out: &mut Vec<Out>,
     ) {
-        gradient(
-            back,
-            Rect::from_min_size(screen.min, Vec2::new(screen.width(), 96.0)),
-            p.navy.gamma_multiply(0.62),
-            Color32::TRANSPARENT,
-        );
         // (the AF mode and area are the bottom bar's, once)
-        crate::ui::widgets::viewfinder_area(ctx, Id::unique("vf_top_left"))
+        let left = crate::ui::widgets::viewfinder_area(ctx, Id::unique("vf_top_left"))
             .order(Order::Foreground)
             .fade_in(false)
             .fixed_pos(screen.left_top() + Vec2::new(GAP, 12.0))
@@ -747,16 +741,35 @@ impl Viewfinder {
                 });
             });
 
+        // The RTL row needs a bounded content width as well as height:
+        // otherwise its blank foreground plane covers the guide button.
+        // Move it below the left row when the two cannot fit side by side.
+        let header_width = 600.0;
+        let inset = GAP.min(screen.width() * 0.25);
+        let extra = if left.response.rect.width() + header_width + 2.0 * inset + 18.0 > screen.width() {
+            32.0
+        } else {
+            0.0
+        };
+        gradient(
+            back,
+            Rect::from_min_size(screen.min, Vec2::new(screen.width(), 96.0 + extra)),
+            p.navy.gamma_multiply(0.62),
+            Color32::TRANSPARENT,
+        );
+
         // what the photo will be: each a switch, a click for the next value
         crate::ui::widgets::viewfinder_area(ctx, Id::unique("vf_top_right"))
             .order(Order::Foreground)
             .fade_in(false)
             .pivot(Align2::RIGHT_TOP)
-            .fixed_pos(screen.right_top() + Vec2::new(-GAP, 14.0))
+            .fixed_pos(screen.right_top() + Vec2::new(-inset, 14.0 + extra))
+            .constrain_to(screen.shrink2(Vec2::new(inset, 0.0)))
             .show(ctx, |ui| {
                 // Right-to-left centre alignment otherwise uses half the
                 // viewport height and leaves a foreground hit plane over
                 // the world all the way down to that row.
+                ui.set_width(header_width);
                 ui.set_height(24.0);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 18.0;
@@ -840,7 +853,7 @@ impl Viewfinder {
             });
 
         // the light of the photo
-        let mut y = screen.top() + 66.0;
+        let mut y = screen.top() + 66.0 + extra;
         let line = |y: &mut f32, name: &str, text: &str, color: Color32| {
             icon(
                 back,
@@ -980,7 +993,10 @@ impl Viewfinder {
         }
 
         // the histogram
-        let h = Rect::from_min_size(Pos2::new(screen.right() - GAP - 150.0, screen.top() + 52.0), Vec2::new(150.0, 62.0));
+        let h = Rect::from_min_size(
+            Pos2::new(screen.right() - GAP - 150.0, screen.top() + 52.0 + extra),
+            Vec2::new(150.0, 62.0),
+        );
         back.rect_filled(h, ctx.global_style().visuals.window_corner_radius, p.navy.gamma_multiply(0.45));
         back.rect_stroke(
             h,
@@ -1369,6 +1385,7 @@ impl Viewfinder {
             screen
         };
         crate::ui::widgets::viewfinder_area(ctx, Id::unique("vf_dials"))
+            .wheel_scroll(false)
             .order(Order::Foreground)
             .fade_in(false)
             .pivot(Align2::CENTER_BOTTOM)

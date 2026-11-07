@@ -1095,6 +1095,7 @@ impl<'a> Floater<'a> {
 pub(crate) struct ViewportArea {
     area: egui::Area,
     bounds: Option<egui::Rect>,
+    wheel_scroll: bool,
 }
 
 /// Photo viewfinder controls have explicit bounds while their guides and
@@ -1105,7 +1106,11 @@ pub(crate) fn viewport_area(ctx: &egui::Context, id: egui::Id) -> ViewportArea {
     if let Some(bounds) = bounds {
         area = area.constrain_to(bounds);
     }
-    ViewportArea { area, bounds }
+    ViewportArea {
+        area,
+        bounds,
+        wheel_scroll: true,
+    }
 }
 
 /// Viewfinder controls follow the selected toolbar canvas, including the
@@ -1148,6 +1153,12 @@ impl ViewportArea {
         self.bounds = Some(bounds);
         self
     }
+    /// Dials own wheel input, including egui's smoothed tail. Their
+    /// container remains reachable through scrollbars and touch dragging.
+    pub(crate) fn wheel_scroll(mut self, enabled: bool) -> Self {
+        self.wheel_scroll = enabled;
+        self
+    }
     pub(crate) fn show<R>(self, ctx: &egui::Context, body: impl FnOnce(&mut egui::Ui) -> R) -> egui::InnerResponse<R> {
         self.area.show(ctx, |ui| {
             super::layout::toolbar_layer(ctx, ui.layer_id());
@@ -1155,6 +1166,10 @@ impl ViewportArea {
                 ui.set_max_size(bounds.size());
                 ui.set_clip_rect(ui.clip_rect().intersect(bounds));
                 egui::ScrollArea::both()
+                    .scroll_source(egui::scroll_area::ScrollSource {
+                        mouse_wheel: self.wheel_scroll,
+                        ..Default::default()
+                    })
                     .min_scrolled_width(0.0)
                     .min_scrolled_height(0.0)
                     .max_width(bounds.width())

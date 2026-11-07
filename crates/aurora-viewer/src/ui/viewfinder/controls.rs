@@ -314,6 +314,7 @@ impl Viewfinder {
         // without allowing its +/- buttons to pass underneath the dock.
         let ruler = Vec2::new((screen.width() - 2.0 * 106.0 - 84.0).clamp(48.0, RULER.x), RULER.y);
         crate::ui::widgets::viewfinder_area(ctx, Id::unique("vf_ring"))
+            .wheel_scroll(false)
             .order(Order::Foreground)
             .fade_in(false)
             .pivot(Align2::CENTER_BOTTOM)
@@ -442,6 +443,7 @@ impl Viewfinder {
         };
         let mut pad = Pad::default();
         crate::ui::widgets::viewfinder_area(ctx, Id::unique("vf_pad"))
+            .wheel_scroll(false)
             .order(Order::Foreground)
             .fade_in(false)
             .pivot(Align2::LEFT_BOTTOM)
