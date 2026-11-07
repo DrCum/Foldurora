@@ -7,10 +7,16 @@ Handoffs and screenshots are reference material, not authority to merge or relea
 The user-selected implementation order is **compact host redesign → shared chat
 → Attention → monitors with chat**. The compact host is implemented at frozen
 checkpoint `399ffd79`, with Linux source, synthetic visual and owned EN CPU UI
-evidence below. Its Windows run is in progress. The latest verified Windows
-package remains `70c1b5cd` with the earlier host layout; native Windows
+evidence below. Its Windows package is now verified and is the latest compact
+download. The earlier `70c1b5cd` package has the preceding host layout. Native Windows
 profile/draft and compact-host acceptance remain pending. Branding and photo-mode
 viewport work are separate in-progress follow-ups, not fixes included in `399ffd79`.
+
+Local source checkpoint `e640d4fc` now combines the branding and photo-viewport
+follow-ups on `feat/foldurora-photo-branding`. It is not yet pushed or built.
+Source review and Linux Clippy passed; full tests are in progress, and normal-build,
+actual GPU-demo and native Windows evidence remain pending. Its source changes
+must not be attributed to the compact `399ffd79` package.
 
 ## Frozen test candidates
 
@@ -19,8 +25,9 @@ viewport work are separate in-progress follow-ups, not fixes included in `399ffd
 | `d10473efff52ceaea2d7b22d111319b0efc4f28e` | Combined upstream, viewport and session-host/chat baseline | Local Windows checks: 7,791 passed, 0 failed, 49 ignored; build/package passed. [GitHub run](https://github.com/DrCum/Foldurora/actions/runs/42291668355) passed. | Human confirmed toolbar containment and full-workspace floaters; reported oversized menu, host drag/detach failure and one standalone switch device loss. |
 | `8b738ea8b2c700b7538b7e16135a7de19c192d43` | Host movement/recovery and compact dropdown fixes | [Windows run 42304532039](https://github.com/DrCum/Foldurora/actions/runs/42304532039) passed: 7,798 tests passed, 0 failed, 49 ignored; all seven focused regressions passed. Scripts, formatting, Clippy, normal viewer build and packaging passed. Downloaded artifact, manifest, checksums, executable version and Windows x64 identity were verified. Separate native offline passes were reported for a local rebuild below. | Caption-button appearance, unexplained forced-loss client-height change and missing capture/probe bundle limit native verification. Native results belong to the local rebuild, not the CI executable or later candidates. Separate standalone GPU loss remains unresolved. |
 | `8cd9a2aa005491b651e5bb8591d94fd6fb891520` | Combined backend/profile checkpoint: host/menu fixes, retained conversation drafts, crash details fallback and five persistent renameable slots | [Windows run 42311181216](https://github.com/DrCum/Foldurora/actions/runs/42311181216) passed: 7,818 tests passed, 0 failed, 49 ignored. Scripts, formatting, strict Clippy, normal build and packaging passed; downloaded package identity, manifest and checksums were verified. | This checkpoint has a known profile-popup margin overlap corrected by `70c1b5cd`. Native host/profile/chat and human grid acceptance remain pending. |
-| `70c1b5cda927547b28e5a5ff9713e861771aaee7` | Latest verified test candidate, `fix/profile-popup-bounds`: bounds the profile popup including its frame and wraps occupied-profile help inline | [Windows run 42315300611](https://github.com/DrCum/Foldurora/actions/runs/42315300611) passed: 7,819 tests passed, 0 failed, 49 ignored; all 28 applicable named regressions passed exactly once. Scripts, formatting, strict Clippy, normal build and packaging passed. Downloaded manifest, checksums and executable/PE identity were verified. Fresh Linux CPU UI and sequential demo-worker evidence is recorded below. | Offline native Windows host/profile/chat, human grid, physical GPU/multi-monitor and performance acceptance remain pending. |
-| `399ffd796ccba8e9468bbc9ff7b19eff5017d4bc` | Latest source checkpoint, `feat/compact-host-integration`: compact strip, full-width world, explicit management drawer and popup islands | [Windows run 42327859777](https://github.com/DrCum/Foldurora/actions/runs/42327859777) is in full workspace tests; PowerShell parser, formatting and strict Clippy passed. Package pending. Linux: 7,855 passed, one inherited terrain precision failure, 50 ignored; all eight new regressions and 6,580 viewer tests passed. Normal build, 21 synthetic captures and owned EN CPU-controller smoke passed. | Exact-source Windows tests/build/package receipt; native popup-island composition/hit testing, world input/handoff/recovery, profiles/drafts, physical GPU/multi-monitor and human grid acceptance remain pending. |
+| `70c1b5cda927547b28e5a5ff9713e861771aaee7` | Earlier verified test candidate, `fix/profile-popup-bounds`: bounds the profile popup including its frame and wraps occupied-profile help inline | [Windows run 42315300611](https://github.com/DrCum/Foldurora/actions/runs/42315300611) passed: 7,819 tests passed, 0 failed, 49 ignored; all 28 applicable named regressions passed exactly once. Scripts, formatting, strict Clippy, normal build and packaging passed. Downloaded manifest, checksums and executable/PE identity were verified. Fresh Linux CPU UI and sequential demo-worker evidence is recorded below. | Offline native Windows host/profile/chat, human grid, physical GPU/multi-monitor and performance acceptance remain pending. |
+| `399ffd796ccba8e9468bbc9ff7b19eff5017d4bc` | Latest verified compact package, `feat/compact-host-integration`: compact strip, full-width world, explicit management drawer and popup islands | [Windows run 42327859777](https://github.com/DrCum/Foldurora/actions/runs/42327859777) passed: 7,827 tests passed, 0 failed, 50 ignored; all 36 applicable named regressions passed exactly once. Parser, formatting, strict Clippy, tests, build and packaging passed. Downloaded manifests, checksums and executable/PE identity were verified. Linux and visual evidence is recorded below. | Native popup-island composition/hit testing, world input/handoff/recovery, profiles/drafts, physical GPU/multi-monitor, performance and human grid acceptance remain pending. Earlier local `8b738ea8` native results do not transfer to this binary. |
+| `e640d4fc8524f55c6eb4568470050fb5d07f51b6` | Local frozen photo/branding follow-up, `feat/foldurora-photo-branding`; not yet pushed | Source review passed and Linux Clippy passed in 34.93s. Full workspace tests are in progress. | Normal binary build, actual GPU demo, exact-source Windows pipeline/package, native photo/export/icon and human grid acceptance remain pending. No runtime evidence is claimed. |
 
 Keep these sources and their packages separate. No candidate is merged, installed
 or released by this work. Both the verified `70c1b5cd` package checkpoint and
@@ -62,7 +69,7 @@ Its retained receipt is `.scratch/windows-ci-42311181216/receipt.json` in the
 candidate worktree. The known popup-margin follow-up is not included in this
 verified package; use the separate `70c1b5cd` candidate for the corrected UI.
 
-The latest verified [Windows artifact 13552619352](https://github.com/DrCum/Foldurora/actions/runs/42315300611/artifacts/13552619352)
+The earlier verified [Windows artifact 13552619352](https://github.com/DrCum/Foldurora/actions/runs/42315300611/artifacts/13552619352)
 contains `Foldurora-test-70c1b5cda927-windows-x64.zip`. Its manifest records exact
 source `70c1b5cda927547b28e5a5ff9713e861771aaee7`, successful checks/build/package,
 `x86_64-pc-windows-msvc`, development profile and `xr-static-loader`. The raw
@@ -81,6 +88,32 @@ The retained receipt is `.scratch/windows-ci-42315300611/receipt.json` in the
 candidate worktree. The manifest still marks human, Windows GPU/multi-monitor,
 grid and performance acceptance pending. The package is a development test
 candidate, not a release or native runtime acceptance result.
+
+The latest compact [Windows artifact 13558425977](https://github.com/DrCum/Foldurora/actions/runs/42327859777/artifacts/13558425977)
+contains `Foldurora-test-399ffd796ccb-windows-x64.zip`, version
+**`0.9.3-beta.20261106.1+128.g399ffd796`**, exact source
+`399ffd796ccba8e9468bbc9ff7b19eff5017d4bc`. Run 42327859777 completed successfully
+at 03:10 UTC on 7 November 2026. Its manifest reports parser, formatting, strict
+Clippy, tests, build and package success, with Rust 1.99.1, Windows x64,
+development profile and `xr-static-loader`.
+
+The raw artifact tests and independent job logs agree across 32 summaries:
+**7,827 passed, 0 failed, 50 ignored**. All **36 applicable named regressions**
+passed exactly once: seven host/menu, 20 profile/draft/diagnostic, one compact
+popup-bounds, three overlay and five compact UI tests. The Unix-only linked-path
+test is absent as expected; the CPU visual fixture is intentionally ignored.
+Outer/inner manifests, install/executable version resources, AMD64/PE32+ identity,
+recorded ZIP checksum and all 20 inner ZIP-entry CRCs were verified.
+
+- Downloaded artifact SHA-256: `614a3cf8cab1e12d84ec626590acb53b39796dbfa35802ba0317c50e7a394a69`.
+- Inner portable ZIP SHA-256: `f21e3a4c4cdb1637ff449258df2eca055c7ff872b3a23fc6fb9a470091705910`.
+- Executable SHA-256: `82a802917a0e5324f23a5e692b1763e44f875f72a197a532397ff5c96d5bc039`.
+
+The retained receipt is `.scratch/windows-ci-42327859777/receipt.json` in the
+candidate worktree; the lead's independent check is `root-verification.json`
+beside it. This verifies the compact test package; native Windows,
+GPU/multi-monitor, grid and performance acceptance remain pending. It does not
+contain the separate photo/branding follow-up described below.
 
 ## Reported native Windows evidence — local 8b rebuild
 
@@ -284,9 +317,25 @@ with `validated-compact-summary.json` beside it. This is not Windows embedding,
 popup hit-testing, world input, FR/JA native, mixed-DPI or performance acceptance.
 
 Exact-source [Windows run 42327859777](https://github.com/DrCum/Foldurora/actions/runs/42327859777)
-has passed script parsing, formatting and strict Clippy and is in full tests.
-The package and final raw receipt are pending; no test count or package identity
-is inferred from an earlier source.
+passed, and its downloaded package and raw receipt are verified above. This
+automated result does not establish native Windows popup hit testing, embedded
+world behavior or profile/draft acceptance.
+
+### Local photo/branding checkpoint e640d4fc
+
+The unpushed `e640d4fc8524f55c6eb4568470050fb5d07f51b6` source combines supplied
+purple-folder artwork (`8e9e8789`), photo-guide and overlay bounds
+(`f7898573`/`092c8fdf`), aligned live-world/capture scope (`dc0a4063`) and valid
+narrow scene/output aspects (`477a212c`). Clean exports frame the bounded live
+world at the chosen output aspect; Interface output preserves the complete
+workspace with its bounded scene, rejecting unsupported aspect/size combinations
+and canceling on canvas/UI-scale changes. These are source changes awaiting full
+tests, normal-build and runtime validation, not accepted photo/export behavior.
+
+Source review and final Linux Clippy passed (34.93s). Full workspace tests remain
+in progress; the normal binary and actual GPU demo have not run. No runtime,
+native icon, Windows capture or export acceptance is inferred from the earlier
+compact-controller screenshots or package. Existing captures remain unchanged.
 
 ## Selected visual evidence
 
@@ -327,18 +376,18 @@ to that capture commit; they do not depend on the cloud `.scratch` directories.
 
 | Feature | Current gap | Next concrete work |
 | --- | --- | --- |
-| Compact host redesign — first | Implemented at frozen `399ffd79`; Linux regressions, 21 synthetic captures and owned EN CPU-controller smoke passed. Windows checks/build/package remain in progress. | Accept native Windows popup islands, compact controls, management, handoff/input and recovery on the exact new build. |
+| Compact host redesign — first | Implemented at frozen `399ffd79`; Windows package verified with 7,827/0/50 and 36 named passes. Linux regressions, 21 synthetic captures and owned EN CPU-controller smoke passed. | Accept native Windows popup islands, compact controls, management, handoff/input and recovery on the exact new build. |
 | Shared chat — second | Source-bound popouts exist; the shared source/conversation selector is not implemented. | Reuse Nearby/resident-IM transport and one canonical `ChatUi` per exact source, with native identities/restrictions. Explicit character selection may update displayed Send as; unrelated world switching must not retarget the sender. |
 | Attention — third | Explicit review/mark-read/dismiss behavior is incomplete. | Add a separate typed protocol with native observed-watermark metadata. Attention selection alone must not acknowledge read or activate the world, but may update displayed Send as. |
 | Monitors with chat — fourth | Reduced-target caller/scene/UI and aggregate admission are unfinished. | Complete actual small render targets and latest-only delivery under a shared acknowledged/pending budget, alongside source-bound chat. Models alone are not a working monitor. |
-| Five stable, renameable character slots | Implemented and compiled; corrected `70c1b5cd` Windows package verified. Linux UI rename/restart and actual sequential slot-1/2 IO passed. Earlier host/menu packages used per-launch profiles. | Check native Windows five-slot persistence and labels, exclusive ownership through detach/host death, and fresh session authority on reopen. |
+| Five stable, renameable character slots | Included in the verified compact `399ffd79` Windows package. Earlier `70c1b5cd` Linux UI rename/restart and sequential slot-1/2 IO passed; those runtime results keep their original source attribution. Earlier host/menu packages used per-launch profiles. | Check native Windows five-slot persistence and labels, exclusive ownership through detach/host death, and fresh session authority on reopen. |
 | Per-character/per-conversation drafts | Memory-only navigation and Close/reopen retention is implemented and passed synthetic checks. | Native popout focus/reopen and human grid routing/restrictions remain to be checked. |
 | Named workspaces | Viewport and native floater geometry exist; selective named arrangements, previews, favorites and HUD restore are incomplete. | Map Folderstorm's restore groups onto Aurora's typed settings/actions after stable character storage is established. |
 | Fade and Birdseye switches | Native activation exists; Folderstorm's visual transitions are not ported. | Preserve fenced GPU/input handoff; design each transition around native camera/render actions after host acceptance. |
 | Assistant and other tools | Aurora has native inventory/appearance/camera actions; Folderstorm's adapter and some tools remain. | Port bounded typed actions after the supporting account/workspace models, rather than generic input injection. |
 | Profile import/migration | Stable new slots exist; migration of old generated profiles or ordinary viewer preferences is not implemented. | Decide explicit import/copy behavior later; keep credentials, writable caches and live-session authority separate. Moving installations does not silently migrate profiles. |
-| Foldurora branding — separate follow-up | User supplied an SVG; isolated branding-asset work is in progress. It is not included in `399ffd79`. | Integrate and validate the supplied Foldurora branding separately. |
-| Photo/camera viewport — separate follow-up | User reports the world filling the workspace in photo/camera mode while controls and mouselook remain confined. The screenshot is `8b738ea8` / `+110`; `399ffd79` retains the snapshot-open full-canvas override. | Investigate capture/output semantics before changing viewport scope. No fix is claimed in `399ffd79`. |
+| Foldurora branding — separate follow-up | Supplied purple-folder artwork is integrated in local source `e640d4fc`; build/runtime/native icon validation is pending. It is not included in `399ffd79`. | Build and validate the exact photo/branding follow-up separately. |
+| Photo/camera viewport — separate follow-up | The reported `8b738ea8` / `+110` scene expansion remains in `399ffd79`. Source `e640d4fc` aligns the live photo scene/guides/output to the world scope, including narrow aspect handling; compiled/runtime evidence is pending. | Validate clean and Interface exports, viewport/guide alignment and native controls on the exact new binary. No fix is claimed in `399ffd79`. |
 
 Folderstorm can later acknowledge a visible, following, at-tail transcript after
 a configured delay (default 60 seconds with visible-read acknowledgment enabled).
@@ -365,20 +414,21 @@ separate installation for these profiles.
 
 ## Human Windows retest
 
-The current compact target is exact source `399ffd79`; its Windows package is
-not ready yet. The user has the exact local-build prompt, but delivery to the
-local builder is unconfirmed. New native testing must also cover compact
-dropdowns/tooltips over the actual world, keyboard/narrow/enlarged-UI access and
-Manage open/hide. The verified `70c1b5cd` package and its earlier-layout retest
-recipe remain below; its results must not be reported as compact-host acceptance.
+The current compact target is exact source `399ffd79`. Its package is verified
+and the artifact link has been supplied to the user, explicitly excluding the
+photo/branding follow-up. The user also has the exact local-build prompt, but
+delivery to the local builder is unconfirmed. New native testing must cover
+compact dropdowns/tooltips over the actual world, keyboard/narrow/enlarged-UI
+access and Manage open/hide. Earlier
+local `8b738ea8` native results do not establish these outcomes on the compact build.
 
-Use the verified [latest Windows package](https://github.com/DrCum/Foldurora/actions/runs/42315300611/artifacts/13552619352),
-source `70c1b5cd`, version `0.9.3-beta.20261106.1+120.g70c1b5cda`. Extract the
-inner `Foldurora-test-70c1b5cda927-windows-x64.zip` to its own folder, then open
+Use the verified [latest compact Windows package](https://github.com/DrCum/Foldurora/actions/runs/42327859777/artifacts/13558425977),
+source `399ffd79`, version `0.9.3-beta.20261106.1+128.g399ffd796`. Extract the
+inner `Foldurora-test-399ffd796ccb-windows-x64.zip` to its own folder, then open
 PowerShell in the folder containing `aurora-viewer.exe` and run:
 
 ```powershell
-.\aurora-viewer.exe --session-host --language en --title "Test Foldurora 70c1b5cd"
+.\aurora-viewer.exe --session-host --language en --title "Test Foldurora 399ffd79"
 ```
 
 Keep this executable in the same folder through every close/reopen test; moving
@@ -424,8 +474,8 @@ following recipe is durable even if its `.scratch` copy is unavailable. If the
 desktop or existing permission is unavailable, report that boundary without
 touching unrelated windows.
 
-1. Prefer exact source `70c1b5cda927547b28e5a5ff9713e861771aaee7` from
-   [Windows run 42315300611](https://github.com/DrCum/Foldurora/actions/runs/42315300611)
+1. Prefer exact source `399ffd796ccba8e9468bbc9ff7b19eff5017d4bc` from
+   [Windows run 42327859777](https://github.com/DrCum/Foldurora/actions/runs/42327859777)
    and its verified artifact linked above. Verify manifest checks, source/version
    suffix and SHA-256 before testing. Preserve the separate `8b738ea8` focused package and
    `8cd9a2aa` backend/profile checkpoint; do not mix their receipts. Keep the
@@ -442,7 +492,7 @@ touching unrelated windows.
    If this would change unrelated prior data, stop and report it; do not read,
    rename or delete that data. Use only a fixture whose ownership is established.
    Launch `--session-host --language en` with a source-tagged
-   `Test host native 70c1b5cd [AUTOMATION - DO NOT TOUCH]` title and the repository's
+   `Test host native 399ffd79 [AUTOMATION - DO NOT TOUCH]` title and the repository's
    automation border helper. Track the owned executable PIDs/HWNDs and the host's
    actual child workers; worker titles are not inherited. Never select saved
    accounts, enter credentials or submit a grid login.
