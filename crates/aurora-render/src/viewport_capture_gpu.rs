@@ -1417,11 +1417,7 @@ mod tests {
         naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
             .validate(&shader)
             .expect("viewport sample shader validates");
-        let source = include_str!("viewport_capture_gpu.rs")
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .unwrap();
-        for forbidden in [
+        const FORBIDDEN: [&str; 7] = [
             "state.lock()",
             "wait_indefinitely",
             "PollType::Wait",
@@ -1429,9 +1425,44 @@ mod tests {
             "std::fs",
             "TcpStream",
             "thread::sleep",
-        ] {
-            assert!(!source.contains(forbidden), "asynchronous capture introduced {forbidden}");
+        ];
+        fn production_prefix(source: &str) -> String {
+            // Windows checkouts may use CRLF. A missed boundary would scan
+            // these test literals instead of the asynchronous production path.
+            let normalized = source.replace("\r\n", "\n");
+            normalized
+                .split_once("#[cfg(test)]\nmod tests")
+                .expect("capture source has a test module boundary")
+                .0
+                .to_owned()
         }
+        fn forbidden_operation(source: &str) -> Option<&'static str> {
+            FORBIDDEN.into_iter().find(|forbidden| source.contains(*forbidden))
+        }
+        for newline in ["\n", "\r\n"] {
+            let fixture = format!("state.try_lock();\n#[cfg(test)]\nmod tests {{\n{}\n}}\n", FORBIDDEN.join("\n")).replace('\n', newline);
+            let prefix = production_prefix(&fixture);
+            assert!(prefix.contains("state.try_lock()"));
+            assert_eq!(
+                forbidden_operation(&prefix),
+                None,
+                "test literals are outside the {newline:?} production prefix"
+            );
+            for forbidden in FORBIDDEN {
+                let fixture = format!("state.try_lock();\n{forbidden};\n#[cfg(test)]\nmod tests {{}}\n").replace('\n', newline);
+                assert_eq!(
+                    forbidden_operation(&production_prefix(&fixture)),
+                    Some(forbidden),
+                    "the {newline:?} production prefix must still reject {forbidden}"
+                );
+            }
+        }
+        let source = production_prefix(include_str!("viewport_capture_gpu.rs"));
+        assert!(
+            forbidden_operation(&source).is_none(),
+            "asynchronous capture introduced {:?}",
+            forbidden_operation(&source)
+        );
         assert!(source.contains("state.try_lock()"));
     }
 
