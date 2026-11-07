@@ -361,6 +361,32 @@ impl State {
             Err(error) => self.store_failure(error, job.initial.is_some()),
         }
     }
+    fn store_failure(&mut self, error: store::Error, initial: bool) {
+        // An unreadable/changed store is never a writable copy of the old cache.
+        // Only ordinary user-edit validation may keep the prior valid model.
+        let edit_error = match error {
+            store::Error::Model(model::Error::Name) => Some("board-name-invalid"),
+            store::Error::Model(model::Error::Limit) => Some("board-limit"),
+            store::Error::Model(model::Error::Duplicate) => Some("board-duplicate"),
+            store::Error::Model(model::Error::Missing) => Some("board-stale"),
+            _ => None,
+        };
+        if !initial && let Some(status) = edit_error {
+            self.status = status;
+            return;
+        }
+        // Reusing an identical later snapshot must not revive held Ready/cache
+        // work; retain ordinary already-started runs, not new Board intent.
+        self.cancel_play_actions();
+        self.snapshot = None;
+        self.status = match error {
+            store::Error::Cancelled => "board-cancelled",
+            store::Error::Conflict => "board-conflict",
+            store::Error::Model(model::Error::Exhausted) => "board-unavailable",
+            store::Error::Model(_) => "board-invalid",
+            store::Error::Private | store::Error::Invalid => "board-save-failed",
+        };
+    }
     fn ready(&mut self, app: &mut App, proof: Proof, target: PlaybackItem, ready: Ready, presentation: Option<Presentation<'_>>) {
         if !self.current(app, proof, presentation) || !current_target(&app.world.inventory, target) || app.world.rlva.has("sendgesture") {
             return;
