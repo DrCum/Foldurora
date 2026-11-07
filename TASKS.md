@@ -3775,3 +3775,17 @@ Open-source technologies that could set Aurora apart (human request of 2026-10-1
     remain author-UNRUN; no runtime acceptance is claimed.
   - ⬜ Later parity: custom labels/colors/defaults, bulk edits/search/reordering,
     paging, persistent last selection, multiple windows and import/export.
+
+
+- 🔧 Fixed-slot quick actions, phase1 pure prerequisite (2026-11-07; no issue):
+  fixed Character1–5 metadata/tickets and bounded preference value/codec,
+  independent of card order/management selection. Checked incarnations fence
+  empty→opening→empty and global busy/mode ABA; stale captures cannot change
+  action or choose a replacement. Default optional subset empty; Attention and
+  registry schema unchanged. Eight portable tests are authored UNRUN. No IO,
+  native/window/grant constructor or UI entry is introduced. Next: independent
+  source review, real actor consumers, separate reviewed ShowViewer control DTO /
+  App-thread native consumer/version change, persistent bounded retiring IO lane,
+  exact receipts and themed captured UI/overflow. Detached/lost recovery remains
+  occupied/unavailable in this explicit first slice. Root alone compiles/tests;
+  source presence is not runtime/native/human acceptance or completed parity.

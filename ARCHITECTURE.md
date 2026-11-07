@@ -5378,3 +5378,21 @@ catalogues and the existing synthetic inventory; no real profile IO or automatic
 play occurs. Source phases depend on the reviewed worker action helper and the
 combined hardened NativeDirectory extraction; author tests remain UNRUN until
 root integration. This is not full Legacy Board parity or native acceptance.
+
+
+### Fixed-slot quick action pure prerequisites
+
+`session_host/quick_actions.rs` contains bounded five-slot DATA/correlation only:
+exact controller/binding/lease/window observation metadata, checked nonreused
+model/slot incarnations, explicit real lifecycle boundary fencing, and immutable
+captured action/slot tickets. The actor must observe every actual eligibility /
+global busy transition, including unpublished ABA. These values do not mint
+native/control authority; actual actor, App/window incarnation witness and control
+DTO consumer remain separately reviewed prerequisites.
+`quick_prefs.rs` is only a version1 <=512-byte codec for an ordered distinct subset
+of SlotIds, empty by default. It performs no IO and preserves slots.json. Actual
+storage requires one persistent bounded IO lane retaining physical ownership
+through retirement, immutable private controller/path/CAS scope and exact terminal
+receipts. Eight portable fixtures are authored UNRUN. Both modules are currently
+test-registered; no menu/button/shortcut/endpoint/control/native effect is enabled.
+This is phase1 of the approved quick-action front, not product completion.
