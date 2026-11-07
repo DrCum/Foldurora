@@ -2248,26 +2248,31 @@ mod tests {
 
     #[test]
     fn actual_viewfinder_header_leaves_the_guide_control_clickable() {
-        let mut f = ViewportPhotoFixture::new_at_scale(false, 1.0, 1.0);
-        f.native_size = (2048, 1080);
-        f.viewport.left = 50.0;
-        f.viewport.right = 0.0;
-        f.viewport.top = 0.0;
-        f.viewport.bottom = 0.0;
-        f.scene = PhotoScene::Viewfinder;
-        f.settings.viewfinder.display = crate::snapshot::viewfinder::Display::Full;
-        f.viewfinder.hinted = true;
-        f.frames(5);
-        let area = |name| f.ctx.memory(|m| m.area_rect(egui::Id::unique(name))).expect("actual header area");
-        let guide = area("vf_top_left");
-        let header = area("vf_top_right");
-        let before = f.settings.guide;
-        f.click(guide.center());
-        assert_ne!(f.settings.guide, before, "header intercepts the actual guide button");
-        assert!(
-            !guide.intersects(header),
-            "header's blank hit region covers the guide: {header:?} over {guide:?}"
-        );
+        for width in [960, 2048] {
+            for restricted in [false, true] {
+                let mut f = ViewportPhotoFixture::new_at_scale(false, 1.0, 1.0);
+                f.native_size = (width, 1080);
+                f.viewport.restrict_ui = restricted;
+                f.viewport.left = 50.0;
+                f.viewport.right = 0.0;
+                f.viewport.top = 0.0;
+                f.viewport.bottom = 0.0;
+                f.scene = PhotoScene::Viewfinder;
+                f.settings.viewfinder.display = crate::snapshot::viewfinder::Display::Full;
+                f.viewfinder.hinted = true;
+                f.frames(5);
+                let area = |name| f.ctx.memory(|m| m.area_rect(egui::Id::unique(name))).expect("actual header area");
+                let guide = area("vf_top_left");
+                let header = area("vf_top_right");
+                let before = f.settings.guide;
+                f.click(guide.center());
+                assert_ne!(f.settings.guide, before, "header intercepts the actual guide button");
+                assert!(
+                    !guide.intersects(header),
+                    "header's blank hit region covers the guide: {header:?} over {guide:?}"
+                );
+            }
+        }
     }
 
     #[test]
