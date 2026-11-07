@@ -1108,10 +1108,10 @@ pub(crate) fn viewport_area(ctx: &egui::Context, id: egui::Id) -> ViewportArea {
     ViewportArea { area, bounds }
 }
 
-/// The viewfinder belongs to the live scene even when general toolbars
-/// use the whole workspace. Its areas must never grow into world input.
+/// Viewfinder controls follow the selected toolbar canvas, including the
+/// full workspace when unrestricted. Keep their scrolling bounds explicit.
 pub(crate) fn viewfinder_area(ctx: &egui::Context, id: egui::Id) -> ViewportArea {
-    viewport_area(ctx, id).constrain_to(super::layout::world_rect(ctx))
+    viewport_area(ctx, id).constrain_to(super::layout::toolbar_rect(ctx))
 }
 
 impl ViewportArea {

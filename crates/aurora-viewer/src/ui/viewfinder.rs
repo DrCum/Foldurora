@@ -515,7 +515,7 @@ impl Viewfinder {
         let before = s.clone();
         let light_before = panel.light;
         let screen = super::layout::world_rect(ctx);
-        let controls = screen;
+        let controls = crate::ui::layout::toolbar_rect(ctx);
         let display = s.viewfinder.display;
         let full = display == Display::Full;
         let shows = display != Display::Hidden;

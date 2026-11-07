@@ -1824,6 +1824,12 @@ mod tests {
                 .unwrap_or_else(|| self.native())
         }
 
+        fn control_bounds(&self) -> Rect {
+            self.viewport
+                .toolbar_rect(self.native_size, self.native())
+                .unwrap_or_else(|| self.native())
+        }
+
         fn id(&self) -> &'static str {
             if self.classic { CLASSIC_WINDOW } else { WINDOW }
         }
@@ -2020,8 +2026,8 @@ mod tests {
             for restricted in [false, true] {
                 let mut f = ViewportPhotoFixture::new_at_scale(false, native_scale, zoom);
                 f.native_size = (3200, 2000);
-                f.viewport.left = 50.0;
-                f.viewport.right = 0.0;
+                f.viewport.left = 5.0;
+                f.viewport.right = 45.0;
                 f.viewport.top = 0.0;
                 f.viewport.bottom = 0.0;
                 f.viewport.restrict_ui = restricted;
@@ -2036,17 +2042,17 @@ mod tests {
                         .memory(|m| m.area_rect(egui::Id::unique(name)))
                         .expect("actual viewfinder area")
                 };
-                let bounds = f.bounds();
+                let bounds = f.control_bounds();
                 let dock = area(&f, "vf_dock");
                 assert!(dock.width() <= 90.0, "dock owns an oversized hit region: {dock:?}");
                 assert!(
                     (dock.right() - (bounds.right() - 20.0)).abs() < 2.0,
-                    "dock must follow the scene's right edge"
+                    "dock must follow the selected control scope's right edge"
                 );
                 let ring = area(&f, "vf_ring");
                 assert!(
                     (ring.center().x - bounds.center().x).abs() < 2.0,
-                    "ring must follow the scene's centre"
+                    "ring must follow the selected control scope's centre"
                 );
                 assert!(bounds.contains_rect(ring));
                 assert!(!dock.intersects(ring), "dock must not intercept the lens ring");
@@ -2088,6 +2094,95 @@ mod tests {
                     f.click(Pos2::new(ring.left() + 16.0, ring.bottom() - 23.0));
                 }
             }
+        }
+    }
+
+    #[test]
+    fn actual_viewfinder_controls_fit_narrow_scenes_and_keep_lens_input_after_other_dials() {
+        use crate::snapshot::viewfinder::{Display, OnScreen};
+        use crate::ui::viewfinder::Dial;
+        for (size, native_scale, zoom, enabled) in [
+            ((960, 1080), 1.0, 1.0, true),
+            ((2048, 1080), 1.0, 1.0, true),
+            ((2880, 2160), 2.0, 1.5, true),
+            ((1280, 900), 1.0, 1.0, false),
+        ] {
+            let mut f = ViewportPhotoFixture::new_at_scale(false, native_scale, zoom);
+            f.native_size = size;
+            f.viewport.enabled = enabled;
+            f.viewport.left = 50.0;
+            f.viewport.right = 0.0;
+            f.viewport.top = 0.0;
+            f.viewport.bottom = 0.0;
+            f.viewport.restrict_ui = true;
+            f.scene = PhotoScene::Viewfinder;
+            f.settings.viewfinder.display = Display::Full;
+            f.settings.viewfinder.controls = OnScreen::Always;
+            f.settings.dof.enabled = true;
+            f.viewfinder.hinted = true;
+            f.fov = crate::snapshot::fov_of_focal(50.0);
+            f.frames(5);
+            let area = |f: &ViewportPhotoFixture, name| {
+                f.ctx
+                    .memory(|m| m.area_rect(egui::Id::unique(name)))
+                    .expect("actual viewfinder area")
+            };
+            let bounds = f.control_bounds();
+            for name in ["vf_dock", "vf_ring", "vf_dials", "vf_af_choices"] {
+                assert!(
+                    bounds.expand(1.0).contains_rect(area(&f, name)),
+                    "{size:?}/{native_scale}/{zoom}: {name} escapes {bounds:?}"
+                );
+            }
+            let ring = area(&f, "vf_ring");
+            assert!(!ring.intersects(area(&f, "vf_dock")));
+            assert!(!area(&f, "vf_dials").intersects(area(&f, "vf_af_choices")));
+            assert!((ring.center().x - bounds.center().x).abs() < 2.0);
+            // Select the actual aperture value, adjust with the ring, then
+            // select the actual focal value. The values share one ring but
+            // must never lose its pointer ownership when the dial changes.
+            let text_point = |f: &mut ViewportPhotoFixture, wanted: &str| {
+                f.show(Vec::new())
+                    .into_iter()
+                    .find_map(|shape| match shape.shape {
+                        egui::Shape::Text(text) if text.galley.text() == wanted => Some(text.pos + text.galley.size() * 0.5),
+                        _ => None,
+                    })
+                    .expect("painted dial label")
+            };
+            let aperture = format!(
+                "f/{}",
+                aurora_i18n::number(
+                    f64::from(f.settings.dof.f_number),
+                    if f.settings.dof.f_number < 10.0 { 1 } else { 0 }
+                )
+            );
+            let at = text_point(&mut f, &aperture);
+            f.click(at);
+            assert_eq!(f.viewfinder.dial, Dial::Aperture);
+            f.frames(2);
+            let ring = area(&f, "vf_ring");
+            let before = f.settings.dof.f_number;
+            f.click(Pos2::new(ring.right() - 16.0, ring.bottom() - 23.0));
+            assert!(f.settings.dof.f_number > before);
+            let at = text_point(&mut f, "50 mm");
+            f.click(at);
+            assert_eq!(f.viewfinder.dial, Dial::Focal);
+            f.frames(2);
+            let ring = area(&f, "vf_ring");
+            let before = f.fov;
+            f.click(Pos2::new(ring.right() - 16.0, ring.bottom() - 23.0));
+            assert!(f.fov < before, "focal stopped after changing aperture at {size:?}");
+            // Help must fit this same narrow scene and release its area when
+            // closed, even after it has risen above the other foreground UI.
+            f.viewfinder.help = true;
+            f.frames(3);
+            assert!(bounds.expand(1.0).contains_rect(area(&f, "vf_help")));
+            f.viewfinder.help = false;
+            f.frames(2);
+            let ring = area(&f, "vf_ring");
+            f.click(Pos2::new(ring.left() + 16.0, ring.bottom() - 23.0));
+            assert!((f.fov - before).abs() < 1e-5);
         }
     }
 
