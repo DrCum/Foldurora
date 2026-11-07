@@ -751,11 +751,15 @@ fn attention_compact_filters_toggle_without_crowding_reminders_or_actions() {
             .context
             .data(|data| data.get_temp::<Rect>(Id::unique("attention_filter_scroll")))
             .unwrap();
-        assert!((39.0..=161.0).contains(&filter_clip.height()) && canvas.contains_rect(filter_clip));
+        assert!(
+            (63.0..=161.0).contains(&filter_clip.height()) && canvas.contains_rect(filter_clip),
+            "bounded filter viewport fits {logical:?}: {filter_clip:?}"
+        );
         let first_slot = SlotId::try_from(0).unwrap();
         assert!(
             filter_clip.contains(f.rect(Id::unique(("attention_slot", first_slot))).center()),
-            "expanded filters must actually paint inside their viewport"
+            "expanded filters must actually paint inside their viewport at {logical:?}: clip={filter_clip:?}, first={:?}",
+            f.rect(Id::unique(("attention_slot", first_slot)))
         );
         let expanded = f
             .context
@@ -772,6 +776,13 @@ fn attention_compact_filters_toggle_without_crowding_reminders_or_actions() {
             panic!("compact action remains reachable");
         };
         assert_eq!(ticket.key(), selected);
+        let Some(Action::Preferences(desired)) = f.click(Id::unique(("attention_slot", first_slot))) else {
+            panic!("first profile must accept its actual pointer gesture at {logical:?}");
+        };
+        let mut expected = Preferences::default();
+        expected.include_slots[0] = false;
+        assert_eq!(desired, expected);
+        assert_eq!(f.host.attention_preferences.preferences, Preferences::default());
         assert!(f.click(Id::unique("attention_filter_toggle")).is_none());
         f.settle();
         assert!(!f.has("host-attention-profiles"));

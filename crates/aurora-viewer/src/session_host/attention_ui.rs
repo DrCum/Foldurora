@@ -207,9 +207,10 @@ impl AttentionUi {
                     activated = None;
                 }
                 if self.filters_open {
-                    // At the native minimum size the filters scroll one row at
-                    // a time, preserving room for reminders and their actions.
-                    let height = (ui.ctx().content_rect().height() - 340.0).clamp(40.0, 160.0);
+                    // Fit the heading and a wrapped first profile row even at
+                    // native minimum size; longer contents remain scrollable.
+                    // This still reserves the reminder list and bottom actions.
+                    let height = (ui.ctx().content_rect().height() - 340.0).clamp(64.0, 160.0);
                     let scroll = egui::ScrollArea::vertical()
                         .id_salt("attention_filter_rows")
                         .max_height(height)
