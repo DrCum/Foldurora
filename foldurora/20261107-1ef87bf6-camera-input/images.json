@@ -1,0 +1,56 @@
+[
+  {
+    "file": "guide-before.png",
+    "sha256": "30f6f17852ee1a760b37aedb71be58c387dcf3a8c5063501fcce590aeec74bba",
+    "source_commit": "1ef87bf6d4cfbe54c071009539cdc99cca4d4f34",
+    "unchanged_original": true
+  },
+  {
+    "file": "guide-fast-after.png",
+    "sha256": "79b370580c8815a8d54808b12fd677938b9cccb13105b1fad407ede04774e162",
+    "source_commit": "1ef87bf6d4cfbe54c071009539cdc99cca4d4f34",
+    "unchanged_original": true
+  },
+  {
+    "file": "settings-fast-after.png",
+    "sha256": "7bfaef748ce75f7c39086684b44e1e0c3e0593a20f90e92e6eaa7d3dba3474a1",
+    "source_commit": "1ef87bf6d4cfbe54c071009539cdc99cca4d4f34",
+    "unchanged_original": true
+  },
+  {
+    "file": "settings-lower.png",
+    "sha256": "9c64fd2a3a5c8c79e0730ee8a0d947939dc07fd3b057f46aff8452346e755759",
+    "source_commit": "1ef87bf6d4cfbe54c071009539cdc99cca4d4f34",
+    "unchanged_original": true
+  },
+  {
+    "file": "photo-requested.png",
+    "sha256": "d5f3d8bdbce526ae28b4ce4837d751a1bc59f7cc92f4bdba32372a46fb03ebd2",
+    "source_commit": "1ef87bf6d4cfbe54c071009539cdc99cca4d4f34",
+    "unchanged_original": true
+  },
+  {
+    "file": "photo-confirmed.png",
+    "sha256": "5abccde53770959653a0d45f7ed51b09517ef013b8027517b094156518b4ee38",
+    "source_commit": "1ef87bf6d4cfbe54c071009539cdc99cca4d4f34",
+    "unchanged_original": true
+  },
+  {
+    "file": "post-photo-alt.png",
+    "sha256": "a99696133dfe9bdc25716230387def0a4cb34f1b113d835a1f18478d25606af2",
+    "source_commit": "1ef87bf6d4cfbe54c071009539cdc99cca4d4f34",
+    "unchanged_original": true
+  },
+  {
+    "file": "post-photo-plus.png",
+    "sha256": "4547daae0b86f1bba33863b9d60e4493f78f71343f35560ba098c0106389eb25",
+    "source_commit": "1ef87bf6d4cfbe54c071009539cdc99cca4d4f34",
+    "unchanged_original": true
+  },
+  {
+    "file": "quit-confirmation.png",
+    "sha256": "50f4fc8468ed3dfc9fa707dfd0ec5aa00ed43ec0a46e1bee266cff648d9981f3",
+    "source_commit": "1ef87bf6d4cfbe54c071009539cdc99cca4d4f34",
+    "unchanged_original": true
+  }
+]
