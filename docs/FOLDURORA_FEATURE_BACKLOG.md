@@ -7,6 +7,15 @@ and the help page cached on 6 November. Ordinary Foldurora files were compared
 at `df213a081dc80dc7c759c6bc9cff1cf2da611750`. Later source work is listed below;
 source review and staged code do not establish a working product or test pass.
 
+## Current candidate
+
+Exact `4ff12e60` joins the reviewed Monitor/Workspace/Board/Favorites consumers.
+[Windows run 42426186025](https://github.com/DrCum/Foldurora/actions/runs/42426186025)
+and full Linux workspace tests are in progress. Linux formatting and qualified
+Clippy pass; no new package or full-suite outcome is established. See the ledger
+for the preserved negative fd44 Windows and Linux runs. Do not transfer earlier
+package/component results to this candidate.
+
 ## Available test package
 
 The verified Windows Attention Review package remains exact `eb5e49f1`:
@@ -19,10 +28,15 @@ and human grid acceptance remain pending; see the ledger for checks and hashes.
 
 | Feature | Current scope and next gate |
 | --- | --- |
-| Monitors with chat | Actual host projection, native producer, CPU window and Shell integration are under source review. The first producer captures ordinary already-active frames and retains last-active images. Live inactive rendering is a separate unfinished stage. Empty demand must not start capture. |
-| Named workspaces | The reviewed first slice provides Save/Rename/Delete, Preview/Cancel, Switch and session-only Previous for four native window geometry roles plus viewport/bar presentation. Source `e1a0246e` is staged; 28 authored tests have not run. It does not yet provide HUD/folder restore, graphics/camera/background groups, startup restore, favorites or complete Workspace parity. |
-| Gesture/sound boards | Exact playback-run ownership is source-reviewed at `3556c914`; the bounded account-local model, native UI and hardened store consumer are being implemented. Four Manager tests have not run. Loading or opening a board must not play it. |
-| About report location choice | Per-open, source-qualified opt-in for location/simulator rows and copied reports is being implemented. Existing native restrictions remain effective. |
+| Monitors with chat | Actual host projection, native producer, CPU window and Shell consumers are joined in frozen `4ff12e60`. The producer captures ordinary already-active frames and retains last-active images; live inactive rendering remains separate. Current full Linux and Windows checks are pending. |
+| Named workspaces | The reviewed first slice provides Save/Rename/Delete, Preview/Cancel, Switch and session-only Previous for four native geometry roles plus viewport/bar presentation. Joined with actual fixture corrections in `4ff12e60`; current validation is pending. HUD/folder, graphics/camera/background groups, startup restore and Workspace favorites remain later stages. |
+| Gesture/sound boards | Real native Floater, item-reference catalogue, exact owned-run Stop, actual guarded gesture/sound effects and hardened storage are joined in `4ff12e60`. The slice adds 56 Board cases and three shared-store cases; current execution is pending. Loading/opening does not play. |
+| Named Favorite menus | Local display metadata, all three layouts, original landmark actions, exact-source editor and bounded actual worker lifetime are joined in `4ff12e60`; 24 new cases await current execution. Inventory items are not moved. |
+| About report location choice | Per-open, source-qualified opt-in and copied-report filtering are joined in `4ff12e60`, preserving native restrictions. Current full-candidate checks remain pending. |
+| Folder Jump | Frozen `e9d4d80a` has a loaded-only chooser, real Inventory-local entry/shortcut and 21 authored unrun cases. Independent review found clipped activation, queued-key, IME and discarded-pass issues; a separate follow-up is being implemented before root integration. |
+| Inventory archive | Pinned local-visibility behavior and bounded shared projection/store/UI plan are approved. Shared actual-login origin prerequisite `fa96072f` is source-reviewed; pure archive model work is beginning separately. No archive UI or mask is enabled. |
+| Selective profile preferences | Four typed families, stopped-target ownership and real Inspect/Apply/Cancel transaction are planned. Mouse identity canonicalization prerequisite `4bb8e405` is source-reviewed; typed projection/reader work is separate and unrun. No copy UI is enabled. |
+| Fixed-slot quick actions | Pinned five-slot truth table, exact actor tickets and guarded ordinary-window Show Viewer plan are approved. Real actor/native/UI implementation and validation remain; detached/recovery Show is explicitly a later stage. |
 
 The intermediate monitor component source `df213a08` completed Linux workspace
 tests with **8,293 passed, five failed, 57 ignored**. Failures comprise the inherited
@@ -35,14 +49,13 @@ override the failed full suite or establish native/product monitor acceptance.
 
 ## Remaining behavior
 
-These are concrete gaps after the active slices, not claims that whole native
+These include unfinished stages of the active slices, not claims that whole native
 Aurora subsystems are absent. Each item needs its own bounded implementation and
 validation before parity can be claimed.
 
 | Area | Remaining behavior | Pinned Folderstorm reference |
 | --- | --- | --- |
-| Favorites | Account-local named landmark menus; reuse landmark actions without moving Inventory items | `llfavoritesbar.cpp` |
-| Folder jump | Separate loaded-folder name/path chooser, bounded indexing/results and final reachability checks; retain ordinary Inventory search | `fsfloaterfolderjump.cpp` |
+| Folder jump | Finish reviewed chooser input and actual archive-policy integration; specialized/custom Inventory owners remain outside its first slice | `fsfloaterfolderjump.cpp` |
 | Inventory archive | Local archive/unarchive visibility, including recoverable archived Trash contents; no Inventory move/delete | `fsinventoryarchive.h` |
 | Custom Inventory tabs | Bounded saved filters and multi-folder scopes, rename/clone/save | `fsinventorycustomtabs.h` |
 | Previous Look | Settled, one-login recovery of clothes/order, non-temporary attachments and gestures | `llappearancemgr.h` |

@@ -9,6 +9,64 @@ Monitor, Workspace and Board slices and the remaining Folderstorm behavior.
 The late initial port-order table below is historical; newer exact-build entries
 and the backlog supersede its implementation inventory.
 
+## Current Monitor, Workspace, Boards and Favorites candidate
+
+Exact source [`4ff12e60948336bd1b16499beaa2c8beed35a213`](https://github.com/DrCum/Foldurora/commit/4ff12e60948336bd1b16499beaa2c8beed35a213),
+tree `847501d002cd7640ed9a7a666b2d55349a83c449`, is frozen on
+`feat/monitor-runtime-integration`. [Windows run 42426186025](https://github.com/DrCum/Foldurora/actions/runs/42426186025),
+attempt 1, and the full Linux workspace run are **in progress**. No package or
+full-suite acceptance is established for this source. Linux formatting and
+qualified Clippy passed; the qualification retains the existing Linux
+`-A dead_code`, while Windows requires strict warnings without that allowance.
+
+This joins actual Windows monitor windows with canonical Chat and retained
+**last-active** images, the first named Workspace slice, native gesture/sound
+Boards, named landmark Favorite menus, and About's per-open location choice.
+Independent source review covers the actual consumers and their joins. Live
+inactive preview rendering is unfinished; this candidate must not be described
+as live inactive Monitor parity. Folder Jump, local Inventory archives, profile
+copying and configurable character quick actions are separate work, not enabled
+by this source. Native Windows, human grid and NVIDIA device-loss acceptance
+remain pending.
+
+The source-derived inventory requires **711 Windows / 709 applicable Linux tests**.
+Conditional totals are Windows 8,499/0/55 and Linux 8,530/1/57, with the Linux
+failure representing the known inherited terrain case, across 33 summaries.
+These are **expectations, not measured results**. Inventory SHA-256:
+`fdbdb0e3bfae24a53ec4e4824457f132a0f71922efad474a03a8441bc39fe148`.
+
+### Preserved negative Monitor checkpoint
+
+Earlier exact [`fd44cd4bfbe654525136136e13745901b9b1c06b`](https://github.com/DrCum/Foldurora/commit/fd44cd4bfbe654525136136e13745901b9b1c06b)
+completed Linux tests with **8,441 passed, seven failed, 57 ignored**, across 33
+summaries. Besides the inherited terrain failure, six new failures reproduced
+in isolated execution. Workspace fixture setup and actual logical-Space handling
+have source corrections in the current candidate, pending its full run.
+
+[Windows run 42421192531](https://github.com/DrCum/Foldurora/actions/runs/42421192531)
+completed **negative**: parser and formatting passed; strict Clippy, tests and
+build failed; packaging was skipped. Raw and packaged logs agree on **8,409
+passed, eight failed, 55 ignored**, 33 summaries. All 629 required names appeared
+once: 621 passed and eight failed. The extra Windows failure exposed a
+nonrepresentable one-nanosecond test timestamp. Windows compilation also exposed
+two methods still gated to tests and unused snapshot/lint issues. The current
+candidate corrects those issues; its outcome remains separate.
+
+[Artifact 13595551041](https://github.com/DrCum/Foldurora/actions/runs/42421192531/artifacts/13595551041)
+is **diagnostics only**, with a verified outer hash and CRC. There is no portable
+ZIP, sidecar or executable. Verified receipt SHA-256:
+`83dcff10bd4ef1ebb0a59a525d72c45abac128fefc7621964b38a35cb2cb2fb9`.
+API step conclusions labeled success did not override the recorded
+`continue-on-error` command failures or the failed final gate.
+
+Exact fd44 separately passed **162 synthetic CPU captures** (90 Attention,
+72 Monitor, EN/FR/JA) and both synthetic GPU readback cases. These component
+results do not override the negative full suites or establish actual native
+Windows, NVIDIA, authentication, grid or human acceptance. Original logs,
+captures and losslessly archived exact Linux test executables remain retained.
+The earlier verified Attention Review package below remains the latest verified
+portable package.
+
 ## Latest Attention Review: verified Windows package
 
 The current Windows test package is verified for exact source
