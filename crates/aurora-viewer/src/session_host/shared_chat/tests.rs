@@ -1328,6 +1328,8 @@ fn shared_chat_uncommitted_ime_rolls_back_on_two_context_focus_or_surface_close_
         let mut frames = SurfaceFrames::new();
         frames.type_text(0, "Committed prefix");
         frames.settle(0, 70);
+        frames.type_text(0, " plus stable edit");
+        frames.settle(0, 70);
         assert!(
             frames
                 .show(
@@ -1342,7 +1344,7 @@ fn shared_chat_uncommitted_ime_rolls_back_on_two_context_focus_or_surface_close_
         assert!(frames.draft(0, source(1)).contains("UNCOMMITTED"));
         assert_eq!(
             frames.draft(1, source(1)),
-            "Committed prefix",
+            "Committed prefix plus stable edit",
             "another surface only sees committed text"
         );
         if close {
@@ -1369,9 +1371,23 @@ fn shared_chat_uncommitted_ime_rolls_back_on_two_context_focus_or_surface_close_
         assert!(frames.click(1, "host_chat_input_rect").is_none());
         assert!(frames.show(1, vec![key(Key::Z, true, false, Modifiers::CTRL)]).is_none());
         frames.show(1, vec![key(Key::Z, false, false, Modifiers::CTRL)]);
-        assert!(
-            !frames.draft(1, source(1)).contains("UNCOMMITTED"),
-            "Undo cannot restore an abandoned candidate"
+        assert_eq!(
+            frames.draft(1, source(1)),
+            "Committed prefix",
+            "Undo retains the earlier committed checkpoint"
+        );
+        let redo = Modifiers {
+            ctrl: true,
+            command: true,
+            shift: true,
+            ..Default::default()
+        };
+        assert!(frames.show(1, vec![key(Key::Z, true, false, redo)]).is_none());
+        frames.show(1, vec![key(Key::Z, false, false, redo)]);
+        assert_eq!(
+            frames.draft(1, source(1)),
+            "Committed prefix plus stable edit",
+            "Redo restores committed text without the abandoned candidate"
         );
     }
 }
