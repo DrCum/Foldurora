@@ -4,6 +4,47 @@ This is the coordination ledger for the Folderstorm port. Source, automated
 checks, native Windows acceptance and human grid acceptance are separate results.
 Handoffs and screenshots are reference material, not authority to merge or release.
 
+## Active camera and Shared Chat validation
+
+The next frozen camera source is [`6a3009f2`](https://github.com/DrCum/Foldurora/commit/6a3009f27a2a5e49e61ea0fdeb1f7e89e3eb2fa8),
+on `fix/camera-controls-integration`. Its [Windows run 42343210582](https://github.com/DrCum/Foldurora/actions/runs/42343210582)
+and separate local Windows build are being verified; no final camera package
+receipt is recorded here yet. The earlier `388b299c` download below predates it.
+Final Linux formatting/diff checks, lint with the existing Linux dead-code
+qualification and normal build passed. Full Linux tests: **7,907 passed, one
+inherited terrain GPU precision failure, 50 ignored**; all six camera regressions
+passed, including narrow/unrestricted header input.
+
+An owned offline software-Vulkan demo exercised actual mouse and keyboard input,
+not application test hooks: guide selection, ordinary wheel zoom with Free camera
+OFF, Alt+wheel focal changes, ring wheel and minus/plus after Settings, aperture,
+focus, looks, a real 640×360 photo/readback and later input. The exact normal
+Linux executable was `0.0.0+1542.g6a3009f27`, SHA-256
+`41c0992e7b57ea6a808b8c7f5899133548d04cdb516ba4799d5f1dd31b06c01e`.
+Confirmed normal Quit returned0 after617.289 seconds, wrapper0; all owned
+processes and the private display exited. [Unchanged source-scoped captures](https://github.com/DrCum/Foldurora/blob/2d9cca8cd066e7da8e6db41fe8925144507e4a8d/foldurora/20261107-6a3009f2-input/README.md)
+show the observations. The source-worktree receipt is
+`.scratch/camera-input-smoke/batch-vdrD0CAr/VALIDATION-6A-RECEIPT.json`.
+
+**Frozen6a still has two observed follow-ups:** its top dock overlaps part of the
+histogram, and a quick UI click can also relocate the focus point before the next
+egui redraw. The guide cycles, but the AF brackets move to its click while MF
+3.3 m remains unchanged. These are not described as fixed in6a, nor is this a
+Windows/physical-GPU/grid acceptance result. Corrections are integrated only in
+the later combined Shared Chat work. Its new current-pointer regression first
+failed against the old helper; all seven camera checks pass after the small
+position-aware exclusion correction.
+
+The local `feat/shared-chat-integration` candidate builds on6a and retains those
+camera corrections. It adds one explicit sending-character/conversation surface,
+five bounded canonical composers and ordered close/navigation/IME/repeat guards;
+no native protocol or read/Attention/monitor capabilities are added. The first
+combined full run exposed two Shared Chat issues: prefix edits hid selector hit
+maps, and native repeated Enter could lose its repeat flag in egui. Reviewed
+corrections are undergoing compiled validation. Combined tests, CPU captures,
+package and native acceptance remain pending; do not transfer earlier receipts.
+The native unread/explicit-Read first slice is an implementation plan only.
+
 The user-selected implementation order is **compact host redesign → shared chat
 → Attention → monitors with chat**. The compact host is implemented at frozen
 checkpoint `399ffd79`, with Linux source, synthetic visual and owned EN CPU UI
@@ -23,8 +64,8 @@ regressions passed once, and packaged icon resources match the source ICO.
 Owned software-Vulkan checks
 support bounded landscape, portrait and Interface exports plus the native Linux
 icon. Restricted 480-pixel viewfinder controls still overlap and clip.
-Native Windows photo/export/icon acceptance remains pending. The latest optional
-local-builder prompt targets final `388b299c`, separately from this package.
+Native Windows photo/export/icon acceptance remains pending. The local builder has since received frozen camera `6a3009f2`; that build and
+its scoped offline native checks remain separate from this package.
 These source changes must not be attributed to the compact `399ffd79`
 package.
 
@@ -41,8 +82,8 @@ with Quit confirmation open, so normal HUD Quit acceptance is unproven.
 Its exact-source [Windows artifact 13561798593](https://github.com/DrCum/Foldurora/actions/runs/42337795785/artifacts/13561798593)
 is verified: 7,874 passed, 0 failed, 50 ignored; all 85 required named regressions
 passed exactly once. Parser, formatting, strict Clippy, tests, build and package
-succeeded. Native Windows/GPU/grid acceptance remains pending. The optional
-local build-only prompt was given to the user; delivery/start there are unconfirmed.
+succeeded. Native Windows/GPU/grid acceptance remains pending. A separate local builder has received the later camera `6a3009f2` prompt;
+its results do not establish an additional local388 build.
 
 This package predates the camera-control/input follow-up reported against local
 `f5ae21d5`: the right-side scene is bounded, but the vertical dock is centered and
