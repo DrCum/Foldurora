@@ -113,7 +113,10 @@ fn interface_aspect_admits_integer_rounding_but_rejects_visible_stretch() {
         );
     }
     assert!(!same_proportions((1920, 1080), (0, 0)));
-    let settings = Settings::default();
+    let settings = Settings {
+        resolution: Resolution::Window,
+        ..Default::default()
+    };
     assert_eq!(settings.size((3200, 2001)), (3200, 2000));
     assert!(
         same_proportions(settings.size((3200, 2001)), (3200, 2001)),

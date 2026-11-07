@@ -120,6 +120,16 @@ impl PhotoScene {
         self.view.width as f32 / self.view.height as f32
     }
 
+    /// A rounded preview target still frames the selected full photo. With
+    /// the interface, preserve the live scene inside the full output canvas.
+    pub fn capture_aspect(self, photo: (u32, u32), interface: bool) -> f32 {
+        if interface {
+            self.aspect()
+        } else {
+            pixel_aspect(photo.0 as f32 / photo.1.max(1) as f32)
+        }
+    }
+
     pub fn output_viewport(self, output: (u32, u32)) -> aurora_render::WorldViewport {
         self.view.scaled(self.native, output)
     }

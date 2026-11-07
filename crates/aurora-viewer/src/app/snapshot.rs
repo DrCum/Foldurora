@@ -50,8 +50,8 @@ fn preview_size(photo: (u32, u32), interface_window: Option<(u32, u32)>) -> (u32
     let side = photo.0.max(photo.1).min(PREVIEW_SIDE) as f32;
     let scale = side / source.0.max(source.1).max(1) as f32;
     (
-        ((source.0 as f32 * scale).round() as u32).max(16),
-        ((source.1 as f32 * scale).round() as u32).max(16),
+        ((source.0 as f32 * scale).round() as u32).max(1),
+        ((source.1 as f32 * scale).round() as u32).max(1),
     )
 }
 /// Bytes a photo may take when the driver does not report its memory.
@@ -595,7 +595,7 @@ impl App {
             job.asked = true;
             s.capturing = Some(spec);
             return Some(PhotoFrame {
-                aspect: job.size.0 as f32 / job.size.1.max(1) as f32,
+                aspect: job.source.capture_aspect(job.photo, job.interface),
                 source_aspect: job.source.aspect(),
                 source_height: job.source.view.height,
                 tile: Mat4::IDENTITY,
@@ -638,11 +638,7 @@ impl App {
         };
         let look = looks::frame_look(&job.looks, place, None, !single, job.focus);
         Some(PhotoFrame {
-            aspect: if include_interface {
-                job.source.aspect()
-            } else {
-                job.size.0 as f32 / job.size.1.max(1) as f32
-            },
+            aspect: job.source.capture_aspect(job.photo, job.interface),
             source_aspect: job.source.aspect(),
             source_height: job.source.view.height,
             tile: if single {
@@ -3158,6 +3154,47 @@ mod canvas_tests {
         }
         assert_eq!(preview_size((320, 240), None), (320, 240));
         assert_eq!(preview_size((2000, 1000), None), (720, 360));
+    }
+
+    #[test]
+    fn narrow_preview_uses_selected_photo_projection_after_target_rounding() {
+        let source = PhotoScene::new(
+            (1920, 1080),
+            WorldViewport {
+                x: 1824,
+                y: 0,
+                width: 96,
+                height: 1080,
+            },
+        );
+        let scene = source.logical_rect(egui::Rect::from_min_size(egui::pos2(11.0, 23.0), egui::vec2(960.0, 540.0)));
+        let camera = crate::camera::Camera::default();
+        let live = camera.proj(source.aspect());
+        // One exact and one inexact preview aspect, both far narrower than
+        // the old sixteen-pixel preview floor permitted.
+        for photo in [(32, 7680), (35, 7680)] {
+            let target = preview_size(photo, None);
+            assert_eq!(target, (3, 720));
+            let guide = crate::ui::snapshot::scene_frame(scene, photo, false);
+            let preview = camera.photo_proj(source.capture_aspect(photo, false), source.aspect());
+            let export = camera.photo_proj(photo.0 as f32 / photo.1 as f32, source.aspect());
+            assert!(
+                preview.abs_diff_eq(export, 1e-6),
+                "rounding the target cannot change what the photo frames"
+            );
+            for corner in [guide.left_top(), guide.right_bottom()] {
+                let ndc = glam::Vec4::new(
+                    2.0 * (corner.x - scene.left()) / scene.width() - 1.0,
+                    1.0 - 2.0 * (corner.y - scene.top()) / scene.height(),
+                    0.5,
+                    1.0,
+                );
+                let projected = preview * live.inverse() * ndc;
+                assert!((projected.x.abs() / projected.w - 1.0).abs() < 1e-5);
+                assert!((projected.y.abs() / projected.w - 1.0).abs() < 1e-5);
+            }
+            assert_eq!(source.capture_aspect(photo, true), source.aspect());
+        }
     }
 
     #[test]

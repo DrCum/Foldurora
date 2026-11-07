@@ -191,7 +191,9 @@ job freezes its source rectangle/aspect separately from the selected output
 dimensions; clean exports use a full offscreen target with the corresponding
 crop projection. Camera projection and guide fitting share a pixel-aspect policy
 that accepts every nonzero u32 rectangle, including a 96×1080 world and 32×7680
-photo; invalid values use a finite square fallback rather than narrowing a valid
+photo. Small previews may have one-pixel sides and use the selected photo's
+projection even when their storage dimensions must round; shrinking the preview
+does not change its framing. Invalid aspect values use a finite square fallback rather than narrowing a valid
 view through an artistic aspect clamp. Interface captures retain the whole native
 UI canvas, with the frozen scene scaled into it by the same uniform height ratio
 as egui.

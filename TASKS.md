@@ -20,7 +20,9 @@
   unrestricted controls and fractional DPI, AF/native-coordinate agreement,
   source/guide/export projection (including maximum-margin narrow scenes and
   narrow outputs), finite invalid-aspect fallbacks, rounded preview sizing and
-  interface placement.
+  interface placement. Preview projection retains the selected full-photo aspect
+  even when a narrow target rounds to only a few pixels across; a preview floor
+  no longer changes that framing.
   Direct formatting and source checks passed; compiled checks, offline visual
   review and human Windows photo/export acceptance remain pending.
 
