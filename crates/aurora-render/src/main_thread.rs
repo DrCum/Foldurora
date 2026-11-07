@@ -216,6 +216,7 @@ pub struct Renderer {
     viewport_capture: Option<Arc<crate::viewport_capture_gpu::Shared>>,
     viewport_capture_pending: Option<crate::viewport_capture_gpu::FrameCapture>,
     viewport_capture_watch: Option<crate::viewport_capture_gpu::FrameCapture>,
+    viewport_capture_retirement: crate::viewport_capture_retirement::Retirement,
     vsync: bool,
     settings: RenderSettings,
     msaa_supported: Vec<u32>,
@@ -720,6 +721,7 @@ impl Renderer {
             viewport_capture,
             viewport_capture_pending: None,
             viewport_capture_watch: None,
+            viewport_capture_retirement: Default::default(),
             last_stats: RenderStats::default(),
             fresh: false,
             gpu_frames,
@@ -1421,6 +1423,12 @@ impl Renderer {
         self.last_inv_vp = (params.proj * params.view).inverse();
         self.last_view = params.view;
         let index = self.frames;
+        let viewport_capture = self.viewport_capture_pending.take();
+        if viewport_capture.is_some() {
+            // A pre-frame Idle reply cannot certify GPU work about to leave
+            // in this same request's actual packet.
+            self.viewport_capture_retirement.dirty();
+        }
         let packet = FramePacket {
             output,
             index,
@@ -1441,7 +1449,7 @@ impl Renderer {
             picks: std::mem::take(&mut self.pick_requests),
             drawn: std::mem::take(&mut self.drawn_requests),
             capture,
-            viewport_capture: self.viewport_capture_pending.take(),
+            viewport_capture,
             histogram: self.histogram_request.take(),
             motion_cut: std::mem::take(&mut self.motion_cut),
             input_at: self.input_at.take(),
@@ -1451,6 +1459,7 @@ impl Renderer {
 
         // ---- to the backend
         let mut results: [Option<Box<FrameResult>>; 2] = [None, None];
+        let mut other_done = None;
         let mut waited = free_wait;
         let mut gone = false;
         match &mut self.host {
@@ -1461,8 +1470,9 @@ impl Renderer {
                         // (added to the wait before the packet: replaced,
                         // the back-pressure counted as the packet's work)
                         waited += s.waited;
-                        if let Some(Done::Frame(r)) = s.previous {
-                            results[0] = Some(r);
+                        match s.previous {
+                            Some(Done::Frame(r)) => results[0] = Some(r),
+                            done => other_done = done,
                         }
                     }
                     Err(_) => gone = true,
@@ -1488,6 +1498,9 @@ impl Renderer {
                     waited += t.elapsed();
                 }
             }
+        }
+        if let Some(done) = other_done {
+            self.apply_done(done);
         }
         for r in results.into_iter().flatten() {
             self.apply(*r);
@@ -1650,7 +1663,7 @@ impl Renderer {
         match done {
             Done::Frame(result) => self.apply(*result),
             Done::SessionFence(reply) => self.session_fences.receive(reply),
-            Done::ViewportCaptureMaintenance => {}
+            Done::ViewportCaptureMaintenance { probe, pending } => self.viewport_capture_retirement.receive(probe, pending),
             Done::Pick(_) => {}
         }
     }
@@ -1756,12 +1769,17 @@ impl Renderer {
         if self.session_fences.pending() {
             return Err(CaptureError::Busy);
         }
+        self.viewport_capture_retirement.available()?;
         let frame = self
             .viewport_capture
             .as_ref()
             .ok_or(CaptureError::Unsupported)?
             .request(boundary, viewport, cap)?;
         let token = frame.request.token();
+        if let Err(error) = self.viewport_capture_retirement.request(token) {
+            self.invalidate_viewport_capture();
+            return Err(error);
+        }
         self.viewport_capture_watch = Some(frame.clone());
         self.viewport_capture_pending = Some(frame);
         Ok(token)
@@ -1772,6 +1790,7 @@ impl Renderer {
         token: crate::viewport_capture::CaptureToken,
     ) -> Result<(), crate::viewport_capture::CaptureError> {
         use crate::viewport_capture::CaptureError;
+        self.viewport_capture_retirement.dirty();
         self.viewport_capture.as_ref().ok_or(CaptureError::Unsupported)?.cancel(token)?;
         self.viewport_capture_watch = None;
         if self
@@ -1786,6 +1805,7 @@ impl Renderer {
 
     /// Revoke immediately even if the render owner holds the short queue lock.
     pub fn invalidate_viewport_capture(&mut self) {
+        self.viewport_capture_retirement.dirty();
         self.viewport_capture_pending = None;
         self.viewport_capture_watch = None;
         if let Some(shared) = &self.viewport_capture {
@@ -1794,11 +1814,59 @@ impl Renderer {
     }
 
     fn invalidate_viewport_capture_physical(&mut self) {
+        self.viewport_capture_retirement.dirty();
         self.viewport_capture_pending = None;
         self.viewport_capture_watch = None;
         if let Some(shared) = &self.viewport_capture {
             shared.invalidate_physical();
         }
+    }
+
+    /// Poll retirement of resources from a prior explicit viewport request.
+    /// This may clean up after XR/capture eligibility closes, but cannot create
+    /// a request, take/publish pixels, render a frame or prove a session fence.
+    /// NoWork/Idle return without owner/device access. Credits still follow
+    /// their real resource/callback/pixel clones, independently of this status.
+    pub fn poll_viewport_capture_retirement(
+        &mut self,
+    ) -> Result<crate::viewport_capture::CaptureRetirementProgress, crate::viewport_capture::CaptureError> {
+        use crate::viewport_capture::{CaptureError, CaptureRetirementProgress};
+        let frontend_pending = self.viewport_capture_pending.is_some() || self.viewport_capture_watch.is_some();
+        let progress = self.viewport_capture_retirement.progress(frontend_pending)?;
+        if progress != CaptureRetirementProgress::Pending {
+            return Ok(progress);
+        }
+        if self.session_fences.pending() {
+            self.drive_session_fence().map_err(|_| CaptureError::DeviceLost)?;
+            return Ok(CaptureRetirementProgress::Pending);
+        }
+        let ready = match &self.host {
+            Host::Thread { owner, .. } => owner.try_take_ready(),
+            Host::Inline(_, _) => return Err(CaptureError::Unsupported),
+        };
+        match ready {
+            Ok(Some(done)) => self.apply_done(done),
+            Ok(None) => {}
+            Err(_) => {
+                self.fail();
+                return Err(CaptureError::DeviceLost);
+            }
+        }
+        let submitted = match &self.host {
+            Host::Thread { owner, .. } => self.viewport_capture_retirement.try_submit(owner, &self.session_fences),
+            Host::Inline(_, _) => return Err(CaptureError::Unsupported),
+        };
+        match submitted {
+            Ok(Some(done)) => self.apply_done(done),
+            Ok(None) => {}
+            Err(error) => {
+                if error == CaptureError::DeviceLost {
+                    self.fail();
+                }
+                return Err(error);
+            }
+        }
+        self.viewport_capture_retirement.progress(frontend_pending)
     }
 
     /// Maintain only map completion; it never requests a world frame. Handoff
@@ -1820,6 +1888,7 @@ impl Renderer {
                 .as_ref()
                 .is_none_or(|shared| !shared.generation_current(frame))
         }) {
+            self.viewport_capture_retirement.dirty();
             self.viewport_capture_watch = None;
             self.viewport_capture_pending = None;
             if let Some(shared) = &self.viewport_capture {
@@ -1830,36 +1899,7 @@ impl Renderer {
         if self.session_fences.pending() {
             self.drive_session_fence().map_err(|_| CaptureError::DeviceLost)?;
         } else {
-            let ready = match &self.host {
-                Host::Thread { owner, .. } => owner.try_take_ready(),
-                Host::Inline(_, _) => return Err(CaptureError::Unsupported),
-            };
-            let ready = match ready {
-                Ok(ready) => ready,
-                Err(_) => {
-                    self.fail();
-                    return Err(CaptureError::DeviceLost);
-                }
-            };
-            if let Some(done) = ready {
-                self.apply_done(done);
-            }
-            let submitted = match &self.host {
-                Host::Thread { owner, .. } => owner.try_submit(Job::MaintainViewportCapture),
-                Host::Inline(_, _) => return Err(CaptureError::Unsupported),
-            };
-            let submitted = match submitted {
-                Ok(submitted) => submitted,
-                Err(_) => {
-                    self.fail();
-                    return Err(CaptureError::DeviceLost);
-                }
-            };
-            if let Some(submitted) = submitted
-                && let Some(done) = submitted.previous
-            {
-                self.apply_done(done);
-            }
+            self.poll_viewport_capture_retirement()?;
         }
         let result = self.viewport_capture.as_ref().ok_or(CaptureError::Unsupported)?.take()?;
         if result.is_some() {
@@ -1977,16 +2017,16 @@ impl Renderer {
             return None;
         }
         let mut frame = None;
+        let mut other_done = None;
         let mut gone = false;
         let hit = match &mut self.host {
             Host::Inline(backend, _) => backend.pick_world(x, y),
             Host::Thread { owner, .. } => {
                 match owner.submit(Job::Pick { x, y }) {
-                    Ok(s) => {
-                        if let Some(Done::Frame(r)) = s.previous {
-                            frame = Some(r);
-                        }
-                    }
+                    Ok(s) => match s.previous {
+                        Some(Done::Frame(r)) => frame = Some(r),
+                        done => other_done = done,
+                    },
                     Err(_) => gone = true,
                 }
                 match owner.finish() {
@@ -1999,6 +2039,9 @@ impl Renderer {
                 }
             }
         };
+        if let Some(done) = other_done {
+            self.apply_done(done);
+        }
         if let Some(r) = frame {
             self.apply(*r);
         }

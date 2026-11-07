@@ -4,6 +4,7 @@
 //! Viewer); an eventual backend must separately prove composition and color.
 
 use crate::WorldViewport;
+pub use crate::viewport_capture_retirement::CaptureRetirementProgress;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering},

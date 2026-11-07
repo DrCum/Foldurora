@@ -1,5 +1,14 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Viewport capture retirement-only continuation (2026-11-07; no issue):
+  correlate actual backend map/submission retirement with exact request origin,
+  frontend revision and nonreused probes. Try-only cleanup survives capture-only
+  XR/cancel gates, prioritizes session fences, and leaves default NoWork idle.
+  Stale replies cannot certify later GPU work; cached/held credits stay charged.
+  Eight production-helper/actual-owner cases are authored and unrun. No new
+  capture permission, App producer, endpoint, frame/proof, allocation or wait is
+  enabled; independent source review and root-owned compilation/tests are next.
+
 - 🔧 Combined monitor validation (2026-11-07; no issue): the component entries
   below describe their frozen author checkpoints. Root subsequently corrected
   the defining-module secret re-export, test helper shadowing and an unused

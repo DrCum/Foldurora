@@ -57,6 +57,7 @@ mod session_fence;
 mod target_layout;
 pub mod viewport_capture;
 mod viewport_capture_gpu;
+mod viewport_capture_retirement;
 pub use session_fence::{SessionBoundary, SessionCompletion, SessionFenceError};
 pub mod shadow_cull;
 mod shadow_merge;

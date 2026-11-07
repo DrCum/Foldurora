@@ -9119,6 +9119,12 @@ impl Backend {
         }
     }
 
+    /// Actual owner state after maintenance, including map/submitted callback
+    /// retirement. Cached pairs and held pixel credits alone do not mean work.
+    pub fn viewport_capture_needs_maintenance(&self) -> bool {
+        self.viewport_capture.as_ref().is_some_and(|capture| capture.has_pending())
+    }
+
     /// World position of the opaque surface under a pixel of the last frame
     /// drawn (depth prepass read-back; None for the sky). Blocks on the GPU
     /// for one tiny copy: clicks only.

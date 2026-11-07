@@ -321,7 +321,7 @@ pub(crate) enum Job {
     /// owning render thread, including when ordinary frame pacing is disabled.
     SessionFence(u64),
     /// Poll/map retirement only: produces no frame or presentation proof.
-    MaintainViewportCapture,
+    MaintainViewportCapture(crate::viewport_capture_retirement::Probe),
     /// Depth under a pixel of the last frame drawn, waiting for the GPU
     /// (clicks). Handed over like a frame, so it runs after the frame in
     /// flight: the depth and the camera are those of the last frame built.
@@ -334,7 +334,10 @@ pub(crate) enum Job {
 pub(crate) enum Done {
     Frame(Box<FrameResult>),
     SessionFence(crate::session_fence::Reply),
-    ViewportCaptureMaintenance,
+    ViewportCaptureMaintenance {
+        probe: crate::viewport_capture_retirement::Probe,
+        pending: bool,
+    },
     Pick(Option<Vec3>),
 }
 
@@ -478,10 +481,10 @@ fn run(mut backend: Backend, worker: Worker<Job, Done>) -> Backend {
             }
             Job::Pick { x, y } => Done::Pick(backend.pick_world(x, y)),
             Job::SessionFence(ticket) => Done::SessionFence(backend.session_fence(ticket)),
-            Job::MaintainViewportCapture => {
+            Job::MaintainViewportCapture(probe) => crate::viewport_capture_retirement::owner_result(probe, || {
                 backend.maintain_viewport_capture();
-                Done::ViewportCaptureMaintenance
-            }
+                backend.viewport_capture_needs_maintenance()
+            }),
         };
         worker.complete(done);
         // frame pacing (pacing.rs): the frame is handed back; the main
@@ -499,6 +502,39 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::mpsc;
+
+    #[test]
+    fn viewport_retirement_contended_owner_never_waits_or_replaces_previous_output() {
+        use crate::viewport_capture::{CaptureBoundary, CaptureBudget, CaptureCap, CaptureQueue, CaptureRetirementProgress};
+        let token = CaptureQueue::new(
+            CaptureBoundary::new(1, 1, (640, 360)).unwrap(),
+            CaptureBudget::new(1024 * 1024).unwrap(),
+        )
+        .unwrap()
+        .request(crate::WorldViewport::full((640, 360)), CaptureCap::Small, 0)
+        .unwrap()
+        .token();
+        let (owner, worker) = handoff();
+        let mut tracker = crate::viewport_capture_retirement::Retirement::default();
+        let fences = crate::session_fence::Requests::default();
+        tracker.request(token).unwrap();
+        let mut held = owner.0.state.lock();
+        held.result = Some(Done::Pick(None));
+        assert!(tracker.try_submit(&owner, &fences).unwrap().is_none());
+        assert!(matches!(&held.result, Some(Done::Pick(None))));
+        assert!(held.job.is_none());
+        drop(held);
+        assert!(matches!(tracker.try_submit(&owner, &fences).unwrap(), Some(Done::Pick(None))));
+        let (Job::MaintainViewportCapture(probe), _) = worker.next().unwrap() else {
+            panic!("cleanup only")
+        };
+        worker.complete(crate::viewport_capture_retirement::owner_result(probe, || false));
+        let Some(Done::ViewportCaptureMaintenance { probe, pending }) = owner.try_take_ready().unwrap() else {
+            panic!("exact probe result")
+        };
+        tracker.receive(probe, pending);
+        assert_eq!(tracker.progress(false), Ok(CaptureRetirementProgress::Idle));
+    }
 
     const TICK: Duration = Duration::from_millis(40);
 

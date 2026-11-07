@@ -414,6 +414,14 @@ gets a fresh request token without charging the same pair twice. Layout,
 surface/device or owner-generation replacement retires the old pair before
 replacement. Every photo capture mode and tiled/photo context vetoes this tap.
 
+`viewport_capture_retirement` tracks cleanup only after an actual accepted
+request. Exact origin/revision and never-reused probes correlate owner-reported
+map/submission retirement; stale Idle cannot cover a later request or handoff.
+The try-only frontend continuation works after capture-only XR/cancel gates
+close, prioritizes session fences, and creates no frame, proof or new capture.
+Default NoWork/known Idle touches no owner/device; cached and held credits remain
+charged independently. Eight pure/actual-owner regressions are authored and unrun.
+
 `chat_ui/view_state.rs` holds six bounded surface views. Source-owned `ChatUi`
 keeps canonical drafts, complete editor/Undo state and captured pending operations;
 only selection, caret, scroll and input fences belong to a view. Scoped passes
