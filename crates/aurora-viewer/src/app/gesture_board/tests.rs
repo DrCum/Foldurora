@@ -786,3 +786,47 @@ fn board_app_edit_observing_unknown_private_or_changed_store_retires_cache_witho
     actor.store_failure(store::Error::Model(model::Error::Limit), true);
     assert!(actor.snapshot.is_none());
 }
+
+#[test]
+fn board_app_unreadable_store_retires_already_issued_ready_before_any_later_refresh() {
+    let mut f = Frames::new();
+    let target = f.add.unwrap();
+    let now = Instant::now();
+    f.actor.snapshot = Some(store::Snapshot::memory(f.data.clone()));
+    let ticket = f
+        .actor
+        .runtime
+        .capture(&f.data, f.data.boards[0].id, f.data.boards[0].tiles[0].id, target, &f.manager, now)
+        .unwrap();
+    let playback::Click::Ready(ready) = f.actor.runtime.click(ticket, &f.data, target, &mut f.manager, now).unwrap() else {
+        panic!("issued ready")
+    };
+    let original = f.actor.proof(None, now).unwrap();
+    f.actor.store_failure(store::Error::Conflict, false);
+    assert!(f.actor.snapshot.is_none());
+    // Even a later valid model with identical IDs/revision cannot revive the
+    // prior explicit gesture; source/window action epochs were retired first.
+    f.actor.snapshot = Some(store::Snapshot::memory(f.data.clone()));
+    assert!(!original.same_owner(f.actor.proof(None, now).unwrap()));
+    assert!(matches!(
+        f.actor.runtime.start(ready, &f.data, target, &mut f.manager, now),
+        Err(playback::Error::Stale)
+    ));
+    assert!(!f.manager.has_playing());
+    f.manager.entries.remove(&target.item());
+    let fresh = f
+        .actor
+        .runtime
+        .capture(&f.data, f.data.boards[0].id, f.data.boards[0].tiles[0].id, target, &f.manager, now)
+        .unwrap();
+    assert!(matches!(
+        f.actor.runtime.click(fresh, &f.data, target, &mut f.manager, now),
+        Ok(playback::Click::NeedsCache(_))
+    ));
+    f.actor
+        .pending
+        .insert(target.item(), (fresh, f.actor.proof(None, now).unwrap(), target));
+    f.actor.store_failure(store::Error::Private, false);
+    assert!(f.actor.pending.is_empty());
+    assert!(f.actor.runtime.pending(target.item()).is_none());
+}
