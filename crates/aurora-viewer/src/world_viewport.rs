@@ -95,6 +95,18 @@ pub struct PhotoScene {
     pub view: aurora_render::WorldViewport,
 }
 
+/// Accept every aspect a nonzero u32 pixel rectangle can have. A stylistic
+/// minimum would distort a valid narrow scene or photo; values outside the
+/// pixel domain (including nonfinite/nonpositive inputs) use a square fallback.
+pub(crate) fn pixel_aspect(aspect: f32) -> f32 {
+    let largest = u32::MAX as f32;
+    if aspect.is_finite() && aspect >= 1.0 / largest && aspect <= largest {
+        aspect
+    } else {
+        1.0
+    }
+}
+
 impl PhotoScene {
     pub fn new(native: (u32, u32), view: aurora_render::WorldViewport) -> Self {
         let native = (native.0.max(1), native.1.max(1));

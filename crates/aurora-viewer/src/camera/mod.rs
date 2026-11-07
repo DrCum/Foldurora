@@ -1983,17 +1983,20 @@ impl Camera {
     }
 
     pub fn proj(&self, aspect: f32) -> Mat4 {
-        glam::camera::rh::proj::directx::perspective_infinite_reverse(self.fov_y, aspect.max(0.1), self.near)
+        glam::camera::rh::proj::directx::perspective_infinite_reverse(self.fov_y, crate::world_viewport::pixel_aspect(aspect), self.near)
     }
 
-    /// The projection of a photo of `aspect` taken from a window of
-    /// `window_aspect`: exactly the part of the window's view the photo's
+    /// The projection of a photo of `aspect` taken from a scene of
+    /// `source_aspect`: exactly the part of the scene's view the photo's
     /// proportions frame (what the full-frame view leaves clear). Narrower
-    /// than the window it keeps the vertical field; wider, the horizontal one.
-    pub fn photo_proj(&self, aspect: f32, window_aspect: f32) -> Mat4 {
-        let (aspect, window_aspect) = (aspect.max(0.1), window_aspect.max(0.1));
-        let fov = if aspect > window_aspect {
-            2.0 * ((self.fov_y * 0.5).tan() * window_aspect / aspect).atan()
+    /// than the scene it keeps the vertical field; wider, the horizontal one.
+    pub fn photo_proj(&self, aspect: f32, source_aspect: f32) -> Mat4 {
+        let (aspect, source_aspect) = (
+            crate::world_viewport::pixel_aspect(aspect),
+            crate::world_viewport::pixel_aspect(source_aspect),
+        );
+        let fov = if aspect > source_aspect {
+            2.0 * ((self.fov_y * 0.5).tan() * source_aspect / aspect).atan()
         } else {
             self.fov_y
         };
@@ -2139,36 +2142,88 @@ mod tests {
                 height: 2100,
             },
         );
-        let canvas = egui::Rect::from_min_size(egui::pos2(11.0, 23.0), egui::vec2(2500.0, 1500.0));
-        let scene = source.logical_rect(canvas);
-        let live = cam.proj(source.aspect());
-        for photo in [(800, 1000), (6000, 2000), (2500, 2100)] {
-            let guide = crate::ui::snapshot::scene_frame(scene, photo, false);
-            let export = cam.photo_proj(photo.0 as f32 / photo.1 as f32, source.aspect());
-            for corner in [guide.left_top(), guide.right_bottom(), guide.center()] {
-                let ndc = glam::Vec4::new(
-                    2.0 * (corner.x - scene.left()) / scene.width() - 1.0,
-                    1.0 - 2.0 * (corner.y - scene.top()) / scene.height(),
-                    0.5,
-                    1.0,
-                );
-                // A ray through a bounded live-guide corner lands on the saved
-                // image's corresponding corner, regardless of the workspace.
-                let saved = export * live.inverse() * ndc;
-                let saved = saved.truncate() / saved.w;
-                let expected = egui::vec2(
-                    2.0 * (corner.x - guide.left()) / guide.width() - 1.0,
-                    1.0 - 2.0 * (corner.y - guide.top()) / guide.height(),
-                );
-                assert!((saved.x - expected.x).abs() < 1e-5 && (saved.y - expected.y).abs() < 1e-5);
+        let narrow_native = (1920, 1080);
+        let narrow_settings = crate::world_viewport::ViewportSettings {
+            enabled: true,
+            left: 95.0,
+            ..Default::default()
+        };
+        let narrow = crate::world_viewport::PhotoScene::new(
+            narrow_native,
+            narrow_settings.render_viewport(narrow_native, false, false, false, false),
+        );
+        assert_eq!(
+            narrow.view.size(),
+            (96, 1080),
+            "the maximum valid horizontal margin leaves a narrow scene"
+        );
+        for source in [source, narrow] {
+            let canvas = egui::Rect::from_min_size(
+                egui::pos2(11.0, 23.0),
+                egui::vec2(source.native.0 as f32, source.native.1 as f32) / 2.0,
+            );
+            let scene = source.logical_rect(canvas);
+            let live = cam.proj(source.aspect());
+            for photo in [(800, 1000), (6000, 2000), (2500, 2100), (32, 7680), (96, 1080)] {
+                let guide = crate::ui::snapshot::scene_frame(scene, photo, false);
+                let export = cam.photo_proj(photo.0 as f32 / photo.1 as f32, source.aspect());
+                for corner in [guide.left_top(), guide.right_bottom(), guide.center()] {
+                    let ndc = glam::Vec4::new(
+                        2.0 * (corner.x - scene.left()) / scene.width() - 1.0,
+                        1.0 - 2.0 * (corner.y - scene.top()) / scene.height(),
+                        0.5,
+                        1.0,
+                    );
+                    // A ray through a bounded live-guide corner lands on the
+                    // saved image's corner, including valid narrow sources and
+                    // outputs below the old artistic aspect clamps.
+                    let saved = export * live.inverse() * ndc;
+                    let saved = saved.truncate() / saved.w;
+                    let expected = egui::vec2(
+                        2.0 * (corner.x - guide.left()) / guide.width() - 1.0,
+                        1.0 - 2.0 * (corner.y - guide.top()) / guide.height(),
+                    );
+                    assert!(
+                        (saved.x - expected.x).abs() < 1e-5 && (saved.y - expected.y).abs() < 1e-5,
+                        "source {:?}, photo {photo:?}, corner {corner:?}: {saved:?} vs {expected:?}",
+                        source.view.size(),
+                    );
+                }
+            }
+            let interface = crate::ui::snapshot::scene_frame(scene, (2000, 1200), true);
+            assert_eq!(
+                interface, scene,
+                "interface output scales the whole scene into its workspace position"
+            );
+            assert!(cam.photo_proj(source.aspect(), source.aspect()).abs_diff_eq(live, 1e-6));
+        }
+    }
+
+    #[test]
+    fn projection_accepts_all_pixel_aspects_and_uses_a_finite_fallback_for_invalid_inputs() {
+        let cam = Camera::default();
+        let largest = u32::MAX as f32;
+        let aspects = [96.0 / 1080.0, 32.0 / 7680.0, 1.0 / largest, largest];
+        for source in aspects {
+            let projection = cam.proj(source);
+            assert!(projection.is_finite() && projection.x_axis.x > 0.0 && projection.y_axis.y > 0.0);
+            assert!(((projection.y_axis.y / projection.x_axis.x) / source - 1.0).abs() < 1e-6);
+            for photo in aspects {
+                let projection = cam.photo_proj(photo, source);
+                assert!(projection.is_finite() && projection.x_axis.x > 0.0 && projection.y_axis.y > 0.0);
             }
         }
-        let interface = crate::ui::snapshot::scene_frame(scene, (2000, 1200), true);
-        assert_eq!(
-            interface, scene,
-            "interface output scales the whole scene into its workspace position"
-        );
-        assert!(cam.photo_proj(source.aspect(), source.aspect()).abs_diff_eq(live, 1e-6));
+        for invalid in [0.0, -1.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY, f32::MIN_POSITIVE, f32::MAX] {
+            assert!(cam.proj(invalid).abs_diff_eq(cam.proj(1.0), 1e-6));
+            assert!(
+                cam.photo_proj(invalid, aspects[0])
+                    .abs_diff_eq(cam.photo_proj(1.0, aspects[0]), 1e-6)
+            );
+            assert!(
+                cam.photo_proj(aspects[0], invalid)
+                    .abs_diff_eq(cam.photo_proj(aspects[0], 1.0), 1e-6)
+            );
+        }
     }
     use crate::scene::avatar::AvatarLibrary;
 

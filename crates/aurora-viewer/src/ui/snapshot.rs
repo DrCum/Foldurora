@@ -1406,8 +1406,8 @@ pub(crate) fn scene_frame(area: Rect, photo: (u32, u32), include_interface: bool
 
 /// The largest rectangle of `ratio` (width / height) centred in `area`.
 pub fn fit(area: Rect, ratio: f32) -> Rect {
-    let ratio = ratio.max(0.01);
-    let size = if area.width() / area.height().max(1.0) > ratio {
+    let ratio = crate::world_viewport::pixel_aspect(ratio);
+    let size = if area.width() / area.height() > ratio {
         Vec2::new(area.height() * ratio, area.height())
     } else {
         Vec2::new(area.width(), area.width() / ratio)

@@ -18,7 +18,9 @@
   changes. Preserve viewport-disabled, fitted-worker, VR and explicit hidden-UI
   policies. Source regressions cover actual egui bounds/clipping with offsets,
   unrestricted controls and fractional DPI, AF/native-coordinate agreement,
-  source/guide/export projection, rounded preview sizing and interface placement.
+  source/guide/export projection (including maximum-margin narrow scenes and
+  narrow outputs), finite invalid-aspect fallbacks, rounded preview sizing and
+  interface placement.
   Direct formatting and source checks passed; compiled checks, offline visual
   review and human Windows photo/export acceptance remain pending.
 
