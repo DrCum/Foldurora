@@ -826,7 +826,8 @@ impl MonitorUi {
             && gesture.control.id == response.id
             && activated.is_none()
         {
-            let after = |index| gesture.frame != ui.ctx().cumulative_frame_nr() || index > gesture.press_index;
+            let frame = ui.ctx().cumulative_frame_nr();
+            let after = |index| gesture.frame != frame || index > gesture.press_index;
             let released = match gesture.trigger {
                 Trigger::Pointer => ui
                     .input(|input| {
@@ -863,9 +864,10 @@ impl MonitorUi {
         if matches!(gesture.trigger, Trigger::Access) {
             return true;
         }
+        let frame = ui.ctx().cumulative_frame_nr();
         ui.input(|input| {
             input.events.iter().enumerate().any(|(index, event)| {
-                (gesture.frame != ui.ctx().cumulative_frame_nr() || index > gesture.press_index)
+                (gesture.frame != frame || index > gesture.press_index)
                     && match (gesture.trigger, event) {
                         (
                             Trigger::Pointer,
@@ -898,6 +900,27 @@ impl MonitorUi {
             return;
         }
         let focus = ui.ctx().memory(|memory| memory.focused());
+        // Context::input takes a write lock. Resolve exact pointer layers before
+        // entering its closure; copy only press coordinates, never text/IME data.
+        let mut pointer_layers = ui.input(|input| {
+            input
+                .events
+                .iter()
+                .enumerate()
+                .filter_map(|(index, event)| match event {
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        ..
+                    } => Some((index, *pos, None)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        });
+        for (_, pos, layer) in &mut pointer_layers {
+            *layer = ui.ctx().layer_id_at(*pos);
+        }
         let captured = ui.input(|input| {
             input.events.iter().enumerate().find_map(|(index, event)| match event {
                 egui::Event::PointerButton {
@@ -909,7 +932,14 @@ impl MonitorUi {
                     .controls
                     .iter()
                     .rev()
-                    .find(|control| control.rect.contains(*pos) && ui.ctx().layer_id_at(*pos) == Some(control.layer))
+                    .find(|control| {
+                        control.rect.contains(*pos)
+                            && pointer_layers
+                                .iter()
+                                .find(|(event_index, _, _)| *event_index == index)
+                                .and_then(|(_, _, layer)| *layer)
+                                == Some(control.layer)
+                    })
                     .map(|control| (index, Trigger::Pointer, *control)),
                 egui::Event::Key {
                     key,
