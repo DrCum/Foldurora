@@ -1,12 +1,15 @@
 //! One disposable owned CPU surface. Shell retains the canonical shared-chat
 //! model when this window closes, is minimized or cannot be created.
 
+mod enter_release;
+
 use super::chat_ui::InputMode;
 use super::shared_chat::SharedChat;
 use super::software::SoftwareWindow;
 use super::transport::HostController;
 use crate::theme::Theme;
 use crate::ui::fonts;
+use enter_release::EnterRelease;
 use std::time::{Duration, Instant};
 use winit::event::{ElementState, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
@@ -27,6 +30,7 @@ pub(super) struct ChatWindow {
     blocked: bool,
     pending_textures: egui::TexturesDelta,
     native_modifiers: ModifiersState,
+    enter_release: EnterRelease,
 }
 
 impl ChatWindow {
@@ -53,6 +57,7 @@ impl ChatWindow {
             blocked: false,
             pending_textures: Default::default(),
             native_modifiers: ModifiersState::empty(),
+            enter_release: EnterRelease::default(),
         })
     }
 
@@ -116,11 +121,18 @@ impl ChatWindow {
         }
         match event {
             WindowEvent::ModifiersChanged(modifiers) => self.native_modifiers = modifiers.state(),
-            WindowEvent::Focused(false) => self.native_modifiers = ModifiersState::empty(),
+            WindowEvent::Focused(focused) => {
+                self.enter_release.focused(*focused);
+                if !focused {
+                    self.native_modifiers = ModifiersState::empty();
+                }
+            }
             _ => {}
         }
-        if let WindowEvent::KeyboardInput { event, .. } = event
-            && suppress_enter_repeat(&event.logical_key, event.state, event.repeat, self.native_modifiers)
+        if let WindowEvent::KeyboardInput { event, is_synthetic, .. } = event
+            && self
+                .enter_release
+                .suppress(&event.logical_key, event.state, event.repeat, *is_synthetic, self.native_modifiers)
         {
             return Ok(false);
         }
