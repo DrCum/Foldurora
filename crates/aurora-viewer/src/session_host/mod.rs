@@ -513,10 +513,10 @@ impl ApplicationHandler for Shell {
             return;
         }
         let mut next = self.next_poll;
-        if let Some(window) = &mut self.chat_window {
-            if let Some(repaint) = window.poll(std::mem::take(&mut self.chat_changed), self.ui.modal_open(), now) {
-                next = next.min(repaint);
-            }
+        if let Some(window) = &mut self.chat_window
+            && let Some(repaint) = window.poll(std::mem::take(&mut self.chat_changed), self.ui.modal_open(), now)
+        {
+            next = next.min(repaint);
         }
         if let Some(repaint) = self.repaint {
             let due = self.last_frame.map_or(repaint, |last| repaint.max(last + MIN_FRAME));

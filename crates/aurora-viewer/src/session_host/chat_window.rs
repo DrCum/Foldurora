@@ -290,9 +290,7 @@ pub(super) fn edit_prefix(raw: &mut egui::RawInput, composer: Option<egui::Rect>
         index += 1;
         !ambiguous
     });
-    if composer.is_none() {
-        return None;
-    }
+    composer?;
     let through = raw
         .events
         .iter()

@@ -3,16 +3,21 @@
 - 🔧 Shared Chat first stage (Folderstorm port, 2026-11-07; no issue): one owned
   CPU window explicitly selects a character and its Nearby/existing resident IM,
   with one Shell-owned canonical composer per complete source (at most five).
-  Slot labels remain separate from actual account/grid identity. All retained
-  sources synchronize policy/receipt loss while closed or minimized; source loss
-  purges text/Undo without choosing another sender. Captured-key admission never
-  follows a later selection or replays uncertainty. Exact widget/allocation IDs,
-  ordered edit draining and fresh Enter/Shift+Enter/IME guards fence navigation,
-  focus and Close. Nineteen new actual-egui/model regressions and an ignored
-  EN/FR/JA CPU fixture are authored; direct formatting/diff checks pass, while
-  compiled tests, captures, native Windows and human grid acceptance are pending.
-  No protocol, Group/New IM/contacts, read acknowledgment or monitor capability
-  is added. See [docs/SESSION_HOST.md](docs/SESSION_HOST.md).
+  Slot labels remain separate from actual account/grid identity. Retained sources
+  observe policy/receipt loss while closed or minimized; source loss purges
+  text/Undo without choosing another sender. Captured-key admission never follows
+  a later selection or replays uncertainty. Exact allocation/widget IDs and
+  ordered edit draining fence navigation, focus and Close. Prefix passes retain
+  full control hit maps without admitting actions; OS repeated Send Enter is
+  rejected before egui normalizes it, while Shift+Enter remains multiline.
+  Runtime checkpoint `7b2298e8` passed all 139 host/chat checks and seven camera
+  regressions; its full Linux result was 7,925 passed, one inherited terrain GPU
+  precision failure, 51 ignored. Thirty EN/FR/JA production CPU captures passed
+  required-text/privacy checks and selected normal/narrow screens were inspected.
+  Final lint/build/package and native Windows/human grid acceptance are tracked
+  in the candidate manifest and coordination ledger. The protocol is unchanged;
+  Friends/New IM, groups, read acknowledgment, Attention and monitors remain later
+  stages. See [docs/SESSION_HOST.md](docs/SESSION_HOST.md).
 
 - 🔧 Viewfinder dock and input (human report, 2026-11-07; task
   `camera-input-dock`; no issue): keep the dock at the selected control canvas's

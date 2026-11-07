@@ -6,9 +6,13 @@ The `feat/shared-chat-integration` branch applies the first Shared Chat surface
 on frozen camera source `6a3009f2`, retaining all of that candidate's camera
 production changes. The separate author checkpoint `e6b27e4e` was based on
 `388b299c` and does not itself contain the camera corrections. Use the exact
-combined commit and version from its own package manifest. Source review and
-diff checks pass; combined compilation, tests, CPU captures and native acceptance
-remain pending. Earlier camera/upstream receipts do not establish these results.
+combined commit and version from its own package manifest. Runtime checkpoint `7b2298e8` passed all 139 host/chat checks and seven camera
+regressions. Full Linux tests reported 7,925 passed, one inherited terrain GPU
+precision failure and 51 ignored; thirty EN/FR/JA production CPU captures passed
+required-text/privacy checks. The final package's exact-source build/lint/test
+outcomes belong to its manifest and the coordination ledger. Native Windows and
+human grid acceptance remain pending. Earlier camera/upstream receipts do not
+establish these results.
 
 In controller mode, a character's **Chat** action opens or focuses one shared
 CPU window and explicitly selects that character as sender. Its selector shows
