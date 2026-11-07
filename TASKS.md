@@ -3575,104 +3575,15 @@ Open-source technologies that could set Aurora apart (human request of 2026-10-1
 
 - ✅ Preserve inventory link target icons with a shortcut overlay (human request, 2026-10-30; task `inventory-link-icons`; PR #1610). Added the human-authored shortcut layer to inventory type variants and wired cycle-safe target resolution, subtype flags, family tints and folder links across inventory views. Missing targets retain generic link icons. Added offline `link-icons` / `aurora-link-icons` scenarios and regression coverage. Full `scripts/check.ps1` green: 6,348 tests passed, zero failures, 31 ignored; formatting, PowerShell parsing and Clippy clean. Both inventory layouts captured and visually checked in offline demo mode. Validated by the human on 2026-10-30.
 
-### Native named workspaces — first vertical slice
-
-- Source implementation: World/Preferences native manager, Save as new, Rename,
-  confirmed Delete, Preview/Cancel, Switch and session-only Previous; bounded
-  32/account/grid/profile typed geometry + viewport/bar records. Four roles keep
-  visibility/minimization/chat selection; shared toolbar commands/lock preserved.
-- Closed unknown-schema-preserving private IO, full captured reply fences, strict
-  hosted native authority, fitted viewport exclusion and durable Preview baseline
-  projection are included. No automatic login/startup restore, HUD/folder/import,
-  host RPC, monitor producer, editor/transcript serialization or parity claim.
-- Root validation and independent source review pending. New pure/private-file/
-  actual-egui tests authored UNRUN by author; human Windows acceptance of both
-  styles, DPI, separate profiles, cancellation and host transitions still pending.
-
-- Workspace source-review follow-up: retain known closed-role geometry and typed
-  absence rollback/Previous; reject opened Windows hardlinks; invalidate held
-  gestures across nonreused selections; quarantine rollback drags; accept own
-  case-only Rename; explicit logical source-generation and cleanup fences.
-  Regression tests are authored UNRUN; immutable 168 source baseline preserved.
-
-- 🔧 Shared native monitor image-data V4 and ordered metadata prerequisites
-  (source-only, disabled): closed exact native DemandReceipt codec, bounded IO
-  demand correlation and accepted-config Stop, non-consuming metadata publications
-  with globally nonreused current heads and independent ORIGINAL policy/layout
-  receipt identities. Adds shared generation fences and sealed actual host/native
-  proof consumers; projection/native token branches plus root production module
-  registration remain required. `PreviewPolicy::validate_successor` extracts the
-  actual SourceImages ordering rule for a retained expired floor without renewing
-  authority. New portable/fake-IO/owned-loopback regressions are authored UNRUN;
-  no Cargo/native/GPU/socket execution by source author and no production endpoint,
-  bootstrap/capture/UI enablement. Root validation and independent source review
-  remain separate, then actual pipeline integration and human Windows acceptance.
-
-- 🔧 Actual native LastActive producer consumer (source-only): optional worker
-  channel lifetime; genuine accepted-source proof with original receipt/expiry;
-  pre-effect shared capture fence; bounded exact native configuration receipts;
-  CPU preclaim layout; ordinary Active-frame request and asynchronous move-only
-  result publication; prior-origin retirement-only cleanup. No auto demand or
-  Standby world rendering. Production-helper tests compose actual World policy
-  facts, native layout/configuration matching and SourceImages admission/history;
-  receipt eviction, duplicate Stop, original deadlines/rate limits and metadata
-  bounds are covered by authored UNRUN cases. Shared V4 sealed IO/Broker branches
-  plus root production registration are required at join. No Cargo/native/GPU,
-  endpoint enablement or product acceptance was performed by the source author;
-  independent source review, root combined checks and human validation remain.
-
-- 🔧 Native Board action scope prerequisite (source-only): opaque WorkerBridge
-  scope over actual accepted Active source/lease/activation/logical generation
-  and original control expiry; final exact authority check without preview,
-  renderer or foreground coupling. Standby/unsupported/expired managed state
-  fails closed. Three production-helper tests use the real accepted WorkerGuard
-  binding and cover incomplete grants, source/generation/activation changes,
-  future receipts and immutable expiry across renewal; UNRUN. Actual Board App
-  consumers, combined compiler/runtime checks and human validation remain.
-
-- Recoverable preview owned-admission prerequisite: exact rejected FrameHandoff /
-  UnadmittedPixels returned for outside-Store-lock retirement; old consuming API
-  behavior preserved. Seven pure budget/pointer/guard/retry/expiry/wrapper fixtures
-  authored UNRUN, no socket/native/GPU use. Actual Host garbage integration is
-  owned separately; source review and root validation required before acceptance.
 
 
-- 🔧 Actual Host Monitor projection consumer, API source checkpoint: genuine
-  Child/Coordinator proofs; synchronous pre-FIFO and queued capture fences; ordered
-  metadata Store with original-time highwaters; stable stripped view-only reads;
-  exact native config/settings/Exchange receipts; conservative 10FPS reservations;
-  owned final admission and globally credited off-UI prepared pairs. Startup
-  listener Pending defers the owned launch instead of silently dropping optional
-  capability. Factory remains closed; source review and final regression inventory
-  are ongoing, all authored tests UNRUN. Root compiler/lint/runtime and actual
-  Windows/human acceptance remain separate; no endpoint or product enablement.
-
-  - Host source follow-up: 33 authored UNRUN protocol/model/ownership regressions
-    now include exact lower native ACK versus duplicate aggregate reuse, actual
-    Store image-cache retirement on terminal IO loss, Busy view-only stripping,
-    exact Unavailable/latest Layout fences, producer-invariant retirement,
-    listener Starting/Ready/failure, and exact Exchange terminal correlations.
-    Private accepted-receipt argument aggregation and two compiler-reported
-    bindings are corrected. Queued native settings timeout stays Uncertain.
-    The shared recoverable-admit seam and UI ViewReads follow-up are explicit
-    combined dependencies. No source-clear or runtime/product claim is made here.
-  - Terminal Host ownership follow-up: nonblocking StoreGuard cleanup with a
-    permanent atomic handoff and post-unlock recheck covers shutdown contention
-    and the exact final-check/unlock race. Per-Broker bounded completion ownership
-    replaces static orphan result retention; global queued/running jobs hold Weak
-    sinks, one process worker and all raw/private credits remain unchanged.
-    Explicit stop disposes its completion owner outside Store locks. Seven real
-    credit/lifecycle regressions are authored UNRUN (40 Host tests total); compile
-    mechanicals are folded in without changing effect/guard order. Exact source
-    review and root compilation/runtime remain pending; factory stays closed.
-
-  - Image-control poison explicitly releases the control guard and invokes
-    terminal Store cleanup; a terminal frontdoor stops image actor resources
-    before a later control read. Adds one real prepared-cache/credit regression
-    (41 Host tests authored UNRUN), with ordinary hosting independent.
-
-- Shared native-store extraction after source-clear Workspace e1: sealed kinds,
-  fixed profile paths/byte caps, hardened opened-handle/private/CAS checks, and
-  metadata-only cancellation. Workspace caller adaptation is mechanical. Boards
-  codec/lane/App/UI consumer is owned separately; combined freeze/review required
-  before integration so no unused production store kind is exposed.
+- 🔧 Native Gesture / Sound Boards first slice (source-only): exact Manager
+  playback-run identity/stop prerequisite, with checked allocation before ordinary
+  restart and old-run preservation on exhaustion. Four portable regressions are
+  authored UNRUN for later hotkey replacement, unrelated item/activation retention,
+  original waits on exhaustion and Manager recreation/disabled attempts. Bounded
+  model and board-owned pending loads follow; actual menus/floater/store consumer
+  depend on the Workspace owner's frozen/reviewed hardened shared private adapter.
+  No Cargo/native/GPU/grid/socket execution by author, no endpoint changes or
+  board UI/playback-on-open enabled. Root combined validation and independent
+  source review remain pending; this is not full Board parity.

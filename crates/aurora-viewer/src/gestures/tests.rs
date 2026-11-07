@@ -427,3 +427,128 @@ fn firestorm_key_codes_and_ctrl_g_default() {
         Some(crate::keybinds::Action::Gestures)
     );
 }
+
+fn owned_animation(asset: Uuid) -> Gesture {
+    Gesture {
+        steps: vec![
+            Step::Animation {
+                asset,
+                name: String::new(),
+                flags: 0,
+            },
+            Step::Wait {
+                seconds: 10.0,
+                flags: WAIT_TIME,
+            },
+        ],
+        ..Default::default()
+    }
+}
+#[test]
+fn gesture_playback_exact_old_board_stop_preserves_later_hotkey_restart_without_animation_stop() {
+    let mut manager = Manager::default();
+    let item = Uuid::from_u128(1);
+    let animation = Uuid::from_u128(2);
+    let now = Instant::now();
+    manager.play(item, owned_animation(animation), None);
+    let old = manager.playback_id(item).unwrap();
+    assert_eq!(manager.tick(now, &BTreeSet::new()), vec![Effect::Animation(animation, true)]);
+    manager.play(item, owned_animation(animation), Some(b'Q'));
+    let restarted = manager.playback_id(item).unwrap();
+    assert_ne!(old, restarted);
+    assert!(manager.stop_exact(item, old).is_empty());
+    assert_eq!(manager.playback_id(item), Some(restarted));
+    assert_eq!(
+        manager.tick(now, &BTreeSet::new()),
+        vec![Effect::Animation(animation, true)],
+        "ordinary restart asks start again without a stop"
+    );
+    assert_eq!(manager.stop_exact(item, restarted), vec![Effect::Animation(animation, false)]);
+}
+#[test]
+fn gesture_playback_exact_stop_only_removes_owned_item_and_keeps_native_activation() {
+    let mut manager = Manager::default();
+    let first = Uuid::from_u128(1);
+    let second = Uuid::from_u128(2);
+    let a = Uuid::from_u128(10);
+    let b = Uuid::from_u128(20);
+    let now = Instant::now();
+    manager.active.insert(first);
+    manager.active.insert(second);
+    manager.play(first, owned_animation(a), None);
+    manager.play(second, owned_animation(b), None);
+    let first_id = manager.playback_id(first).unwrap();
+    let second_id = manager.playback_id(second).unwrap();
+    assert_eq!(
+        manager.tick(now, &BTreeSet::new()),
+        vec![Effect::Animation(a, true), Effect::Animation(b, true)]
+    );
+    assert!(manager.stop_exact(second, first_id).is_empty());
+    assert_eq!(manager.stop_exact(first, first_id), vec![Effect::Animation(a, false)]);
+    assert!(manager.active.contains(&first));
+    assert!(manager.active.contains(&second));
+    assert_eq!(manager.playback_id(second), Some(second_id));
+    assert!(manager.stop_exact(first, first_id).is_empty());
+    assert_eq!(manager.stop_all(), vec![Effect::Animation(b, false)]);
+}
+#[test]
+fn gesture_playback_counter_exhaustion_keeps_old_definition_wait_and_exact_identity_intact() {
+    let mut manager = Manager::default();
+    let item = Uuid::from_u128(1);
+    let now = Instant::now();
+    manager.play(
+        item,
+        Gesture {
+            steps: vec![
+                chat("first"),
+                Step::Wait {
+                    seconds: 2.0,
+                    flags: WAIT_TIME,
+                },
+                chat("last"),
+            ],
+            ..Default::default()
+        },
+        None,
+    );
+    let original = manager.playback_id(item).unwrap();
+    assert_eq!(manager.tick(now, &BTreeSet::new()), vec![Effect::Chat("first".into())]);
+    manager.next_playback = u64::MAX;
+    manager.play(
+        item,
+        Gesture {
+            steps: vec![chat("replacement")],
+            ..Default::default()
+        },
+        None,
+    );
+    assert_eq!(manager.playback_id(item), Some(original));
+    assert_eq!(manager.next_playback, u64::MAX);
+    assert!(manager.tick(now + Duration::from_secs(1), &BTreeSet::new()).is_empty());
+    assert_eq!(
+        manager.tick(now + Duration::from_secs(2), &BTreeSet::new()),
+        vec![Effect::Chat("last".into())]
+    );
+}
+#[test]
+fn gesture_playback_manager_recreation_and_disabled_attempt_cannot_reuse_old_run_identity() {
+    let item = Uuid::from_u128(1);
+    let animation = Uuid::from_u128(2);
+    let mut old = Manager::default();
+    old.play(item, owned_animation(animation), None);
+    let prior = old.playback_id(item).unwrap();
+    let mut fresh = Manager::default();
+    fresh.play(item, owned_animation(animation), None);
+    let current = fresh.playback_id(item).unwrap();
+    assert_ne!(prior, current);
+    assert!(fresh.stop_exact(item, prior).is_empty());
+    assert_eq!(fresh.playback_id(item), Some(current));
+    let next = fresh.next_playback;
+    fresh.enabled = false;
+    fresh.play(item, Gesture::default(), None);
+    assert_eq!(fresh.playback_id(item), Some(current));
+    assert_eq!(fresh.next_playback, next);
+    fresh.enabled = true;
+    fresh.play(item, owned_animation(animation), None);
+    assert_ne!(fresh.playback_id(item), Some(current));
+}
