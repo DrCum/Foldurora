@@ -6,7 +6,9 @@
   Private X11/XDG controls and native Return/Space, stale gesture, focus and
   close/reopen acceptance steps are documented. Actual enabled live-painted Open
   captures gate telemetry eligibility, with per-key effect-time paint traces;
-  an actual-egui cancellation/repaint regression is authored. Compilation and every native
+  full identities are interned in bounded trace tables rather than repeated in
+  every predicate. Actual-egui cancellation/repaint and 512-event serialized-size
+  regressions are authored. Compilation and every native
   acceptance case remain unexecuted; no host IO, worker or grid is started.
 
 - 🔧 Explicit native Review from Attention (2026-11-07; no issue): a separately

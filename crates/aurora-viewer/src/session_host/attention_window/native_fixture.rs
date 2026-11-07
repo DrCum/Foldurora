@@ -7,6 +7,7 @@ use crate::session_host::attention_ui::native_fixture_host;
 use crate::session_host::slots::SlotId;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::cell::RefCell;
 use std::io::Write;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
@@ -15,6 +16,42 @@ use winit::application::ApplicationHandler;
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::platform::x11::EventLoopBuilderExtX11;
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+const MAX_STATE_BYTES: usize = 512 * 1024;
+const MAX_AUTHORITIES: usize = 64;
+const MAX_AUTHORITY_BYTES: usize = 1536;
+const OBSERVATION_FIELDS: [&str; 8] = [
+    "selected_row_authority",
+    "open_ticket_authority",
+    "open_paint_frame",
+    "flags",
+    "prior_focus_losses",
+    "prior_intents",
+    "cached_controls",
+    "save_authority",
+];
+const OBSERVATION_FLAGS: [&str; 20] = [
+    "selected_valid",
+    "open_focused",
+    "native_window_focused",
+    "blocked",
+    "modifiers_none",
+    "writable",
+    "stopped",
+    "save_pending",
+    "ime_composing",
+    "popup_open",
+    "gesture",
+    "open_live_valid",
+    "open_ready",
+    "open_painted_valid",
+    "open_painted_selected",
+    "open_painted_live_enabled",
+    "eligible",
+    "filters_open",
+    "save_failed",
+    "open_painted_present",
+];
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -70,6 +107,7 @@ struct Fixture {
     modifiers: ModifiersState,
     events: Vec<Value>,
     awaiting_activation_paint: Vec<usize>,
+    observation_authorities: RefCell<Vec<Value>>,
     intents: Vec<Value>,
     pending_preferences: Option<(u64, Preferences)>,
     preference_ticket: u64,
@@ -80,6 +118,52 @@ struct Fixture {
 }
 
 impl Fixture {
+    fn new(directory: PathBuf) -> Self {
+        let snapshot = native_fixture_host();
+        // Mapping is always slot 1..5; Nearby stays excluded by real defaults.
+        assert_eq!(snapshot.chat.len(), 5);
+        let mut fixture = Self {
+            title: format!("Test attention-native-os [AUTOMATION - DO NOT TOUCH] {}", std::process::id()),
+            directory,
+            snapshot,
+            model: Attention::default(),
+            body: AttentionUi::default(),
+            owner: None,
+            attention: None,
+            started: Instant::now(),
+            serial: 0,
+            phase: "startup".into(),
+            blocked: true,
+            modifiers: ModifiersState::empty(),
+            events: Vec::new(),
+            awaiting_activation_paint: Vec::new(),
+            observation_authorities: RefCell::new(Vec::new()),
+            intents: Vec::new(),
+            pending_preferences: None,
+            preference_ticket: 0,
+            focus_losses: 0,
+            closes: 0,
+            reopens: 0,
+            finished: false,
+        };
+        fixture.sync();
+        fixture
+    }
+
+    fn authority(&self, kind: &str, value: Option<Value>) -> Option<usize> {
+        let value = value.filter(|value| !value.is_null())?;
+        let authority = json!({"kind": kind, "value": value});
+        assert!(serde_json::to_vec(&authority).unwrap().len() <= MAX_AUTHORITY_BYTES);
+        let mut authorities = self.observation_authorities.borrow_mut();
+        if let Some(index) = authorities.iter().position(|existing| *existing == authority) {
+            return Some(index);
+        }
+        assert!(authorities.len() < MAX_AUTHORITIES, "bounded native authority trace exhausted");
+        let index = authorities.len();
+        authorities.push(authority);
+        Some(index)
+    }
+
     fn sync(&mut self) {
         self.model.sync(&self.snapshot, &self.snapshot.attention_preferences.preferences);
         self.body.sync(&self.model, &self.snapshot.attention_preferences);
@@ -104,30 +188,70 @@ impl Fixture {
         let focused = window.is_some_and(AttentionWindow::focused);
         let selected = self.model.selected();
         let selected_valid = selected.is_some_and(|key| self.model.capture(key).is_some());
-        let selected_row = self
-            .model
-            .rows()
-            .iter()
-            .find(|row| Some(row.key) == selected)
-            .map(|row| json!({"key": row.key, "policy": row.policy, "read": row.read, "incarnation": row.id()}));
+        let selected_row = selected.map(|key| {
+            self.model.rows().iter().find(|row| row.key == key).map_or_else(
+                || json!({"key": key, "policy": null, "read": null, "incarnation": null}),
+                |row| json!({"key": row.key, "policy": row.policy, "read": row.read, "incarnation": row.id()}),
+            )
+        });
         let open_focused = window.is_some_and(|window| {
             let id = egui::Id::unique("attention_open");
             let widget = window.context.data(|data| data.get_temp::<egui::Id>(id.with("widget")));
             widget.is_some() && widget == window.context.memory(|memory| memory.focused())
         });
         let ui = self.body.native_fixture_status(&self.model, &self.snapshot.attention_preferences);
-        json!({"selected": selected, "selected_row": selected_row, "selected_valid": selected_valid, "open_focused": open_focused,
-            "native_window_focused": focused, "blocked": self.blocked, "ui": ui,
-            "modifiers_none": self.modifiers.is_empty(),
-            "prior_focus_losses": self.focus_losses, "prior_intents": self.intents.len(),
-            "eligible": focused && open_focused && selected_valid && !self.blocked
-                && self.snapshot.attention_preferences.writable && !self.snapshot.stopped && ui["save"].is_null()
-                && ui["open_ready"] == true
-                && ui["ime_composing"] == false && self.modifiers.is_empty()
-                && window.is_some_and(|window| !egui::Popup::is_any_open(&window.context))})
+        let writable = self.snapshot.attention_preferences.writable;
+        let stopped = self.snapshot.stopped;
+        let popup = window.is_some_and(|window| egui::Popup::is_any_open(&window.context));
+        let eligible = focused
+            && open_focused
+            && selected_valid
+            && !self.blocked
+            && writable
+            && !stopped
+            && ui["save"].is_null()
+            && ui["open_ready"] == true
+            && ui["ime_composing"] == false
+            && self.modifiers.is_empty()
+            && !popup;
+        let flags = [
+            selected_valid,
+            open_focused,
+            focused,
+            self.blocked,
+            self.modifiers.is_empty(),
+            writable,
+            stopped,
+            !ui["save"].is_null(),
+            ui["ime_composing"] == true,
+            popup,
+            ui["gesture"] == true,
+            ui["open_live_valid"] == true,
+            ui["open_ready"] == true,
+            ui["open_painted"]["valid"] == true,
+            ui["open_painted"]["selected"] == true,
+            ui["open_painted"]["live_enabled"] == true,
+            eligible,
+            ui["filters_open"] == true,
+            ui["save_failed"] == true,
+            !ui["open_painted"].is_null(),
+        ]
+        .into_iter()
+        .enumerate()
+        .fold(0u32, |mask, (bit, on)| mask | (u32::from(on) << bit));
+        json!([
+            self.authority("selected_row", selected_row),
+            self.authority("open_ticket", ui["open_painted"].get("ticket").cloned()),
+            ui["open_painted"]["frame"],
+            flags,
+            self.focus_losses,
+            self.intents.len(),
+            ui["controls"],
+            self.authority("save", Some(ui["save"].clone()))
+        ])
     }
 
-    fn publish(&self) {
+    fn state(&self) -> Value {
         let attention = self.attention.as_ref().map(|window| {
             let context = &window.context;
             let control = |id: egui::Id| {
@@ -189,19 +313,24 @@ impl Fixture {
             "incarnation": row.id(), "policy": row.policy, "read": row.read})
             })
             .collect();
-        let state = json!({"fixture": "synthetic policy / native Linux AttentionWindow CPU input only",
+        json!({"fixture": "synthetic policy / native Linux AttentionWindow CPU input only",
             "source_version": aurora_version::version(), "pid": std::process::id(), "phase": self.phase, "serial": self.serial,
-            "display": std::env::var("DISPLAY").unwrap(), "xauthority": std::env::var("XAUTHORITY").unwrap(),
+            "display": std::env::var("DISPLAY").ok(), "xauthority": std::env::var("XAUTHORITY").ok(),
             "owner": self.owner.as_ref().map(|window| json!({"window": window_id(window), "title": format!("{} owner", self.title)})),
             "attention": attention, "selected": self.model.selected(), "rows": rows,
             "preferences": self.snapshot.attention_preferences.preferences,
             "ui": self.body.native_fixture_status(&self.model, &self.snapshot.attention_preferences),
             "blocked": self.blocked, "events": self.events, "intents": self.intents, "native_reads": reads,
+            "observation_fields": OBSERVATION_FIELDS, "observation_flags": OBSERVATION_FLAGS,
+            "observation_authorities": self.observation_authorities.borrow().clone(),
             "focus_losses": self.focus_losses, "closes": self.closes, "reopens": self.reopens, "finished": self.finished,
             "preference_io": false, "host_controller": false, "authentication_acceptance": false,
-            "grid_or_world_submit": false, "ime_acceptance": false});
-        let bytes = serde_json::to_vec_pretty(&state).unwrap();
-        assert!(bytes.len() < 512 * 1024);
+            "grid_or_world_submit": false, "ime_acceptance": false})
+    }
+
+    fn publish(&self) {
+        let bytes = serde_json::to_vec(&self.state()).unwrap();
+        assert!(bytes.len() < MAX_STATE_BYTES);
         let mut output = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -220,17 +349,19 @@ impl Fixture {
             Action::OpenChat(ticket) => {
                 let captured = ticket.key();
                 let row = self.model.rows().iter().find(|row| row.key == captured).unwrap();
-                let observation = json!({"policy": row.policy, "read": row.read, "incarnation": row.id()});
+                let incarnation = row.id();
+                let capture = self.authority("open_ticket", Some(ticket.native_fixture_status()));
                 let opened = self.model.open_chat(ticket);
                 assert_eq!(opened, Some(captured));
-                json!({"kind": "open_chat", "key": captured, "observation": observation, "validated": true})
+                json!({"kind": "open_chat", "capture": capture, "incarnation": incarnation, "validated": true})
             }
             Action::Dismiss(ticket) => {
                 let captured = ticket.key();
                 let row = self.model.rows().iter().find(|row| row.key == captured).unwrap();
-                let observation = json!({"policy": row.policy, "read": row.read, "incarnation": row.id()});
+                let incarnation = row.id();
+                let capture = self.authority("open_ticket", Some(ticket.native_fixture_status()));
                 assert!(self.model.dismiss(ticket));
-                json!({"kind": "dismiss", "key": captured, "observation": observation, "local_only": true})
+                json!({"kind": "dismiss", "capture": capture, "incarnation": incarnation, "local_only": true})
             }
             Action::Preferences(preferences) => {
                 assert!(self.pending_preferences.is_none());
@@ -257,7 +388,13 @@ impl Fixture {
         if control.serial <= self.serial {
             return;
         }
-        assert!(control.phase.len() <= 64 && control.phase.chars().all(|c| c.is_ascii_graphic() || c == ' '));
+        assert!(
+            control.phase.len() <= 64
+                && control
+                    .phase
+                    .chars()
+                    .all(|c| (c.is_ascii_graphic() || c == ' ') && !matches!(c, '"' | '\\'))
+        );
         self.serial = control.serial;
         self.phase = control.phase;
         match control.command {
@@ -447,37 +584,74 @@ fn attention_native_os_fixture() {
     let _ = crate::cli::get();
     aurora_i18n::select("en", None);
     fonts::fallback::wait();
-    let snapshot = native_fixture_host();
-    // Mapping is always slot 1..5; Nearby remains excluded by real defaults.
-    assert_eq!(snapshot.chat.len(), 5);
-    let mut fixture = Fixture {
-        title: format!("Test attention-native-os [AUTOMATION - DO NOT TOUCH] {}", std::process::id()),
-        directory,
-        snapshot,
-        model: Attention::default(),
-        body: AttentionUi::default(),
-        owner: None,
-        attention: None,
-        started: Instant::now(),
-        serial: 0,
-        phase: "startup".into(),
-        blocked: true,
-        modifiers: ModifiersState::empty(),
-        events: Vec::new(),
-        awaiting_activation_paint: Vec::new(),
-        intents: Vec::new(),
-        pending_preferences: None,
-        preference_ticket: 0,
-        focus_losses: 0,
-        closes: 0,
-        reopens: 0,
-        finished: false,
-    };
-    fixture.sync();
+    let mut fixture = Fixture::new(directory);
     let event_loop = EventLoop::builder().with_x11().with_any_thread(true).build().unwrap();
     event_loop.run_app(&mut fixture).unwrap();
     assert!(
         fixture.finished,
         "only explicit finish completes the fixture; driver receipts decide acceptance"
     );
+}
+
+#[test]
+fn attention_native_trace_budget_covers_512_fully_annotated_key_events() {
+    let mut fixture = Fixture::new(PathBuf::new());
+    fixture.phase = "p".repeat(64);
+    let key = fixture.model.rows()[0].key;
+    fixture.model.select(key);
+    let ticket = fixture.model.capture(key).unwrap();
+    assert_eq!(fixture.authority("open_ticket", Some(ticket.native_fixture_status())), Some(0));
+    assert_eq!(fixture.authority("open_ticket", Some(ticket.native_fixture_status())), Some(0));
+    // Fill every authority slot to its enforced byte ceiling, rather than
+    // relying on the small number of captures in the acceptance sequence.
+    for index in 1..MAX_AUTHORITIES {
+        let mut value = json!({"index": index, "padding": ""});
+        let overhead = serde_json::to_vec(&json!({"kind": "budget", "value": value})).unwrap().len();
+        value["padding"] = json!("x".repeat(MAX_AUTHORITY_BYTES - overhead));
+        fixture.authority("budget", Some(value));
+    }
+    let observation = json!([63, 63, u64::MAX, (1u32 << OBSERVATION_FLAGS.len()) - 1, 512, 64, 32, 63]);
+    for _ in 0..512 {
+        fixture.events.push(json!({"phase": fixture.phase, "attention": true,
+            "event": {"kind": "key", "key": "Named(Enter)", "state": "Released", "repeat": false,
+                "synthetic": false, "before": observation}, "after": observation,
+            "paint_effect": {"frame": u64::MAX, "window": u64::MAX, "phase": fixture.phase,
+                "before": observation, "after": observation}}));
+    }
+    for _ in 0..64 {
+        let preferences = Preferences {
+            include_slots: [false; 5],
+            nearby: false,
+            direct: false,
+            oldest_first: false,
+        };
+        fixture
+            .intents
+            .push(json!({"phase": fixture.phase, "intent": {"kind": "preferences",
+            "ticket": u64::MAX, "preferences": preferences, "queued_only": true, "published": preferences}}));
+    }
+    let mut state = fixture.state();
+    // No native window is created. Reserve 32 KiB for its five/ten row probes,
+    // slots, controls, geometry and current UI state, above the real closed
+    // fixture's model/native-read metadata already included by state().
+    state["attention"] = json!({"native_window_metadata_reserve": "x".repeat(32 * 1024)});
+    let bytes = serde_json::to_vec(&state).unwrap().len();
+    assert!(bytes < MAX_STATE_BYTES - 48 * 1024, "512-event state needs {bytes} bytes");
+}
+
+#[test]
+fn attention_native_trace_keeps_exact_identity_for_a_missing_selection() {
+    let mut fixture = Fixture::new(PathBuf::new());
+    let mut missing = fixture.model.rows()[0].key;
+    missing.source.session.generation += 1;
+    assert!(!fixture.model.select(missing));
+    let observation = fixture.observation();
+    let index = observation[0].as_u64().unwrap() as usize;
+    let authorities = fixture.observation_authorities.borrow();
+    assert_eq!(authorities[index]["kind"], "selected_row");
+    assert_eq!(authorities[index]["value"]["key"], json!(missing));
+    assert!(authorities[index]["value"]["policy"].is_null());
+    let flags = observation[3].as_u64().unwrap();
+    assert_eq!(flags & 1, 0, "missing selection cannot be eligible/current");
+    assert!(observation[1].is_null());
 }

@@ -137,8 +137,34 @@ throttled redraw cannot annotate an effect; closing cancels outstanding entries
 instead of attributing them to the reopened surface. Several queued key edges
 can share a render; that is not proof of individual egui passes.
 
+State uses compact JSON. Each trace observation is the eight-element array
+described by `observation_fields`:
+`[selected_row_authority, open_ticket_authority, open_paint_frame, flags,
+prior_focus_losses, prior_intents, cached_controls, save_authority]`.
+Authority indexes refer only to that state's append-only
+`observation_authorities` array of `{kind,value}` entries; absent indexes/frames
+are null. Kinds are `selected_row` (full key/policy/read/incarnation, retaining a
+missing selection's key with null metadata), `open_ticket` (full typed captured
+Ticket) and `save` (exact admitting/queued state). No full identity is hashed or
+truncated. The table allows 64 distinct entries of at most 1536 serialized bytes
+each; exhaustion fails instead of dropping evidence. Open/Dismiss intents carry
+`capture` into this same `open_ticket` table plus `incarnation` and their
+validation/local-only flag; derive their full key/policy/read from that Ticket.
+
+`observation_flags` lists bit names in increasing bit order: `selected_valid`,
+`open_focused`, `native_window_focused`, `blocked`, `modifiers_none`, `writable`,
+`stopped`, `save_pending`, `ime_composing`, `popup_open`, `gesture`,
+`open_live_valid`, `open_ready`, `open_painted_valid`, `open_painted_selected`,
+`open_painted_live_enabled`, `eligible`, `filters_open`, `save_failed`,
+`open_painted_present`. Decode every before/after/effect observation against its
+own state's table and labels; never compare raw reference integers between
+batches. The source budget regression reserves all 512 fully annotated key
+events, 64 maximum-size authority entries and 64 preference intents, with 32 KiB
+additional native-window metadata, while requiring 48 KiB state-budget headroom.
+
 Write atomic private `control.json` of at most 4096 bytes, with increasing
-`serial`, printable `phase` of at most 64 characters, and exactly one `command`.
+`serial`, printable ASCII `phase` of at most 64 characters (excluding quotes and
+backslashes), and exactly one `command`.
 For example `{"serial":1,"phase":"ready","command":{"kind":"block","blocked":false}}`.
 Closed command kinds are `observe`, `block` (`blocked` bool), `replace_source`,
 `revise_policy`, `incoming` (each `slot` **1–5**), `complete_preferences`
@@ -148,7 +174,8 @@ advances unread observations. Completion requires an actual queued preference
 intent and publishes only its exact ticket/values, or a synthetic failure.
 Only the external driver sends pointer/key/focus/WM_DELETE_WINDOW events.
 Controls cannot select a reminder, focus an egui widget, inject RawInput or
-submit an action. State is bounded to 512 KiB, 512 native events and 64 intents.
+submit an action. State is bounded to 512 KiB, 512 native events, 64 authority
+entries and 64 intents.
 
 Driver acceptance sequence (preserve every assertion state and screenshot):
 
