@@ -322,7 +322,15 @@ impl HostUi {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             let width = (ui.available_width() * 0.22).clamp(96.0, 220.0);
-            let selection_changed = self.slot_picker(ui, snapshot, width);
+            // ComboBox::width is a minimum. Give its truncating face its own
+            // maximum layout budget before it measures a long profile caption.
+            let selection_changed = ui
+                .allocate_ui_with_layout(vec2(width, 28.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.set_min_width(width);
+                    ui.set_max_width(width);
+                    self.slot_picker(ui, snapshot, width)
+                })
+                .inner;
             if selection_changed {
                 if let Some(worker) = self.selected_worker(snapshot) {
                     if can_activate(snapshot, worker, native_ready, hosted, closing) {
