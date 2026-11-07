@@ -22,6 +22,7 @@ pub(super) struct ReadDraft {
     pub key: ChatKey,
     pub policy_revision: u64,
     pub metadata: ReadMetadata,
+    instance: u64,
 }
 impl ReadDraft {
     pub fn request(self, request: u64) -> MarkReadRequest {
@@ -43,7 +44,7 @@ pub(super) struct SendDraft {
     pub policy_revision: u64,
     pub text: ChatText,
     native_policy: NativeChatPolicy,
-    draft_stamp: (u64, u64),
+    draft_stamp: (u64, u64, u64),
 }
 
 struct RetainedDraft {
@@ -425,10 +426,14 @@ impl ChatUi {
         self.drafts.get(&self.view.conversation).map_or("", |draft| draft.text.as_str())
     }
 
-    fn draft_stamp(&self) -> (u64, u64) {
+    // Local draft revisions restart when an authenticated source model is
+    // retired. Include its nonreused allocation, as editor widget IDs do, so
+    // a late admission cannot consume text or install pending authority in a
+    // recreated identical source (including clear/reopen).
+    fn draft_stamp(&self) -> (u64, u64, u64) {
         self.drafts
             .get(&self.view.conversation)
-            .map_or((0, 0), |draft| (draft.incarnation, draft.revision))
+            .map_or((self.instance, 0, 0), |draft| (self.instance, draft.incarnation, draft.revision))
     }
 
     fn ensure_draft(&mut self, policy: NativeChatPolicy) -> Option<&mut RetainedDraft> {
@@ -514,8 +519,12 @@ impl ChatUi {
         self.warning = ChatText::new(self.draft()).is_err().then_some(Warning::Invalid);
     }
 
+    pub fn accepts_send(&self, draft: &SendDraft) -> bool {
+        draft.key.source == self.source && draft.draft_stamp.0 == self.instance
+    }
+
     pub fn queued(&mut self, draft: &SendDraft, request: u64) {
-        if draft.key.source != self.source || request == 0 {
+        if !self.accepts_send(draft) || request == 0 {
             return;
         }
         if self.drafts.get(&draft.key.conversation).is_some_and(|retained| {
@@ -523,7 +532,7 @@ impl ChatUi {
                 && draft.native_policy.key == draft.key
                 && draft.native_policy.revision == draft.policy_revision
                 && retained.text == draft.text.as_str()
-                && (retained.incarnation, retained.revision) == draft.draft_stamp
+                && (self.instance, retained.incarnation, retained.revision) == draft.draft_stamp
         }) {
             self.drafts.remove(&draft.key.conversation);
         }
@@ -573,7 +582,7 @@ impl ChatUi {
     }
 
     pub fn queued_read(&mut self, draft: ReadDraft, request: u64) {
-        if draft.key.source == self.source {
+        if draft.key.source == self.source && draft.instance == self.instance {
             self.read_operation = Some(ReadOperation {
                 request: draft.request(request),
                 status: ReadStatus::Pending,
@@ -583,7 +592,7 @@ impl ChatUi {
     }
 
     pub fn read_queue_failed(&mut self, draft: ReadDraft) {
-        if draft.key.source == self.source {
+        if draft.key.source == self.source && draft.instance == self.instance {
             self.read_operation = Some(ReadOperation {
                 request: draft.request(0),
                 status: ReadStatus::Unavailable,
@@ -937,6 +946,7 @@ impl ChatUi {
                             key: policy.key,
                             policy_revision: policy.revision,
                             metadata,
+                            instance: self.instance,
                         });
                     }
                 });
@@ -1948,6 +1958,7 @@ mod tests {
             key: frames.ui.key(),
             policy_revision: 1,
             metadata: snapshot.reads[&Conversation::Nearby],
+            instance: frames.ui.instance,
         };
         frames.ui.queued_read(draft, 7);
         frames.ui.select(direct());
@@ -1966,6 +1977,7 @@ mod tests {
             key: frames.ui.key(),
             policy_revision: 2,
             metadata: draft.metadata,
+            instance: frames.ui.instance,
         };
         frames.ui.queued_read(direct_draft, 8);
         snapshot.read_operations.push(ReadOperation {

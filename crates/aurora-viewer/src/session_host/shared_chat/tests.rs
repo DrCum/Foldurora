@@ -1234,6 +1234,55 @@ fn shared_chat_late_admission_does_not_consume_newer_same_text_after_another_sur
 }
 
 #[test]
+fn shared_chat_late_admission_cannot_cross_exact_source_reauthentication_or_clear_in_two_contexts() {
+    for clear in [false, true] {
+        let mut frames = SurfaceFrames::new();
+        Arc::make_mut(&mut frames.host.chat[0]).reads.insert(Conversation::Nearby, aurora_session::chat::ReadMetadata {
+            unread: 1, unread_revision: 1, observed: aurora_session::chat::ObservedIncoming { epoch: 1, through: 1 }, can_mark_read: true,
+        });
+        frames.type_text(0, "Identical recreated text");
+        assert!(frames.click(0, "host_chat_read_rect").is_none());
+        let old_read = frames.model.take_read_action().unwrap();
+        let old = frames.click(0, "host_chat_send_rect").unwrap();
+        let old_ids = SurfaceFrames::SURFACES.map(|surface| frames.model.states[0].ui.retained_for(surface).3);
+        frames.model.surface_closed(ChatSurface::Shared);
+        frames.model.surface_closed(ChatSurface::Monitor1);
+        if clear {
+            frames.model.clear();
+        } else {
+            Arc::make_mut(&mut frames.host.chat[0]).authenticated = false;
+            frames.model.sync(&frames.host, false);
+            assert!(!frames.model.states.iter().any(|state| state.ui.source() == old.key.source));
+            Arc::make_mut(&mut frames.host.chat[0]).authenticated = true;
+        }
+        frames.model.sync(&frames.host, false);
+        // Exact source, policy, conversation and local edit count all repeat.
+        // The source model allocation is the only distinguishing authority.
+        frames.model.select_for(ChatSurface::Shared, old.key.source);
+        frames.model.select_for(ChatSurface::Monitor1, old.key.source);
+        frames.type_text(1, old.text.as_str());
+        let new = frames.click(1, "host_chat_send_rect").unwrap();
+        assert_eq!(new.key, old.key);
+        assert_eq!(new.native_policy, old.native_policy);
+        assert_eq!(new.text, old.text);
+        frames.model.queued(&old, 90);
+        frames.model.queue_failed(&old, HostError::Busy);
+        frames.model.queued_read(old_read, 92);
+        frames.model.read_queue_failed(old_read);
+        for (index, surface) in SurfaceFrames::SURFACES.into_iter().enumerate() {
+            frames.settle(index, 3);
+            assert_eq!(frames.draft(index, old.key.source), old.text.as_str());
+            let state = frames.model.states.iter().find(|state| state.ui.source() == old.key.source).unwrap();
+            assert_ne!(state.ui.retained_for(surface).3, old_ids[index]);
+            assert!(state.ui.operations().0.is_none(), "old admission cannot install new pending authority");
+            assert!(state.ui.operations().1.is_none(), "old Read callbacks cannot install new pending/failure authority");
+        }
+        frames.model.queued(&new, 91);
+        assert_eq!(frames.draft(0, old.key.source), "", "the newly captured admission still consumes its draft");
+    }
+}
+
+#[test]
 fn shared_chat_monitor_transfer_flushes_the_delivered_old_focus_prefix_before_rebinding() {
     let mut frames = SurfaceFrames::new();
     frames.type_text(1, "Old source");

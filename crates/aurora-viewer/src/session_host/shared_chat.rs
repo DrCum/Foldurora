@@ -311,7 +311,7 @@ impl SharedChat {
     }
 
     pub fn queue_failed(&mut self, draft: &SendDraft, error: HostError) {
-        if let Some(state) = self.states.iter_mut().find(|state| state.ui.source() == draft.key.source) {
+        if let Some(state) = self.states.iter_mut().find(|state| state.ui.accepts_send(draft)) {
             state.ui.queue_failed(error);
         }
     }
