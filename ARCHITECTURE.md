@@ -151,6 +151,19 @@ when no world is Active. These models perform no capture, socket or GPU work;
 renderer/App integration, authenticated image delivery and native validation
 remain separate prerequisites. They do not enable parked world rendering.
 
+The source-only `viewport_capture_gpu` integration shares that single queue
+between the renderer frontend and render owner through nonblocking state access
+and an atomic revocation generation. Explicit requests attach only to an
+ordinary frame and sample a bounded target before labels/HUD/UI; map completion
+uses separate maintenance jobs and the capacity-one queue outcome. A submitted
+work callback retains resource credit after map cancellation. No App/native
+permission adapter or image lane enables captures yet. Existing synchronous
+photo APIs remain separate; physical GPU/color/driver checks are pending.
+Renderer replacement shares the process's worker image-credit pool, so an old
+callback or image cannot evade the bound by outliving its renderer.
+The future native adapter must observe the capture generation on CPU ticks,
+including without pending images, to propagate backend surface-loss revocation.
+
 `ChatUi` owns a bounded policy-stamped draft map, including each editor's Undo
 state. A pass moves editor state into egui only for its exact source/conversation/
 policy/incarnation and removes it afterward, so background authority changes can

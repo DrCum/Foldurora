@@ -289,6 +289,8 @@ pub(crate) enum Job {
     /// Ordered after preceding frame packets. Every poll stays on the queue's
     /// owning render thread, including when ordinary frame pacing is disabled.
     SessionFence(u64),
+    /// Poll/map retirement only: produces no frame or presentation proof.
+    MaintainViewportCapture,
     /// Depth under a pixel of the last frame drawn, waiting for the GPU
     /// (clicks). Handed over like a frame, so it runs after the frame in
     /// flight: the depth and the camera are those of the last frame built.
@@ -301,6 +303,7 @@ pub(crate) enum Job {
 pub(crate) enum Done {
     Frame(Box<FrameResult>),
     SessionFence(crate::session_fence::Reply),
+    ViewportCaptureMaintenance,
     Pick(Option<Vec3>),
 }
 
@@ -444,6 +447,10 @@ fn run(mut backend: Backend, worker: Worker<Job, Done>) -> Backend {
             }
             Job::Pick { x, y } => Done::Pick(backend.pick_world(x, y)),
             Job::SessionFence(ticket) => Done::SessionFence(backend.session_fence(ticket)),
+            Job::MaintainViewportCapture => {
+                backend.maintain_viewport_capture();
+                Done::ViewportCaptureMaintenance
+            }
         };
         worker.complete(done);
         // frame pacing (pacing.rs): the frame is handed back; the main

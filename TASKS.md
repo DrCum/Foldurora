@@ -8,6 +8,12 @@
   demands under the existing 10 FPS aggregate budget. Fake-backend/model tests
   are authored; execution and independent review remain pending. No renderer,
   App, image IPC, native command or parked rendering path is enabled.
+  - 🔧 Render-owner capture prerequisite: explicit requests can sample a tiny
+    target from a supported ordinary frame without the blocking photo path.
+    Nonblocking map maintenance, token/generation fences and bounded byte
+    lifetimes are authored, with fake-owner tests and an ignored synthetic GPU
+    color/crop fixture. Source review, compilation and GPU execution remain
+    pending; no native export authority or host monitor is enabled.
 
 - 🔧 Native Attention CPU input fixture (2026-11-07; no issue): source-only
   Linux ignored test around the production AttentionWindow, with synthetic

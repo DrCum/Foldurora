@@ -1559,6 +1559,7 @@ pub(crate) struct Backend {
     /// a queued frame's statistics or an external capture/XR target.
     session_presented: Option<(u64, u64)>,
     session_fences: crate::session_fence::GpuFences,
+    viewport_capture: Option<crate::viewport_capture_gpu::GpuCapture>,
     external: bool,
     #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
     vr: Arc<crate::vr_control::Control>,
@@ -1757,6 +1758,7 @@ struct XrWorld {
 /// What the main thread's `Renderer` creates the backend from.
 #[derive(Clone)]
 pub(crate) struct BackendInit {
+    pub viewport_capture: Option<Arc<crate::viewport_capture_gpu::Shared>>,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub surface: Arc<wgpu::Surface<'static>>,
@@ -2711,6 +2713,7 @@ impl Backend {
         #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
         let xr_seed = init.xr.as_ref().map(|_| Box::new(init.clone()));
         let BackendInit {
+            viewport_capture,
             device,
             queue,
             surface,
@@ -2759,6 +2762,11 @@ impl Backend {
         let mut surface_usage = wgpu::TextureUsages::RENDER_ATTACHMENT;
         if caps.usages.contains(wgpu::TextureUsages::COPY_SRC) {
             surface_usage |= wgpu::TextureUsages::COPY_SRC;
+        }
+        // Sampling an already rendered viewport must never need a new full-size
+        // intermediate. Unsupported surfaces report unavailable for captures.
+        if caps.usages.contains(wgpu::TextureUsages::TEXTURE_BINDING) {
+            surface_usage |= wgpu::TextureUsages::TEXTURE_BINDING;
         }
         let config = wgpu::SurfaceConfiguration {
             usage: surface_usage,
@@ -3313,6 +3321,7 @@ impl Backend {
             session_surface_epoch: 1,
             session_presented: None,
             session_fences: crate::session_fence::GpuFences::default(),
+            viewport_capture: viewport_capture.map(crate::viewport_capture_gpu::GpuCapture::new),
             anim_clock,
             anim_now: [0; 4],
             shadow_path: crate::shadow_cull::path::NEW,
@@ -5682,6 +5691,7 @@ impl Backend {
             picks: Vec::new(),
             drawn: Vec::new(),
             capture: None,
+            viewport_capture: None,
             histogram: None,
             motion_cut: packet.motion_cut,
             input_at: None,
@@ -5734,7 +5744,17 @@ impl Backend {
         Ok(first)
     }
 
-    pub fn render(&mut self, packet: FramePacket) -> FrameResult {
+    pub fn render(&mut self, mut packet: FramePacket) -> FrameResult {
+        self.maintain_viewport_capture();
+        let capture_unavailable = self.external;
+        #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+        let capture_unavailable = capture_unavailable || self.vr.state().engaged() || self.vr.wanted();
+        if capture_unavailable {
+            if let Some(capture) = &mut self.viewport_capture {
+                capture.invalidate();
+            }
+            packet.viewport_capture = None;
+        }
         #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
         if self.xr_world.is_none() && !self.vr.wanted() && self.vr.state() == crate::VrState::Stopping {
             self.vr.finish(false);
@@ -5779,6 +5799,7 @@ impl Backend {
             picks,
             drawn,
             capture: wanted,
+            viewport_capture,
             histogram,
             motion_cut,
             input_at,
@@ -5954,6 +5975,9 @@ impl Backend {
             match self.surface.get_current_texture() {
                 wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => Some(FrameTarget::Surface(t)),
                 wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
+                    if let Some(capture) = &mut self.viewport_capture {
+                        capture.invalidate();
+                    }
                     if !self.external {
                         crate::present::configure(&self.surface, &self.device, &self.config);
                     }
@@ -8509,6 +8533,17 @@ impl Backend {
             calls.set(calls.get() + 1);
         }
 
+        // Dedicated no-UI tap: ordinary composed world only, before labels,
+        // HUDs and viewer UI. Existing blocking photo captures stay separate.
+        if let (Some(frame), Some(capture)) = (viewport_capture, &mut self.viewport_capture) {
+            if external_output || snapshot.is_some() || f.cutout || !f.rlva_overlays.is_empty() || !f.rlva_spheres.is_empty() {
+                capture.shared.fail(&frame, crate::viewport_capture::CaptureError::Unsupported);
+            } else if let Ok(boundary) = capture.shared.boundary(surface.epoch, (self.config.width, self.config.height)) {
+                let source = self.ui_blur.as_ref().map_or(surface_tex.texture(), |blur| &blur.source);
+                capture.encode(&self.device, &mut encoder, source, frame, boundary, viewport, index);
+            }
+        }
+
         let mut capture = None;
 
         prof.mark("post");
@@ -8797,6 +8832,9 @@ impl Backend {
             upload_cmds.into_iter().chain(extra_cmds).chain(output_transition),
         );
         self.gpu_frames.submitted(index, submission);
+        if let Some(capture) = &mut self.viewport_capture {
+            capture.after_submit(&self.queue);
+        }
         if self.gpu_frames.enabled {
             // the news as soon as a poll sees the frame done (the start of
             // the next frame's job): a GPU that is not the limit does not
@@ -8861,6 +8899,7 @@ impl Backend {
             stats.input_ms = input_at.map(|at| at.elapsed().as_secs_f32() * 1000.0);
         }
         self.lost.poll(&self.device);
+        self.maintain_viewport_capture();
         // a click answered by now goes back with this frame's result
         self.depth_pick.harvest_clicks();
         self.drawn_pick.harvest();
@@ -8996,6 +9035,9 @@ impl Backend {
     /// frame submissions, and run callbacks with a nonblocking poll even when
     /// ordinary frame pacing is disabled.
     pub fn session_fence(&mut self, ticket: u64) -> crate::session_fence::Reply {
+        if let Some(capture) = &mut self.viewport_capture {
+            capture.invalidate();
+        }
         use crate::session_fence::{Reply, SessionCompletion, SessionFenceError};
         if self.external {
             return Reply::Failed(ticket, SessionFenceError::Unsupported);
@@ -9032,6 +9074,22 @@ impl Backend {
     pub fn poll_finished(&self) {
         if self.gpu_frames.enabled {
             self.lost.poll(&self.device);
+        }
+    }
+
+    /// Completion-only work: no scene, surface acquisition, submit or present.
+    /// The nonblocking device poll is independent of ordinary pacing.
+    pub fn maintain_viewport_capture(&mut self) {
+        if !self.viewport_capture.as_ref().is_some_and(|capture| capture.has_pending()) {
+            return;
+        }
+        self.lost.poll(&self.device);
+        if let Some(capture) = &mut self.viewport_capture {
+            if self.lost.get() {
+                capture.invalidate();
+            } else {
+                capture.maintain();
+            }
         }
     }
 

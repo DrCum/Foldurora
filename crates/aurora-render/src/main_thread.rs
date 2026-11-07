@@ -213,6 +213,9 @@ pub struct Renderer {
     /// Desired window surface generation, carried by each frame packet.
     surface_epoch: u64,
     session_fences: Requests,
+    viewport_capture: Option<Arc<crate::viewport_capture_gpu::Shared>>,
+    viewport_capture_pending: Option<crate::viewport_capture_gpu::FrameCapture>,
+    viewport_capture_watch: Option<crate::viewport_capture_gpu::FrameCapture>,
     vsync: bool,
     settings: RenderSettings,
     msaa_supported: Vec<u32>,
@@ -617,7 +620,9 @@ impl Renderer {
         )
         .filter(|_| !crate::device_lost::DEMO_HANG_TAKEN.swap(true, std::sync::atomic::Ordering::Relaxed))
         .map(|frame| (frame, queue.clone()));
+        let viewport_capture = crate::viewport_capture_gpu::Shared::new((width.max(1), height.max(1))).ok();
         let backend = Backend::new(BackendInit {
+            viewport_capture: viewport_capture.clone(),
             vr: vr.clone(),
             gpu_frames: gpu_frames.clone(),
             device: device.clone(),
@@ -712,6 +717,9 @@ impl Renderer {
             frames: 0,
             surface_epoch: 1,
             session_fences: Requests::default(),
+            viewport_capture,
+            viewport_capture_pending: None,
+            viewport_capture_watch: None,
             last_stats: RenderStats::default(),
             fresh: false,
             gpu_frames,
@@ -977,6 +985,7 @@ impl Renderer {
             return;
         }
         if self.size != (width, height) {
+            self.invalidate_viewport_capture();
             self.surface_epoch = crate::session_fence::next_surface_epoch(self.surface_epoch);
             self.size = (width, height);
         }
@@ -1071,6 +1080,7 @@ impl Renderer {
 
     pub fn set_vsync(&mut self, vsync: bool) {
         if self.vsync != vsync {
+            self.invalidate_viewport_capture();
             self.surface_epoch = crate::session_fence::next_surface_epoch(self.surface_epoch);
             self.vsync = vsync;
         }
@@ -1232,6 +1242,7 @@ impl Renderer {
     }
 
     fn fail(&mut self) {
+        self.invalidate_viewport_capture();
         if !std::mem::replace(&mut self.failed, true) {
             log::error!("the render thread is gone: nothing can be drawn any more");
         }
@@ -1320,6 +1331,7 @@ impl Renderer {
             log::error!("GPU work at the loss: {}", self.lost.work_at_loss());
         }
         if self.lost.get() {
+            self.invalidate_viewport_capture();
             // nothing reaches a lost device: no frame is built, the photo
             // asked is answered as failed, the clicks as on nothing
             self.writes.clear();
@@ -1429,6 +1441,7 @@ impl Renderer {
             picks: std::mem::take(&mut self.pick_requests),
             drawn: std::mem::take(&mut self.drawn_requests),
             capture,
+            viewport_capture: self.viewport_capture_pending.take(),
             histogram: self.histogram_request.take(),
             motion_cut: std::mem::take(&mut self.motion_cut),
             input_at: self.input_at.take(),
@@ -1637,6 +1650,7 @@ impl Renderer {
         match done {
             Done::Frame(result) => self.apply(*result),
             Done::SessionFence(reply) => self.session_fences.receive(reply),
+            Done::ViewportCaptureMaintenance => {}
             Done::Pick(_) => {}
         }
     }
@@ -1668,9 +1682,152 @@ impl Renderer {
     /// or GPU. Stop submitting frames before this call and until consumption;
     /// only the caller knows which account/activation owns that rendering gate.
     pub fn request_session_fence(&mut self, ticket: u64) -> Result<(), SessionFenceError> {
+        self.invalidate_viewport_capture();
         self.session_fences_supported()?;
         self.session_fences.request(ticket)?;
         self.drive_session_fence()
+    }
+
+    /// Pure boundary query for the future native policy adapter. This API does
+    /// not prove Active ownership, privacy/HUD permission or visible display.
+    pub fn viewport_capture_boundary(&self) -> Result<crate::viewport_capture::CaptureBoundary, crate::viewport_capture::CaptureError> {
+        use crate::viewport_capture::CaptureError;
+        if !self.threaded() || self.vr_engaged() || self.vr.wanted() {
+            return Err(CaptureError::Unsupported);
+        }
+        if self.failed || self.lost.get() {
+            return Err(CaptureError::DeviceLost);
+        }
+        self.viewport_capture
+            .as_ref()
+            .ok_or(CaptureError::Unsupported)?
+            .boundary(self.surface_epoch, self.size)
+    }
+
+    /// The future adapter observes this on CPU ticks even without a pending
+    /// capture, propagating backend surface-loss/recovery revocation to its
+    /// source image policy. Zero is exhausted/unavailable, never authority.
+    pub fn viewport_capture_generation(&self) -> u64 {
+        self.viewport_capture.as_ref().map_or(0, |shared| shared.generation())
+    }
+
+    /// Freeze one small request for the next ordinary frame. There is no App
+    /// adapter yet; callers must independently prove native export authority.
+    /// No GPU allocation, copy, device poll or IO occurs on this thread.
+    pub fn request_viewport_capture(
+        &mut self,
+        viewport: crate::WorldViewport,
+        cap: crate::viewport_capture::CaptureCap,
+    ) -> Result<crate::viewport_capture::CaptureToken, crate::viewport_capture::CaptureError> {
+        use crate::viewport_capture::CaptureError;
+        let boundary = self.viewport_capture_boundary()?;
+        if self.session_fences.pending() {
+            return Err(CaptureError::Busy);
+        }
+        let frame = self
+            .viewport_capture
+            .as_ref()
+            .ok_or(CaptureError::Unsupported)?
+            .request(boundary, viewport, cap)?;
+        let token = frame.request.token();
+        self.viewport_capture_watch = Some(frame.clone());
+        self.viewport_capture_pending = Some(frame);
+        Ok(token)
+    }
+
+    pub fn cancel_viewport_capture(
+        &mut self,
+        token: crate::viewport_capture::CaptureToken,
+    ) -> Result<(), crate::viewport_capture::CaptureError> {
+        use crate::viewport_capture::CaptureError;
+        self.viewport_capture.as_ref().ok_or(CaptureError::Unsupported)?.cancel(token)?;
+        self.viewport_capture_watch = None;
+        if self
+            .viewport_capture_pending
+            .as_ref()
+            .is_some_and(|frame| frame.request.token() == token)
+        {
+            self.viewport_capture_pending = None;
+        }
+        Ok(())
+    }
+
+    /// Revoke immediately even if the render owner holds the short queue lock.
+    pub fn invalidate_viewport_capture(&mut self) {
+        self.viewport_capture_pending = None;
+        self.viewport_capture_watch = None;
+        if let Some(shared) = &self.viewport_capture {
+            shared.invalidate();
+        }
+    }
+
+    /// Maintain only map completion; it never requests a world frame. Handoff
+    /// fences win admission, and every handoff/queue access is nonblocking.
+    pub fn poll_viewport_capture(
+        &mut self,
+    ) -> Result<Option<crate::viewport_capture::CaptureOutcome>, crate::viewport_capture::CaptureError> {
+        use crate::viewport_capture::CaptureError;
+        if let Err(error) = self.viewport_capture_boundary() {
+            self.invalidate_viewport_capture();
+            return Err(error);
+        }
+        if self.viewport_capture_watch.as_ref().is_some_and(|frame| {
+            self.viewport_capture
+                .as_ref()
+                .is_none_or(|shared| !shared.generation_current(frame))
+        }) {
+            self.viewport_capture_watch = None;
+            self.viewport_capture_pending = None;
+            if let Some(shared) = &self.viewport_capture {
+                let _ = shared.take();
+            }
+            return Err(CaptureError::Cancelled);
+        }
+        if self.session_fences.pending() {
+            self.drive_session_fence().map_err(|_| CaptureError::DeviceLost)?;
+        } else {
+            let ready = match &self.host {
+                Host::Thread { owner, .. } => owner.try_take_ready(),
+                Host::Inline(_, _) => return Err(CaptureError::Unsupported),
+            };
+            let ready = match ready {
+                Ok(ready) => ready,
+                Err(_) => {
+                    self.fail();
+                    return Err(CaptureError::DeviceLost);
+                }
+            };
+            if let Some(done) = ready {
+                self.apply_done(done);
+            }
+            let submitted = match &self.host {
+                Host::Thread { owner, .. } => owner.try_submit(Job::MaintainViewportCapture),
+                Host::Inline(_, _) => return Err(CaptureError::Unsupported),
+            };
+            let submitted = match submitted {
+                Ok(submitted) => submitted,
+                Err(_) => {
+                    self.fail();
+                    return Err(CaptureError::DeviceLost);
+                }
+            };
+            if let Some(submitted) = submitted
+                && let Some(done) = submitted.previous
+            {
+                self.apply_done(done);
+            }
+        }
+        let result = self.viewport_capture.as_ref().ok_or(CaptureError::Unsupported)?.take()?;
+        if result.is_some() {
+            self.viewport_capture_watch = None;
+            self.viewport_capture_pending = None;
+        }
+        Ok(result)
+    }
+
+    /// The future adapter rechecks this AND its native source/policy before IPC.
+    pub fn viewport_capture_current(&self, result: &crate::viewport_capture::CapturedViewport) -> bool {
+        self.viewport_capture_boundary().is_ok() && self.viewport_capture.as_ref().is_some_and(|shared| shared.can_publish(result))
     }
 
     /// Retry/consume the matching fence once. A Pending result only schedules

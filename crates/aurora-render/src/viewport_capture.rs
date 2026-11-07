@@ -45,6 +45,8 @@ impl CaptureCap {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CaptureError {
+    Unsupported,
+    DeviceLost,
     Invalid,
     Busy,
     Capacity,
@@ -367,6 +369,18 @@ pub struct CaptureQueue {
 }
 
 impl CaptureQueue {
+    pub(crate) fn request_current(&self, request: &CaptureRequest) -> bool {
+        self.epoch != 0
+            && request.boundary == self.boundary
+            && self.pending.as_ref().is_some_and(|pending| pending.request.token == request.token)
+    }
+
+    pub(crate) fn fail_request(&mut self, token: CaptureToken, error: CaptureError) {
+        if self.pending.as_ref().is_some_and(|pending| pending.request.token == token) {
+            self.pending = None;
+            self.outcome = Some(CaptureOutcome::Failed(token, error));
+        }
+    }
     pub fn new(boundary: CaptureBoundary, budget: CaptureBudget) -> Result<Self, CaptureError> {
         let instance = allocate_queue_instance(&NEXT_QUEUE)?;
         Ok(Self {

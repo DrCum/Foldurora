@@ -53,6 +53,7 @@ mod rlva;
 mod selection;
 mod session_fence;
 pub mod viewport_capture;
+mod viewport_capture_gpu;
 pub use session_fence::{SessionBoundary, SessionCompletion, SessionFenceError};
 pub mod shadow_cull;
 mod shadow_merge;

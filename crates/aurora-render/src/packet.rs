@@ -129,6 +129,8 @@ pub(crate) struct FramePacket {
     /// answered with a later result (drawn_pick.rs).
     pub drawn: Vec<DrawnRequest>,
     pub capture: Option<Capture>,
+    /// Separate bounded asynchronous viewport sample; never enters photo waits.
+    pub viewport_capture: Option<crate::viewport_capture_gpu::FrameCapture>,
     /// Count the luminance histogram of this frame shown at that exposure
     /// (the photo viewfinder; answered a few frames later).
     pub histogram: Option<f32>,
