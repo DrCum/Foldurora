@@ -76,7 +76,10 @@ mismatched source, drains latent UI Read intents, and borrows the existing
 source-owned draft/IME/Undo and operation receipts without selecting a fallback.
 The pure `selected_source_for` getter also serves the existing composer lookup.
 Local view tickets permit Pause/Play/interval recovery but grant no source,
-native, image, Send or Read authority.
+native, image, Send or Read authority. IME boundaries retire only last-painted
+Monitor command/presentation focus, independently of pruned action tickets;
+canonical TextEdit focus and source-owned composition remain intact. Actual
+native held-key/refocus quarantine still belongs to the future window adapter.
 
 Images require an actual `AdmittedImage` and a borrowed
 `private_image::PrivateTextureView` matching exact source/binding, egui context,
@@ -88,7 +91,7 @@ fixture painter; inspected/cloned output is not a private presentation permit.
 This staged implementation remembers only authorized Active frames, retains a
 binding through ordinary activation, and permits explicit Open of current Active.
 Inactive production capture, native windows, subscriptions and menu enablement
-are not supplied by this body. Eleven actual-egui tests and one ignored
+are not supplied by this body. Twelve actual-egui tests and one ignored
 24-capture-per-locale CPU fixture are authored; execution remains pending.
 
 The opt-in session controller starts before the ordinary viewer App/EventLoop.

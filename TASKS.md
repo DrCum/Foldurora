@@ -5,10 +5,12 @@
   canonical source-bound Chat, pin, bounded Options and four fixed/cycling view
   contracts. Captured controls preserve prior-painted binding and published
   settings; requests never move accepted checkmarks before an owner receipt.
-  Playing cycling is passive; pausing requires fresh composer focus. Eleven
+  Playing cycling is passive; pausing requires fresh composer focus. Twelve
   actual-egui regressions cover stale gestures/options, blockers, unavailable
   local recovery, clipped compact/scaled controls, admitted image/context/source
   rejection, canonical three-context draft/Undo, IME and latent Read cancellation.
+  IME terminal events retire owned command focus before later confirmation keys,
+  preserving canonical editor focus; fresh Tab/Enter remains usable.
   One ignored fixture defines 24 synthetic CPU captures per locale (EN/FR/JA),
   consuming the surface owner's original sealed frames. Tests/captures are
   authored and unrun; independent source review and integration remain pending.

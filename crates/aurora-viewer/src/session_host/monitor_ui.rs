@@ -151,6 +151,10 @@ pub(super) struct MonitorUi {
     binding_generation: u64,
     controls: Vec<Painted>,
     painting: Vec<Painted>,
+    // Non-private command/presentation widget identities, committed with paint.
+    // Separate from valid action tickets so state revocation cannot hide focus.
+    focus_controls: Vec<Id>,
+    focus_painting: Vec<Id>,
     gesture: Option<Gesture>,
     input_frame: Option<u64>,
     observed: Option<(Binding, bool)>,
@@ -168,6 +172,8 @@ impl MonitorUi {
             binding_generation,
             controls: Vec::new(),
             painting: Vec::new(),
+            focus_controls: Vec::new(),
+            focus_painting: Vec::new(),
             gesture: None,
             input_frame: None,
             observed: None,
@@ -188,6 +194,8 @@ impl MonitorUi {
     pub fn cancel_input(&mut self) {
         self.controls.clear();
         self.painting.clear();
+        self.focus_controls.clear();
+        self.focus_painting.clear();
         self.gesture = None;
         self.input_frame = None;
         self.ime = false;
@@ -258,6 +266,17 @@ impl MonitorUi {
             }
             seen
         });
+        if ime_event {
+            // OS confirmation keys may arrive after Commit/Disabled in another
+            // frame. Retire only Monitor command focus at the IME boundary;
+            // canonical TextEdit keeps its source-owned composition and focus.
+            self.gesture = None;
+            ui.ctx().memory_mut(|memory| {
+                if let Some(id) = memory.focused().filter(|id| self.focus_controls.contains(id)) {
+                    memory.surrender_focus(id);
+                }
+            });
+        }
         let surface_live = state.revision != 0
             && mode == InputMode::Live
             && focused
@@ -276,6 +295,7 @@ impl MonitorUi {
         }
         self.capture(ui, view, model, state, live);
         self.painting.clear();
+        self.focus_painting.clear();
         let mut command = None;
         let ticket = model.capture(view);
         egui::Panel::top(Id::unique(("monitor_top", view.surface().index())))
@@ -476,6 +496,7 @@ impl MonitorUi {
                     #[cfg(test)]
                     ui.ctx()
                         .data_mut(|data| data.insert_temp(control_id(view, "options"), response.rect));
+                    self.record_control_focus(response.id);
                     if response.clicked() {
                         self.options_open = !self.options_open;
                         self.gesture = None;
@@ -563,9 +584,11 @@ impl MonitorUi {
         }
         if mode != InputMode::Live {
             self.painting.clear();
+            self.focus_painting.clear();
             return None;
         }
         self.controls = std::mem::take(&mut self.painting);
+        self.focus_controls = std::mem::take(&mut self.focus_painting);
         if egui::Popup::is_any_open(ui.ctx()) {
             self.gesture = None;
             command = None;
@@ -624,6 +647,7 @@ impl MonitorUi {
                             let response = ui.add_enabled(live, egui::Button::new(aurora_i18n::tr!("common-close")));
                             ui.ctx()
                                 .data_mut(|data| data.insert_temp(control_id(view, "close_options"), response.rect));
+                            self.record_control_focus(response.id);
                             close |= response.clicked();
                         });
                     });
@@ -746,6 +770,11 @@ impl MonitorUi {
         }
     }
 
+    fn record_control_focus(&mut self, id: Id) {
+        assert!(self.focus_painting.len() < 24);
+        self.focus_painting.push(id);
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn control(
         &mut self,
@@ -758,6 +787,7 @@ impl MonitorUi {
         command: Option<Command>,
         activated: &mut Option<Intent>,
     ) {
+        self.record_control_focus(response.id);
         let Some(binding) = binding else { return };
         let Some(command) = command.filter(|_| response.enabled()) else {
             return;

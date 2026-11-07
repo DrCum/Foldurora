@@ -871,6 +871,9 @@ fn monitor_bound_facade_clears_latent_ui_read_on_mismatch_and_preserves_queued_o
 fn monitor_body_canonical_ime_commits_once_and_late_composition_cannot_cross_cycling_source() {
     let mut f = Frames::new([680.0, 680.0], 1.0);
     f.type_text(1, "Committed prefix");
+    let editor_focus = f.contexts[1]
+        .memory(|memory| memory.focused())
+        .expect("real canonical editor focus");
     assert!(
         f.show(
             1,
@@ -880,6 +883,11 @@ fn monitor_body_canonical_ime_commits_once_and_late_composition_cannot_cross_cyc
             })]
         )
         .is_none()
+    );
+    assert_eq!(
+        f.contexts[1].memory(|memory| memory.focused()),
+        Some(editor_focus),
+        "toolbar IME fence preserves canonical TextEdit focus"
     );
     f.focus(2);
     assert_eq!(
@@ -1040,4 +1048,100 @@ fn monitor_body_accessibility_uses_committed_exact_binding_and_edit_prefix_keeps
     );
     f.settle(1);
     assert_eq!(f.send(2).text.as_str(), "Before flush + delivered");
+}
+
+#[test]
+fn monitor_body_ime_terminal_retires_only_owned_command_focus_before_later_confirmation_keys() {
+    fn focus_exchange(f: &mut Frames) -> Painted {
+        f.settle(1);
+        let control = *f.bodies[0]
+            .controls
+            .iter()
+            .find(|control| matches!(control.intent.command, Command::Exchange(_)))
+            .unwrap();
+        f.contexts[1].memory_mut(|memory| memory.request_focus(control.widget));
+        f.settle(1);
+        assert_eq!(f.contexts[1].memory(|memory| memory.focused()), Some(control.widget));
+        control
+    }
+    fn fresh_exchange(f: &mut Frames) {
+        f.settle(1);
+        let control = *f.bodies[0]
+            .controls
+            .iter()
+            .find(|control| matches!(control.intent.command, Command::Exchange(_)))
+            .unwrap();
+        for _ in 0..12 {
+            if f.contexts[1].memory(|memory| memory.focused()) == Some(control.widget) {
+                break;
+            }
+            assert!(
+                f.show(1, vec![key(Key::Tab, true, Modifiers::NONE), key(Key::Tab, false, Modifiers::NONE)])
+                    .is_none()
+            );
+            f.settle(1);
+        }
+        assert_eq!(
+            f.contexts[1].memory(|memory| memory.focused()),
+            Some(control.widget),
+            "fresh explicit Tab navigation restores command focus"
+        );
+        assert!(f.show(1, vec![key(Key::Enter, true, Modifiers::NONE)]).is_none());
+        assert!(
+            matches!(f.show(1,vec![key(Key::Enter,false,Modifiers::NONE)]),Some(Action::Control{command:Command::Exchange(ticket),..}) if ticket.source().chat()==control.intent.binding.source.chat())
+        );
+    }
+    let mut f = Frames::new([440.0, 560.0], 1.0);
+    f.states[0].chat = false;
+    focus_exchange(&mut f);
+    assert!(
+        f.show(
+            1,
+            vec![Event::Ime(egui::ImeEvent::Preedit {
+                text: "候補".into(),
+                active_range_chars: None
+            })]
+        )
+        .is_none()
+    );
+    assert!(f.contexts[1].memory(|memory| memory.focused()).is_none());
+    assert!(f.show(1, vec![Event::Ime(egui::ImeEvent::Commit("確定".into()))]).is_none());
+    assert!(
+        f.show(1, vec![key(Key::Enter, true, Modifiers::NONE)]).is_none(),
+        "confirmation may follow Commit in a later frame"
+    );
+    assert!(f.show(1, vec![key(Key::Enter, false, Modifiers::NONE)]).is_none());
+    fresh_exchange(&mut f);
+
+    for key_first in [false, true] {
+        #[allow(deprecated)]
+        let terminals = [
+            egui::ImeEvent::Commit("確定".into()),
+            egui::ImeEvent::Preedit {
+                text: String::new(),
+                active_range_chars: None,
+            },
+            egui::ImeEvent::Disabled,
+        ];
+        for terminal in terminals {
+            let mut f = Frames::new([440.0, 560.0], 1.0);
+            f.states[0].chat = false;
+            focus_exchange(&mut f);
+            // The published base/input can change before this render. Its old
+            // ticket is pruned, but the old owned focus identity still retires.
+            f.states[0].revision += 1;
+            f.states[0].failed = true;
+            f.model.cancel_input().unwrap();
+            let terminal = Event::Ime(terminal);
+            let down = key(Key::Enter, true, Modifiers::NONE);
+            let events = if key_first { vec![down, terminal] } else { vec![terminal, down] };
+            assert!(
+                f.show(1, events).is_none(),
+                "same-frame terminal/key order cannot activate a new published base"
+            );
+            assert!(f.contexts[1].memory(|memory| memory.focused()).is_none());
+            assert!(f.show(1, vec![key(Key::Enter, false, Modifiers::NONE)]).is_none());
+            fresh_exchange(&mut f);
+        }
+    }
 }
