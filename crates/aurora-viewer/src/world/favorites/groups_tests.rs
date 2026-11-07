@@ -1,25 +1,14 @@
 use super::super::Favorites;
 use super::*;
+use crate::world::account_metadata_origin::Pending as PendingLoginGrid;
 use crate::world::inventory::{FetchState, Folder};
 use aurora_net::inventory::{InvFolder, InvItem};
 use std::time::{Duration, Instant};
 
 pub(crate) fn request(uri: &str) -> aurora_net::LoginRequest {
-    aurora_net::LoginRequest {
-        login_uri: uri.into(),
-        username: String::new(),
-        password: String::new(),
-        start: aurora_net::StartLocation::Last,
-        agree_to_tos: false,
-        read_critical: false,
-        mfa_token: String::new(),
-        mfa_hash: String::new(),
-        mac: String::new(),
-        id0: String::new(),
-        last_exec: aurora_net::login::LastExec::default(),
-        platform: aurora_net::login::Platform::default(),
-    }
+    crate::world::account_metadata_origin::request(uri)
 }
+
 fn scope(uri: &str) -> GroupScope {
     GroupScope::new(Uuid::from_u128(101), Uuid::from_u128(102), LoginGrid::from_uri(uri).unwrap()).unwrap()
 }
@@ -141,8 +130,9 @@ pub(crate) fn fixture() -> Fixture {
     // Same admission/owner/poll path, isolated capacity so the ordinary
     // parallel test suite cannot make unrelated fixture loads starve.
     favorites.group_workers = WorkerPool::isolated(MAX_WORKERS);
-    favorites.capture_login_grid(&request("https://grid.example.invalid/login"));
-    let grid = favorites.take_login_grid().unwrap();
+    let mut origin = PendingLoginGrid::default();
+    origin.submitted(&request("https://grid.example.invalid/login"));
+    let grid = origin.completed().unwrap();
     assert!(grid == source.grid);
     favorites.bind_groups(GroupScope::new(source.account, source.session, grid), root.clone());
     let mut f = Fixture {
@@ -199,7 +189,8 @@ fn favorite_group_ignored_later_request_stays_ambiguous_and_failure_retry_captur
 #[test]
 fn favorite_group_missing_and_ambiguous_login_receipts_never_start_metadata_io() {
     let mut favorites = Favorites::default();
-    assert!(favorites.take_login_grid().is_none());
+    let mut origin = PendingLoginGrid::default();
+    assert!(origin.completed().is_none());
     favorites.bind_groups(None, PathBuf::from("unused-synthetic-directory"));
     assert!(favorites.groups.is_none());
     assert_eq!(favorites.group_status(), GroupStatus::Unavailable);
@@ -241,7 +232,7 @@ fn favorite_group_name_input_preserves_utf8_bounds_and_saved_document_is_strict(
     let duplicate = format!(
         r#"{{"version":1,"account":"{}","grid":{},"publication":1,"assignments":{{"{}":"a","{}":"b"}}}}"#,
         f.account,
-        serde_json::to_string(&f.source.grid.0).unwrap(),
+        serde_json::to_string(&f.source.grid.bytes()).unwrap(),
         Uuid::from_u128(10),
         Uuid::from_u128(10)
     );
@@ -385,7 +376,7 @@ fn favorite_group_malformed_newer_wrong_scope_and_oversize_loads_never_rewrite()
     let good = serde_json::to_value(Document {
         version: VERSION,
         account: f.account,
-        grid: f.source.grid.0,
+        grid: f.source.grid.bytes(),
         publication: 1,
         assignments: Assignments::new(),
     })
@@ -459,7 +450,7 @@ fn favorite_group_publication_exhaustion_is_readonly_without_rewriting_existing_
     let bytes = serde_json::to_vec(&Document {
         version: VERSION,
         account: f.account,
-        grid: f.source.grid.0,
+        grid: f.source.grid.bytes(),
         publication: u64::MAX,
         assignments: Assignments::new(),
     })

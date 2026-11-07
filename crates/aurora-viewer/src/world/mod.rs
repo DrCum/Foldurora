@@ -1,5 +1,6 @@
 //! Viewer-side world model fed by network events.
 
+pub(crate) mod account_metadata_origin;
 pub mod animation_log;
 pub mod anti_spam;
 pub mod appearance;
@@ -351,6 +352,7 @@ pub struct World {
     pub hover_height: hover_height::HoverHeight,
     /// The favourites in the account's order (`favorites.rs`).
     pub favorites: favorites::Favorites,
+    pub(crate) metadata_login: account_metadata_origin::Pending,
     /// What left the notification list, kept per account (the center's
     /// History).
     pub notification_history: notification_history::History,
@@ -750,6 +752,7 @@ impl World {
             temp_attachment_names: Default::default(),
             hover_height: Default::default(),
             favorites: Default::default(),
+            metadata_login: Default::default(),
             notification_history: Default::default(),
             ui_sounds: Vec::new(),
             im_messages: Vec::new(),

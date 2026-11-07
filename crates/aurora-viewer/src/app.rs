@@ -2983,7 +2983,7 @@ impl App {
         self.login_form.error = None;
         self.login_progress = Some((aurora_i18n::tr!("app-connecting").into(), 0.05));
         self.settings.save();
-        self.world.favorites.capture_login_grid(&req);
+        self.world.metadata_login.submitted(&req);
         self.net.send(NetCommand::Login(Box::new(req)));
     }
 
@@ -3695,7 +3695,7 @@ impl App {
                 bad_credentials,
                 previous_session,
             } => {
-                self.world.favorites.cancel_login_grid();
+                self.world.metadata_login.failed();
                 // A refused login spends its code, whatever the reason: the next
                 // attempt sends none, so the server can ask for a new one
                 // (LLLoginInstance::constructAuthParams starts with an empty
@@ -3780,14 +3780,14 @@ impl App {
                     )
                 };
                 self.load_region_titles(l.agent_id);
-                let favorite_grid = self.world.favorites.take_login_grid();
+                let metadata_grid = self.world.metadata_login.completed();
                 self.world.favorites = if self.demo {
                     Default::default()
                 } else {
                     let directory = crate::settings::account_dir(&l.agent_id);
                     let mut favorites = crate::world::favorites::Favorites::load(directory.join(crate::world::favorites::FILE));
                     favorites.bind_groups(
-                        favorite_grid.and_then(|grid| crate::world::favorites::GroupScope::new(l.agent_id, l.session_id, grid)),
+                        metadata_grid.and_then(|grid| crate::world::favorites::GroupScope::new(l.agent_id, l.session_id, grid)),
                         directory,
                     );
                     favorites

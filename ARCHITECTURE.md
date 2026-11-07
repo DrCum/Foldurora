@@ -1,5 +1,14 @@
 # Aurora Viewer architecture
 
+`world/account_metadata_origin.rs` owns the pure request-origin namespace for
+account-local metadata. World retains one pending digest from the actual built
+LoginRequest; a differing/invalid later submission stays ambiguous until a
+terminal failure or one actual login consumption. Failure clears before retry,
+and World reset clears pending provenance. Consumers copy the original digest
+with the accepted account/session independently of IO readiness; no form value,
+raw URI or credential is persisted. Favorites retains its original file identity
+and behavior. Archive projection, private storage and UI are separate stages.
+
 `session_host/monitor_manager.rs` is the Shell-owned bounded binding/operation
 front for four fixed monitors and one cycling view. It depends on the separately
 authored real `preview_projection` facade; no local IO stub or inferred image

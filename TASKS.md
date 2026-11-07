@@ -1,5 +1,14 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Local Inventory archive prerequisite, shared origin (2026-11-07; no issue):
+  World now owns one pure actual-request digest/ambiguity state, captured before
+  Net submission, cleared before failure retry and consumed once on LoggedIn.
+  Favorites receives the same original digest independently of its IO status;
+  its paths/schema/menu/worker behavior are unchanged. Three additional pure/
+  actual-World lifecycle tests are authored/unrun; existing Favorites assertions
+  remain. Bounded archive projection, new closed store kind, actual consumers
+  and Folder Jump visibility integration are not yet implemented or enabled.
+
 - 🔧 Account-local named landmark Favorite menus (2026-11-07; no issue):
   first-member folders share the original ordered landmarks across menu, row and
   grid. Separate bounded account/profile/grid metadata uses original submitted
