@@ -8,7 +8,7 @@
   purges text/Undo without choosing another sender. Captured-key admission never
   follows a later selection or replays uncertainty. Exact widget/allocation IDs,
   ordered edit draining and fresh Enter/Shift+Enter/IME guards fence navigation,
-  focus and Close. Seventeen new actual-egui/model regressions and an ignored
+  focus and Close. Nineteen new actual-egui/model regressions and an ignored
   EN/FR/JA CPU fixture are authored; direct formatting/diff checks pass, while
   compiled tests, captures, native Windows and human grid acceptance are pending.
   No protocol, Group/New IM/contacts, read acknowledgment or monitor capability

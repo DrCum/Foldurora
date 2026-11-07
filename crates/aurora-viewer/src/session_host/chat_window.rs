@@ -71,11 +71,10 @@ impl ChatWindow {
     pub fn flush_edits(&mut self, controller: &HostController, model: &mut SharedChat) {
         model.sync(&controller.snapshot(), false);
         let mut raw = self.surface.raw_input();
-        if let Some(edits) = edit_prefix(
-            &mut raw,
-            model.composer_rect(&self.context),
-            egui::Popup::is_any_open(&self.context),
-        ) {
+        let Some(composer) = model.composer_rect(&self.context) else {
+            return;
+        };
+        if let Some(edits) = edit_prefix(&mut raw, Some(composer), egui::Popup::is_any_open(&self.context)) {
             self.apply_edits(edits, model);
         }
         self.apply_edits(edit_input(raw), model);
@@ -197,13 +196,38 @@ impl ChatWindow {
 /// pending click, Enter or unfinished IME candidate into a Send action.
 pub(super) fn edit_input(mut raw: egui::RawInput) -> egui::RawInput {
     raw.focused = true;
-    raw.events.retain(|event| match event {
-        egui::Event::Text(_) | egui::Event::Paste(_) | egui::Event::ModifiersChanged(_) => true,
-        egui::Event::Key { key, .. } => !matches!(key, egui::Key::Enter | egui::Key::Tab | egui::Key::Escape),
-        egui::Event::Ime(egui::ImeEvent::Commit(_) | egui::ImeEvent::DeleteSurrounding { .. }) => true,
-        _ => false,
+    let through = raw.events.iter().position(edit_navigation).unwrap_or(raw.events.len());
+    let mut index = 0;
+    raw.events.retain(|event| {
+        let before_navigation = index < through;
+        index += 1;
+        // This pass deliberately omits pointer/focus navigation. Its trailing
+        // editing key presses must not act on the old editor after the pointer
+        // has been stripped. Releases still retire held keys in a reused context.
+        if !before_navigation {
+            return matches!(event, egui::Event::Key { pressed: false, .. } | egui::Event::ModifiersChanged(_));
+        }
+        match event {
+            egui::Event::Text(_) | egui::Event::Paste(_) | egui::Event::ModifiersChanged(_) => true,
+            egui::Event::Key { key, .. } => !matches!(key, egui::Key::Enter | egui::Key::Tab | egui::Key::Escape),
+            egui::Event::Ime(egui::ImeEvent::Commit(_) | egui::ImeEvent::DeleteSurrounding { .. }) => true,
+            _ => false,
+        }
     });
     raw
+}
+
+fn edit_navigation(event: &egui::Event) -> bool {
+    matches!(
+        event,
+        egui::Event::PointerButton { pressed: true, .. }
+            | egui::Event::Key {
+                key: egui::Key::Enter | egui::Key::Tab | egui::Key::Escape,
+                pressed: true,
+                ..
+            }
+            | egui::Event::WindowFocused(_)
+    )
 }
 
 /// Winit can deliver text/paste before a navigation press in the same redraw
@@ -248,19 +272,7 @@ pub(super) fn edit_prefix(raw: &mut egui::RawInput, composer: Option<egui::Rect>
     let through = raw
         .events
         .iter()
-        .position(|event| {
-            matches!(
-                event,
-                egui::Event::PointerButton { pressed: true, .. }
-                    | egui::Event::Key {
-                        key: egui::Key::Enter | egui::Key::Tab | egui::Key::Escape,
-                        pressed: true,
-                        ..
-                    }
-                    | egui::Event::WindowFocused(_)
-                    | egui::Event::Ime(egui::ImeEvent::Preedit { .. })
-            )
-        })
+        .position(|event| edit_navigation(event) || matches!(event, egui::Event::Ime(egui::ImeEvent::Preedit { .. })))
         .unwrap_or(raw.events.len());
     let mut edits = Vec::new();
     let mut index = 0;

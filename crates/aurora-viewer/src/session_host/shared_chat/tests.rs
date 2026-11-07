@@ -238,6 +238,18 @@ impl Frames {
         self.model.cancel_gestures();
         self.settle(3);
     }
+
+    fn flush(&mut self, events: Vec<Event>) {
+        self.model.sync(&self.host, false);
+        let mut raw = self.raw(events);
+        let Some(composer) = self.model.composer_rect(&self.context) else {
+            return;
+        };
+        if let Some(edits) = edit_prefix(&mut raw, Some(composer), egui::Popup::is_any_open(&self.context)) {
+            assert!(self.pass(edits, InputMode::Closing).is_none());
+        }
+        assert!(self.pass(edit_input(raw), InputMode::Closing).is_none());
+    }
 }
 
 #[test]
@@ -370,7 +382,7 @@ fn shared_chat_close_drains_delivered_text_but_never_a_queued_send() {
     let mut frames = Frames::new();
     frames.type_text("Before close");
     let at = frames.rect(Id::unique("host_chat_send_rect")).center();
-    let raw = frames.raw(vec![
+    frames.flush(vec![
         Event::Text(" plus queued edit".into()),
         key(Key::Enter, true, false, Modifiers::NONE),
         Event::PointerButton {
@@ -381,9 +393,89 @@ fn shared_chat_close_drains_delivered_text_but_never_a_queued_send() {
         },
         Event::WindowFocused(false),
     ]);
-    assert!(frames.pass(edit_input(raw), InputMode::Closing).is_none());
     frames.reopen();
     assert_eq!(frames.send().unwrap().text.as_str(), "Before close plus queued edit");
+}
+
+#[test]
+fn shared_chat_close_drops_destructive_keys_after_undrawn_source_navigation() {
+    let command = Modifiers {
+        ctrl: true,
+        command: true,
+        ..Default::default()
+    };
+    for (destructive, modifiers) in [(Key::Backspace, Modifiers::NONE), (Key::Delete, Modifiers::NONE), (Key::Z, command)] {
+        let mut frames = Frames::new();
+        frames.type_text("Keep old");
+        frames.settle(65);
+        frames.show(vec![Event::Text(" selected draft".into())]);
+        frames.settle(65);
+        frames.show(vec![key(Key::A, true, false, command)]);
+        frames.show(vec![key(Key::A, false, false, command)]);
+        assert!(frames.model.composer_rect(&frames.context).is_some());
+        let at = frames.rect(Id::unique("shared_chat_combo_rect")).center();
+        // None of these queued events receives a normal redraw before Close.
+        // Both production flush stages must preserve the old selected text.
+        frames.flush(vec![
+            Event::PointerMoved(at),
+            Event::PointerButton {
+                pos: at,
+                button: PointerButton::Primary,
+                pressed: true,
+                modifiers: Modifiers::NONE,
+            },
+            Event::PointerButton {
+                pos: at,
+                button: PointerButton::Primary,
+                pressed: false,
+                modifiers: Modifiers::NONE,
+            },
+            key(destructive, true, false, modifiers),
+            key(destructive, false, false, modifiers),
+            Event::WindowFocused(false),
+        ]);
+        assert_eq!(frames.model.selected, Some(source(1)), "Close never commits a source choice");
+        frames.reopen();
+        assert_eq!(
+            frames.send().unwrap().text.as_str(),
+            "Keep old selected draft",
+            "{destructive:?} after navigation"
+        );
+    }
+}
+
+#[test]
+fn shared_chat_close_retains_committed_ime_and_undo_before_navigation_only() {
+    let mut frames = Frames::new();
+    frames.type_text("Keep checkpoint");
+    frames.settle(65);
+    frames.show(vec![Event::Text(" remove this edit".into())]);
+    frames.settle(65);
+    let command = Modifiers {
+        ctrl: true,
+        command: true,
+        ..Default::default()
+    };
+    let at = frames.rect(Id::unique("shared_chat_combo_rect")).center();
+    frames.flush(vec![
+        key(Key::Z, true, false, command),
+        key(Key::Z, false, false, command),
+        Event::Ime(egui::ImeEvent::Preedit {
+            text: "未確定".into(),
+            active_range_chars: None,
+        }),
+        Event::Ime(egui::ImeEvent::Commit("確定".into())),
+        Event::PointerButton {
+            pos: at,
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: Modifiers::NONE,
+        },
+        key(Key::Backspace, true, false, Modifiers::NONE),
+        key(Key::Backspace, false, false, Modifiers::NONE),
+    ]);
+    frames.reopen();
+    assert_eq!(frames.send().unwrap().text.as_str(), "Keep checkpoint確定");
 }
 
 #[test]
@@ -561,7 +653,7 @@ fn shared_chat_cut_and_unfinished_ime_cannot_delete_or_send_during_close_flush()
     };
     frames.show(vec![key(Key::A, true, false, command)]);
     frames.show(vec![key(Key::A, false, false, command)]);
-    let raw = frames.raw(vec![
+    frames.flush(vec![
         Event::Cut,
         Event::Ime(egui::ImeEvent::Preedit {
             text: "未確定".into(),
@@ -569,7 +661,6 @@ fn shared_chat_cut_and_unfinished_ime_cannot_delete_or_send_during_close_flush()
         }),
         key(Key::Enter, true, false, Modifiers::NONE),
     ]);
-    assert!(frames.pass(edit_input(raw), InputMode::Closing).is_none());
     frames.reopen();
     assert_eq!(frames.send().unwrap().text.as_str(), "Keep selected text");
 }

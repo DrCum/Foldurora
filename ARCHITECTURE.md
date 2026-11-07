@@ -121,7 +121,10 @@ remains independent of conversation navigation.
 before processing navigation, with ambiguous trailing input suppressed. Close
 uses an edit-only pass that cannot send or select a target; Cut is excluded
 because that pass produces no clipboard output. Font texture deltas survive
-same-context flushes. Exact source/conversation/policy widget IDs and gesture
+same-context flushes. Only a currently focused composer admits the ordered
+prefix; editing key presses after a navigation boundary cannot mutate its old
+selection. Committed IME text before that boundary remains an edit. Exact
+source/conversation/policy widget IDs and gesture
 cancellation fence navigation, catalogue changes, focus loss and popup/modal
 input. Enter sends once, Shift+Enter inserts a line, and command-Enter remains
 supported; repeat and IME-confirmation keys do not send.
