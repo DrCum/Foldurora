@@ -11,6 +11,8 @@ pub(crate) mod chat_io;
 pub(crate) mod chat_transport;
 mod chat_ui;
 mod chat_window;
+// Ordinary Inventory chooser observes the same native activation-key fence.
+pub(crate) use chat_window::enter_release::EnterRelease;
 // Real host/window front; Root promotes its existing prerequisite modules only
 // after the separately authored host projection and native proof join review.
 #[cfg(any(windows, test))]
