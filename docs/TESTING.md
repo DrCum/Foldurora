@@ -248,7 +248,7 @@ Driver acceptance sequence (preserve every assertion state and screenshot):
    and verify cleanup of only the owned test/display process groups. Finish
    itself makes no coverage claim; the driver receipts determine acceptance.
 
-**Native Linux Shared Chat CPU input fixture.**
+**Asynchronous viewport GPU fixture.**
 
 The explicitly ignored `viewport_gpu_synthetic_crop_colors_srgb_channels_and_alpha`
 test exercises the asynchronous monitor sampler with owned synthetic textures.
@@ -256,6 +256,8 @@ Run it alone with `cargo test --workspace viewport_gpu_synthetic_crop_colors_srg
 It checks RGBA/BGRA and sRGB crop colors, orientation and opaque alpha through
 the real GPU path. It does not establish native permissions, swapchain
 composition, renderer cancellation, Windows performance or inactive rendering.
+
+**Native Linux Shared Chat CPU input fixture.**
 
 | Variable | Effect |
 |---|---|
