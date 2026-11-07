@@ -8,14 +8,15 @@ The user-selected implementation order is **compact host redesign → shared cha
 → Attention → monitors with chat**. Compact host UI work is now in progress from
 frozen source `70c1b5cd`, following the Folderstorm demo's compact presentation.
 The verified package below remains the earlier test candidate and does not
-contain the ongoing redesign. Native Windows acceptance remains pending.
+contain the ongoing redesign. Native Windows acceptance of the `70c1b5cd`
+profile/draft changes and the new compact UI remains pending.
 
 ## Frozen test candidates
 
 | Source | Purpose | Evidence | Remaining acceptance |
 | --- | --- | --- | --- |
 | `d10473efff52ceaea2d7b22d111319b0efc4f28e` | Combined upstream, viewport and session-host/chat baseline | Local Windows checks: 7,791 passed, 0 failed, 49 ignored; build/package passed. [GitHub run](https://github.com/DrCum/Foldurora/actions/runs/42291668355) passed. | Human confirmed toolbar containment and full-workspace floaters; reported oversized menu, host drag/detach failure and one standalone switch device loss. |
-| `8b738ea8b2c700b7538b7e16135a7de19c192d43` | Host movement/recovery and compact dropdown fixes | [Windows run 42304532039](https://github.com/DrCum/Foldurora/actions/runs/42304532039) passed: 7,798 tests passed, 0 failed, 49 ignored; all seven focused regressions passed. Scripts, formatting, Clippy, normal viewer build and packaging passed. Downloaded artifact, manifest, checksums, executable version and Windows x64 identity were verified. | Native title-bar drag, resize, post-drag switch, detach, confirmed host closure, taskbar and responsive redraw. Separate standalone GPU loss is unresolved. |
+| `8b738ea8b2c700b7538b7e16135a7de19c192d43` | Host movement/recovery and compact dropdown fixes | [Windows run 42304532039](https://github.com/DrCum/Foldurora/actions/runs/42304532039) passed: 7,798 tests passed, 0 failed, 49 ignored; all seven focused regressions passed. Scripts, formatting, Clippy, normal viewer build and packaging passed. Downloaded artifact, manifest, checksums, executable version and Windows x64 identity were verified. Separate native offline passes were reported for a local rebuild below. | Caption-button appearance, unexplained forced-loss client-height change and missing capture/probe bundle limit native verification. Native results belong to the local rebuild, not the CI executable or later candidates. Separate standalone GPU loss remains unresolved. |
 | `8cd9a2aa005491b651e5bb8591d94fd6fb891520` | Combined backend/profile checkpoint: host/menu fixes, retained conversation drafts, crash details fallback and five persistent renameable slots | [Windows run 42311181216](https://github.com/DrCum/Foldurora/actions/runs/42311181216) passed: 7,818 tests passed, 0 failed, 49 ignored. Scripts, formatting, strict Clippy, normal build and packaging passed; downloaded package identity, manifest and checksums were verified. | This checkpoint has a known profile-popup margin overlap corrected by `70c1b5cd`. Native host/profile/chat and human grid acceptance remain pending. |
 | `70c1b5cda927547b28e5a5ff9713e861771aaee7` | Latest verified test candidate, `fix/profile-popup-bounds`: bounds the profile popup including its frame and wraps occupied-profile help inline | [Windows run 42315300611](https://github.com/DrCum/Foldurora/actions/runs/42315300611) passed: 7,819 tests passed, 0 failed, 49 ignored; all 28 applicable named regressions passed exactly once. Scripts, formatting, strict Clippy, normal build and packaging passed. Downloaded manifest, checksums and executable/PE identity were verified. Fresh Linux CPU UI and sequential demo-worker evidence is recorded below. | Offline native Windows host/profile/chat, human grid, physical GPU/multi-monitor and performance acceptance remain pending. |
 
@@ -77,6 +78,38 @@ The retained receipt is `.scratch/windows-ci-42315300611/receipt.json` in the
 candidate worktree. The manifest still marks human, Windows GPU/multi-monitor,
 grid and performance acceptance pending. The package is a development test
 candidate, not a release or native runtime acceptance result.
+
+## Reported native Windows evidence — local 8b rebuild
+
+The attached native-results report applies to a separate local rebuild of exact
+source `8b738ea8b2c700b7538b7e16135a7de19c192d43`, version
+`0.9.3-beta.20261106.1+110.g8b738ea8b`, Rust 1.99.1, development profile and
+`xr-static-loader`. It reports the same 7,798/0/49 test result and seven focused
+regressions. Its binary/package hashes differ from the CI artifact above:
+
+- Local package ZIP SHA-256: `b10f42484cf4a1a632867a4780bad09fcf20bdb6ef6bb2b340e9cd9c65e34f05`.
+- Local executable SHA-256: `12616c5bc9bded71a38fa0271f6aa8d91a9bb793730ad345785951175aa6783d`.
+
+Reported human/offline passes cover continuous native title-bar dragging away
+and back, subsequent aligned A/B switching, resize and held movement/camera input
+release; explicit detach to responsive taskbar/Alt+Tab-selectable full worlds;
+compact menus; minimize followed by reactivation; normal confirmed host closure
+with Detach sessions and close; and normal worker Quit with actual process exits.
+Six synthetic demo workers produced no reported device-loss/recovery matches.
+
+After forced controller loss, both workers were eventually visible and usable.
+The delayed sample was 55.73 seconds after the immediate probe; actual recovery
+latency was not measured. One client's delayed size was 960×568 rather than its
+initial 960×640, unexplained despite the human reporting full usable worlds.
+Caption-button appearance remains unresolved; functional minimize does not
+establish visual correctness. The report names relative screenshot/JSON evidence
+files, but that bundle was not attached for independent inspection.
+
+These checks used low graphics and an intentional 15 FPS cap. They do not
+establish normal performance, mixed-DPI behavior, live-grid/voice/chat routing,
+the separate standalone GPU-loss cause, `70c1b5cd` native profiles/drafts or the
+new compact UI. User raw files, local paths and private runtime data are not
+republished here.
 
 ## Implemented in the combined source
 
@@ -387,10 +420,18 @@ touching unrelated windows.
 - If the standalone graphics loss recurs, retain the report folder and identify
   which viewer/process was active and which switch was requested. The crash label
   detects graphics-device loss; it does not establish the operating-system cause.
-  Earlier user-supplied rows identify an RTX 3060 with NVIDIA driver 610.88,
-  unfinished frame 5747 at about 1.002 seconds and last finished frame 5745.
-  The cause remains unresolved; the full sanitized `public-report.md` has been
-  requested but is not yet attached.
+  The full sanitized report is now received for `d10473eff`, version
+  `0.9.3-beta.20261106.1+107.gd10473eff`, on an RTX 3060/NVIDIA 610.88. It records
+  unfinished submission frame 5747 after 1.002 seconds and last finished frame
+  5745. Its “hang” label comes from the source's
+  [500 ms submission heuristic](https://github.com/DrCum/Foldurora/blob/d10473efff52ceaea2d7b22d111319b0efc4f28e/crates/aurora-render/src/device_lost.rs#L280),
+  not independent confirmation of an operating-system reset cause. The coarse
+  loss fields are `unknown / other / callback`. Sampled VRAM 2,573/11,347 MB and
+  texture pressure 0/7 show no recorded exhaustion. Focused window plus one other
+  peer and zero foreground peers is internally consistent. No Characters row
+  identity or switch target is recorded, so the observed status mismatch remains
+  unresolved. Enumerated Vulkan layers do not prove an overlay was active, and
+  no driver culprit is established. The user report itself is not republished.
 - No immediate preference blocks new stable slots starting from defaults. Importing
   an old generated profile, copying ordinary viewer preferences, or sharing slots
   across moved installations needs an explicit later choice; no migration is planned
