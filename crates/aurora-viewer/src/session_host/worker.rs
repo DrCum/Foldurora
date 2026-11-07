@@ -7,6 +7,9 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::Instant;
 
+mod preview;
+pub(crate) use preview::AcceptedNativePreviewSource;
+
 struct Startup {
     config: WorkerConfig,
     directory: PathBuf,
@@ -108,6 +111,7 @@ pub(crate) struct WorkerBridge {
     last_receipt: Option<Instant>,
     preview_grant: Option<PreviewGrant>,
     chat: Option<super::chat_io::WorkerChannel>,
+    preview: Option<preview::Runtime>,
 }
 
 impl WorkerBridge {
@@ -129,6 +133,7 @@ impl WorkerBridge {
                 }
             }
         });
+        let preview = preview::Runtime::from_config(&startup.config);
         Ok(Some(Self {
             config: startup.config.clone(),
             io: WorkerIo::start(startup.config.clone(), startup.directory.clone())?,
@@ -150,6 +155,7 @@ impl WorkerBridge {
             last_receipt: None,
             preview_grant: None,
             chat,
+            preview,
         }))
     }
 
@@ -184,6 +190,7 @@ impl WorkerBridge {
             return self.fail_closed();
         };
         if effects.quiesce {
+            self.retire_preview_source();
             self.request_sequence = 0;
             self.admitted = false;
             self.last_frame = None;
@@ -215,6 +222,9 @@ impl WorkerBridge {
                 continue;
             }
             if let Ok(transition) = self.guard.on_command(&envelope, now) {
+                // The same Arc is held by App policy and in-flight image IO.
+                // Revoke before any native effect or accepted-control reply.
+                self.preview_accepted_command(command);
                 if self.guard.mode() != WorkerMode::Detached {
                     self.last_receipt = Some(Instant::now());
                 }
@@ -243,6 +253,7 @@ impl WorkerBridge {
             merge_effects(&mut effects, self.fail_closed());
         }
         self.sync_chat_source();
+        self.refresh_preview_source();
         final_display_effects(effects, self.guard.mode())
     }
 
@@ -441,6 +452,7 @@ impl WorkerBridge {
     }
 
     fn fail_closed(&mut self) -> WorkerEffects {
+        self.retire_preview_source();
         self.preview_grant = None;
         self.detached = true;
         self.admitted = false;
@@ -455,6 +467,7 @@ impl WorkerBridge {
     }
 
     fn cancel_fence(&self, renderer: &mut aurora_render::Renderer) {
+        self.preview_capture_barrier();
         if let DisplayGate::Draining { ticket, .. } | DisplayGate::FrameFence { ticket, .. } = self.gate {
             renderer.cancel_session_fence(ticket);
         }
@@ -1289,7 +1302,7 @@ mod native {
 mod tests {
     use super::*;
 
-    fn guard_and_command() -> (WorkerGuard, aurora_session::Envelope) {
+    pub(super) fn guard_and_command() -> (WorkerGuard, aurora_session::Envelope) {
         let identity = aurora_session::WorkerIdentity {
             installation: aurora_session::InstallationId::from_bytes([1; 32]).unwrap(),
             host: aurora_session::HostId::from_bytes([2; 16]).unwrap(),

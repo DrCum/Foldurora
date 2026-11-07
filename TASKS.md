@@ -1,5 +1,15 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Actual native LastActive producer front, phase 1 (2026-11-07; no issue):
+  WorkerBridge privately mints accepted Online control tokens with original
+  receipt/expiry and stable revocable witness; optional image startup and source
+  forwarding are image-local. Exact shared capture fences retire before accepted
+  native effects/replies while normal park preserves source authority. Seven
+  accepted-core/actual-helper cases are authored and unrun. App demand/capture
+  glue, combined V4/sealed consumers, root-owned production promotion and joint
+  source/runtime checks remain required. No host bootstrap producer is enabled;
+  this component alone is not a standalone compilation or native acceptance claim.
+
 - 🔧 Viewport capture retirement-only continuation (2026-11-07; no issue):
   correlate actual backend map/submission retirement with exact request origin,
   frontend revision and nonreused probes. Try-only cleanup survives capture-only

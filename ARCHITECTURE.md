@@ -407,6 +407,14 @@ callback or image cannot evade the bound by outliving its renderer.
 The CPU-only native adapter observes capture publication and physical retention
 separately on CPU ticks, including without pending images. Continuous IO-side
 composition and actual image delivery still require their later service owner.
+`session_host/worker/preview.rs` supplies the real worker-side accepted-control
+token and optional image-channel owner. Only WorkerBridge mints that opaque
+token from current managed Online state and the original accepted receipt;
+same-domain renewals preserve its witness, source loss permanently retires it.
+App/bridge capture fences are shared separately and revoked before accepted
+control effects/replies. Image startup/IO failure does not detach hosting/chat.
+This source slice depends on the coordinated V4/sealed APIs and root-owned
+production module promotion; it does not enable a launch bootstrap producer.
 One matching target/staging pair, uniform and sampler remain cached after
 unmapping and exact GPU submission retirement. A token-independent allocation
 lease charges that physical cache and submitted/map callbacks; each new capture
