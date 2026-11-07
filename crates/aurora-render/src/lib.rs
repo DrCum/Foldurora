@@ -52,6 +52,9 @@ mod renderer;
 mod rlva;
 mod selection;
 mod session_fence;
+// Checked core descriptors/lifetime model only; no production allocator caller.
+#[cfg(test)]
+mod target_layout;
 pub mod viewport_capture;
 mod viewport_capture_gpu;
 pub use session_fence::{SessionBoundary, SessionCompletion, SessionFenceError};

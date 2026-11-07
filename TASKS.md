@@ -1,5 +1,26 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Combined monitor validation (2026-11-07; no issue): the component entries
+  below describe their frozen author checkpoints. Root subsequently corrected
+  the defining-module secret re-export, test helper shadowing and an unused
+  mutable test binding, and documented two bounded inline-capture Clippy
+  expectations without weakening captured guards or assertions. Foundation
+  qualified Linux Clippy passed at e4d3a357; combined runtime checks are next.
+  Earlier negative compiler/lint receipts remain preserved. The current
+  combination includes the checked-core-target prerequisite but still enables
+  no monitor window, image service, capture demand or inactive producer.
+
+- 🔧 Checked core-target accounting prerequisite (2026-11-07; no issue):
+  test-only fixed-capacity descriptors mirror direct make_targets allocations,
+  with checked mip/layer/sample/format/limit arithmetic and explicit missing
+  GTAO/contact planners. A generic one-active/one-retiring ledger keeps shared
+  injected credits with physical bundles, callbacks and held leases; pending
+  layout changes coalesce without allocation. Nine pure descriptor and real
+  byte-buffer lifecycle tests are authored and unrun. No complete-view/driver
+  memory bound or 64 MiB default is approved. Production allocators, normal
+  Active/XR/photo behavior and GPU producers remain unchanged; source review and
+  root-owned compilation/tests are next.
+
 - 🔧 Disabled CPU/body integration (2026-11-07; no issue): preserve the nine
   reviewed CPU surface/body commits on exact disabled-foundation base b6d5ed6b.
   CPU source at 25ae27c6 and body source at a59bd978 remain byte-identical;

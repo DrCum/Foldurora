@@ -315,6 +315,19 @@ work. Renderer hooks and CPU-only native observations are integrated as source
 prerequisites; authenticated service/image delivery and compiled/native
 validation remain separate. They do not enable parked world rendering.
 
+`target_layout.rs` with `target_layout/{layout,generations,tests}.rs` is a
+cfg(test)-only accounting prerequisite. CoreTargetLayout records up to 18 direct
+Backend::make_targets texture descriptors, checks copied format/limit metadata
+and payload arithmetic, and explicitly reports missing nested GTAO/contact
+components. It provides no complete-view/world or physical-residency receipt.
+TargetGenerations uses one active and at most one retiring bundle, one latest
+metadata request and an injected shared limit with no numeric default. Callback
+and consumer leases retain resources and credits through completion/teardown;
+third-generation allocation is refused before its factory. Nine pure descriptor/
+real-byte-buffer lifecycle regressions are authored and unrun. Existing renderer
+allocators, Active/XR/photo policy, callers and GPU submissions remain unchanged;
+no monitor authority or inactive producer is enabled.
+
 `render_thread::Owner::try_submit_owned` is a generic ownership prerequisite:
 its Busy and WorkerGone errors return the intact rejected job, including any
 owned journals/uploads. Only acceptance transfers the job and takes a previous
