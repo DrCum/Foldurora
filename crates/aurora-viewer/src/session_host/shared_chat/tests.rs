@@ -119,7 +119,7 @@ impl Frames {
         }
     }
 
-    fn raw(&self, events: Vec<Event>) -> RawInput {
+    fn raw(&self, mut events: Vec<Event>) -> RawInput {
         let modifiers = events
             .iter()
             .rev()
@@ -128,10 +128,10 @@ impl Frames {
                 _ => None,
             })
             .unwrap_or_default();
+        events.insert(0, Event::ModifiersChanged(modifiers));
         RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(680.0, 680.0))),
             time: Some(self.frame as f64 / 60.0),
-            modifiers,
             events,
             focused: true,
             ..Default::default()
