@@ -916,6 +916,18 @@ impl SurfaceFrames {
         }
     }
 
+    fn command_modifiers(&self, index: usize) -> Modifiers {
+        // Match egui-winit's ModifiersChanged translation, which stamps logical
+        // command alongside native Ctrl/Super. TextEdit Undo checks command.
+        let is_mac = self.contexts[index].os().is_mac();
+        Modifiers {
+            ctrl: !is_mac,
+            mac_cmd: is_mac,
+            command: true,
+            ..Modifiers::NONE
+        }
+    }
+
     fn focus(&mut self, index: usize) {
         if self.active != index {
             let old = self.active;
@@ -1015,6 +1027,14 @@ fn shared_chat_two_contexts_share_one_undo_and_passive_or_stale_input_cannot_rep
     assert!(frames.show(1, vec![key(Key::Z, true, false, Modifiers::CTRL)]).is_none());
     frames.show(1, vec![key(Key::Z, false, false, Modifiers::CTRL)]);
     assert_eq!(
+        frames.draft(1, source(1)),
+        "Canonical base plus edit",
+        "a physical Ctrl flag without logical command is not an egui Undo shortcut"
+    );
+    let command = frames.command_modifiers(1);
+    assert!(frames.show(1, vec![key(Key::Z, true, false, command)]).is_none());
+    frames.show(1, vec![key(Key::Z, false, false, command)]);
+    assert_eq!(
         frames.draft(0, source(1)),
         "Canonical base",
         "Undo came from the other context's canonical history"
@@ -1110,13 +1130,14 @@ fn shared_chat_hidden_policy_loss_and_reopen_purge_both_context_authorities() {
     assert_eq!(frames.draft(0, source(1)), "");
     assert_eq!(frames.draft(1, source(1)), "");
     for (index, surface) in [ChatSurface::Shared, ChatSurface::Monitor1].into_iter().enumerate() {
+        let command = frames.command_modifiers(index);
         assert_ne!(frames.model.states[0].ui.retained_for(surface).3, old_ids[index]);
         assert!(
             frames
                 .show(
                     index,
                     vec![
-                        key(Key::Z, true, false, Modifiers::CTRL),
+                        key(Key::Z, true, false, command),
                         Event::Text("OLD".into()),
                         key(Key::Enter, true, false, Modifiers::NONE)
                     ]
@@ -1241,8 +1262,9 @@ fn shared_chat_late_admission_does_not_consume_newer_same_text_after_another_sur
     let earlier = frames.click(0, "host_chat_send_rect").unwrap();
     frames.type_text(1, " plus a later edit");
     frames.settle(1, 70);
-    assert!(frames.show(1, vec![key(Key::Z, true, false, Modifiers::CTRL)]).is_none());
-    frames.show(1, vec![key(Key::Z, false, false, Modifiers::CTRL)]);
+    let command = frames.command_modifiers(1);
+    assert!(frames.show(1, vec![key(Key::Z, true, false, command)]).is_none());
+    frames.show(1, vec![key(Key::Z, false, false, command)]);
     assert_eq!(frames.draft(1, source(1)), earlier.text.as_str());
     frames.model.queued(&earlier, 99);
     assert_eq!(
@@ -1372,19 +1394,15 @@ fn shared_chat_uncommitted_ime_rolls_back_on_two_context_focus_or_surface_close_
             "Committed prefix plus stable edit"
         );
         assert!(frames.click(1, "host_chat_input_rect").is_none());
-        assert!(frames.show(1, vec![key(Key::Z, true, false, Modifiers::CTRL)]).is_none());
-        frames.show(1, vec![key(Key::Z, false, false, Modifiers::CTRL)]);
+        let command = frames.command_modifiers(1);
+        assert!(frames.show(1, vec![key(Key::Z, true, false, command)]).is_none());
+        frames.show(1, vec![key(Key::Z, false, false, command)]);
         assert_eq!(
             frames.draft(1, source(1)),
             "Committed prefix",
             "Undo retains the earlier committed checkpoint"
         );
-        let redo = Modifiers {
-            ctrl: true,
-            command: true,
-            shift: true,
-            ..Default::default()
-        };
+        let redo = Modifiers { shift: true, ..command };
         assert!(frames.show(1, vec![key(Key::Z, true, false, redo)]).is_none());
         frames.show(1, vec![key(Key::Z, false, false, redo)]);
         assert_eq!(
