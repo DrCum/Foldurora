@@ -717,7 +717,11 @@ impl Peer {
                     return Err(ChatError::UnknownReceipt);
                 }
                 self.update_review_status(request, status);
-                self.review_pending = None;
+                // An immutable duplicate belongs only to its original full
+                // capture/grant/ticket; it cannot retire a newer recovery.
+                if self.review_pending.as_ref().is_some_and(|pending| pending.request == request) {
+                    self.review_pending = None;
+                }
             }
             ChatEvent::Line(line) => {
                 let policy = self.conversations.get(&line.key.conversation).ok_or(ChatError::Unavailable)?.policy;

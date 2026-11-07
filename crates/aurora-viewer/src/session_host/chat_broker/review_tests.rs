@@ -202,6 +202,75 @@ fn chat_broker_review_receipts_match_full_capture_grant_and_request_before_high_
 }
 
 #[test]
+fn chat_broker_review_old_terminal_duplicate_preserves_newer_exact_recovery_and_host_transaction() {
+    let (mut peer, mut worker, first) = setup();
+    let now = Instant::now();
+    peer.admit_review(first, now).unwrap();
+    peer.observe(&event(&peer, 2, reply(first, ReviewOutcome::OpenedLocally))).unwrap();
+    let second = ReviewConversationRequest {
+        request: first.request + 1,
+        activation: first.activation + 1,
+        ..first
+    };
+    peer.admit_review(second, now).unwrap();
+    let viewport = aurora_session::HostedViewport {
+        host_window: 1,
+        rect: aurora_session::PhysicalRect {
+            x: 0,
+            y: 0,
+            width: 640,
+            height: 480,
+        },
+    };
+    let grant = review::Grant {
+        binding: second.target.key.source.binding(),
+        activation: second.activation,
+        viewport,
+    };
+    let mut transactions = review::Transactions::default();
+    assert!(transactions.begin(second.target, second.request, viewport, 0));
+    assert!(transactions.expect_activation(second.activation));
+    transactions.granted(grant);
+    assert_eq!(transactions.dispatch(grant), Some(second));
+    transactions.queued(second);
+
+    // A duplicate terminal A can be delivered after B's one-shot queue
+    // admission. It must not consume B's receipt identity or recovery budget.
+    peer.observe(&event(&peer, 3, reply(first, ReviewOutcome::OpenedLocally))).unwrap();
+    assert_eq!(peer.review_pending.as_ref().unwrap().request, second);
+    let delivery = peer.review_delivery(second).unwrap();
+    assert!(delivery.recovering);
+    assert_eq!(delivery.status, Status::Dispatched);
+    transactions.delivery(Some(delivery));
+    assert_eq!(transactions.full_request(), Some(second));
+    assert_eq!(transactions.operations()[0].status, Status::Dispatched);
+
+    let opens = commands(&mut peer, &mut worker, 2);
+    assert_eq!(
+        opens
+            .iter()
+            .filter(|packet| matches!(packet.message, ChatMessage::Command(ChatCommand::ReviewConversation(_))))
+            .count(),
+        2
+    );
+    peer.poll_review_receipt(now + POLL);
+    let queries = commands(&mut peer, &mut worker, 1);
+    assert!(
+        queries.iter().all(|packet| matches!(packet.message,
+        ChatMessage::Command(ChatCommand::QueryReviewReceipt(query)) if query.key == second.target.key && query.request == second.request))
+    );
+    assert_eq!(peer.review_pending.as_ref().unwrap().queries, 1);
+    peer.observe(&event(&peer, 4, reply(second, ReviewOutcome::NotForeground))).unwrap();
+    transactions.delivery(peer.review_delivery(second));
+    assert_eq!(transactions.operations()[0].status, Status::Completed(ReviewOutcome::NotForeground));
+    assert!(transactions.full_request().is_none());
+    assert_eq!(
+        peer.review_delivery(first).unwrap().status,
+        Status::Completed(ReviewOutcome::OpenedLocally)
+    );
+}
+
+#[test]
 fn chat_broker_review_disconnect_reconnect_queries_receipt_without_replaying_open() {
     let (mut peer, mut worker, request) = setup();
     let now = Instant::now();
