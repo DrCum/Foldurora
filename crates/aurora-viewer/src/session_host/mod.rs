@@ -44,6 +44,11 @@ mod preview_transport;
 #[cfg(any(windows, test))]
 mod private_image;
 mod shared_chat;
+// Pure fixed-slot prerequisites; actual actor/native/UI join remains separate.
+#[cfg(test)]
+mod quick_actions;
+#[cfg(test)]
+mod quick_prefs;
 pub(crate) mod slots;
 mod software;
 pub(crate) mod startup;
