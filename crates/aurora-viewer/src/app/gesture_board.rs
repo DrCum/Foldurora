@@ -358,24 +358,7 @@ impl State {
                     );
                 }
             }
-            Err(store::Error::Cancelled) => self.status = "board-cancelled",
-            Err(store::Error::Conflict) => self.status = "board-conflict",
-            Err(store::Error::Model(error)) => {
-                if job.initial.is_some() {
-                    self.snapshot = None;
-                    self.status = "board-invalid";
-                } else {
-                    self.status = match error {
-                        model::Error::Name => "board-name-invalid",
-                        model::Error::Limit => "board-limit",
-                        model::Error::Duplicate => "board-duplicate",
-                        model::Error::Missing => "board-stale",
-                        model::Error::Exhausted => "board-unavailable",
-                        model::Error::Invalid | model::Error::Unsupported | model::Error::Identity => "board-invalid",
-                    };
-                }
-            }
-            Err(_) => self.status = "board-save-failed",
+            Err(error) => self.store_failure(error, job.initial.is_some()),
         }
     }
     fn ready(&mut self, app: &mut App, proof: Proof, target: PlaybackItem, ready: Ready, presentation: Option<Presentation<'_>>) {

@@ -750,3 +750,39 @@ fn board_native_ui_ime_terminal_retires_only_command_focus_before_later_enter_co
     assert!(f.draw(vec![egui::Event::Ime(egui::ImeEvent::Commit("x".into()))]).0.is_none());
     assert_eq!(f.ctx.memory(|m| m.focused()), Some(text_focus));
 }
+
+#[test]
+fn board_app_edit_observing_unknown_private_or_changed_store_retires_cache_without_repair() {
+    let data = Catalogue::empty(facts().agent, facts().grid)
+        .unwrap()
+        .apply(Change::Create {
+            id: BoardId::new(),
+            name: "Prior board".into(),
+        })
+        .unwrap();
+    let bytes = data.encode().unwrap();
+    let saved = bytes.clone();
+    for error in [
+        store::Error::Model(model::Error::Unsupported),
+        store::Error::Model(model::Error::Identity),
+        store::Error::Model(model::Error::Invalid),
+        store::Error::Private,
+        store::Error::Conflict,
+    ] {
+        let mut actor = actor();
+        actor.snapshot = Some(store::Snapshot::memory(data.clone()));
+        actor.loaded = true;
+        actor.store_failure(error, false);
+        assert!(actor.snapshot.is_none());
+        assert!(actor.loaded);
+        assert!(actor.pending.is_empty());
+        assert_eq!(bytes, saved);
+    }
+    let mut actor = actor();
+    actor.snapshot = Some(store::Snapshot::memory(data.clone()));
+    actor.store_failure(store::Error::Model(model::Error::Name), false);
+    assert_eq!(*actor.snapshot.as_ref().unwrap().data, data);
+    assert_eq!(actor.status, "board-name-invalid");
+    actor.store_failure(store::Error::Model(model::Error::Limit), true);
+    assert!(actor.snapshot.is_none());
+}
