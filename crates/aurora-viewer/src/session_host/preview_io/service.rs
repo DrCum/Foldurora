@@ -626,13 +626,16 @@ mod tests {
     use super::super::tests::{control, source, state};
     use super::*;
     fn claim() -> CaptureClaim {
+        claim_for_connection(1)
+    }
+    fn claim_for_connection(connection: u64) -> CaptureClaim {
         let c = control(source(1));
         let state = state(c, Some(EpochFence::new()));
         let mut images = aurora_session::preview_image::SourceImages::new(source(1), ImageBudget::new(1024 * 1024).unwrap()).unwrap();
         images.sync(state.policy, 0).unwrap();
         images
             .request(
-                1,
+                connection,
                 1,
                 aurora_session::preview_image::PreviewGeometry::new([640, 360], [0, 0, 640, 360], PreviewSize::Small).unwrap(),
                 1,
@@ -905,8 +908,11 @@ mod tests {
         channel.try_unavailable(token, claim(), Unavailable::Busy).unwrap_err();
         assert!(channel.acknowledge_stop(token, 1).is_err());
         let fresh = channel.connection().unwrap();
+        let fresh_claim = claim_for_connection(fresh.connection());
+        assert_eq!(fresh_claim.connection(), fresh.connection());
+        assert_ne!(fresh_claim.connection(), token.connection());
         for _ in 1..=QUEUE as u64 {
-            channel.try_unavailable(fresh, claim(), Unavailable::Busy).unwrap();
+            channel.try_unavailable(fresh, fresh_claim, Unavailable::Busy).unwrap();
         }
         assert!(matches!(channel.acknowledge_stop(fresh, 1), Err(Error::Busy)));
     }

@@ -730,8 +730,8 @@ impl AdmittedFixture {
             size,
         }
     }
-    pub fn renew(&mut self, now: u64) {
-        self.images.sync(self.policy, now).unwrap();
+    pub fn observe_policy(&mut self, received_at: u64) {
+        self.images.sync_observed(self.policy, received_at, received_at).unwrap();
     }
 }
 
@@ -832,8 +832,15 @@ fn monitor_body_draws_only_current_admitted_source_and_actual_texture_namespace_
     assert!(canvas.contains_rect(fit) && fit.is_positive());
     assert!((fit.width() / fit.height() - 16.0 / 9.0).abs() < 0.01);
     drop(frame);
+    let original_age = admitted.admitted.age();
+    // Each synthetic receipt arrives before the previous authority expires.
+    // Repainting or rereading the original receipt cannot bridge a five-second gap.
+    for received_at in (505..=5005).step_by(500) {
+        admitted.observe_policy(received_at);
+        assert!(admitted.admitted.current(received_at));
+        assert_eq!(admitted.admitted.age(), original_age);
+    }
     f.now = 5010;
-    admitted.renew(5005);
     let frame = draw_private(&mut f, 1, &mut slot, &admitted.admitted);
     assert!(
         f.text

@@ -512,11 +512,32 @@ fn preview_io_owned_loopback_full_reconnect_never_replays_old_commands_or_revive
             control: io.control.clone(),
         }))
         .unwrap();
-    io.worker.publish_state(io.state.clone()).unwrap();
+    // An actual CPU owner keeps observing native state while IO waits for its
+    // normal reconnect retry. A clone of the startup receipt expires after 1s.
+    assert!(!io.state.current(io.state.native_observed_at + DEADLINE));
+    let mut next_observation = Instant::now();
+    let mut observations = 0;
     let fresh = until(|| {
+        let now = Instant::now();
+        if now >= next_observation {
+            let observed = state(io.control.clone(), io.state.capture.clone());
+            assert_eq!(observed.policy, io.state.policy);
+            assert!(observed.capture == io.state.capture);
+            match io.worker.publish_state(observed) {
+                Ok(()) => {
+                    observations += 1;
+                    next_observation = now + HEARTBEAT;
+                }
+                // The real API fails closed on contention. A later synthetic
+                // CPU observation may recover; the existing until bound stays fixed.
+                Err(Error::Busy) => return None,
+                Err(error) => panic!("fresh synthetic native observation rejected: {error:?}"),
+            }
+        }
         io.observation(Status::Pixels)
             .filter(|o| o.token.connection() > old.token.connection())
     });
+    assert!(observations > 0, "reconnect requires newly observed native state");
     assert!(
         image
             .with_pixels(&io.control, io.host.shared.clock(Instant::now()), |_| ())
