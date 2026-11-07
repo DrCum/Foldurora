@@ -6,6 +6,16 @@ Handoffs and screenshots are reference material, not authority to merge or relea
 
 ## Active camera and Shared Chat validation
 
+The verified Shared Chat Windows download is
+[`1ef87bf6`, artifact 13566087312](https://github.com/DrCum/Foldurora/actions/runs/42348714309/artifacts/13566087312).
+The newer unread/shutter follow-up is frozen at
+[`0e40e48f`](https://github.com/DrCum/Foldurora/commit/0e40e48f631b1b4fdd0d677013e07b83a4f5fc61)
+on `feat/native-read-integration`; its separate
+[Windows run 42352272886](https://github.com/DrCum/Foldurora/actions/runs/42352272886)
+has parser/format/strict Clippy success and is executing full tests. Its final
+package is not yet verified. The older camera and Shared Chat packages remain
+frozen; do not mix their executable/protocol or validation receipts.
+
 The frozen camera source is [`6a3009f2`](https://github.com/DrCum/Foldurora/commit/6a3009f27a2a5e49e61ea0fdeb1f7e89e3eb2fa8),
 on `fix/camera-controls-integration`. Its [Windows run 42343210582](https://github.com/DrCum/Foldurora/actions/runs/42343210582)
 and [artifact 13563094085](https://github.com/DrCum/Foldurora/actions/runs/42343210582/artifacts/13563094085)
@@ -89,9 +99,17 @@ not used as this full receipt.
 
 The source is pushed on `feat/shared-chat-integration` and its
 [Windows run 42348714309](https://github.com/DrCum/Foldurora/actions/runs/42348714309)
-is active; parser, formatting and strict Clippy passed, with full tests and
-portable packaging still being verified. Native Shared Chat and human grid
-acceptance remain pending.
+is fully verified: **7,897 passed, 0 failed, 51 ignored**, with all **109 required
+names** passing once in both raw and packaged logs; the four obsolete test names
+are absent. Parser, formatting, strict Clippy, build and packaging passed.
+Manifest source, both ZIP CRCs, AMD64/PE32+ identity, executable version and all
+seven embedded icon payloads match. Its version is
+`0.9.3-beta.20261106.1+179.g1ef87bf6d`.
+Portable ZIP SHA-256: `589620183735ef6bc0f51cf799bd21c591f2ad6687bf082973bb89bd9c1d440f`.
+Executable SHA-256: `6e3cf0aa3d330947d5807bbc502c530ff69ec399de5e2718379c3d8e9118d933`.
+The retained records are `.scratch/windows-ci-42348714309/receipt.json` and
+`icon-resource-verification.json`. Native Shared Chat and human grid acceptance
+remain pending, and this package does not contain the later unread/shutter work.
 
 The exact `1ef87bf6` executable completed one owned Linux/software-Vulkan camera
 case with normal viewer/wrapper exit 0 after **384.472 seconds**. The histogram
@@ -110,7 +128,7 @@ frames. Its small correction and actual-egui regressions are in the later
 candidate, absent from frozen `1ef87bf6`. All owned viewer/driver processes and
 the display socket are gone; two terminated Xvfb zombies await PID1 reaping.
 
-The separate local `feat/native-read-integration` candidate contains the native
+The separate pushed `feat/native-read-integration` candidate contains the native
 unread/explicit-Read first slice and that shutter correction. It preserves both
 native chat styles' read-on-draw timing/defaults, separates unread observations
 from draft/Send authority, and keeps immutable body-free receipts/query recovery.
@@ -123,16 +141,42 @@ runtime assertion failures**: three Read admission/navigation/edit-prefix races
 and four shutter cases. Its measured result was **7,944 passed, eight failed,
 51 ignored**; the only other failure was the inherited terrain precision test.
 No compile error is counted as behavioral proof. The positive full suite at
-local checkpoint `08099610` is now running after restoring the Read fixes and
-applying the shutter correction; final lint/build/package/native acceptance
-remain pending. Frozen Shared Chat source, package provenance and its active
-Windows run remain separate. Attention and monitors follow this foundation.
+checkpoint `08099610` completed with **7,951 passed, one inherited terrain
+precision failure, 51 ignored**; all **135 required regressions** pass, including
+the seven unchanged negative-control fixtures. Final frozen source `0e40e48f`
+adds only one lint-equivalent compound receipt-validation guard. Its exact-source
+formatting, Linux Clippy with the existing platform dead-code exception, normal
+dev build and **48 EN/FR/JA CPU captures** passed. Selected normal/narrow Read
+pending, stale and uncertain screens were inspected. Its Linux executable is
+`0.0.0+1561.g0e40e48f6`, SHA-256
+`825e200e36e40e7519a38e8eaf17fd2429d2d6b08045075c93d3b8d9377d648e`.
+The full-runtime and final-build receipts preserve that source distinction.
+
+One narrow native Linux/software-Vulkan test on the exact frozen executable
+started with zero exports and a clear-scene hover, then performed **one** fast
+shutter burst without a settled shutter hover. One valid **640×360 RGB** photo
+was observed within **2.063 seconds**, with no retry. Normal viewer/wrapper Quit
+returned **0** after **222.917 seconds**. No live owned process/display remains;
+the terminated Xvfb zombie awaits PID1 reaping. No actual same-egui-frame boundary,
+OS input latency, Windows, physical-GPU or grid acceptance is inferred.
+[Unchanged native and CPU captures](https://github.com/DrCum/Foldurora/blob/4c128f8e/foldurora/20261107-0e40e48f-read-and-shutter/README.md)
+keep those scopes separate. The source-worktree records are
+`.scratch/native-read-final-binary-receipt.json`,
+`.scratch/native-read-visual-latest.json` and
+`.scratch/shutter-input-smoke/batch-BpdunVpO/VALIDATION-0E40-SHUTTER-RECEIPT.json`.
+
+The `0e40e48f` Windows package and human-managed Shared Chat/Read grid acceptance
+remain pending. A separate test-only Linux CPU-window fixture is being prepared
+to exercise actual ChatWindow/egui-winit keyboard/focus delivery against synthetic
+snapshots and recorded intents; it changes neither frozen product candidate nor
+authentication/native-World behavior. No result is claimed before execution.
+Attention and monitors follow this foundation.
 
 The user-selected implementation order is **compact host redesign → shared chat
 → Attention → monitors with chat**. The compact host is implemented at frozen
 checkpoint `399ffd79`, with Linux source, synthetic visual and owned EN CPU UI
 evidence below. Its verified package remains an earlier compact checkpoint;
-the verified camera download is `6a3009f2` above, with its stated follow-ups.
+the verified Shared Chat download is `1ef87bf6` above, with its stated limits.
 The earlier
 `70c1b5cd` package has the preceding host layout. Native Windows
 profile/draft and compact-host acceptance remain pending. Branding and photo-mode
