@@ -47,6 +47,14 @@ Unknown strings and Other buttons remain opaque unchanged, without settings
 repair or action substitution. Visible labels still use the existing catalogues.
 This prerequisite enables no profile-copy UI, IO, or automatic native action.
 
+The test-only `world/inventory_archive` prerequisite contains the closed local
+UUID-set codec and source/edit/publication model. Actual World login, Inventory
+owner/root and RLVa showinv are checked before reads/edits; source/event and UI
+owner adapters remain required. Only an explicit missing-load outcome creates
+empty defaults. Exact model/source/operation intents retain old published flags
+on failure and cannot complete another model's operation with the same number.
+There is no IO, visibility projection, new store kind or production UI yet.
+
 `session_host/monitor_manager.rs` is the Shell-owned bounded binding/operation
 front for four fixed monitors and one cycling view. It depends on the separately
 authored real `preview_projection` facade; no local IO stub or inferred image
