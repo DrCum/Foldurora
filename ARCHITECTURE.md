@@ -163,6 +163,12 @@ Renderer replacement shares the process's worker image-credit pool, so an old
 callback or image cannot evade the bound by outliving its renderer.
 The future native adapter must observe the capture generation on CPU ticks,
 including without pending images, to propagate backend surface-loss revocation.
+One matching target/staging pair, uniform and sampler remain cached after
+unmapping and exact GPU submission retirement. A token-independent allocation
+lease charges that physical cache and submitted/map callbacks; each new capture
+gets a fresh request token without charging the same pair twice. Layout,
+surface/device or owner-generation replacement retires the old pair before
+replacement. Every photo capture mode and tiled/photo context vetoes this tap.
 
 `ChatUi` owns a bounded policy-stamped draft map, including each editor's Undo
 state. A pass moves editor state into egui only for its exact source/conversation/

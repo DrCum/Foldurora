@@ -186,9 +186,10 @@ pub struct CaptureRequest {
     boundary: CaptureBoundary,
     viewport: WorldViewport,
     layout: CaptureLayout,
-    // Backend buffers/packets must retain a request clone until their actual
-    // resources retire; cancellation of the queue alone cannot free credit.
-    _credit: Arc<Credit>,
+    // The simple public request API carries allocation credit through clones.
+    // The backend-cache metadata path instead uses CaptureResources so fresh
+    // tokens do not repeatedly reserve a retained physical pair.
+    _credit: Option<Arc<Credit>>,
 }
 
 impl CaptureRequest {
@@ -217,7 +218,26 @@ struct Credit {
     bytes: usize,
 }
 
+/// Token-independent credit for one physical cached target/staging pair.
+/// Backend storage and submitted/map callbacks retain clones until retirement.
+#[derive(Clone)]
+pub(crate) struct CaptureResources {
+    layout: CaptureLayout,
+    _credit: Arc<Credit>,
+}
+impl CaptureResources {
+    pub(crate) fn layout(&self) -> CaptureLayout {
+        self.layout
+    }
+}
+
 impl CaptureBudget {
+    pub(crate) fn resources(&self, layout: CaptureLayout) -> Result<CaptureResources, CaptureError> {
+        Ok(CaptureResources {
+            layout,
+            _credit: Arc::new(self.reserve(layout.payload_bytes + layout.staging_bytes)?),
+        })
+    }
     /// One shared pool per worker capture service. Replacement queues reuse it
     /// while old backend requests, callbacks or image clones remain retained.
     pub fn new(limit: usize) -> Result<Self, CaptureError> {
@@ -396,6 +416,23 @@ impl CaptureQueue {
     }
 
     pub fn request(&mut self, viewport: WorldViewport, cap: CaptureCap, now: u64) -> Result<CaptureRequest, CaptureError> {
+        self.request_inner(viewport, cap, now, true)
+    }
+
+    /// The render-owner cache independently reserves physical pair credit.
+    /// This path freezes metadata only and never reserves the same GPU pair
+    /// again for every fresh request token. Pixel allocation remains separate.
+    pub(crate) fn request_metadata(&mut self, viewport: WorldViewport, cap: CaptureCap, now: u64) -> Result<CaptureRequest, CaptureError> {
+        self.request_inner(viewport, cap, now, false)
+    }
+
+    fn request_inner(
+        &mut self,
+        viewport: WorldViewport,
+        cap: CaptureCap,
+        now: u64,
+        reserve_gpu: bool,
+    ) -> Result<CaptureRequest, CaptureError> {
         self.clock(now)?;
         if self.epoch == 0 {
             return Err(CaptureError::Exhausted);
@@ -416,7 +453,11 @@ impl CaptureQueue {
             CaptureError::Exhausted
         })?;
         // GPU target and staging reservations precede their eventual creation.
-        let credit = self.budget.reserve(layout.payload_bytes + layout.staging_bytes)?;
+        let credit = if reserve_gpu {
+            Some(self.budget.resources(layout)?._credit)
+        } else {
+            None
+        };
         let request = CaptureRequest {
             token: CaptureToken {
                 instance: self.instance,
@@ -427,7 +468,7 @@ impl CaptureQueue {
             boundary: self.boundary,
             viewport,
             layout,
-            _credit: Arc::new(credit),
+            _credit: credit,
         };
         self.next_ticket = next;
         self.pending = Some(Pending {

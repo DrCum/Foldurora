@@ -14,6 +14,10 @@
     lifetimes are authored, with fake-owner tests and an ignored synthetic GPU
     color/crop fixture. Source review, compilation and GPU execution remain
     pending; no native export authority or host monitor is enabled.
+    Matching-layout target/staging reuse waits for unmapping and exact submitted
+    work retirement; physical cache credit is independent of request tokens.
+    All photo modes and tiled contexts veto capture. Fake allocation/retirement
+    tests and four-format synthetic GPU coverage are authored, not executed.
 
 - 🔧 Native Attention CPU input fixture (2026-11-07; no issue): source-only
   Linux ignored test around the production AttentionWindow, with synthetic

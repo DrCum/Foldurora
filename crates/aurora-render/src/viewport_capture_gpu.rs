@@ -6,16 +6,15 @@ use crate::WorldViewport;
 use crate::pipeline_cache::CachedPipelines;
 use crate::viewport_capture::{
     CaptureBoundary, CaptureBudget, CaptureCap, CaptureError, CaptureLayout, CaptureOutcome, CapturePixels, CaptureQueue, CaptureRequest,
-    CaptureToken, CapturedViewport, MapCallback, WORKER_CAPTURE_BYTES,
+    CaptureResources, CaptureToken, CapturedViewport, MapCallback, WORKER_CAPTURE_BYTES,
 };
 use bytemuck::{Pod, Zeroable};
 use parking_lot::{Mutex, MutexGuard};
 use std::sync::{
     Arc, OnceLock,
-    atomic::{AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use std::time::Instant;
-use wgpu::util::DeviceExt;
 
 static NEXT_DEVICE: AtomicU64 = AtomicU64::new(1);
 static WORKER_BUDGET: OnceLock<CaptureBudget> = OnceLock::new();
@@ -116,7 +115,7 @@ impl Shared {
     pub fn request(&self, boundary: CaptureBoundary, viewport: WorldViewport, cap: CaptureCap) -> Result<FrameCapture, CaptureError> {
         let mut state = self.lock()?;
         state.queue.synchronize_boundary(boundary)?;
-        let request = state.queue.request(viewport, cap, self.now())?;
+        let request = state.queue.request_metadata(viewport, cap, self.now())?;
         let generation = state.generation;
         if generation != self.generation.load(Ordering::Acquire) {
             return Err(CaptureError::Cancelled);
@@ -227,21 +226,111 @@ pub(crate) fn sampleable(format: wgpu::TextureFormat, usage: wgpu::TextureUsages
 struct Pending {
     frame: FrameCapture,
     callback: MapCallback,
-    staging: wgpu::Buffer,
-    _target: wgpu::Texture,
     mapped: bool,
     packed: Option<CapturePixels>,
 }
-impl Drop for Pending {
-    fn drop(&mut self) {
-        self.staging.unmap();
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct PairKey {
+    boundary: CaptureBoundary,
+    layout: CaptureLayout,
+    generation: u64,
+}
+struct Flight {
+    retired: Arc<AtomicBool>,
+    submitted: bool,
+    unmapped: bool,
+}
+
+/// The actual backend and fake allocator tests use the same single-pair
+/// lifecycle. Readiness requires both unmapping and submitted-work retirement;
+/// cancellation never manufactures completion or admits a second pair.
+struct PairSlot<T> {
+    key: Option<PairKey>,
+    value: Option<T>,
+    flight: Option<Flight>,
+    discard: bool,
+}
+impl<T> Default for PairSlot<T> {
+    fn default() -> Self {
+        Self {
+            key: None,
+            value: None,
+            flight: None,
+            discard: false,
+        }
     }
+}
+impl<T> PairSlot<T> {
+    fn poll(&mut self, generation: u64) {
+        if self.key.is_some_and(|key| key.generation != generation) {
+            self.discard = true;
+        }
+        if self
+            .flight
+            .as_ref()
+            .is_some_and(|flight| flight.unmapped && (!flight.submitted || flight.retired.load(Ordering::Acquire)))
+        {
+            self.flight = None;
+        }
+        if self.discard && self.flight.is_none() {
+            self.value = None;
+            self.key = None;
+            self.discard = false;
+        }
+    }
+    fn acquire(&mut self, key: PairKey, create: impl FnOnce() -> Result<T, CaptureError>) -> Result<(), CaptureError> {
+        self.poll(key.generation);
+        if self.flight.is_some() {
+            return Err(CaptureError::Busy);
+        }
+        if self.key != Some(key) {
+            self.value = None;
+            self.key = None;
+        }
+        if self.value.is_none() {
+            self.value = Some(create()?);
+            self.key = Some(key);
+        }
+        self.flight = Some(Flight {
+            retired: Arc::new(AtomicBool::new(false)),
+            submitted: false,
+            unmapped: false,
+        });
+        Ok(())
+    }
+    fn submitted(&mut self) -> Option<Arc<AtomicBool>> {
+        let flight = self.flight.as_mut()?;
+        flight.submitted = true;
+        Some(flight.retired.clone())
+    }
+    fn unmapped(&mut self) {
+        if let Some(flight) = &mut self.flight {
+            flight.unmapped = true;
+        }
+    }
+    fn retire(&mut self, generation: u64) {
+        self.discard = true;
+        self.poll(generation);
+    }
+    fn needs_maintenance(&self, generation: u64) -> bool {
+        self.flight.is_some() || self.discard || self.key.is_some_and(|key| key.generation != generation)
+    }
+}
+
+struct ResourcePair {
+    target: wgpu::Texture,
+    staging: wgpu::Buffer,
+    uniform: wgpu::Buffer,
+    sampler: wgpu::Sampler,
+    lease: CaptureResources,
 }
 
 pub(crate) struct GpuCapture {
     pub shared: Arc<Shared>,
     pipeline: Option<wgpu::RenderPipeline>,
     pending: Option<Pending>,
+    pair: PairSlot<ResourcePair>,
 }
 
 impl GpuCapture {
@@ -250,6 +339,7 @@ impl GpuCapture {
             shared,
             pipeline: None,
             pending: None,
+            pair: PairSlot::default(),
         }
     }
 
@@ -257,6 +347,7 @@ impl GpuCapture {
     pub fn encode(
         &mut self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         source: &wgpu::Texture,
         frame: FrameCapture,
@@ -290,37 +381,61 @@ impl GpuCapture {
         }
         let layout = frame.request.layout();
         let (width, height) = layout.size();
-        let target = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("viewport capture target"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let staging = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("viewport capture staging"),
-            size: layout.staging_bytes() as u64,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
+        let key = PairKey {
+            boundary,
+            layout,
+            generation: frame.generation,
+        };
+        if let Err(error) = self.pair.acquire(key, || {
+            let lease = self.shared.budget.resources(layout)?;
+            let target = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("viewport capture target"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
+            let staging = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("viewport capture staging"),
+                size: layout.staging_bytes() as u64,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            });
+            let uniform = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("viewport capture crop"),
+                size: std::mem::size_of::<Params>() as u64,
+                mapped_at_creation: false,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+            let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                ..Default::default()
+            });
+            Ok(ResourcePair {
+                target,
+                staging,
+                uniform,
+                sampler,
+                lease,
+            })
+        }) {
+            self.shared.fail(&frame, error);
+            return;
+        }
+        let Some(pair) = self.pair.value.as_ref() else {
+            return;
+        };
+        debug_assert_eq!(pair.lease.layout(), layout);
+        queue.write_buffer(&pair.uniform, 0, bytemuck::bytes_of(&params(&frame.request, source.format())));
         let pipeline = self.pipeline.get_or_insert_with(|| pipeline(device));
-        let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("viewport capture crop"),
-            contents: bytemuck::bytes_of(&params(&frame.request, source.format())),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            ..Default::default()
-        });
         let source_view = source.create_view(&Default::default());
         let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("viewport capture source"),
@@ -332,15 +447,15 @@ impl GpuCapture {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
+                    resource: wgpu::BindingResource::Sampler(&pair.sampler),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: uniform.as_entire_binding(),
+                    resource: pair.uniform.as_entire_binding(),
                 },
             ],
         });
-        let target_view = target.create_view(&Default::default());
+        let target_view = pair.target.create_view(&Default::default());
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("viewport capture sample"),
@@ -363,9 +478,9 @@ impl GpuCapture {
             pass.draw(0..3, 0..1);
         }
         encoder.copy_texture_to_buffer(
-            target.as_image_copy(),
+            pair.target.as_image_copy(),
             wgpu::TexelCopyBufferInfo {
-                buffer: &staging,
+                buffer: &pair.staging,
                 layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(layout.padded_row_bytes()),
@@ -381,8 +496,6 @@ impl GpuCapture {
         self.pending = Some(Pending {
             frame,
             callback,
-            staging,
-            _target: target,
             mapped: false,
             packed: None,
         });
@@ -392,15 +505,26 @@ impl GpuCapture {
         if let Some(pending) = &mut self.pending
             && !pending.mapped
         {
+            let Some(retired) = self.pair.submitted() else {
+                return;
+            };
+            let Some(pair) = &self.pair.value else {
+                return;
+            };
             // Mapping can be cancelled before its copy completes. The ordered
             // queue callback retains GPU allocation credit through real work
             // completion independently of map/queue/UI cancellation.
-            let submitted_credit = pending.frame.request.clone();
-            queue.on_submitted_work_done(move || drop(submitted_credit));
+            let submitted_credit = pair.lease.clone();
+            queue.on_submitted_work_done(move || {
+                retired.store(true, Ordering::Release);
+                drop(submitted_credit);
+            });
             let callback = pending.callback.clone();
-            pending
-                .staging
-                .map_async(wgpu::MapMode::Read, .., move |result| callback.complete(result.is_ok()));
+            let map_credit = pair.lease.clone();
+            pair.staging.map_async(wgpu::MapMode::Read, .., move |result| {
+                callback.complete(result.is_ok());
+                drop(map_credit);
+            });
             pending.mapped = true;
         }
     }
@@ -408,6 +532,7 @@ impl GpuCapture {
     /// Device polling occurs in Backend, on its render owner, even without
     /// frame pacing or another presentation. This method never waits for maps.
     pub fn maintain(&mut self) {
+        self.pair.poll(self.shared.generation());
         let Some(pending) = &mut self.pending else {
             return;
         };
@@ -415,7 +540,7 @@ impl GpuCapture {
             Ok(true) => {}
             Err(CaptureError::Busy) => return,
             _ => {
-                self.pending = None;
+                self.release_pending(true);
                 return;
             }
         }
@@ -433,40 +558,71 @@ impl GpuCapture {
                 Ok(pixels) => pixels,
                 Err(error) => {
                     self.shared.fail(&pending.frame, error);
-                    self.pending = None;
+                    self.release_pending(true);
                     return;
                 }
             };
             let mut pixels = pixels;
-            let result = match pending.staging.get_mapped_range(..) {
+            let Some(pair) = self.pair.value.as_ref() else {
+                return;
+            };
+            let result = match pair.staging.get_mapped_range(..) {
                 Ok(mapped) => pack_rows(&mapped, pixels.bytes_mut(), pending.frame.request.layout()),
                 Err(_) => Err(CaptureError::MapFailed),
             };
-            pending.staging.unmap();
-            pending.packed = match result.and_then(|_| pixels.finish()) {
-                Ok(pixels) => Some(pixels),
+            pair.staging.unmap();
+            self.pair.unmapped();
+            let packed = match result.and_then(|_| pixels.finish()) {
+                Ok(pixels) => pixels,
                 Err(error) => {
                     self.shared.fail(&pending.frame, error);
-                    self.pending = None;
+                    self.release_pending(true);
                     return;
                 }
             };
+            pending.packed = Some(packed);
         }
         let Some(pixels) = pending.packed.as_ref() else {
             return;
         };
         match self.shared.finish(&pending.frame, pixels.clone()) {
             Err(CaptureError::Busy) => {}
-            _ => self.pending = None,
+            Ok(()) => self.release_pending(false),
+            Err(_) => self.release_pending(true),
         }
     }
 
     pub fn invalidate(&mut self) {
         self.shared.invalidate();
-        self.pending = None;
+        self.release_pending(true);
     }
     pub fn has_pending(&self) -> bool {
-        self.pending.is_some()
+        self.pending.is_some() || self.pair.needs_maintenance(self.shared.generation())
+    }
+
+    fn release_pending(&mut self, retire: bool) {
+        if self.pending.is_some() {
+            if let Some(pair) = &self.pair.value {
+                pair.staging.unmap();
+            }
+            self.pair.unmapped();
+        }
+        self.pending = None;
+        if retire {
+            self.pair.retire(self.shared.generation());
+        } else {
+            self.pair.poll(self.shared.generation());
+        }
+    }
+}
+
+impl Drop for GpuCapture {
+    fn drop(&mut self) {
+        if let Some(pair) = &self.pair.value {
+            pair.staging.unmap();
+        }
+        // Submitted/map callback leases retain physical allocation credit even
+        // if renderer teardown drops this cache before GPU retirement.
     }
 }
 
@@ -647,6 +803,7 @@ mod tests {
         let first = Shared::with_budget((640, 360), budget.clone()).unwrap();
         first.clock_override.store(0, Ordering::Release);
         let frame = request(&first);
+        let resources = budget.resources(frame.request.layout()).unwrap();
         let callback = first.begin(&frame, frame.request.boundary(), 1).unwrap();
         callback.complete(true);
         first.finish(&frame, fake_pixels(&first, &frame)).unwrap();
@@ -655,14 +812,157 @@ mod tests {
         let replacement = Shared::with_budget((640, 360), budget.clone()).unwrap();
         replacement.clock_override.store(0, Ordering::Release);
         let boundary = replacement.boundary(1, (640, 360)).unwrap();
-        assert!(matches!(
-            replacement.request(boundary, view(), CaptureCap::Small),
-            Err(CaptureError::Capacity)
-        ));
+        replacement.request(boundary, view(), CaptureCap::Small).unwrap();
+        assert!(
+            matches!(budget.resources(resources.layout()), Err(CaptureError::Capacity)),
+            "metadata requests no longer double-charge GPU bytes; physical pair allocation still fails at the shared cap"
+        );
         assert_eq!(budget.used(), bytes * 3);
         drop(image);
+        assert_eq!(budget.used(), bytes * 2);
+        drop(resources);
         assert_eq!(budget.used(), 0);
-        assert!(replacement.request(boundary, view(), CaptureCap::Small).is_ok());
+        assert!(budget.resources(CaptureLayout::fit(view(), CaptureCap::Small).unwrap()).is_ok());
+    }
+
+    #[test]
+    fn viewport_gpu_pair_cache_reuses_matching_captures_with_fresh_tokens_and_one_allocation() {
+        let shared = shared();
+        let mut slot: PairSlot<CaptureResources> = PairSlot::default();
+        let mut allocations = 0;
+        let mut previous = None;
+        for sequence in 1..=3 {
+            let frame = request(&shared);
+            assert_ne!(previous, Some(frame.request.token()));
+            previous = Some(frame.request.token());
+            let key = PairKey {
+                boundary: frame.request.boundary(),
+                layout: frame.request.layout(),
+                generation: frame.generation,
+            };
+            slot.acquire(key, || {
+                allocations += 1;
+                shared.budget.resources(key.layout)
+            })
+            .unwrap();
+            let submitted = slot.submitted().unwrap();
+            let callback = shared.begin(&frame, key.boundary, sequence).unwrap();
+            callback.complete(true);
+            shared.finish(&frame, fake_pixels(&shared, &frame)).unwrap();
+            drop(shared.take().unwrap().unwrap());
+            slot.unmapped();
+            assert!(matches!(slot.acquire(key, || panic!("still in flight")), Err(CaptureError::Busy)));
+            submitted.store(true, Ordering::Release);
+            slot.poll(frame.generation);
+            assert_eq!(allocations, 1, "matching target/staging pair is allocated once");
+            assert_eq!(shared.budget.used(), key.layout.payload_bytes() + key.layout.staging_bytes());
+        }
+        let old = slot.key.unwrap();
+        let resized = PairKey {
+            layout: CaptureLayout::new(480, 270).unwrap(),
+            ..old
+        };
+        slot.acquire(resized, || {
+            allocations += 1;
+            shared.budget.resources(resized.layout)
+        })
+        .unwrap();
+        let done = slot.submitted().unwrap();
+        done.store(true, Ordering::Release);
+        slot.unmapped();
+        slot.poll(old.generation);
+        assert_eq!(allocations, 2);
+        let new_device = PairKey {
+            boundary: CaptureBoundary::new(old.boundary.device_epoch() + 1, 1, old.boundary.size()).unwrap(),
+            ..resized
+        };
+        slot.acquire(new_device, || {
+            allocations += 1;
+            shared.budget.resources(new_device.layout)
+        })
+        .unwrap();
+        assert_eq!(allocations, 3, "device replacement cannot reuse old resources");
+    }
+
+    #[test]
+    fn viewport_gpu_pair_reuse_waits_for_unmap_and_exact_submission_even_after_cancel() {
+        let shared = shared();
+        let frame = request(&shared);
+        let key = PairKey {
+            boundary: frame.request.boundary(),
+            layout: frame.request.layout(),
+            generation: frame.generation,
+        };
+        let mut slot: PairSlot<CaptureResources> = PairSlot::default();
+        let mut allocations = 0;
+        slot.acquire(key, || {
+            allocations += 1;
+            shared.budget.resources(key.layout)
+        })
+        .unwrap();
+        let old = slot.submitted().unwrap();
+        old.store(true, Ordering::Release);
+        assert!(matches!(slot.acquire(key, || panic!("map not unmapped")), Err(CaptureError::Busy)));
+        slot.unmapped();
+        slot.poll(key.generation);
+        slot.acquire(key, || panic!("reuse expected")).unwrap();
+        let cancelled = slot.submitted().unwrap();
+        slot.unmapped();
+        slot.retire(key.generation + 1);
+        let next = PairKey {
+            generation: key.generation + 1,
+            ..key
+        };
+        assert!(matches!(
+            slot.acquire(next, || panic!("cancel is not GPU completion")),
+            Err(CaptureError::Busy)
+        ));
+        cancelled.store(true, Ordering::Release);
+        slot.poll(next.generation);
+        slot.acquire(next, || {
+            allocations += 1;
+            shared.budget.resources(next.layout)
+        })
+        .unwrap();
+        let fresh = slot.submitted().unwrap();
+        slot.unmapped();
+        old.store(true, Ordering::Release);
+        cancelled.store(true, Ordering::Release);
+        assert!(matches!(
+            slot.acquire(next, || panic!("old callbacks cannot retire new submission")),
+            Err(CaptureError::Busy)
+        ));
+        fresh.store(true, Ordering::Release);
+        slot.poll(next.generation);
+        slot.acquire(next, || panic!("new safely retired pair is reusable")).unwrap();
+        assert_eq!(allocations, 2);
+    }
+
+    #[test]
+    fn viewport_gpu_cached_pair_and_callback_leases_survive_renderer_teardown() {
+        let shared = shared();
+        let frame = request(&shared);
+        let layout = frame.request.layout();
+        let key = PairKey {
+            boundary: frame.request.boundary(),
+            layout,
+            generation: frame.generation,
+        };
+        let bytes = layout.payload_bytes() + layout.staging_bytes();
+        let budget = CaptureBudget::new(bytes).unwrap();
+        let mut slot: PairSlot<CaptureResources> = PairSlot::default();
+        slot.acquire(key, || budget.resources(layout)).unwrap();
+        let retired = slot.submitted().unwrap();
+        let callback_lease = slot.value.as_ref().unwrap().clone();
+        slot.unmapped();
+        slot.retire(key.generation + 1);
+        drop(slot);
+        assert_eq!(budget.used(), bytes);
+        assert!(matches!(budget.resources(layout), Err(CaptureError::Capacity)));
+        retired.store(true, Ordering::Release);
+        drop(callback_lease);
+        assert_eq!(budget.used(), 0);
+        assert!(budget.resources(layout).is_ok());
     }
 
     #[test]
@@ -737,6 +1037,7 @@ mod tests {
             wgpu::TextureFormat::Rgba8Unorm,
             wgpu::TextureFormat::Rgba8UnormSrgb,
             wgpu::TextureFormat::Bgra8Unorm,
+            wgpu::TextureFormat::Bgra8UnormSrgb,
         ] {
             let shared = Shared::new((64, 64)).unwrap();
             shared.clock_override.store(0, Ordering::Release);
@@ -772,7 +1073,7 @@ mod tests {
                     } else {
                         [255, 0, 255, 0]
                     };
-                    if format == wgpu::TextureFormat::Bgra8Unorm {
+                    if matches!(format, wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb) {
                         color.swap(0, 2);
                     }
                     bytes[(y * 64 + x) * 4..(y * 64 + x + 1) * 4].copy_from_slice(&color);
@@ -790,7 +1091,16 @@ mod tests {
             );
             let mut capture = GpuCapture::new(shared.clone());
             let mut encoder = device.create_command_encoder(&Default::default());
-            capture.encode(&device, &mut encoder, &source, frame.clone(), frame.request.boundary(), viewport, 1);
+            capture.encode(
+                &device,
+                &queue,
+                &mut encoder,
+                &source,
+                frame.clone(),
+                frame.request.boundary(),
+                viewport,
+                1,
+            );
             queue.submit([encoder.finish()]);
             capture.after_submit(&queue);
             let deadline = Instant::now() + std::time::Duration::from_secs(2);

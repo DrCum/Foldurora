@@ -8536,11 +8536,18 @@ impl Backend {
         // Dedicated no-UI tap: ordinary composed world only, before labels,
         // HUDs and viewer UI. Existing blocking photo captures stay separate.
         if let (Some(frame), Some(capture)) = (viewport_capture, &mut self.viewport_capture) {
-            if external_output || snapshot.is_some() || f.cutout || !f.rlva_overlays.is_empty() || !f.rlva_spheres.is_empty() {
+            if !viewport_capture_frame_allowed(
+                wanted,
+                f.photo_context,
+                external_output,
+                f.cutout,
+                !f.rlva_overlays.is_empty(),
+                !f.rlva_spheres.is_empty(),
+            ) {
                 capture.shared.fail(&frame, crate::viewport_capture::CaptureError::Unsupported);
             } else if let Ok(boundary) = capture.shared.boundary(surface.epoch, (self.config.width, self.config.height)) {
                 let source = self.ui_blur.as_ref().map_or(surface_tex.texture(), |blur| &blur.source);
-                capture.encode(&self.device, &mut encoder, source, frame, boundary, viewport, index);
+                capture.encode(&self.device, &self.queue, &mut encoder, source, frame, boundary, viewport, index);
             }
         }
 
@@ -9112,9 +9119,61 @@ impl Backend {
     }
 }
 
+fn viewport_capture_frame_allowed(
+    wanted: Option<Capture>,
+    context: PhotoContext,
+    external: bool,
+    cutout: bool,
+    overlays: bool,
+    spheres: bool,
+) -> bool {
+    wanted.is_none() && matches!(context, PhotoContext::None) && !external && !cutout && !overlays && !spheres
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn viewport_capture_vetoes_every_photo_capture_and_context() {
+        let photo = crate::SnapshotSpec {
+            width: 640,
+            height: 360,
+            interface: false,
+            huds: false,
+            photo: (640, 360),
+            world_viewport: None,
+        };
+        for wanted in [Some(Capture::Scene), Some(Capture::Full), Some(Capture::Snapshot(photo))] {
+            assert!(!viewport_capture_frame_allowed(
+                wanted,
+                PhotoContext::None,
+                false,
+                false,
+                false,
+                false
+            ));
+        }
+        for context in [PhotoContext::Record, PhotoContext::Use] {
+            assert!(!viewport_capture_frame_allowed(None, context, false, false, false, false));
+        }
+        for (external, cutout, overlays, spheres) in [
+            (true, false, false, false),
+            (false, true, false, false),
+            (false, false, true, false),
+            (false, false, false, true),
+        ] {
+            assert!(!viewport_capture_frame_allowed(
+                None,
+                PhotoContext::None,
+                external,
+                cutout,
+                overlays,
+                spheres
+            ));
+        }
+        assert!(viewport_capture_frame_allowed(None, PhotoContext::None, false, false, false, false));
+    }
 
     /// The occlusion's table is read by index against the main view's
     /// arguments: a cut-out photo leaves the ground and the water out of both,
