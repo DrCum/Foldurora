@@ -7,8 +7,6 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::Instant;
 
-// The separate native Board consumer has not joined this build candidate yet.
-#[cfg(test)]
 pub(crate) mod action;
 mod preview;
 pub(crate) use preview::AcceptedNativePreviewSource;

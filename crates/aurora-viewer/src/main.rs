@@ -41,7 +41,7 @@ mod fast_hash;
 mod frame_par;
 mod frame_profile;
 mod gestures;
-// Board data/ownership prerequisite; actual native consumer follows private-store review.
+// Native Boards keep item references and bind effects to exact current action scopes.
 mod gesture_board;
 mod gif_search;
 mod gpu_driver;
