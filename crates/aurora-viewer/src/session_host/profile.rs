@@ -279,6 +279,8 @@ fn invalid(message: &'static str) -> io::Error {
 /// standalone viewers. No DTO supplies a directory and no catalogue is copied.
 pub(crate) struct WorkspaceDirectory {
     path: PathBuf,
+    account: Uuid,
+    grid: String,
 }
 impl WorkspaceDirectory {
     pub(crate) fn select(account: Uuid, grid: &str) -> io::Result<Self> {
@@ -291,7 +293,14 @@ impl WorkspaceDirectory {
         }
         let root = config.join("named-workspaces");
         let relative = PathBuf::from(account.to_string()).join(grid);
-        Ok(Self { path: root.join(relative) })
+        Ok(Self {
+            path: root.join(relative),
+            account,
+            grid: grid.to_owned(),
+        })
+    }
+    pub(crate) fn matches(&self, account: Uuid, grid: &str) -> bool {
+        self.account == account && self.grid == grid
     }
     fn checked(&self) -> io::Result<()> {
         let grid = self.path.parent().ok_or_else(|| invalid("invalid workspace parent"))?;

@@ -77,7 +77,13 @@ impl Lane {
     }
 }
 fn perform(r: &Request) -> Result<Option<Catalogue>, ()> {
-    if r.operation == 0 || r.binding == 0 || r.source.login.is_nil() || r.source.agent != r.account || r.source.grid != r.grid {
+    if r.operation == 0
+        || r.binding == 0
+        || r.source.login.is_nil()
+        || r.source.agent != r.account
+        || r.source.grid != r.grid
+        || !r.directory.matches(r.account, &r.grid)
+    {
         return Err(());
     }
     let _lock = r.directory.lock().map_err(|_| ())?;
@@ -200,5 +206,28 @@ mod tests {
         assert!(lane.submit(request()));
         drop(results);
         assert!(lane.poll().is_err());
+    }
+    #[test]
+    fn workspace_request_identity_cannot_publish_into_another_empty_account_directory() {
+        let account = Uuid::new_v4();
+        let other = Uuid::new_v4();
+        let grid = "e".repeat(64);
+        let r = Request {
+            source: super::super::controller::Source {
+                agent: account,
+                login: Uuid::new_v4(),
+                grid: grid.clone(),
+                hosted: None,
+            },
+            operation: 1,
+            binding: 1,
+            directory: WorkspaceDirectory::select(other, &grid).unwrap(),
+            account,
+            grid: grid.clone(),
+            write: Some((None, Catalogue::empty(account, grid.clone()))),
+        };
+        assert!(perform(&r).is_err());
+        let _lock = r.directory.lock().unwrap();
+        assert!(r.directory.read(MAX_FILE).unwrap().is_none());
     }
 }
