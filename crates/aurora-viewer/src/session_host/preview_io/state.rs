@@ -155,12 +155,10 @@ impl HostPermit {
 /// never authorize a role or select a replacement worker.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Status {
-    Connecting,
     Metadata,
     Pixels,
     CaptureStopped,
     Fault,
-    Stopped,
 }
 #[derive(Clone)]
 pub(crate) struct Observation {

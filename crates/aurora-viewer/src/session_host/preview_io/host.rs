@@ -17,7 +17,7 @@ struct Pending {
 }
 enum Suspension {
     AwaitStop(Instant),
-    AwaitEof { began: Instant, stop: u64, ack_sequence: u64 },
+    AwaitEof { began: Instant, ack_sequence: u64 },
 }
 struct Source {
     permit: HostPermit,
@@ -111,7 +111,6 @@ impl Source {
                 })?;
                 self.suspension = Some(Suspension::AwaitEof {
                     began: now,
-                    stop,
                     ack_sequence: self.pair.metadata_queued(),
                 });
                 self.observation.status = Status::CaptureStopped;

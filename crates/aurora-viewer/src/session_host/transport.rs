@@ -31,9 +31,10 @@ pub(crate) mod preview_control;
 use super::preview_projection::{
     self, BootstrapAdmission, BrokerProjection, PreviewError, PreviewReader, RequestKind, ViewDescriptor, ViewNamespace, ViewSetRequest,
 };
-// Root promotes this only after the combined real Host/Native/IO/UI join review.
+// The joined Windows frontend captures ordinary Active frames only. Inactive
+// rendering remains unavailable; an empty visible set creates no demand.
 #[cfg(any(windows, test))]
-const PREVIEW_CAPABILITY_JOINED: bool = false;
+const PREVIEW_CAPABILITY_JOINED: bool = cfg!(windows);
 
 const PERIOD: Duration = Duration::from_millis(100);
 const HEARTBEAT: Duration = Duration::from_secs(1);
