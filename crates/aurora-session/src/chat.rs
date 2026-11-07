@@ -653,14 +653,13 @@ impl ChatPacket {
                         return Err(ChatError::Sequence);
                     }
                     source = reply.query.key.source;
-                    if let Some(receipt) = reply.receipt {
-                        if receipt.key != reply.query.key
+                    if let Some(receipt) = reply.receipt
+                        && (receipt.key != reply.query.key
                             || receipt.request != reply.query.request
                             || receipt.observed.epoch == 0
-                            || receipt.unread_revision == 0
-                        {
-                            return Err(ChatError::Invalid);
-                        }
+                            || receipt.unread_revision == 0)
+                    {
+                        return Err(ChatError::Invalid);
                     }
                 }
                 ChatEvent::Gap { through_event } if *through_event == 0 => return Err(ChatError::Sequence),
