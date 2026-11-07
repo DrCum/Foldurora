@@ -89,11 +89,44 @@ not used as this full receipt.
 
 The source is pushed on `feat/shared-chat-integration` and its
 [Windows run 42348714309](https://github.com/DrCum/Foldurora/actions/runs/42348714309)
-is active. Windows package verification and the owned combined-source native
-camera check remain pending; do not transfer earlier binary receipts. Native
-Shared Chat and human grid acceptance also remain pending. The native unread and
-explicit-Read first slice is being authored on a separate branch from this
-checkpoint, without altering this candidate. Attention and monitors follow it.
+is active; parser, formatting and strict Clippy passed, with full tests and
+portable packaging still being verified. Native Shared Chat and human grid
+acceptance remain pending.
+
+The exact `1ef87bf6` executable completed one owned Linux/software-Vulkan camera
+case with normal viewer/wrapper exit 0 after **384.472 seconds**. The histogram
+clears the dock, and guide/Settings clicks queued without a settled UI hover
+leave the AF point centered. Actual Free camera OFF, ordinary wheel, Alt+wheel,
+ring, focus/aperture and post-photo minus/plus responses were observed. A
+640×360 RGB export succeeded. [Unchanged native captures and limits](https://github.com/DrCum/Foldurora/blob/b7c676e0/foldurora/20261107-1ef87bf6-camera-input/README.md)
+belong to this source only; this is not Windows, physical-GPU or grid acceptance.
+
+Its **first shutter click produced no observed export for about 30 seconds**;
+another click after a fresh hover succeeded. The case did not instrument event
+boundaries inside an egui frame, so the cause remains unproven. There is no
+blanket shutter-input pass. Source inspection found a separate reproducible
+completed-primary-click defect: press and release can both arrive between UI
+frames. Its small correction and actual-egui regressions are in the later
+candidate, absent from frozen `1ef87bf6`. All owned viewer/driver processes and
+the display socket are gone; two terminated Xvfb zombies await PID1 reaping.
+
+The separate local `feat/native-read-integration` candidate contains the native
+unread/explicit-Read first slice and that shutter correction. It preserves both
+native chat styles' read-on-draw timing/defaults, separates unread observations
+from draft/Send authority, and keeps immutable body-free receipts/query recovery.
+Only the separate chat protocol becomes V2; control stays V1. Attention,
+automatic host reading, new conversations and monitors are absent. Independent
+source reviews cleared the Read and shutter changes.
+
+A compiled full-workspace negative control reproduced **all seven targeted
+runtime assertion failures**: three Read admission/navigation/edit-prefix races
+and four shutter cases. Its measured result was **7,944 passed, eight failed,
+51 ignored**; the only other failure was the inherited terrain precision test.
+No compile error is counted as behavioral proof. The positive full suite at
+local checkpoint `08099610` is now running after restoring the Read fixes and
+applying the shutter correction; final lint/build/package/native acceptance
+remain pending. Frozen Shared Chat source, package provenance and its active
+Windows run remain separate. Attention and monitors follow this foundation.
 
 The user-selected implementation order is **compact host redesign → shared chat
 → Attention → monitors with chat**. The compact host is implemented at frozen
