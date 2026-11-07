@@ -1,0 +1,35 @@
+{
+  "source": "b54b2c28f2ccadc7ce05c18a4badafea14ff2d08",
+  "source_version": "0.0.0+1565.gb54b2c28f",
+  "elf_sha256": "dd07fca80a79a0fff67c140a86af704974e7ab2f7072b6f99fe2e4af4246e77e",
+  "driver_sha256": "068eb588f0c68eef8c90c1a69b0a5a384e66f514c63a2e63e476e855ee459e71",
+  "base_driver_sha256": "b85909b1650d2404a792ec6c30abad4d24862d380d47a5277b62c6846069a109",
+  "assertions": 15,
+  "typed_sends": 3,
+  "typed_reads": 1,
+  "actual_runtime_seconds": 64.407,
+  "fixture_returncode": 0,
+  "wrapper_returncode": 0,
+  "images": {
+    "repeat-no-send.png": {
+      "sha256": "b3c395e17b19fa5c8deafd95b1c81f8e376aa598ced9b329193301f9a09adc90",
+      "caption": "Held Return after refocus, before any typed intent; the valid draft remains."
+    },
+    "candidate-conversation-1-before-press.png": {
+      "sha256": "cc7ba7f96be86029838ed0f3de5a10aa48cef5217dea05664cfe20e130a4c42b",
+      "caption": "Stable requested Direct row before the native click; this case places the popup above its selector."
+    },
+    "read-intent-only.png": {
+      "sha256": "354bdec33537ef0fcb9f205ab730341f4641065758122e320a6b902409b78288",
+      "caption": "One captured synthetic Read intent without a new Send or activation."
+    },
+    "reopened-canonical-draft.png": {
+      "sha256": "c43bc9bf1aa86d3dcbf81e1787d5c7c3629cdd7986cfb47b6f55c60c538b57f4",
+      "caption": "Canonical close queue draft after native close/reopen."
+    },
+    "held-read-cancelled.png": {
+      "sha256": "2397682c42e6296b5633a13b016556b34119cd0bbe6d3d73e80d232c74876c9c",
+      "caption": "Source replacement cancels the held Read and removes the unavailable source composer."
+    }
+  }
+}
