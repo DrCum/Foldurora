@@ -2188,6 +2188,46 @@ mod tests {
     }
 
     #[test]
+    fn actual_viewfinder_short_canvas_stays_bounded_and_restores_lens_input() {
+        use crate::snapshot::viewfinder::{Display, OnScreen};
+        for (native_scale, zoom, left) in [(1.0, 1.0, 50.0), (1.25, 1.2, 0.0), (2.0, 1.5, 50.0)] {
+            let mut f = ViewportPhotoFixture::new_at_scale(false, native_scale, zoom);
+            f.native_size = (2048, 1080);
+            f.viewport.left = left;
+            f.viewport.right = 0.0;
+            f.viewport.top = 50.0;
+            f.viewport.bottom = 45.0;
+            f.scene = PhotoScene::Viewfinder;
+            f.settings.viewfinder.display = Display::Full;
+            f.settings.viewfinder.controls = OnScreen::Always;
+            f.viewfinder.hinted = true;
+            f.fov = crate::snapshot::fov_of_focal(50.0);
+            f.frames(5);
+            let area = |f: &ViewportPhotoFixture, name| {
+                f.ctx
+                    .memory(|m| m.area_rect(egui::Id::unique(name)))
+                    .expect("actual viewfinder area")
+            };
+            let bounds = f.control_bounds();
+            assert!(bounds.height() <= 54.1, "exercise an allowed 5% high viewport");
+            for name in ["vf_dock", "vf_ring", "vf_dials", "vf_af_choices"] {
+                let rect = area(&f, name);
+                assert!(rect.is_finite() && rect.is_positive(), "{name}: invalid short-canvas area {rect:?}");
+                assert!(bounds.expand(1.0).contains_rect(rect), "{name}: {rect:?} escapes {bounds:?}");
+            }
+            // Resizing out of the tiny canvas must restore the usable ring,
+            // rather than retain a zero-sized scroll region or stuck input.
+            f.viewport.top = 0.0;
+            f.viewport.bottom = 0.0;
+            f.frames(5);
+            let ring = area(&f, "vf_ring");
+            let before = f.fov;
+            f.click(Pos2::new(ring.right() - 16.0, ring.bottom() - 23.0));
+            assert!(f.fov < before, "lens input lost after restoring a short viewport");
+        }
+    }
+
+    #[test]
     fn actual_snapshot_panel_and_classic_window_keep_full_frame_output_independent_of_tool_bounds() {
         for classic in [false, true] {
             for restricted in [false, true] {

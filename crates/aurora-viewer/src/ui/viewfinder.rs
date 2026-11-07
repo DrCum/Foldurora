@@ -1355,10 +1355,12 @@ impl Viewfinder {
         // Keep the value row reachable by horizontal scrolling if its
         // labels cannot all fit. The AF row above remains independent.
         let dial_bounds = if compact {
-            Rect::from_min_max(
+            let band = Rect::from_min_max(
                 Pos2::new(screen.left() + GAP, screen.bottom() - 68.0),
                 Pos2::new(screen.right() - GAP, screen.bottom() - 8.0),
             )
+            .intersect(screen);
+            if band.is_positive() { band } else { screen }
         } else {
             screen
         };
@@ -1561,10 +1563,7 @@ impl Viewfinder {
             .fade_in(false)
             .pivot(Align2::RIGHT_CENTER)
             .fixed_pos(Pos2::new(screen.right() - 20.0, screen.center().y))
-            .constrain_to(Rect::from_min_max(
-                screen.left_top() + Vec2::new(20.0, 64.0),
-                screen.right_bottom() - Vec2::new(20.0, if screen.width() < 1100.0 { 208.0 } else { 128.0 }),
-            ))
+            .constrain_to(dock_bounds(screen))
             .show(ctx, |ui| {
                 // A centred column expands to its available width. Give it
                 // the shutter's width, not the whole scene: otherwise this
@@ -2215,6 +2214,21 @@ enum Face<'a> {
 
 /// The side of a dock button.
 pub(crate) const DOCK_SIDE: f32 = 44.0;
+
+/// Leave the main rows clear when there is room for a tile. At extreme
+/// viewport margins or DPI, the dock instead scrolls in the remaining
+/// canvas; subtracting fixed row reserves could invert its bounds.
+fn dock_bounds(screen: Rect) -> Rect {
+    let side = 20.0_f32.min(screen.width() * 0.25);
+    let bottom = if screen.width() < 1100.0 { 208.0 } else { 128.0 };
+    let (top, bottom) = if screen.height() >= 64.0 + bottom + DOCK_SIDE {
+        (64.0, bottom)
+    } else {
+        let margin = 20.0_f32.min(screen.height() * 0.25);
+        (margin, margin)
+    };
+    Rect::from_min_max(screen.min + Vec2::new(side, top), screen.max - Vec2::new(side, bottom))
+}
 
 /// The face of the dock's buttons, shared by everything of photo mode that
 /// sits over the world like them (the reel's tray, its quick view): the
