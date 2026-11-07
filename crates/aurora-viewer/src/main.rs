@@ -41,6 +41,9 @@ mod fast_hash;
 mod frame_par;
 mod frame_profile;
 mod gestures;
+// Board data/ownership prerequisite; actual native consumer follows private-store review.
+#[cfg(test)]
+mod gesture_board;
 mod gif_search;
 mod gpu_driver;
 mod gpu_load;

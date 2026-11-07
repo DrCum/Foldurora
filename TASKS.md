@@ -3522,3 +3522,12 @@ Open-source technologies that could set Aurora apart (human request of 2026-10-1
   No Cargo/native/GPU/grid/socket execution by author, no endpoint changes or
   board UI/playback-on-open enabled. Root combined validation and independent
   source review remain pending; this is not full Board parity.
+  - 🔧 Board data/intent prerequisite (test-registered until real consumer): closed
+    16x1024/4MiB account-grid schema, bounded decode, exact captured actions,
+    separate32-entry pending-cache ledger and board-owned exact run stops. Shared
+    inventory resolution covers links/type/trash/ancestry with native playback
+    rights; source/cache-only cancellation leaves ordinary Load flags untouched.
+    Twenty-three portable model/resolver/real-Manager/shared-load cases authored
+    UNRUN. Actual native menus/floater, store lane and genuine NativeActionScope
+    effect-boundary checks follow with the hardened shared directory dependency;
+    no usable Board completion or native validation is claimed in this phase.

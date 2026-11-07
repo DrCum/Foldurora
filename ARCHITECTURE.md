@@ -5013,3 +5013,15 @@ array atlas from one to four 64-tile pages (32 to 128 MiB), preserving existing
 pictures by GPU copy. The two-capture frame budget and full-avatar limit remain
 independent. Pending or over-budget avatars draw neutral silhouette cards rather
 than disappearing; cards have a dynamically sized instance buffer.
+
+`gesture_board/{model,playback}.rs` is the next Board prerequisite, registered
+only for tests until its actual native consumer lands. The closed version-1
+catalogue holds at most16 boards x1024 typed inventory references and4MiB encoded
+metadata; independent board revisions preserve unrelated pending intent. The
+playback controller owns at most32 cache-wait intents with original30s deadlines,
+source/profile/login/action/window fences and exact Manager run ownership. It
+never changes the shared native Load flags. `world/inventory/actions/playback.rs`
+resolves current personal/Library item/link/type/asset/trash ancestry through the
+existing shared rules; it accepts no raw asset UUID. Native proof, actual cache
+requests, prefetch/effects, hardened store and real menu/floater wiring remain
+App-consumer work. A Source/Facts value alone is not native action permission.
