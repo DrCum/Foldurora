@@ -3618,3 +3618,14 @@ Open-source technologies that could set Aurora apart (human request of 2026-10-1
   behavior preserved. Seven pure budget/pointer/guard/retry/expiry/wrapper fixtures
   authored UNRUN, no socket/native/GPU use. Actual Host garbage integration is
   owned separately; source review and root validation required before acceptance.
+
+
+- 🔧 Actual Host Monitor projection consumer, API source checkpoint: genuine
+  Child/Coordinator proofs; synchronous pre-FIFO and queued capture fences; ordered
+  metadata Store with original-time highwaters; stable stripped view-only reads;
+  exact native config/settings/Exchange receipts; conservative 10FPS reservations;
+  owned final admission and globally credited off-UI prepared pairs. Startup
+  listener Pending defers the owned launch instead of silently dropping optional
+  capability. Factory remains closed; source review and final regression inventory
+  are ongoing, all authored tests UNRUN. Root compiler/lint/runtime and actual
+  Windows/human acceptance remain separate; no endpoint or product enablement.

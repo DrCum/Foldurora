@@ -5178,3 +5178,28 @@ No new getter, Clone payload, authority, reservation or replay route is introduc
 The two bounded owned-result methods use narrowly documented Clippy expectations
 to avoid allocating metadata boxes under the same lock. Pure ownership fixtures
 are authored UNRUN; independent source review and root checks remain pending.
+
+
+### Actual Host Monitor projection consumer — closed join
+
+`session_host/transport/preview_control.rs` mints opaque accepted-source and capture
+proofs from actual Child/Coordinator receipts. Its light proof definitions are
+portable for the real IO/native consumer types; actual Monitor host glue is
+Windows/test gated. Synchronous capture/view counters cover pre-FIFO contention
+and the admission-to-processing interval without retiring parked history.
+`preview_projection` owns one try-only ordered Store, immutable reads, exact
+settings/Exchange correlations, conservative native-ACK rate reservations and
+one globally credited off-UI preparation worker. The one process UI pool is
+shared with every private DIB; final owned image admission uses recoverable
+`try_admit` so rejected payloads retire outside the Store lock. Stable view-only
+proofs retain their original control deadline, carry no image/receipt/backend
+command authority and leave canonical Chat's independent policy in force.
+
+The Host factory remains closed (`PREVIEW_CAPABILITY_JOINED=false`, new_config
+preview=None). At the reviewed future join, actual listener Starting returns
+Pending: the Broker retains the launch request and retries before process creation
+until the real port is ready, or a bounded actual image failure falls back to an
+ordinary launch. There is no guessed endpoint, transient bootstrap omission or
+forced worker restart. Root owns production module/capability promotion. This
+API-complete source checkpoint is uncompiled and unapproved for product use;
+independent source review, focused regressions and combined root checks remain.

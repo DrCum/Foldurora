@@ -26,6 +26,15 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
+pub(crate) mod preview_control;
+#[cfg(any(windows, test))]
+use super::preview_projection::{
+    self, BootstrapAdmission, BrokerProjection, PreviewError, PreviewReader, RequestKind, ViewDescriptor, ViewNamespace, ViewSetRequest,
+};
+// Root promotes this only after the combined real Host/Native/IO/UI join review.
+#[cfg(any(windows, test))]
+const PREVIEW_CAPABILITY_JOINED: bool = false;
+
 const PERIOD: Duration = Duration::from_millis(100);
 const HEARTBEAT: Duration = Duration::from_secs(1);
 const REACHABLE: Duration = Duration::from_secs(5);
@@ -87,6 +96,8 @@ impl std::fmt::Display for HostError {
 impl std::error::Error for HostError {}
 
 enum HostIntent {
+    #[cfg(any(windows, test))]
+    Preview(RequestKind, preview_projection::OperationSlot),
     Open(Option<AccountKey>, Option<SlotId>),
     RenameSlot(SlotId, SlotLabel),
     SaveAttentionPreferences(super::attention_prefs::Preferences),
@@ -107,6 +118,8 @@ enum HostIntent {
 impl HostIntent {
     fn controls_presentation(&self) -> bool {
         match self {
+            #[cfg(any(windows, test))]
+            Self::Preview(_, _) => false,
             // Review reports its own body-free outcome. Its local failures
             // cannot cover an acknowledged world or clear a control error.
             Self::ChatSend { .. }
@@ -136,6 +149,8 @@ fn request_result(
 struct HostRequest {
     ticket: u64,
     intent: HostIntent,
+    #[cfg(any(windows, test))]
+    _preview_slot: Option<preview_control::CaptureQueueSlot>,
 }
 
 struct RequestSender {
@@ -144,19 +159,42 @@ struct RequestSender {
 }
 
 impl RequestSender {
+    #[cfg(any(test, not(windows)))]
     fn send(&mut self, intent: HostIntent) -> Result<u64, HostError> {
+        self.send_scoped(
+            intent,
+            #[cfg(any(windows, test))]
+            None,
+        )
+    }
+    fn send_scoped(
+        &mut self,
+        intent: HostIntent,
+        #[cfg(any(windows, test))] preview_slot: Option<preview_control::CaptureQueueSlot>,
+    ) -> Result<u64, HostError> {
         let ticket = self.next;
         let next = ticket.checked_add(1).ok_or(HostError::Busy)?;
-        self.sender.try_send(HostRequest { ticket, intent }).map_err(|error| match error {
-            TrySendError::Full(_) => HostError::Busy,
-            TrySendError::Disconnected(_) => HostError::Stopped,
-        })?;
+        self.sender
+            .try_send(HostRequest {
+                ticket,
+                intent,
+                #[cfg(any(windows, test))]
+                _preview_slot: preview_slot,
+            })
+            .map_err(|error| match error {
+                TrySendError::Full(_) => HostError::Busy,
+                TrySendError::Disconnected(_) => HostError::Stopped,
+            })?;
         self.next = next;
         Ok(ticket)
     }
 }
 
 pub(crate) struct HostController {
+    #[cfg(any(windows, test))]
+    preview_frontdoor: Arc<preview_control::Frontdoor>,
+    #[cfg(any(windows, test))]
+    preview_reader: PreviewReader,
     requests: Mutex<RequestSender>,
     snapshot: Arc<Mutex<Arc<HostSnapshot>>>,
     stop: Arc<AtomicBool>,
@@ -194,7 +232,11 @@ pub(super) mod native_fixture {
     pub(crate) fn controller(snapshot: HostSnapshot) -> (HostController, Inbox) {
         let (sender, receiver) = bounded(MAX_QUEUE);
         let snapshot = Arc::new(Mutex::new(Arc::new(snapshot)));
+        let preview_frontdoor = Arc::new(preview_control::Frontdoor::default());
+        let preview_reader = PreviewReader::new(preview_frontdoor.clone());
         let controller = HostController {
+            preview_frontdoor,
+            preview_reader,
             requests: Mutex::new(RequestSender { sender, next: 1 }),
             snapshot: snapshot.clone(),
             stop: Arc::new(AtomicBool::new(false)),
@@ -299,8 +341,25 @@ impl HostController {
         let ending = stop.clone();
         let ended = stopped.clone();
         let focus = foreground.clone();
+        #[cfg(any(windows, test))]
+        let preview_frontdoor = Arc::new(preview_control::Frontdoor::default());
+        #[cfg(any(windows, test))]
+        let preview_reader = PreviewReader::new(preview_frontdoor.clone());
+        #[cfg(any(windows, test))]
+        let preview_reads = preview_reader.clone();
+        #[cfg(any(windows, test))]
+        let preview_fences = preview_frontdoor.clone();
         std::thread::Builder::new().name("session-host-io".into()).spawn(move || {
-            if let Err(error) = host_loop(&rx, &shared, &ending, &focus) {
+            if let Err(error) = host_loop(
+                &rx,
+                &shared,
+                &ending,
+                &focus,
+                #[cfg(any(windows, test))]
+                preview_fences,
+                #[cfg(any(windows, test))]
+                preview_reads,
+            ) {
                 let previous = shared.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
                 let mut next = (*previous).clone();
                 next.error = Some(error.to_string());
@@ -310,6 +369,10 @@ impl HostController {
             ended.store(true, Ordering::Release);
         })?;
         Ok(Self {
+            #[cfg(any(windows, test))]
+            preview_frontdoor,
+            #[cfg(any(windows, test))]
+            preview_reader,
             requests: Mutex::new(RequestSender { sender: tx, next: 1 }),
             snapshot,
             stop,
@@ -442,18 +505,39 @@ impl HostController {
     }
 
     fn send(&self, intent: HostIntent) -> Result<u64, HostError> {
+        #[cfg(any(windows, test))]
+        let capture = intent.controls_presentation() || matches!(intent, HostIntent::ReviewConversation(_, _) | HostIntent::Preview(_, _));
+        #[cfg(any(windows, test))]
+        let _attempt = capture.then(|| self.preview_frontdoor.begin_capture().ok()).flatten();
+        #[cfg(any(windows, test))]
+        let slot = if capture {
+            // Preview-only retirement precedes contention/FIFO admission; an
+            // image failure never changes the ordinary request result.
+            self.preview_frontdoor.queue_slot().ok()
+        } else {
+            None
+        };
         if self.stop.load(Ordering::Acquire) || self.stopped() {
             return Err(HostError::Stopped);
         }
         // The short try-lock keeps tickets in the channel's actual FIFO order
         // even if callers other than the shell enqueue an intent concurrently.
         let mut requests = self.requests.try_lock().map_err(|_| HostError::Busy)?;
-        requests.send(intent)
+        #[cfg(any(windows, test))]
+        {
+            requests.send_scoped(intent, slot)
+        }
+        #[cfg(not(any(windows, test)))]
+        {
+            requests.send(intent)
+        }
     }
 
     /// Nonblocking: the IO thread requests detach, then retires after its
     /// bounded acknowledgment period. It never kills or logs out a worker.
     pub fn shutdown(&self) {
+        #[cfg(any(windows, test))]
+        self.preview_frontdoor.retire();
         self.stop.store(true, Ordering::Release);
     }
     pub fn stopped(&self) -> bool {
@@ -905,6 +989,8 @@ fn matches_acknowledgment(command: &Envelope, reply: &Envelope) -> bool {
 }
 
 struct Child {
+    #[cfg(any(windows, test))]
+    preview: preview_control::ChildPreview,
     config: WorkerConfig,
     directory: PathBuf,
     process: std::process::Child,
@@ -931,6 +1017,8 @@ impl Child {
 
     fn poll_process(&mut self) -> io::Result<bool> {
         if self.process.try_wait()?.is_some() {
+            #[cfg(any(windows, test))]
+            self.preview.retire();
             self.exited = true;
             self.detached = true;
             self.reservation = None;
@@ -1061,6 +1149,10 @@ fn review_activation(effects: &[Effect]) -> Option<u64> {
 }
 
 struct Broker {
+    #[cfg(any(windows, test))]
+    preview_frontdoor: Arc<preview_control::Frontdoor>,
+    #[cfg(any(windows, test))]
+    preview_projection: BrokerProjection,
     registry: Registry,
     registry_error: Option<String>,
     slot_available: [bool; MAX_WORKERS],
@@ -1223,6 +1315,11 @@ impl Broker {
                         Command::Revoke { activation } | Command::Prepare { activation, .. } | Command::Grant { activation },
                     ) = &envelope.message
                     {
+                        #[cfg(any(windows, test))]
+                        {
+                            let _ = self.preview_frontdoor.capture_intent();
+                            self.preview_projection.control_activation(*activation);
+                        }
                         self.reviews.control_activation(*activation);
                     }
                     let worker = envelope.binding.worker.worker;
@@ -1245,6 +1342,11 @@ impl Broker {
                         }
                         Message::Command(Command::Grant { .. }) => self.pending = Some(worker),
                         Message::Command(Command::Detach) => {
+                            #[cfg(any(windows, test))]
+                            {
+                                child.preview.retire();
+                                self.preview_projection.exchange_lost();
+                            }
                             self.reviews.interrupt(ReviewStatus::Unavailable);
                             child.chat.set_control(None, false);
                             child.granted = None;
@@ -1266,6 +1368,13 @@ impl Broker {
                             activation: active.activation,
                             viewport: active.viewport,
                         });
+                        #[cfg(any(windows, test))]
+                        if let Some(source) = self.preview_view_sources(Instant::now()).into_iter().find(|source| {
+                            source.source().worker() == active.binding.worker && Some(source.source().session()) == active.binding.session
+                        }) {
+                            self.preview_projection
+                                .exchange_granted(&source, active.activation, active.viewport, false);
+                        }
                     } else {
                         self.reviews.interrupt(ReviewStatus::Unavailable);
                     }
@@ -1275,6 +1384,15 @@ impl Broker {
                     self.error = None;
                     self.pending = None;
                     self.active_viewport = self.accepted_viewport(worker);
+                    #[cfg(any(windows, test))]
+                    if let Some(active) = self.active_viewport
+                        && let Some(source) = self.preview_view_sources(Instant::now()).into_iter().find(|source| {
+                            source.source().worker() == active.binding.worker && Some(source.source().session()) == active.binding.session
+                        })
+                    {
+                        self.preview_projection
+                            .exchange_granted(&source, active.activation, active.viewport, true);
+                    }
                 }
                 Effect::Notice(HostNotice::Parked(worker)) => {
                     self.reviews.interrupt(ReviewStatus::Cancelled);
@@ -1286,6 +1404,11 @@ impl Broker {
                     }
                 }
                 Effect::Notice(HostNotice::Failed | HostNotice::Detached | HostNotice::Expired(_) | HostNotice::Blocked(_)) => {
+                    #[cfg(any(windows, test))]
+                    {
+                        let _ = self.preview_frontdoor.capture_intent();
+                        self.preview_projection.exchange_lost();
+                    }
                     self.reviews.interrupt(ReviewStatus::Unavailable);
                     self.pending = None;
                     self.active_viewport = None;
@@ -1297,6 +1420,10 @@ impl Broker {
     }
 
     fn intent(&mut self, intent: HostIntent, ticket: u64, now: u64) -> anyhow::Result<()> {
+        #[cfg(any(windows, test))]
+        if intent.controls_presentation() || matches!(intent, HostIntent::ReviewConversation(_, _)) {
+            self.preview_projection.external_intent();
+        }
         if matches!(
             intent,
             HostIntent::Open(_, _) | HostIntent::Activate(_, _) | HostIntent::Viewport(_) | HostIntent::Park | HostIntent::Detach(_)
@@ -1304,6 +1431,8 @@ impl Broker {
             self.reviews.interrupt(ReviewStatus::Cancelled);
         }
         match intent {
+            #[cfg(any(windows, test))]
+            HostIntent::Preview(kind, slot) => self.preview_projection.queue(ticket, kind, slot),
             HostIntent::Open(account, requested) => {
                 if self.opens.len() >= MAX_QUEUE {
                     anyhow::bail!(HostError::Busy);
@@ -1404,6 +1533,8 @@ impl Broker {
         // observed; a detached ordinary window is never a kill permission.
         for index in 0..self.children.len() {
             if !self.children[index].exited && self.children[index].poll_process()? {
+                #[cfg(any(windows, test))]
+                self.preview_projection.exited(self.children[index].config.identity);
                 let effects = self.coordinator.remove(self.children[index].config.identity.worker);
                 self.effects(effects)?;
             }
@@ -1442,6 +1573,18 @@ impl Broker {
                     .workers()
                     .find(|entry| entry.binding.worker.worker == child.config.identity.worker)
                 {
+                    #[cfg(any(windows, test))]
+                    if child.status.as_ref().is_some_and(|old| {
+                        old.native_window != entry.status.native_window
+                            || old.blocked != entry.status.blocked
+                            || old.phase != entry.status.phase
+                    }) {
+                        let _ = self.preview_frontdoor.capture_intent();
+                    }
+                    #[cfg(any(windows, test))]
+                    if child.binding != entry.binding || !entry.live || entry.status.phase != Phase::Online {
+                        child.preview.retire();
+                    }
                     child.binding = entry.binding;
                     child.status = Some(entry.status.clone());
                 }
@@ -1620,6 +1763,15 @@ impl Broker {
             account,
             self.chat_listener.as_ref().map(|listener| listener.port()),
         )?;
+        #[cfg(any(windows, test))]
+        match self.preview_projection.bootstrap() {
+            BootstrapAdmission::Pending => {
+                self.opens.push_front(open);
+                return Ok(());
+            }
+            BootstrapAdmission::Ready(bootstrap) => config.preview = Some(bootstrap),
+            BootstrapAdmission::Absent => {}
+        }
         config.slot = Some(open.slot);
         self.coordinator.register(config.identity.worker, config.lease_epoch, now)?;
         let worker = config.identity.worker;
@@ -1673,6 +1825,16 @@ impl Broker {
             .active_viewport
             .filter(|active| {
                 !self.coordinator.busy()
+                    && {
+                        #[cfg(any(windows, test))]
+                        {
+                            !self.preview_projection.exchange_waiting()
+                        }
+                        #[cfg(not(any(windows, test)))]
+                        {
+                            true
+                        }
+                    }
                     && self.coordinator.active() == Some(active.worker)
                     && self.viewport == Some(active.viewport)
                     && workers.iter().any(|worker| worker.reachable && worker.binding == active.binding)
@@ -1724,6 +1886,8 @@ fn host_loop(
     shared: &Arc<Mutex<Arc<HostSnapshot>>>,
     stop: &AtomicBool,
     foreground: &AtomicBool,
+    #[cfg(any(windows, test))] preview_frontdoor: Arc<preview_control::Frontdoor>,
+    #[cfg(any(windows, test))] preview_reader: PreviewReader,
 ) -> anyhow::Result<()> {
     anyhow::ensure!(
         aurora_updater::test_environment().is_none(),
@@ -1746,6 +1910,10 @@ fn host_loop(
     }
     let registry = Registry::open(installation, host)?;
     let mut broker = Broker {
+        #[cfg(any(windows, test))]
+        preview_frontdoor,
+        #[cfg(any(windows, test))]
+        preview_projection: BrokerProjection::new(preview_reader, installation, host, PREVIEW_CAPABILITY_JOINED),
         registry,
         registry_error: None,
         slot_available: [false; MAX_WORKERS],
@@ -1784,6 +1952,8 @@ fn host_loop(
         let now = began.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
         broker.coordinator.set_workspace_foreground(foreground.load(Ordering::Acquire));
         if stop.load(Ordering::Acquire) && closing.is_none() {
+            #[cfg(any(windows, test))]
+            broker.preview_projection.stop();
             broker.reviews.interrupt(ReviewStatus::Cancelled);
             closing = Some(Instant::now() + CLOSE_WAIT);
             broker.opens.clear();
@@ -1819,6 +1989,8 @@ fn host_loop(
             broker.error = Some(failure.to_string());
             broker.opens.clear();
         }
+        #[cfg(any(windows, test))]
+        broker.poll_previews(now);
         for child in &mut broker.children {
             if !child.detached
                 && let Err(failure) = child.flush()
@@ -1901,6 +2073,8 @@ fn launch(
     };
     let chat = super::chat_broker::Peer::new(config.identity, config.lease_epoch);
     Ok(Child {
+        #[cfg(any(windows, test))]
+        preview: preview_control::ChildPreview::new(),
         config,
         directory,
         process,
@@ -2065,7 +2239,11 @@ mod tests {
         )
         .unwrap();
         let host = HostId::from_bytes(*uuid::Uuid::new_v4().as_bytes()).unwrap();
+        let preview_frontdoor = Arc::new(preview_control::Frontdoor::default());
+        let preview_reader = PreviewReader::new(preview_frontdoor.clone());
         let mut broker = Broker {
+            preview_frontdoor,
+            preview_projection: BrokerProjection::new(preview_reader, installation, host, false),
             registry: Registry::open(installation, host).unwrap(),
             registry_error: None,
             slot_available: [true; MAX_WORKERS],
