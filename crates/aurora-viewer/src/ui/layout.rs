@@ -253,6 +253,22 @@ pub(crate) fn restricted_canvas(ctx: &egui::Context) -> Option<Rect> {
     ctx.data(|d| d.get_temp::<Option<Rect>>(canvas_bounds_id())).flatten()
 }
 
+fn world_canvas_id() -> Id {
+    Id::unique("layout_world_canvas")
+}
+
+/// The live scene has its own rectangle even when controls use the full
+/// workspace. Snapshot output sizes do not change this logical rectangle.
+pub(crate) fn set_world_canvas(ctx: &egui::Context, bounds: Option<Rect>) {
+    ctx.data_mut(|data| data.insert_temp(world_canvas_id(), bounds));
+}
+
+pub(crate) fn world_rect(ctx: &egui::Context) -> Rect {
+    ctx.data(|data| data.get_temp::<Option<Rect>>(world_canvas_id()))
+        .flatten()
+        .unwrap_or_else(|| ctx.content_rect())
+}
+
 fn toolbar_canvas_id() -> Id {
     Id::unique("layout_toolbar_canvas")
 }

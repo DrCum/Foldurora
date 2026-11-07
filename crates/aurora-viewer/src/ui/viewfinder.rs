@@ -514,7 +514,7 @@ impl Viewfinder {
         panel.looks.hover = None;
         let before = s.clone();
         let light_before = panel.light;
-        let screen = ctx.content_rect();
+        let screen = super::layout::world_rect(ctx);
         let controls = crate::ui::layout::toolbar_rect(ctx);
         let display = s.viewfinder.display;
         let full = display == Display::Full;
@@ -523,8 +523,8 @@ impl Viewfinder {
         let front = ctx.layer_painter(egui::LayerId::new(Order::Middle, Id::unique("vf_front")));
 
         // the photo's proportions: the rest darkened, a fine frame, the guide
-        let ratio = f.photo.0 as f32 / f.photo.1.max(1) as f32;
-        let frame = panel::fit(screen, ratio);
+        let include_interface = s.interface && crate::snapshot::same_proportions(f.photo, f.window) && !panel.freeze;
+        let frame = panel::scene_frame(screen, f.photo, include_interface);
         for r in panel::outside(screen, frame) {
             back.rect_filled(r, 0.0, p.navy.gamma_multiply(0.66));
         }

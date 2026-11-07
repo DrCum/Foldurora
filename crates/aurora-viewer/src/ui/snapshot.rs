@@ -858,6 +858,7 @@ impl SnapshotUi {
 
     /// The full-frame view (instead of the interface); `photo` the photo's
     /// size. Escape or the exit button leaves it.
+    #[allow(clippy::too_many_arguments)]
     pub fn full_frame(
         &mut self,
         ctx: &egui::Context,
@@ -866,10 +867,12 @@ impl SnapshotUi {
         fov: &mut f32,
         default_fov: f32,
         photo: (u32, u32),
+        window: (u32, u32),
     ) -> Vec<Action> {
         let mut out = Vec::new();
-        let screen = ctx.content_rect();
-        let frame = fit(screen, photo.0 as f32 / photo.1.max(1) as f32);
+        let screen = super::layout::world_rect(ctx);
+        let include_interface = s.interface && crate::snapshot::same_proportions(photo, window) && !self.freeze;
+        let frame = scene_frame(screen, photo, include_interface);
         let controls = super::layout::toolbar_rect(ctx);
         let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::unique("photo_full_frame")));
         let mask = p.navy.gamma_multiply(0.62);
@@ -1374,7 +1377,7 @@ fn changed(s: &Settings, before: &Settings, out: &mut Vec<Action>) {
 /// The photo held by "Freeze frame", over the whole world, in its
 /// proportions.
 pub fn frozen(ctx: &egui::Context, p: &Palette, texture: &egui::TextureHandle) {
-    let screen = ctx.content_rect();
+    let screen = super::layout::world_rect(ctx);
     let size = texture.size_vec2();
     let rect = fit(screen, size.x / size.y.max(1.0));
     let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::unique("photo_frozen")));
@@ -1385,6 +1388,16 @@ pub fn frozen(ctx: &egui::Context, p: &Palette, texture: &egui::TextureHandle) {
         Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
         widgets::PICTURE_TINT,
     );
+}
+
+/// A clean photo frames its output proportions within the live scene. A
+/// photo with the interface keeps the entire scene inside its output canvas.
+pub(crate) fn scene_frame(area: Rect, photo: (u32, u32), include_interface: bool) -> Rect {
+    if include_interface {
+        area
+    } else {
+        fit(area, photo.0 as f32 / photo.1.max(1) as f32)
+    }
 }
 
 /// The largest rectangle of `ratio` (width / height) centred in `area`.
@@ -1718,6 +1731,14 @@ fn shutter(ui: &mut egui::Ui, p: &Palette) -> egui::Response {
 mod tests {
     use super::*;
 
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum PhotoScene {
+        Panel,
+        FullFrame,
+        Viewfinder,
+        Frozen,
+    }
+
     struct ViewportPhotoFixture {
         ctx: egui::Context,
         ui: SnapshotUi,
@@ -1727,7 +1748,10 @@ mod tests {
         open: bool,
         fov: f32,
         classic: bool,
-        viewfinder: bool,
+        scene: PhotoScene,
+        viewfinder: crate::ui::viewfinder::Viewfinder,
+        frozen: egui::TextureHandle,
+        native_scale: f32,
     }
 
     impl ViewportPhotoFixture {
@@ -1736,6 +1760,11 @@ mod tests {
             crate::theme::Theme::default().apply(&ctx, 1.0);
             ctx.set_zoom_factor(1.2);
             ctx.all_styles_mut(|style| style.animation_time = 0.0);
+            let frozen = ctx.load_texture(
+                "held photo fixture",
+                egui::ColorImage::filled([4, 5], widgets::PICTURE_TINT),
+                Default::default(),
+            );
             Self {
                 ctx,
                 ui: SnapshotUi::default(),
@@ -1757,12 +1786,18 @@ mod tests {
                 open: true,
                 fov: crate::camera::DEFAULT_FOV,
                 classic,
-                viewfinder: false,
+                scene: PhotoScene::Panel,
+                viewfinder: Default::default(),
+                frozen,
+                native_scale: 1.25,
             }
         }
 
         fn native(&self) -> Rect {
-            Rect::from_min_size(egui::pos2(7.0, 11.0), Vec2::new(3200.0, 2000.0) / (1.25 * self.ctx.zoom_factor()))
+            Rect::from_min_size(
+                egui::pos2(7.0, 11.0),
+                Vec2::new(3200.0, 2000.0) / (self.native_scale * self.ctx.zoom_factor()),
+            )
         }
 
         fn bounds(&self) -> Rect {
@@ -1772,7 +1807,7 @@ mod tests {
             };
             configured
                 .toolbar_rect((3200, 2000), self.native())
-                .expect("configured world rectangle")
+                .unwrap_or_else(|| self.native())
         }
 
         fn id(&self) -> &'static str {
@@ -1791,10 +1826,11 @@ mod tests {
             }
         }
 
-        fn show(&mut self, events: Vec<egui::Event>) {
+        fn show(&mut self, events: Vec<egui::Event>) -> Vec<egui::epaint::ClippedShape> {
             use super::super::layout;
             self.frame += 1;
             let native = self.native();
+            let world = self.viewport.enabled.then(|| self.bounds());
             let catalog = crate::world::env_select::SettingsCatalog::default();
             let view = View {
                 window: (3200, 2000),
@@ -1825,15 +1861,63 @@ mod tests {
                 quality_reduced: false,
             };
             let p = crate::theme::Theme::default().palette();
+            let isolation = crate::snapshot::isolate::Isolation::default();
+            let thumbs = std::collections::HashMap::new();
+            let full = std::collections::HashMap::new();
+            let time = |_: i64| String::new();
+            let reel = crate::ui::photo_reel::ReelView {
+                photos: &[],
+                thumbs: &thumbs,
+                full: &full,
+                can_send: &[],
+                time: &time,
+                arriving: false,
+            };
+            let frame = crate::ui::viewfinder::Frame {
+                still: true,
+                now: self.frame as f64 / 60.0,
+                photo: view.photo,
+                window: view.window,
+                fps: 60.0,
+                focal_mm: 50.0,
+                ev: 0.0,
+                base_exposure: 0.0,
+                roll: 0.0,
+                sharp: (1.0, 100.0),
+                point: world.unwrap_or(native).center(),
+                face: None,
+                group: Vec::new(),
+                points: Vec::new(),
+                zone: None,
+                pitch: 0.0,
+                histogram: None,
+                review: None,
+                first_person: false,
+                first_person_allowed: true,
+                free_camera: false,
+                keys: crate::ui::viewfinder::Keys {
+                    menu: "Tab",
+                    af_mode: "N",
+                    first_person: Some("M"),
+                },
+                isolation: &isolation,
+                isolate_rows: &[],
+                isolate_hover: None,
+                presets: &[],
+                preset_object: None,
+                posing: false,
+                reel: &reel,
+            };
             let mut raw = egui::RawInput {
                 screen_rect: Some(native),
                 time: Some(self.frame as f64 / 60.0),
                 events,
                 ..Default::default()
             };
-            raw.viewports.entry(raw.viewport_id).or_default().native_pixels_per_point = Some(1.25);
+            raw.viewports.entry(raw.viewport_id).or_default().native_pixels_per_point = Some(self.native_scale);
             let mut output = self.ctx.run_ui(raw, |ui| {
                 layout::begin_canvas(ui.ctx(), false);
+                layout::set_world_canvas(ui.ctx(), world);
                 layout::set_toolbar_canvas(ui.ctx(), self.viewport.toolbar_rect((3200, 2000), native));
                 layout::set_work_area(ui.ctx(), native);
                 layout::set_move_area(ui.ctx(), native);
@@ -1841,29 +1925,47 @@ mod tests {
                 layout::frame(ui.ctx(), &p, false);
                 // The UI only emits actions; no renderer, file service or
                 // network consumer is installed in this offline fixture.
-                if self.viewfinder {
-                    self.ui.full_frame(
-                        ui.ctx(),
-                        &p,
-                        &mut self.settings,
-                        &mut self.fov,
-                        crate::camera::DEFAULT_FOV,
-                        view.photo,
-                    );
-                } else {
-                    self.ui.show(
-                        ui.ctx(),
-                        &p,
-                        &mut self.open,
-                        &mut self.settings,
-                        &mut self.fov,
-                        crate::camera::DEFAULT_FOV,
-                        &view,
-                        self.classic,
-                    );
+                match self.scene {
+                    PhotoScene::Panel => {
+                        self.ui.show(
+                            ui.ctx(),
+                            &p,
+                            &mut self.open,
+                            &mut self.settings,
+                            &mut self.fov,
+                            crate::camera::DEFAULT_FOV,
+                            &view,
+                            self.classic,
+                        );
+                    }
+                    PhotoScene::FullFrame => {
+                        self.ui.full_frame(
+                            ui.ctx(),
+                            &p,
+                            &mut self.settings,
+                            &mut self.fov,
+                            crate::camera::DEFAULT_FOV,
+                            view.photo,
+                            view.window,
+                        );
+                    }
+                    PhotoScene::Viewfinder => {
+                        self.viewfinder.show(
+                            ui.ctx(),
+                            &p,
+                            &mut self.settings,
+                            &mut self.ui,
+                            &mut self.fov,
+                            crate::camera::DEFAULT_FOV,
+                            &frame,
+                            &view,
+                        );
+                    }
+                    PhotoScene::Frozen => frozen(ui.ctx(), &p, &self.frozen),
                 }
             });
             output.textures_delta.clear();
+            output.shapes
         }
 
         fn click(&mut self, position: Pos2) {
@@ -1957,7 +2059,7 @@ mod tests {
     #[test]
     fn actual_snapshot_full_frame_strip_and_tags_stay_in_the_selected_viewport() {
         let mut f = ViewportPhotoFixture::new(false);
-        f.viewfinder = true;
+        f.scene = PhotoScene::FullFrame;
         f.ui.full_frame = true;
         let before = f.settings.clone();
         f.frames(12);
@@ -1975,6 +2077,179 @@ mod tests {
         assert_eq!(f.settings, before);
         assert_eq!(f.settings.size((3200, 2000)), (3200, 2000));
         assert!((f.ctx.content_rect().size() - f.native().size()).abs().max_elem() < 1.0);
+    }
+
+    fn assert_rect_near(actual: Rect, expected: Rect) {
+        assert!(
+            (actual.min - expected.min).abs().max_elem() < 0.1 && (actual.max - expected.max).abs().max_elem() < 0.1,
+            "{actual:?} differs from {expected:?}"
+        );
+    }
+
+    #[test]
+    fn actual_photo_guides_masks_and_comparison_follow_the_world_with_unrestricted_controls_and_dpi() {
+        for scene in [PhotoScene::FullFrame, PhotoScene::Viewfinder] {
+            for restricted in [false, true] {
+                for (native_scale, zoom) in [(1.0, 1.0), (1.25, 1.2), (2.0, 1.5)] {
+                    let mut f = ViewportPhotoFixture::new(false);
+                    f.scene = scene;
+                    f.native_scale = native_scale;
+                    f.ctx.set_zoom_factor(zoom);
+                    f.viewport.restrict_ui = restricted;
+                    f.settings.aspect = Aspect::R4x5;
+                    f.settings.guide = Guide::Thirds;
+                    f.settings.viewfinder.display = crate::snapshot::viewfinder::Display::Essential;
+                    f.settings.looks.push(crate::snapshot::looks::Layer::new("Sepia"));
+                    f.ui.looks.compare = Some(0.5);
+                    f.viewfinder.hinted = true;
+                    let before = f.settings.clone();
+                    f.frames(4);
+                    let shapes = f.show(Vec::new());
+                    let p = crate::theme::Theme::default().palette();
+                    let scale = native_scale * zoom;
+                    let at = |x, y| f.native().min + Vec2::new(x, y) / scale;
+                    // The physical scene is [800, 300, 2080, 1300]. A 4:5
+                    // photo occupies its middle 1040 pixels, independently
+                    // of the toolbar placement and native output size.
+                    let expected = Rect::from_min_max(at(1320.0, 300.0), at(2360.0, 1600.0));
+                    let guide_color = p.ink.gamma_multiply(if scene == PhotoScene::Viewfinder { 0.4 } else { 0.55 });
+                    let guides: Vec<_> = shapes
+                        .iter()
+                        .filter_map(|shape| match &shape.shape {
+                            egui::Shape::LineSegment { points, stroke } if stroke.color == guide_color && stroke.width == 1.0 => {
+                                Some(*points)
+                            }
+                            _ => None,
+                        })
+                        .collect();
+                    assert_eq!(guides.len(), 4, "{scene:?}/{restricted}/{scale}");
+                    for points in [
+                        [at(1320.0 + 1040.0 / 3.0, 300.0), at(1320.0 + 1040.0 / 3.0, 1600.0)],
+                        [at(1320.0 + 2080.0 / 3.0, 300.0), at(1320.0 + 2080.0 / 3.0, 1600.0)],
+                        [at(1320.0, 300.0 + 1300.0 / 3.0), at(2360.0, 300.0 + 1300.0 / 3.0)],
+                        [at(1320.0, 300.0 + 2600.0 / 3.0), at(2360.0, 300.0 + 2600.0 / 3.0)],
+                    ] {
+                        assert!(
+                            guides.iter().any(|actual| {
+                                (actual[0] - points[0]).abs().max_elem() < 0.1 && (actual[1] - points[1]).abs().max_elem() < 0.1
+                            }),
+                            "missing guide {points:?} in {guides:?}"
+                        );
+                    }
+                    let mask = p.navy.gamma_multiply(if scene == PhotoScene::Viewfinder { 0.66 } else { 0.62 });
+                    let masks: Vec<_> = shapes
+                        .iter()
+                        .filter_map(|shape| match &shape.shape {
+                            egui::Shape::Rect(rect) if rect.fill == mask => Some(rect.rect),
+                            _ => None,
+                        })
+                        .collect();
+                    assert_eq!(masks.len(), 2, "{scene:?}/{restricted}/{scale}");
+                    assert_rect_near(masks[0], Rect::from_min_max(at(800.0, 300.0), expected.left_bottom()));
+                    assert_rect_near(masks[1], Rect::from_min_max(expected.right_top(), at(2880.0, 1600.0)));
+                    if scene == PhotoScene::Viewfinder {
+                        let compare = f
+                            .ctx
+                            .memory(|memory| memory.area_rect(egui::Id::unique("vf_look_compare")))
+                            .expect("actual photo comparison handle");
+                        assert!((compare.center().x - expected.center().x).abs() < 1.0);
+                        assert!((compare.top() - expected.top()).abs() < 1.0);
+                        assert!((compare.bottom() - expected.bottom()).abs() < 1.0);
+                    } else if !restricted {
+                        let strip = f
+                            .ctx
+                            .memory(|memory| memory.area_rect(egui::Id::unique("photo_full_strip")))
+                            .expect("actual unrestricted full-frame controls");
+                        assert!(strip.center().y > f.bounds().bottom(), "controls retain the full workspace");
+                    }
+                    assert_rect_near(f.ctx.content_rect(), f.native());
+                    assert_eq!(f.settings, before, "scene placement must preserve the photo settings");
+                    assert_eq!(f.settings.size((3200, 2000)), (2560, 3200));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn actual_frozen_photo_uses_the_world_and_returns_to_the_native_canvas_when_cleared() {
+        for restricted in [false, true] {
+            let mut f = ViewportPhotoFixture::new(false);
+            f.scene = PhotoScene::Frozen;
+            f.viewport.restrict_ui = restricted;
+            f.frames(2);
+            for scoped in [true, false] {
+                f.viewport.enabled = scoped;
+                let shapes = f.show(Vec::new());
+                let p = crate::theme::Theme::default().palette();
+                let scale = f.native_scale * f.ctx.zoom_factor();
+                let at = |x, y| f.native().min + Vec2::new(x, y) / scale;
+                let expected = if scoped {
+                    Rect::from_min_max(at(1320.0, 300.0), at(2360.0, 1600.0))
+                } else {
+                    Rect::from_min_max(at(800.0, 0.0), at(2400.0, 2000.0))
+                };
+                let picture = shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Mesh(mesh) if mesh.texture_id == f.frozen.id() => Some(mesh.calc_bounds()),
+                        _ => None,
+                    })
+                    .expect("actual held photo image");
+                let background = shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Rect(rect) if rect.fill == p.navy => Some(rect.rect),
+                        _ => None,
+                    })
+                    .expect("actual held photo background");
+                assert_rect_near(picture, expected);
+                assert_rect_near(background, f.bounds());
+                assert_rect_near(f.ctx.content_rect(), f.native());
+            }
+        }
+    }
+
+    #[test]
+    fn actual_photo_guides_keep_the_whole_scene_for_interface_capture_and_fit_a_held_photo() {
+        for scene in [PhotoScene::FullFrame, PhotoScene::Viewfinder] {
+            let mut f = ViewportPhotoFixture::new(false);
+            f.scene = scene;
+            f.viewport.restrict_ui = false;
+            f.viewport.right = 20.0;
+            f.settings.guide = Guide::Thirds;
+            f.settings.viewfinder.display = crate::snapshot::viewfinder::Display::Essential;
+            f.viewfinder.hinted = true;
+            for (include_interface, frozen, aspect, physical_frame) in [
+                (false, false, Aspect::Window, [800.0, 400.0, 2560.0, 1500.0]),
+                (true, false, Aspect::Window, [800.0, 300.0, 2560.0, 1600.0]),
+                (true, true, Aspect::Window, [800.0, 400.0, 2560.0, 1500.0]),
+                (true, false, Aspect::R4x5, [1160.0, 300.0, 2200.0, 1600.0]),
+            ] {
+                f.settings.interface = include_interface;
+                f.settings.aspect = aspect;
+                f.ui.freeze = frozen;
+                f.frames(3);
+                let shapes = f.show(Vec::new());
+                let p = crate::theme::Theme::default().palette();
+                let guide_color = p.ink.gamma_multiply(if scene == PhotoScene::Viewfinder { 0.4 } else { 0.55 });
+                let mut guide_bounds = Rect::NOTHING;
+                let mut count = 0;
+                for shape in shapes {
+                    if let egui::Shape::LineSegment { points, stroke } = shape.shape
+                        && stroke.color == guide_color
+                        && stroke.width == 1.0
+                    {
+                        guide_bounds = guide_bounds.union(Rect::from_two_pos(points[0], points[1]));
+                        count += 1;
+                    }
+                }
+                assert_eq!(count, 4, "{scene:?}/{include_interface}/{frozen}/{aspect:?}");
+                let scale = f.native_scale * f.ctx.zoom_factor();
+                let at = |x, y| f.native().min + Vec2::new(x, y) / scale;
+                let [left, top, right, bottom] = physical_frame;
+                assert_rect_near(guide_bounds, Rect::from_min_max(at(left, top), at(right, bottom)));
+            }
+        }
     }
 
     #[test]
