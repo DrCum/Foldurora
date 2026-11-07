@@ -494,3 +494,99 @@ fn board_held_board_stop_expiry_keeps_current_owned_work_until_a_fresh_explicit_
     f.playback.stop_board(fresh, &f.data, &mut f.manager, f.now + DEADLINE).unwrap();
     assert!(!f.manager.is_playing(target.item()));
 }
+
+#[test]
+fn board_stop_retires_cached_and_pending_ready_before_native_start_without_replay() {
+    for pending in [false, true] {
+        let mut f = Fixture::new(1);
+        let target = f.target(1);
+        if !pending {
+            f.cache(1);
+        }
+        let ticket = f.ticket(1);
+        let ready = match f.playback.click(ticket, &f.data, target, &mut f.manager, f.now).unwrap() {
+            Click::Ready(ready) => ready,
+            Click::NeedsCache(queued) => {
+                f.cache(1);
+                f.playback.prepare_pending(queued, &f.data, target, &f.manager, f.now).unwrap()
+            }
+            _ => panic!("exact explicit start"),
+        };
+        let stop = f.playback.capture_board(&f.data, b(1), f.now).unwrap();
+        f.playback.stop_board(stop, &f.data, &mut f.manager, f.now).unwrap();
+        assert_eq!(f.playback.start(ready, &f.data, target, &mut f.manager, f.now), Err(Error::Stale));
+        assert!(!f.manager.has_playing());
+        assert!(f.playback.pending(target.item()).is_none());
+        let fresh = f.ticket(1);
+        let Click::Ready(ready) = f.playback.click(fresh, &f.data, target, &mut f.manager, f.now).unwrap() else {
+            panic!("new explicit intent")
+        };
+        f.playback.start(ready, &f.data, target, &mut f.manager, f.now).unwrap();
+        assert!(f.manager.is_playing(target.item()));
+    }
+}
+#[test]
+fn board_stop_cancels_only_its_ready_and_pending_domain_and_preserves_other_board_ready() {
+    let mut f = Fixture::new(2);
+    let second = f.target(2);
+    f.data = f
+        .data
+        .apply(Change::Create {
+            id: b(2),
+            name: "Other".into(),
+        })
+        .unwrap()
+        .apply(Change::Add {
+            board: b(2),
+            tile: Tile {
+                id: t(9),
+                item: Reference {
+                    reference: second.reference(),
+                    kind: Kind::Gesture,
+                },
+            },
+        })
+        .unwrap();
+    f.cache(1);
+    let first = f.target(1);
+    let ticket = f.ticket(1);
+    let Click::Ready(ready) = f.playback.click(ticket, &f.data, first, &mut f.manager, f.now).unwrap() else {
+        panic!("first ready")
+    };
+    let second_ticket = f.playback.capture(&f.data, b(2), t(9), second, &f.manager, f.now).unwrap();
+    assert!(matches!(
+        f.playback.click(second_ticket, &f.data, second, &mut f.manager, f.now),
+        Ok(Click::NeedsCache(_))
+    ));
+    let stop = f.playback.capture_board(&f.data, b(2), f.now).unwrap();
+    f.playback.stop_board(stop, &f.data, &mut f.manager, f.now).unwrap();
+    assert!(f.playback.pending(second.item()).is_none());
+    f.playback.start(ready, &f.data, first, &mut f.manager, f.now).unwrap();
+    assert!(f.manager.is_playing(first.item()));
+    assert!(!f.manager.is_playing(second.item()));
+}
+#[test]
+fn board_cancel_retires_held_play_and_stop_tickets_without_touching_a_later_explicit_run() {
+    let mut f = Fixture::new(1);
+    f.cache(1);
+    let target = f.target(1);
+    let held = f.ticket(1);
+    let stop = f.playback.capture_board(&f.data, b(1), f.now).unwrap();
+    f.playback.stop_board(stop, &f.data, &mut f.manager, f.now).unwrap();
+    assert!(matches!(
+        f.playback.click(held, &f.data, target, &mut f.manager, f.now),
+        Err(Error::Stale)
+    ));
+    let fresh = f.ticket(1);
+    let Click::Ready(ready) = f.playback.click(fresh, &f.data, target, &mut f.manager, f.now).unwrap() else {
+        panic!("new click")
+    };
+    f.playback.start(ready, &f.data, target, &mut f.manager, f.now).unwrap();
+    let run = f.manager.playback_id(target.item()).unwrap();
+    assert!(f.playback.stop_board(stop, &f.data, &mut f.manager, f.now).is_err());
+    assert_eq!(f.manager.playback_id(target.item()), Some(run));
+    let from = f.playback.capture_board(&f.data, b(1), f.now).unwrap();
+    f.playback.cancel_board(b(1), &f.data).unwrap();
+    assert!(f.playback.stop_board(from, &f.data, &mut f.manager, f.now).is_err());
+    assert_eq!(f.manager.playback_id(target.item()), Some(run));
+}
