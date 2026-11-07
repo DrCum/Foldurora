@@ -172,7 +172,11 @@ using the integration's current DPI/zoom. Ordinary floaters, including Inventory
 Preferences, World Map and mini-map, retain the native workspace for layout,
 movement, resizing and input. Native pointer and world coordinates stay unchanged.
 Control placement uses the configured world rectangle independently of temporary
-full-frame rendering and snapshot output. Small control areas fit or scroll their
+full-frame rendering and snapshot output. Viewfinder areas retain this selected
+control scope (the native workspace when unrestricted), cap scrolling to their
+explicit bounds and keep the dock's centred column at its intrinsic shutter
+width so its foreground hit region cannot cover the scene or lens controls.
+The lens ring reserves dock space; compact layouts separate the AF and lens rows. Small control areas fit or scroll their
 contents rather than replacing their bounds with the full window; ordinary
 floater edge allowances do not loosen camera/snapshot bounds. Shared floaters
 preserve saved full-workspace geometry and restore wide size/anchor backups from

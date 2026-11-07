@@ -1,6 +1,17 @@
 # Aurora Viewer — task tracking
 
-- 🔧 Viewfinder dock and input (human report, 2026-11-07; task `camera-input-dock`; no issue): diagnose oversized control hit regions, anchor the dock to the scene right edge, and preserve scene wheel and lens controls after changing photo settings. Source regressions and integration validation in progress.
+- 🔧 Viewfinder dock and input (human report, 2026-11-07; task
+  `camera-input-dock`; no issue): constrain the centred dock column to the
+  shutter's width so its foreground area no longer covers world input. Anchor
+  it at the right edge of the selected control canvas, retaining unrestricted
+  full-workspace controls when the toolbar restriction is off. Keep the lens
+  ring centred, clear of the dock and responsive at narrow widths; give the AF
+  choices their own row when the lens values need the bottom row, and bound
+  scrolling/help/menu controls. The scene/export projection, frozen frame,
+  wheel/dial semantics and ordinary floaters remain unchanged. Real egui
+  regressions exercise pointer ownership, drawer cycles, lens +/- and wheel,
+  aperture-to-focal selection, narrow widths and fractional DPI/zoom.
+  Integration checks, native visual checks and human Windows acceptance pending.
 
 - 🔧 Selective upstream catch-up (human request, 2026-11-07; no issue): apply
   sixteen reviewed upstream commits individually with `-x` to frozen photo/
