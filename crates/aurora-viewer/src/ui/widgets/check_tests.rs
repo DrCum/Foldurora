@@ -94,6 +94,76 @@ fn checkbox_keeps_the_contract_of_the_stock_one() {
 }
 
 #[test]
+fn published_checkbox_reports_accessible_activation_without_changing_confirmed_value() {
+    fn frame(ctx: &egui::Context, published: bool, enabled: bool, events: Vec<egui::Event>) -> (egui::Response, Vec<egui::WidgetInfo>) {
+        let p = crate::theme::Theme::default().palette();
+        let mut response = None;
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(400.0, 200.0))),
+                focused: true,
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                response = Some(
+                    ui.add_enabled_ui(enabled, |ui| checkbox_value(ui, &p, published, "Confirmed setting"))
+                        .inner,
+                );
+            },
+        );
+        let infos = output
+            .platform_output
+            .events
+            .into_iter()
+            .filter_map(|event| match event {
+                egui::output::OutputEvent::Clicked(info) => Some(info),
+                _ => None,
+            })
+            .collect();
+        (response.unwrap(), infos)
+    }
+    let ctx = egui::Context::default();
+    let (initial, _) = frame(&ctx, false, true, vec![]);
+    assert!(initial.enabled());
+    let pos = initial.rect.center();
+    frame(
+        &ctx,
+        false,
+        true,
+        vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: Default::default(),
+            },
+        ],
+    );
+    let (clicked, infos) = frame(
+        &ctx,
+        false,
+        true,
+        vec![egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: Default::default(),
+        }],
+    );
+    assert!(clicked.clicked() && !clicked.changed() && clicked.enabled());
+    let info = infos.first().expect("the actual interactive checkbox announces activation");
+    assert_eq!(info.role, egui::Role::CheckBox);
+    assert_eq!(info.label.as_deref(), Some("Confirmed setting"));
+    assert_eq!(info.selected, Some(false), "an unconfirmed request is not announced as persisted");
+    let (confirmed, _) = frame(&ctx, true, true, vec![]);
+    assert!(!confirmed.changed(), "publication belongs to the owner, not a fabricated UI edit");
+    let (disabled, _) = frame(&ctx, true, false, vec![]);
+    assert!(!disabled.enabled());
+}
+
+#[test]
 fn labeled_switch_flips_from_its_switch_and_from_its_label() {
     let mut bench = Bench::new(true);
     assert_eq!(bench.labels, 1);

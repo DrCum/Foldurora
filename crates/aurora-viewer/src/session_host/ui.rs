@@ -18,6 +18,7 @@ pub(super) enum Action {
     Activate(WorkerId),
     Detach(WorkerId),
     OpenChat(aurora_session::chat::ChatSource),
+    OpenAttention,
     Close,
 }
 
@@ -36,6 +37,7 @@ pub(super) struct HostUi {
     rename: Option<(SlotId, String)>,
     pub close_prompt: bool,
     pub notice: Option<Notice>,
+    pub attention_count: usize,
 }
 
 pub(super) struct Output {
@@ -84,6 +86,15 @@ impl HostUi {
                     );
                     ui.add_space(8.0);
                     self.slot_management(ui, p, snapshot, closing);
+                    if ui
+                        .add_enabled(
+                            !closing && !snapshot.stopped,
+                            egui::Button::new(aurora_i18n::tr!("host-attention-show")),
+                        )
+                        .clicked()
+                    {
+                        action = Some(Action::OpenAttention);
+                    }
                     let login_slot = self.login_slot(snapshot);
                     ui.add_space(10.0);
                     let query = self.search.trim().to_lowercase();
@@ -445,7 +456,37 @@ impl HostUi {
                         self.management_open = true;
                     }
                 } else {
-                    ui.allocate_space(vec2(28.0, 28.0));
+                    let preferences = &snapshot.attention_preferences;
+                    let tooltip = if preferences.error.is_some() {
+                        if preferences.writable {
+                            aurora_i18n::tr!("host-attention-save-failed").to_owned()
+                        } else {
+                            aurora_i18n::tr!("host-attention-load-failed").to_owned()
+                        }
+                    } else if self.attention_count == 0 {
+                        aurora_i18n::tr!("host-attention-show").to_owned()
+                    } else {
+                        aurora_i18n::tr!("host-attention-count", count = self.attention_count)
+                    };
+                    let inbox = compact_button(
+                        ui,
+                        p,
+                        "bell-filled",
+                        &tooltip,
+                        if preferences.error.is_some() {
+                            ActionKind::Caution
+                        } else if self.attention_count > 0 {
+                            ActionKind::Primary
+                        } else {
+                            ActionKind::Flat
+                        },
+                        enabled,
+                    );
+                    #[cfg(test)]
+                    ui.ctx().data_mut(|data| data.insert_temp(Id::unique("host_attention"), inbox.rect));
+                    if inbox.clicked() {
+                        action = Some(Action::OpenAttention);
+                    }
                 }
             });
             let attention = snapshot.registry_error.is_some() || snapshot.error.is_some() || matches!(self.notice, Some(Notice::Error(_)));
@@ -784,7 +825,8 @@ fn matches(label: &str, grid: &str, query: &str) -> bool {
 /// The IO thread may publish a fresh Arc for unchanged receipts. Only visible
 /// changes should repaint the full software surface, including on a large host.
 pub(super) fn same_snapshot(a: &HostSnapshot, b: &HostSnapshot) -> bool {
-    a.slots == b.slots
+    a.attention_preferences == b.attention_preferences
+        && a.slots == b.slots
         && a.registry_error == b.registry_error
         && a.stopped == b.stopped
         && a.error == b.error
@@ -1261,6 +1303,39 @@ mod tests {
                     "closed popups cannot leave a stale geometry capture"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn host_attention_uses_existing_compact_island_without_activating_a_world() {
+        let snapshot = snapshot();
+        for width in [1240.0, 760.0] {
+            let mut frames = Frames::new();
+            frames.size.x = width;
+            frames.show(&snapshot, vec![], false);
+            let world = frames
+                .ctx
+                .data(|data| data.get_temp::<Rect>(Id::unique("host_world_rect")))
+                .unwrap();
+            let before = frames.ctx.data(|data| data.get_temp::<Rect>(Id::unique("host_attention"))).unwrap();
+            frames.ui.attention_count = 7;
+            frames.show(&snapshot, vec![], false);
+            let after = frames.ctx.data(|data| data.get_temp::<Rect>(Id::unique("host_attention"))).unwrap();
+            assert_eq!(before, after, "unread color/count must not move the strip or world");
+            assert_eq!(
+                world,
+                frames
+                    .ctx
+                    .data(|data| data.get_temp::<Rect>(Id::unique("host_world_rect")))
+                    .unwrap()
+            );
+            assert!(frames.ctx.content_rect().contains_rect(after));
+            assert_eq!(
+                frames.click(&snapshot, Id::unique("host_attention"), false),
+                Some(Action::OpenAttention)
+            );
+            assert_eq!(snapshot.active, None);
+            assert_eq!(snapshot.pending, None);
         }
     }
 

@@ -1,5 +1,17 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Host-only conversation Attention (2026-11-07; no issue): bounded unread
+  reminders for five stable profiles and existing Nearby/Direct conversations,
+  defaults all profiles/Direct on and Nearby off. Local Dismiss preserves native
+  unread state; passive Next/Previous/Open shared chat captures the exact target
+  and flushes delivered edits before canonical navigation. Separate private
+  preferences preserve the slot registry/rollback schema and retain published
+  values on save failure. A compact owned CPU surface keeps filters collapsed,
+  with last-painted input capture, IME/refocus fences and exact save outcomes.
+  Model, persistence, real-egui/bridge and lifecycle source tests are authored;
+  compiled checks, CPU captures and native acceptance remain pending. Native
+  Review, offers/groups, auto-reading and monitors remain later increments.
+
 - 🔧 Native Shared Chat CPU input fixture (2026-11-07): isolated Linux ignored
   test using actual ChatWindow/egui-winit input with synthetic snapshots and
   recorded intents only. Runtime checkpoint `b54b2c28` compiled and verified

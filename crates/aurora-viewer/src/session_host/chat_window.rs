@@ -1,7 +1,7 @@
 //! One disposable owned CPU surface. Shell retains the canonical shared-chat
 //! model when this window closes, is minimized or cannot be created.
 
-mod enter_release;
+pub(super) mod enter_release;
 
 use super::chat_ui::InputMode;
 use super::shared_chat::SharedChat;

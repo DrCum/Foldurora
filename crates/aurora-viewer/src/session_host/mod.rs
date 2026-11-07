@@ -1,6 +1,10 @@
 //! Opt-in native session controller. Worlds, logins and GPU ownership remain
 //! in separately isolated workers; the host paints only its CPU interface.
 
+mod attention;
+mod attention_prefs;
+mod attention_ui;
+mod attention_window;
 pub(crate) mod chat;
 pub(crate) mod chat_broker;
 pub(crate) mod chat_io;
@@ -63,6 +67,10 @@ pub fn run() -> anyhow::Result<()> {
         chat_window: None,
         shared_chat: shared_chat::SharedChat::default(),
         chat_changed: true,
+        attention: attention::Attention::default(),
+        attention_ui: attention_ui::AttentionUi::default(),
+        attention_window: None,
+        attention_changed: true,
         error: None,
         next_poll: now,
         repaint: Some(now),
@@ -98,6 +106,10 @@ struct Shell {
     chat_window: Option<chat_window::ChatWindow>,
     shared_chat: shared_chat::SharedChat,
     chat_changed: bool,
+    attention: attention::Attention,
+    attention_ui: attention_ui::AttentionUi,
+    attention_window: Option<attention_window::AttentionWindow>,
+    attention_changed: bool,
     error: Option<String>,
     next_poll: Instant,
     repaint: Option<Instant>,
@@ -128,6 +140,10 @@ impl Shell {
                 self.open_chat(event_loop, source);
                 return;
             }
+            Action::OpenAttention => {
+                self.open_attention(event_loop);
+                return;
+            }
             Action::OpenLogin(account, slot) => self.controller.open_manual_login(account, slot),
             Action::RenameSlot(slot, label) => self.controller.rename_slot(slot, label),
             Action::Activate(worker) => match viewport {
@@ -138,6 +154,9 @@ impl Shell {
             Action::Close => {
                 self.chat_window = None;
                 self.shared_chat.clear();
+                self.attention_window = None;
+                self.attention_ui.cancel_gestures();
+                self.attention.clear();
                 self.close_region();
                 self.controller.shutdown();
                 self.closing = Some(Instant::now());
@@ -151,7 +170,7 @@ impl Shell {
                 // The broker's pending row can name the old renderer while
                 // the requested target is also a transaction participant.
                 Action::Detach(worker) => self.snapshot.active == Some(worker) || self.snapshot.pending.is_some(),
-                Action::OpenChat(_) | Action::RenameSlot(_, _) | Action::Close => false,
+                Action::OpenChat(_) | Action::OpenAttention | Action::RenameSlot(_, _) | Action::Close => false,
             };
             if affects_active {
                 // The IO thread has not seen the intent yet. Do not reopen
@@ -193,6 +212,94 @@ impl Shell {
                 self.request_repaint();
             }
         }
+    }
+
+    fn sync_attention(&mut self) {
+        if self.closing.is_some() || self.snapshot.stopped {
+            self.attention.clear();
+        } else {
+            // Pending/invalid loads carry disabled preferences. A transient save
+            // error retains the last published filters and must remain usable.
+            self.attention
+                .sync(&self.snapshot, &self.snapshot.attention_preferences.preferences);
+        }
+        self.attention_ui.sync(&self.attention, &self.snapshot.attention_preferences);
+        self.ui.attention_count = self.attention.rows().len();
+    }
+
+    fn refresh_attention(&mut self) {
+        let snapshot = self.controller.snapshot();
+        let changed = !ui::same_snapshot(&snapshot, &self.snapshot);
+        self.snapshot = snapshot;
+        self.chat_changed |= self.shared_chat.sync(&self.snapshot, self.closing.is_some());
+        self.sync_attention();
+        self.attention_changed |= changed;
+        if changed {
+            self.request_repaint();
+        }
+    }
+
+    fn open_attention(&mut self, event_loop: &ActiveEventLoop) {
+        self.refresh_attention();
+        if let Some(window) = &mut self.attention_window {
+            window.focus(&mut self.attention_ui);
+            return;
+        }
+        self.attention_ui.cancel_gestures();
+        let result = self
+            .surface
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("host window is unavailable"))
+            .and_then(|owner| attention_window::AttentionWindow::new(event_loop, &owner.window));
+        match result {
+            Ok(window) => self.attention_window = Some(window),
+            Err(error) => {
+                log::warn!("session host: could not open owned Attention window: {error}");
+                self.ui.notice = Some(Notice::Error(transport::HostError::Unavailable));
+                self.notice_at = Some(Instant::now());
+                self.request_repaint();
+            }
+        }
+    }
+
+    fn attention_action(&mut self, event_loop: &ActiveEventLoop, action: attention_ui::Action) {
+        self.refresh_attention();
+        if self.closing.is_some() || self.snapshot.stopped || self.ui.modal_open() {
+            self.attention_ui.surface_failed();
+            self.attention_changed = true;
+            self.request_repaint();
+            return;
+        }
+        match action {
+            attention_ui::Action::OpenChat(ticket) => {
+                if !self.attention.validate(ticket) {
+                    return;
+                }
+                // Drain edits already delivered to the old composer before the
+                // explicit source/conversation change; this pass cannot send.
+                if let Some(window) = &mut self.chat_window {
+                    window.flush_edits(&self.controller, &mut self.shared_chat);
+                }
+                self.refresh_attention();
+                if let Some(key) = self.attention.open_chat(ticket)
+                    && self.shared_chat.select_key(key)
+                {
+                    self.open_chat(event_loop, key.source);
+                }
+            }
+            attention_ui::Action::Dismiss(ticket) => {
+                if self.attention.dismiss(ticket) {
+                    self.ui.attention_count = self.attention.rows().len();
+                }
+            }
+            attention_ui::Action::Preferences(preferences) => match self.controller.save_attention_preferences(preferences) {
+                Ok(ticket) => self.attention_ui.queued(ticket, preferences),
+                Err(_) => self.attention_ui.queue_failed(),
+            },
+        }
+        self.ui.attention_count = self.attention.rows().len();
+        self.attention_changed = true;
+        self.request_repaint();
     }
 
     fn render(&mut self, event_loop: &ActiveEventLoop) -> anyhow::Result<()> {
@@ -241,11 +348,14 @@ impl Shell {
         }
         self.next_poll = now + POLL;
         let snapshot = self.controller.snapshot();
-        if !ui::same_snapshot(&snapshot, &self.snapshot) {
+        let changed = !ui::same_snapshot(&snapshot, &self.snapshot);
+        if changed {
             self.repaint = Some(now);
         }
         self.snapshot = snapshot;
         self.chat_changed |= self.shared_chat.sync(&self.snapshot, self.closing.is_some());
+        self.sync_attention();
+        self.attention_changed |= changed;
         if self
             .notice_at
             .is_some_and(|at| now.saturating_duration_since(at) >= Duration::from_secs(4))
@@ -288,7 +398,10 @@ impl Shell {
             })
         });
         self.controller.set_workspace_foreground(
-            surface.window.has_focus() || worker_focused || self.chat_window.as_ref().is_some_and(|window| window.focused()),
+            surface.window.has_focus()
+                || worker_focused
+                || self.chat_window.as_ref().is_some_and(|window| window.focused())
+                || self.attention_window.as_ref().is_some_and(|window| window.focused()),
         );
         let viewport = surface.viewport(self.world, self.context.pixels_per_point());
         let visible = surface.window.is_visible() == Some(true) && surface.window.is_minimized() == Some(false);
@@ -414,6 +527,38 @@ impl ApplicationHandler for Shell {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        if self.attention_window.as_ref().is_some_and(|window| window.id() == id) {
+            self.refresh_attention();
+            let blocked = self.ui.modal_open() || self.closing.is_some() || self.snapshot.stopped;
+            let Some(window) = self.attention_window.as_mut() else { return };
+            let result = window.event(
+                event_loop,
+                &event,
+                &mut self.attention,
+                &mut self.attention_ui,
+                &self.snapshot,
+                blocked,
+            );
+            match result {
+                Ok((closed, action)) => {
+                    if closed {
+                        self.attention_window = None;
+                    }
+                    if let Some(action) = action {
+                        self.attention_action(event_loop, action);
+                    }
+                }
+                Err(error) => {
+                    log::warn!("session host: owned Attention surface closed after native error: {error}");
+                    self.attention_ui.surface_failed();
+                    self.attention_window = None;
+                    self.ui.notice = Some(Notice::Error(transport::HostError::Unavailable));
+                    self.notice_at = Some(Instant::now());
+                    self.request_repaint();
+                }
+            }
+            return;
+        }
         if let Some(window) = self.chat_window.as_mut().filter(|window| window.id() == id) {
             match window.event(event_loop, &event, &self.controller, &mut self.shared_chat, self.ui.modal_open()) {
                 Ok(false) => {}
@@ -518,6 +663,16 @@ impl ApplicationHandler for Shell {
         {
             next = next.min(repaint);
         }
+        if let Some(window) = &mut self.attention_window
+            && let Some(repaint) = window.poll(
+                std::mem::take(&mut self.attention_changed),
+                self.ui.modal_open() || self.closing.is_some() || self.snapshot.stopped,
+                &mut self.attention_ui,
+                now,
+            )
+        {
+            next = next.min(repaint);
+        }
         if let Some(repaint) = self.repaint {
             let due = self.last_frame.map_or(repaint, |last| repaint.max(last + MIN_FRAME));
             if now >= due {
@@ -538,6 +693,9 @@ impl ApplicationHandler for Shell {
         // Drop clipboard/surface while the platform connection still lives.
         self.chat_window = None;
         self.shared_chat.clear();
+        self.attention_window = None;
+        self.attention_ui.cancel_gestures();
+        self.attention.clear();
         self.surface = None;
     }
 }

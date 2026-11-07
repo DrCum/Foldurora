@@ -117,6 +117,21 @@ not enter permission revisions or composer/catalogue identity. Old chat peers
 fail closed; the control protocol and activation authority are unchanged.
 This source stage still needs compiled and native acceptance.
 
+`session_host/attention.rs` derives a bounded, body-free conversation inbox from
+current authenticated native Read metadata. Five stable slots own inclusion
+filters; policy/source loss purges reminders and gesture captures even while the
+window is closed. Reminder dismissal is local, keyed by full source/conversation,
+policy, native epoch/cursor and count. It never issues Read or activation.
+`attention_prefs.rs` persists only filters in a separate bounded private file
+under the controller registry lock/IO owner, leaving the old slot schema intact.
+Malformed stores fail closed without disabling core hosting; failed writes retain
+published values and exact attempted-operation status. `attention_ui.rs` binds
+input to last-painted identities and native release fences. Shell retains its
+model/UI across the disposable owned `attention_window.rs` CPU surface. Passive
+Open/Next/Previous flush delivered edits before `SharedChat::select_key` selects
+an exact existing conversation without fallback or worker commands. Native Review,
+offers, automatic reading and preview monitors remain separate increments.
+
 `ChatUi` owns a bounded policy-stamped draft map, including each editor's Undo
 state. A pass moves editor state into egui only for its exact source/conversation/
 policy/incarnation and removes it afterward, so background authority changes can

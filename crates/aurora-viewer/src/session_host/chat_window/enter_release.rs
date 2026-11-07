@@ -4,7 +4,7 @@ use winit::event::ElementState;
 use winit::keyboard::{Key, ModifiersState};
 
 #[derive(Default)]
-pub(super) struct EnterRelease {
+pub(in crate::session_host) struct EnterRelease {
     held: bool,
     focused: bool,
     before_focus: bool,

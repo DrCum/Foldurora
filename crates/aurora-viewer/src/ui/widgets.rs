@@ -1854,6 +1854,15 @@ pub fn checkbox(ui: &mut egui::Ui, p: &Palette, on: &mut bool, label: impl Into<
     check_row(ui, p, on, label.into(), false)
 }
 
+/// A confirmed value whose click requests a change elsewhere. The displayed
+/// state changes only when its owner publishes a new value, while this remains
+/// a normal focusable, accessible checkbox. A vector tick also lets independent
+/// CPU contexts use it without borrowing another context's icon texture.
+pub fn checkbox_value(ui: &mut egui::Ui, p: &Palette, on: bool, label: impl Into<egui::WidgetText>) -> egui::Response {
+    let mut published = on;
+    check_row_value(ui, p, &mut published, label.into(), false, false, false)
+}
+
 /// `checkbox` showing a dash instead of its tick while `mixed`: the objects
 /// of a selection do not agree.
 pub fn checkbox_mixed(ui: &mut egui::Ui, p: &Palette, on: &mut bool, label: impl Into<egui::WidgetText>, mixed: bool) -> egui::Response {
@@ -1901,8 +1910,20 @@ fn mark_label(ui: &egui::Ui, p: &Palette, row: egui::Rect, mark: egui::Rect, gal
 }
 
 fn check_row(ui: &mut egui::Ui, p: &Palette, on: &mut bool, label: egui::WidgetText, mixed: bool) -> egui::Response {
+    check_row_value(ui, p, on, label, mixed, true, true)
+}
+
+fn check_row_value(
+    ui: &mut egui::Ui,
+    p: &Palette,
+    on: &mut bool,
+    label: egui::WidgetText,
+    mixed: bool,
+    toggle: bool,
+    textured: bool,
+) -> egui::Response {
     let (rect, mut resp, galley) = mark_row(ui, label);
-    if resp.clicked() {
+    if toggle && resp.clicked() {
         *on = !*on;
         resp.mark_changed();
     }
@@ -1929,7 +1950,7 @@ fn check_row(ui: &mut egui::Ui, p: &Palette, on: &mut bool, label: egui::WidgetT
         if mixed {
             painter.hline(square.shrink(3.5).x_range(), square.center().y, mark);
         } else if checked {
-            match super::icons::global("check") {
+            match textured.then(|| super::icons::global("check")).flatten() {
                 Some(icon) => {
                     let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
                     painter.image(icon.id(), square.shrink(1.0), uv, p.on_accent);

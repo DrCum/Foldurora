@@ -54,6 +54,23 @@ are synthetic; no native window, controller, profile, socket, grid or GPU is
 created. Passing these checks does not establish native Windows focus/ownership
 or real-grid routing. Japanese captures require the installed CJK fallback font.
 
+**Attention CPU captures.**
+
+| Variable | Effect |
+|---|---|
+| `AURORA_ATTENTION_VISUAL_DIR=<directory>` | Fresh output directory for the ignored production Attention body fixture |
+| `AURORA_ATTENTION_VISUAL_LANGUAGE=en\|fr\|ja` | Isolated locale for that test process |
+
+These variables exist only in test builds. Run
+`cargo test --workspace attention_cpu_visual_fixture -- --ignored --test-threads=1 --nocapture`
+with one locale and fresh directory per process. The production CPU painter
+captures compact/expanded filters, selected reminders, pending/failed saves,
+unavailable/empty/load-failed state, narrow 150% and short layouts. All data and
+transcript/path privacy sentinels are synthetic. Required text and clip/privacy
+checks accompany the original PNGs. No native window, authentication, World or
+read/activation command is created; these captures do not establish native
+Windows ownership/IME or real-grid acceptance.
+
 **Native Linux Shared Chat CPU input fixture.**
 
 | Variable | Effect |
