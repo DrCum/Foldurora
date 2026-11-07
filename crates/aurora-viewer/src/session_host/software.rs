@@ -147,6 +147,10 @@ impl SoftwareWindow {
         private: Option<(egui::TextureId, &egui::ColorImage)>,
         current: &mut dyn FnMut() -> bool,
     ) -> anyhow::Result<Duration> {
+        if self.input.egui_ctx() != context {
+            output.textures_delta.clear();
+            anyhow::bail!("private output belongs to a different native input context");
+        }
         self.pending.append(std::mem::take(&mut output.textures_delta));
         let delay = output
             .viewport_output
