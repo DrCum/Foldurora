@@ -23,11 +23,11 @@ mod monitor_manager;
 mod monitor_shell;
 #[cfg(windows)]
 mod monitor_window;
-// Pure monitor bindings only; no production surface or image service enabled.
-#[cfg(test)]
+// The native monitor frontend is Windows-only; portable fixtures exercise the
+// same model and body. Bootstrap enablement is a separate integration gate.
+#[cfg(any(windows, test))]
 mod monitor_model;
-// Body only; native surface, image service and Shell entry remain disabled.
-#[cfg(test)]
+#[cfg(any(windows, test))]
 mod monitor_ui;
 mod native;
 mod preview_bootstrap;
@@ -35,13 +35,11 @@ mod preview_bootstrap;
 mod preview_projection;
 pub(crate) mod profile;
 mod review;
-// Unused prerequisite only; native IO/bootstrap/authority integration is absent.
-#[cfg(test)]
-mod preview_io;
-#[cfg(test)]
+// App and WorkerBridge consume the genuine image proofs on every platform.
+// Linux does not gain a native monitor window or an image bootstrap fallback.
+pub(crate) mod preview_io;
 mod preview_transport;
-// Dormant CPU private-image lifetime prerequisite; no native monitor caller.
-#[cfg(test)]
+#[cfg(any(windows, test))]
 mod private_image;
 mod shared_chat;
 pub(crate) mod slots;
