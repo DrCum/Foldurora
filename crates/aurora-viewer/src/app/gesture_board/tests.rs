@@ -361,6 +361,11 @@ fn board_app_old_stop_cannot_drop_new_cache_context_before_exact_runtime_validat
     );
     assert!(f.actor.runtime.pending(target.item()) == Some(ticket));
     let current = f.actor.runtime.capture_board(&f.data, board, now).unwrap();
+    assert!(matches!(
+        f.actor.stop_board(BoardId::new(), current, &f.data, &mut f.manager, now),
+        Err(playback::Error::Stale)
+    ));
+    assert!(f.actor.pending.contains_key(&target.item()));
     f.actor.stop_board(board, current, &f.data, &mut f.manager, now).unwrap();
     assert!(f.actor.pending.is_empty());
     assert!(f.actor.runtime.pending(target.item()).is_none());

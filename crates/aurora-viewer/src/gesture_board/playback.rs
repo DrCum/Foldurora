@@ -99,6 +99,11 @@ pub(crate) struct BoardTicket {
     board: BoardId,
     captured_at: Instant,
 }
+impl BoardTicket {
+    pub fn board(self) -> BoardId {
+        self.board
+    }
+}
 pub(crate) struct Ready {
     ticket: Ticket,
     definition: Gesture,

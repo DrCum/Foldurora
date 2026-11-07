@@ -498,6 +498,9 @@ impl State {
         manager: &mut crate::gestures::Manager,
         now: Instant,
     ) -> Result<Vec<crate::gestures::Effect>, playback::Error> {
+        if board != ticket.board() {
+            return Err(playback::Error::Stale);
+        }
         let effects = self.runtime.stop_board(ticket, data, manager, now)?;
         self.pending.retain(|_, (t, _, _)| t.board() != board);
         Ok(effects)
