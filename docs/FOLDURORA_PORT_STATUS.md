@@ -8,7 +8,7 @@ The user-selected implementation order is **compact host redesign → shared cha
 → Attention → monitors with chat**. The compact host is implemented at frozen
 checkpoint `399ffd79`, with Linux source, synthetic visual and owned EN CPU UI
 evidence below. Its verified package remains an earlier compact checkpoint;
-the current verified Windows download is `f5ae21d5` below. The earlier
+the current verified Windows download is `388b299c` below. The earlier
 `70c1b5cd` package has the preceding host layout. Native Windows
 profile/draft and compact-host acceptance remain pending. Branding and photo-mode
 viewport work are separate in-progress follow-ups, not fixes included in `399ffd79`.
@@ -28,7 +28,7 @@ local-builder prompt targets final `388b299c`, separately from this package.
 These source changes must not be attributed to the compact `399ffd79`
 package.
 
-The final frozen source candidate is
+The verified frozen upstream candidate is
 [`388b299c429d776b3fc7a9890162cd3d940b9dc3`](https://github.com/DrCum/Foldurora/commit/388b299c429d776b3fc7a9890162cd3d940b9dc3)
 on pushed `feat/foldurora-upstream-integration`: frozen `f5ae21d5` plus 16
 reviewed upstream commits, leaving 25 for staged integration. Provenance, source
@@ -38,11 +38,38 @@ new HUD/cache and retained regressions passed. Its normal binary built in 4m35s.
 Bounded software-Vulkan landscape/isolation and HUD visibility checks passed;
 landscape/isolation exited normally, but the HUD harness reached its deadline
 with Quit confirmation open, so normal HUD Quit acceptance is unproven.
-Its exact-source Windows run is
-[42337795785](https://github.com/DrCum/Foldurora/actions/runs/42337795785).
-GPU/native and package acceptance remain pending. The optional build-only prompt
-was given to the user; delivery/start at the local builder are unconfirmed. The verified
-`f5ae21d5` download does not validate this newer upstream source.
+Its exact-source [Windows artifact 13561798593](https://github.com/DrCum/Foldurora/actions/runs/42337795785/artifacts/13561798593)
+is verified: 7,874 passed, 0 failed, 50 ignored; all 85 required named regressions
+passed exactly once. Parser, formatting, strict Clippy, tests, build and package
+succeeded. Native Windows/GPU/grid acceptance remains pending. The optional
+local build-only prompt was given to the user; delivery/start there are unconfirmed.
+
+This package predates the camera-control/input follow-up reported against local
+`f5ae21d5`: the right-side scene is bounded, but the vertical dock is centered and
+wheel/ring input can stop responding. A separate camera-control fix is undergoing
+integration tests. Shared Chat is also being authored independently; neither is
+included in `388b299c`. The exact control sequence preceding the human's failure
+is unknown and is not required for the reproduced header hit-region defect.
+
+The current verified Windows package is
+`Foldurora-test-388b299c429d-windows-x64.zip`, version
+**`0.9.3-beta.20261106.1+155.g388b299c4`**, from successful run
+[42337795785](https://github.com/DrCum/Foldurora/actions/runs/42337795785), completed
+7 November 2026 at 05:19 UTC (00:19 America/New_York). Artifact test output and
+independent raw job logs agree on **7,874 passed, 0 failed, 50 ignored** and all
+**85 required named regressions** exactly once. The two masked-HUD regressions
+are included. Both manifests, portable archive checksum/CRCs, AMD64/PE32+
+executable, executable/install version strings and all seven embedded icon frames
+were verified against the exact source ICO.
+
+- Outer artifact SHA-256: `9cc8b2a9e6160cbcabe88b7ff08e86f366e09079ec63849bc9006120b30de4b7`.
+- Portable ZIP SHA-256: `f5f0c84ec350f0e3d410ccdd26be8830ffb36a31a0cff4a8ca36fae108e72905`.
+- Executable SHA-256: `66bbcb2a0cf1706775565625246f6f8ffa0989d17b3b10f6b6aae2c5c334d6da`.
+
+The retained source-worktree receipt is
+`.scratch/windows-ci-42337795785/receipt.json`, with the downloaded package,
+raw logs and `icon-resource-verification.json`. This verifies the portable build;
+it does not establish native Windows acceptance or resolve the later camera bug.
 
 ## Frozen test candidates
 
@@ -53,9 +80,9 @@ was given to the user; delivery/start at the local builder are unconfirmed. The 
 | `8cd9a2aa005491b651e5bb8591d94fd6fb891520` | Combined backend/profile checkpoint: host/menu fixes, retained conversation drafts, crash details fallback and five persistent renameable slots | [Windows run 42311181216](https://github.com/DrCum/Foldurora/actions/runs/42311181216) passed: 7,818 tests passed, 0 failed, 49 ignored. Scripts, formatting, strict Clippy, normal build and packaging passed; downloaded package identity, manifest and checksums were verified. | This checkpoint has a known profile-popup margin overlap corrected by `70c1b5cd`. Native host/profile/chat and human grid acceptance remain pending. |
 | `70c1b5cda927547b28e5a5ff9713e861771aaee7` | Earlier verified test candidate, `fix/profile-popup-bounds`: bounds the profile popup including its frame and wraps occupied-profile help inline | [Windows run 42315300611](https://github.com/DrCum/Foldurora/actions/runs/42315300611) passed: 7,819 tests passed, 0 failed, 49 ignored; all 28 applicable named regressions passed exactly once. Scripts, formatting, strict Clippy, normal build and packaging passed. Downloaded manifest, checksums and executable/PE identity were verified. Fresh Linux CPU UI and sequential demo-worker evidence is recorded below. | Offline native Windows host/profile/chat, human grid, physical GPU/multi-monitor and performance acceptance remain pending. |
 | `399ffd796ccba8e9468bbc9ff7b19eff5017d4bc` | Earlier verified compact package, `feat/compact-host-integration`: compact strip, full-width world, explicit management drawer and popup islands | [Windows run 42327859777](https://github.com/DrCum/Foldurora/actions/runs/42327859777) passed: 7,827 tests passed, 0 failed, 50 ignored; all 36 applicable named regressions passed exactly once. Parser, formatting, strict Clippy, tests, build and packaging passed. Downloaded manifests, checksums and executable/PE identity were verified. Linux and visual evidence is recorded below. | Native popup-island composition/hit testing, world input/handoff/recovery, profiles/drafts, physical GPU/multi-monitor, performance and human grid acceptance remain pending. Earlier local `8b738ea8` native results do not transfer to this binary. |
-| `f5ae21d535da3a338bace51ffb03af7beeb040c6` | Current verified Windows download: frozen photo/branding source, including compact host and narrow scene/output/preview corrections | [Windows run 42334134158](https://github.com/DrCum/Foldurora/actions/runs/42334134158) passed: 7,842/0/50, all 51 named regressions once, all checks/build/package successful. Manifest, hashes, CRCs, executable identity and seven PE icon frames verified. Linux: 7,870/1 inherited terrain/50; normal build and bounded software-Vulkan exports/icon checks passed. | Restricted 480-pixel control overlap/clipping remains. Native Windows host/photo/export/icon, physical GPU, performance and human grid acceptance remain pending. Separate local-builder delivery/start are unconfirmed. |
+| `f5ae21d535da3a338bace51ffb03af7beeb040c6` | Earlier verified Windows download: frozen photo/branding source, including compact host and narrow scene/output/preview corrections | [Windows run 42334134158](https://github.com/DrCum/Foldurora/actions/runs/42334134158) passed: 7,842/0/50, all 51 named regressions once, all checks/build/package successful. Manifest, hashes, CRCs, executable identity and seven PE icon frames verified. Linux: 7,870/1 inherited terrain/50; normal build and bounded software-Vulkan exports/icon checks passed. | Restricted 480-pixel control overlap/clipping remains. Native Windows host/photo/export/icon, physical GPU, performance and human grid acceptance remain pending. A separate local build completed; the human reported the camera-control/input bugs described above. |
 | `8750450f0161e03fe6ef48194aa58b28d49a2cb9` | Preserved 15-import upstream baseline | Linux Clippy passed (1m29s); full tests: 7,900 passed, one inherited terrain failure, 50 ignored. Its completed Windows test step reports 7,872/0/50 and all 83 named tests once before expected same-branch cancellation. | Viewer build was cancelled and packaging skipped; no usable `8750450f` package. Superseded by `388b299c`, not a failed-test result or validation of the final source. |
-| `388b299c429d776b3fc7a9890162cd3d940b9dc3` | Final frozen, pushed 16-import source, `feat/foldurora-upstream-integration`; 25 upstream commits deferred | Source/provenance proof, formatting/diff checks and Linux Clippy passed (34.70s). Full Linux tests: 7,902 passed, one inherited terrain precision failure, 50 ignored; new HUD/cache and retained regressions passed. Normal build passed (4m35s). [Windows run 42337795785](https://github.com/DrCum/Foldurora/actions/runs/42337795785) is in progress. | Exact-binary software-Vulkan landscape/isolation and HUD visibility passed. Landscape/isolation exited normally; a 240-second guard interrupted HUD Quit confirmation, so normal HUD Quit remains unproven. Restricted controls still crowd/clip. Verified Windows package and native host/profile/photo/icon/grid acceptance remain pending. Optional local-build delivery/start are unconfirmed; earlier source receipts do not transfer. |
+| `388b299c429d776b3fc7a9890162cd3d940b9dc3` | Final frozen, pushed 16-import source, `feat/foldurora-upstream-integration`; 25 upstream commits deferred | Source/provenance proof, formatting/diff checks and Linux Clippy passed (34.70s). Full Linux tests: 7,902 passed, one inherited terrain precision failure, 50 ignored; new HUD/cache and retained regressions passed. Normal build passed (4m35s). [Windows artifact 13561798593](https://github.com/DrCum/Foldurora/actions/runs/42337795785/artifacts/13561798593) is verified: 7,874/0/50; all 85 required named tests once, all checks/build/package successful. Manifests, hashes, CRCs, executable identity and seven icon frames match. | Exact-binary software-Vulkan landscape/isolation and HUD visibility passed. Landscape/isolation exited normally; a 240-second guard interrupted HUD Quit confirmation, so normal HUD Quit remains unproven. Restricted controls still crowd/clip. Native host/profile/photo/icon/grid acceptance remains pending; this package predates the separate camera-control/input fix. Optional local-build delivery/start are unconfirmed; earlier source receipts do not transfer. |
 
 Keep these sources and their packages separate. No candidate is merged into main, installed
 or released by this work. Both the verified `70c1b5cd` package checkpoint and
@@ -143,7 +170,7 @@ beside it. This verifies the compact test package; native Windows,
 GPU/multi-monitor, grid and performance acceptance remain pending. It does not
 contain the separate photo/branding follow-up described below.
 
-The current verified [Windows artifact 13560192057](https://github.com/DrCum/Foldurora/actions/runs/42334134158/artifacts/13560192057)
+The earlier verified [Windows artifact 13560192057](https://github.com/DrCum/Foldurora/actions/runs/42334134158/artifacts/13560192057)
 contains `Foldurora-test-f5ae21d535da-windows-x64.zip`, version
 **`0.9.3-beta.20261106.1+136.gf5ae21d53`**, exact source
 `f5ae21d535da3a338bace51ffb03af7beeb040c6`. Parser, formatting, strict Clippy,
