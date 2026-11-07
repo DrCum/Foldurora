@@ -45,6 +45,19 @@ struct Save {
 }
 
 impl State {
+    /// Board cache work may join a current native load but never rewrite its
+    /// open/play/activation intent or replace a different in-flight asset.
+    #[cfg(test)]
+    pub(super) fn can_board_cache(&self, target: crate::world::inventory::actions::PlaybackItem) -> bool {
+        if target.kind() != crate::world::inventory::actions::PlaybackKind::Gesture {
+            return false;
+        }
+        if self.pending.get(&target.item()).is_some_and(|load| load.asset != target.asset()) {
+            return false;
+        }
+        self.pending.contains_key(&target.item()) || self.pending.len() < 32
+    }
+
     fn queue_load(&mut self, item: Uuid, asset: Uuid, open: bool, play: bool, active: Option<bool>, inform: bool) {
         let load = self.pending.entry(item).or_insert_with(|| Load {
             asset,
@@ -1206,5 +1219,120 @@ mod tests {
         state.queue_load(item, new, true, false, None, false);
         assert!(state.take_load(item, old).is_none());
         assert_eq!(state.take_load(item, new).expect("new load").asset, new);
+    }
+    fn board_cache_target(item: Uuid, asset: Uuid) -> crate::world::inventory::actions::PlaybackItem {
+        use crate::world::inventory::{FetchState, Folder, Inventory};
+        let mut inv = Inventory {
+            owner: Uuid::from_u128(2),
+            root: Uuid::from_u128(1),
+            ..Default::default()
+        };
+        inv.folders.insert(
+            inv.root,
+            Folder {
+                info: aurora_net::inventory::InvFolder {
+                    id: inv.root,
+                    type_default: 8,
+                    ..Default::default()
+                },
+                children: Vec::new(),
+                items: Vec::new(),
+                state: FetchState::Fetched,
+                library: false,
+            },
+        );
+        inv.items.insert(
+            item,
+            aurora_net::inventory::InvItem {
+                id: item,
+                parent: inv.root,
+                asset_id: asset,
+                asset_type: 21,
+                ..Default::default()
+            },
+        );
+        crate::world::inventory::actions::resolve_playback_item(&inv, item, crate::world::inventory::actions::PlaybackKind::Gesture)
+            .unwrap()
+    }
+    #[test]
+    fn board_cache_only_merge_and_cancel_leave_native_editor_play_activation_flags_untouched() {
+        let item = Uuid::from_u128(99_001);
+        let asset = Uuid::from_u128(99_002);
+        let target = board_cache_target(item, asset);
+        let mut state = State::default();
+        state.queue_load(item, asset, true, true, Some(true), true);
+        state.pending.get_mut(&item).unwrap().requested = true;
+        assert!(state.can_board_cache(target));
+        state.queue_load(target.item(), target.asset(), false, false, None, false);
+        // Exercise the actual separate board cancellation against the shared
+        // native load. It must remove only board intent, never Load flags.
+        use crate::gesture_board::{
+            model::{BoardId, Catalogue, Change, Kind, Reference, Tile, TileId},
+            playback::{Click, Facts, Playback},
+        };
+        let grid = aurora_session::GridKey::from_bytes([1; 32]).unwrap();
+        let board = BoardId::new();
+        let tile = TileId::new();
+        let data = Catalogue::empty(Uuid::from_u128(2), grid)
+            .unwrap()
+            .apply(Change::Create {
+                id: board,
+                name: "Synthetic".into(),
+            })
+            .unwrap()
+            .apply(Change::Add {
+                board,
+                tile: Tile {
+                    id: tile,
+                    item: Reference {
+                        reference: item,
+                        kind: Kind::Gesture,
+                    },
+                },
+            })
+            .unwrap();
+        let mut ledger = Playback::default();
+        ledger
+            .bind(Some(Facts {
+                agent: data.account,
+                login: Uuid::from_u128(3),
+                grid,
+                logical_generation: 1,
+                profile_generation: 1,
+                managed: None,
+            }))
+            .unwrap();
+        ledger.window(true).unwrap();
+        let now = Instant::now();
+        let click = ledger.capture(&data, board, tile, target, &state.manager, now).unwrap();
+        assert!(matches!(
+            ledger.click(click, &data, target, &mut state.manager, now),
+            Ok(Click::NeedsCache(_))
+        ));
+        let stop = ledger.capture_board(&data, board, now).unwrap();
+        ledger.stop_board(stop, &data, &mut state.manager, now).unwrap();
+        assert!(ledger.pending(item).is_none());
+        let load = state.take_load(item, asset).unwrap();
+        assert!(load.open && load.play && load.requested && load.inform);
+        assert_eq!(load.active, Some(true));
+        assert!(state.manager.active.contains(&item));
+    }
+    #[test]
+    fn board_cache_only_capacity_and_changed_asset_never_replace_shared_native_load_intent() {
+        let item = Uuid::from_u128(99_001);
+        let asset = Uuid::from_u128(99_002);
+        let target = board_cache_target(item, asset);
+        let mut state = State::default();
+        state.queue_load(item, Uuid::from_u128(99_003), true, true, None, false);
+        assert!(!state.can_board_cache(target));
+        assert!(state.pending[&item].play);
+        state.pending.clear();
+        for n in 1..=32 {
+            state.queue_load(Uuid::from_u128(n), asset, false, false, None, false);
+        }
+        assert!(!state.can_board_cache(target));
+        assert_eq!(state.pending.len(), 32);
+        state.pending.remove(&Uuid::from_u128(1));
+        assert!(state.can_board_cache(target));
     }
 }
