@@ -1,7 +1,7 @@
 //! One bounded native IO lane. Replies never apply a layout, and every job
 //! retains its originally selected private profile directory.
-use super::model::{Catalogue, MAX_FILE};
-use crate::session_host::profile::WorkspaceDirectory;
+use super::model::Catalogue;
+use crate::session_host::profile::{NativeDirectory, NativeStoreKind};
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use uuid::Uuid;
 
@@ -9,7 +9,7 @@ pub(crate) struct Request {
     pub source: super::controller::Source,
     pub operation: u64,
     pub binding: u64,
-    pub directory: WorkspaceDirectory,
+    pub directory: NativeDirectory,
     pub account: Uuid,
     pub grid: String,
     pub write: Option<(Option<Catalogue>, Catalogue)>,
@@ -82,12 +82,12 @@ fn perform(r: &Request) -> Result<Option<Catalogue>, ()> {
         || r.source.login.is_nil()
         || r.source.agent != r.account
         || r.source.grid != r.grid
-        || !r.directory.matches(r.account, &r.grid)
+        || !r.directory.matches(NativeStoreKind::Workspaces, r.account, &r.grid)
     {
         return Err(());
     }
     let _lock = r.directory.lock().map_err(|_| ())?;
-    let current_bytes = r.directory.read(MAX_FILE).map_err(|_| ())?;
+    let current_bytes = r.directory.read().map_err(|_| ())?;
     let current = current_bytes
         .as_deref()
         .map(|b| Catalogue::decode(b, r.account, &r.grid))
@@ -115,6 +115,7 @@ mod tests {
     use super::*;
     #[test]
     fn workspace_store_missing_load_atomic_write_revision_and_unknown_bytes_preservation() {
+        assert_eq!(NativeStoreKind::Workspaces.max_bytes(), crate::workspace::model::MAX_FILE);
         let account = Uuid::new_v4();
         let grid = "d".repeat(64);
         let make = |write| Request {
@@ -126,7 +127,7 @@ mod tests {
             },
             operation: 1,
             binding: 1,
-            directory: WorkspaceDirectory::select(account, &grid).unwrap(),
+            directory: NativeDirectory::select(NativeStoreKind::Workspaces, account, &grid).unwrap(),
             account,
             grid: grid.clone(),
             write,
@@ -135,15 +136,15 @@ mod tests {
         let next = Catalogue::empty(account, grid.clone());
         assert_eq!(perform(&make(Some((None, next.clone())))).unwrap(), Some(next.clone()));
         assert!(perform(&make(Some((None, next.clone())))).is_err());
-        let directory = WorkspaceDirectory::select(account, &grid).unwrap();
+        let directory = NativeDirectory::select(NativeStoreKind::Workspaces, account, &grid).unwrap();
         let unknown = b"{\"version\":999,\"future\":true}";
-        let old = directory.read(MAX_FILE).unwrap().unwrap();
+        let old = directory.read().unwrap().unwrap();
         directory.publish(unknown, Some(&old)).unwrap();
         assert!(perform(&make(None)).is_err());
         assert!(perform(&make(Some((Some(next.clone()), next)))).is_err());
-        assert_eq!(directory.read(MAX_FILE).unwrap().unwrap(), unknown);
+        assert_eq!(directory.read().unwrap().unwrap(), unknown);
         assert!(directory.publish(b"replacement", Some(&old)).is_err());
-        assert_eq!(directory.read(MAX_FILE).unwrap().unwrap(), unknown);
+        assert_eq!(directory.read().unwrap().unwrap(), unknown);
         assert!(
             perform(&Request {
                 source: super::super::controller::Source {
@@ -153,7 +154,7 @@ mod tests {
                     hosted: None
                 },
                 grid: "e".repeat(64),
-                directory: WorkspaceDirectory::select(account, &"e".repeat(64)).unwrap(),
+                directory: NativeDirectory::select(NativeStoreKind::Workspaces, account, &"e".repeat(64)).unwrap(),
                 ..make(None)
             })
             .unwrap()
@@ -181,7 +182,7 @@ mod tests {
             source: source.clone(),
             operation: 1,
             binding: 1,
-            directory: WorkspaceDirectory::select(account, &grid).unwrap(),
+            directory: NativeDirectory::select(NativeStoreKind::Workspaces, account, &grid).unwrap(),
             account,
             grid: grid.clone(),
             write: None,
@@ -221,13 +222,13 @@ mod tests {
             },
             operation: 1,
             binding: 1,
-            directory: WorkspaceDirectory::select(other, &grid).unwrap(),
+            directory: NativeDirectory::select(NativeStoreKind::Workspaces, other, &grid).unwrap(),
             account,
             grid: grid.clone(),
             write: Some((None, Catalogue::empty(account, grid.clone()))),
         };
         assert!(perform(&r).is_err());
         let _lock = r.directory.lock().unwrap();
-        assert!(r.directory.read(MAX_FILE).unwrap().is_none());
+        assert!(r.directory.read().unwrap().is_none());
     }
 }

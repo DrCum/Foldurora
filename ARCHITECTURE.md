@@ -5261,3 +5261,13 @@ terminal Store retirement; subsequent actor polls stop image resources before
 attempting the poisoned publication again. This remains an image-component
 failure, independent of ordinary host control. One additional actual cache/credit
 poison regression is authored UNRUN (41 Host tests total).
+
+The hardened native private-store primitive is shared through sealed
+`profile::NativeStoreKind` and `NativeDirectory`. Workspaces retain their fixed
+256 KiB file; the actual Boards consumer uses a separate fixed 4 MiB file under
+`gesture-boards/<agent>/<grid>/boards-v1.json`. No consumer/DTO supplies a path or
+read limit. Optional atomic cancellation is metadata only; it cannot authorize an
+action, and a rename racing after the final check remains confined to the
+original captured path. Exact source/operation reply validation remains required.
+The helper extraction is a dependency of the actual Boards consumer and must be
+reviewed/frozen with that consumer; it is not a standalone feature enablement.

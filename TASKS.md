@@ -3670,3 +3670,9 @@ Open-source technologies that could set Aurora apart (human request of 2026-10-1
     terminal Store cleanup; a terminal frontdoor stops image actor resources
     before a later control read. Adds one real prepared-cache/credit regression
     (41 Host tests authored UNRUN), with ordinary hosting independent.
+
+- Shared native-store extraction after source-clear Workspace e1: sealed kinds,
+  fixed profile paths/byte caps, hardened opened-handle/private/CAS checks, and
+  metadata-only cancellation. Workspace caller adaptation is mechanical. Boards
+  codec/lane/App/UI consumer is owned separately; combined freeze/review required
+  before integration so no unused production store kind is exposed.

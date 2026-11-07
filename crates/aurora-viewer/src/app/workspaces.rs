@@ -181,7 +181,11 @@ impl App {
             return;
         }
         let Some(source) = &self.workspaces.source else { return };
-        let Ok(directory) = crate::session_host::profile::WorkspaceDirectory::select(source.agent, &source.grid) else {
+        let Ok(directory) = crate::session_host::profile::NativeDirectory::select(
+            crate::session_host::profile::NativeStoreKind::Workspaces,
+            source.agent,
+            &source.grid,
+        ) else {
             self.workspaces.status = Status::Error;
             return;
         };

@@ -297,36 +297,89 @@ fn validate_opened_single_link(file: &File) -> io::Result<()> {
     Ok(())
 }
 
-/// Native named layouts use the already selected character profile, including
-/// standalone viewers. No DTO supplies a directory and no catalogue is copied.
-pub(crate) struct WorkspaceDirectory {
+/// A closed native-store catalogue. Kinds are selected by native code, never by
+/// a file/DTO; paths and hard byte limits cannot be supplied by a consumer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NativeStoreKind {
+    Workspaces,
+    Boards,
+}
+impl NativeStoreKind {
+    fn directory(self) -> &'static str {
+        match self {
+            Self::Workspaces => "named-workspaces",
+            Self::Boards => "gesture-boards",
+        }
+    }
+    fn filename(self) -> &'static str {
+        match self {
+            Self::Workspaces => "named-v1.json",
+            Self::Boards => "boards-v1.json",
+        }
+    }
+    pub(crate) const fn max_bytes(self) -> usize {
+        match self {
+            Self::Workspaces => 256 * 1024,
+            Self::Boards => 4 * 1024 * 1024,
+        }
+    }
+}
+/// Logical cancellation metadata only, never permission or a path selector.
+/// A rename racing after its final check can still finish at the original path;
+/// callers must retain their exact source/operation reply fences.
+#[derive(Clone, Default)]
+pub(crate) struct NativeStoreCancellation(std::sync::Arc<std::sync::atomic::AtomicBool>);
+impl NativeStoreCancellation {
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+    pub(crate) fn cancel(&self) {
+        self.0.store(true, std::sync::atomic::Ordering::Release);
+    }
+    pub(crate) fn is_cancelled(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Acquire)
+    }
+    fn check(&self) -> io::Result<()> {
+        if self.is_cancelled() {
+            Err(io::Error::new(io::ErrorKind::Interrupted, "native store operation cancelled"))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+/// Uses the already selected character profile, including standalone viewers.
+/// No DTO supplies a directory and no catalogue is copied.
+pub(crate) struct NativeDirectory {
+    kind: NativeStoreKind,
     path: PathBuf,
     account: Uuid,
     grid: String,
 }
-impl WorkspaceDirectory {
-    pub(crate) fn select(account: Uuid, grid: &str) -> io::Result<Self> {
+impl NativeDirectory {
+    pub(crate) fn select(kind: NativeStoreKind, account: Uuid, grid: &str) -> io::Result<Self> {
         if account.is_nil() || !crate::characters::valid_id(grid) {
-            return Err(invalid("invalid workspace identity"));
+            return Err(invalid("invalid native store identity"));
         }
         let config = crate::settings::config_dir();
         if !config.is_absolute() {
-            return Err(invalid("workspace profile must be absolute"));
+            return Err(invalid("native store profile must be absolute"));
         }
-        let root = config.join("named-workspaces");
+        let root = config.join(kind.directory());
         let relative = PathBuf::from(account.to_string()).join(grid);
         Ok(Self {
+            kind,
             path: root.join(relative),
             account,
             grid: grid.to_owned(),
         })
     }
-    pub(crate) fn matches(&self, account: Uuid, grid: &str) -> bool {
-        self.account == account && self.grid == grid
+    pub(crate) fn matches(&self, kind: NativeStoreKind, account: Uuid, grid: &str) -> bool {
+        self.kind == kind && self.account == account && self.grid == grid
     }
     fn checked(&self) -> io::Result<()> {
-        let grid = self.path.parent().ok_or_else(|| invalid("invalid workspace parent"))?;
-        let root = grid.parent().ok_or_else(|| invalid("invalid workspace root"))?;
+        let grid = self.path.parent().ok_or_else(|| invalid("invalid native store parent"))?;
+        let root = grid.parent().ok_or_else(|| invalid("invalid native store root"))?;
         ordinary_directories(root.parent().ok_or_else(|| invalid("invalid config root"))?)?;
         for p in [root, grid, self.path.as_path()] {
             plain_directory(p)?;
@@ -335,8 +388,8 @@ impl WorkspaceDirectory {
         Ok(())
     }
     pub(crate) fn lock(&self) -> io::Result<File> {
-        let account = self.path.parent().ok_or_else(|| invalid("invalid workspace parent"))?;
-        let root = account.parent().ok_or_else(|| invalid("invalid workspace root"))?;
+        let account = self.path.parent().ok_or_else(|| invalid("invalid native store parent"))?;
+        let root = account.parent().ok_or_else(|| invalid("invalid native store root"))?;
         ordinary_directories(root.parent().ok_or_else(|| invalid("invalid config root"))?)?;
         platform::private_directory(root)?;
         platform::private_directory(account)?;
@@ -344,15 +397,16 @@ impl WorkspaceDirectory {
         self.checked()?;
         lock_private(&self.path.join("store.lock"))
     }
-    pub(crate) fn read(&self, limit: usize) -> io::Result<Option<Vec<u8>>> {
+    pub(crate) fn read(&self) -> io::Result<Option<Vec<u8>>> {
         use std::io::Read;
+        let limit = self.kind.max_bytes();
         self.checked()?;
-        let path = self.path.join("named-v1.json");
+        let path = self.path.join(self.kind.filename());
         match std::fs::symlink_metadata(&path) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(e),
             Ok(m) if !m.is_file() || m.file_type().is_symlink() || platform::is_reparse(&m) => {
-                return Err(invalid("workspace file is not plain"));
+                return Err(invalid("native store file is not plain"));
             }
             Ok(_) => {}
         }
@@ -371,7 +425,7 @@ impl WorkspaceDirectory {
         let f = o.open(&path)?;
         let m = f.metadata()?;
         if !m.is_file() || platform::is_reparse(&m) {
-            return Err(invalid("workspace file is not plain"));
+            return Err(invalid("native store file is not plain"));
         }
         #[cfg(windows)]
         validate_opened_single_link(&f)?;
@@ -379,15 +433,38 @@ impl WorkspaceDirectory {
         let mut b = Vec::new();
         f.take((limit + 1) as u64).read_to_end(&mut b)?;
         if b.len() > limit {
-            return Err(invalid("workspace file too large"));
+            return Err(invalid("native store file too large"));
         }
         Ok(Some(b))
     }
     /// Caller holds store.lock and has checked the original file revision.
     pub(crate) fn publish(&self, bytes: &[u8], expected: Option<&[u8]>) -> io::Result<()> {
+        self.publish_staged(bytes, expected, None, || {})
+    }
+    pub(crate) fn publish_cancellable(
+        &self,
+        bytes: &[u8],
+        expected: Option<&[u8]>,
+        cancellation: &NativeStoreCancellation,
+    ) -> io::Result<()> {
+        self.publish_staged(bytes, expected, Some(cancellation), || {})
+    }
+    fn publish_staged(
+        &self,
+        bytes: &[u8],
+        expected: Option<&[u8]>,
+        cancellation: Option<&NativeStoreCancellation>,
+        before_publish: impl FnOnce(),
+    ) -> io::Result<()> {
         use std::io::Write;
+        if let Some(c) = cancellation {
+            c.check()?;
+        }
+        if bytes.len() > self.kind.max_bytes() || expected.is_some_and(|old| old.len() > self.kind.max_bytes()) {
+            return Err(invalid("native store file too large"));
+        }
         self.checked()?;
-        let temp = self.path.join(format!(".workspace-{}.tmp", Uuid::new_v4()));
+        let temp = self.path.join(format!(".native-store-{}.tmp", Uuid::new_v4()));
         let result = (|| {
             let mut f = create_private_file(&temp)?;
             f.write_all(bytes)?;
@@ -395,12 +472,19 @@ impl WorkspaceDirectory {
             #[cfg(windows)]
             validate_opened_single_link(&f)?;
             drop(f);
+            before_publish();
+            if let Some(c) = cancellation {
+                c.check()?;
+            }
             // The caller's cooperative store lock covers read/encode/rename;
             // also detect a non-cooperating replacement during the disk flush.
-            if self.read(crate::workspace::model::MAX_FILE)?.as_deref() != expected {
-                return Err(invalid("workspace file changed before publication"));
+            if self.read()?.as_deref() != expected {
+                return Err(invalid("native store file changed before publication"));
             }
-            crate::atomic_file::rename_retrying(&temp, &self.path.join("named-v1.json"))?;
+            if let Some(c) = cancellation {
+                c.check()?;
+            }
+            crate::atomic_file::rename_retrying(&temp, &self.path.join(self.kind.filename()))?;
             crate::atomic_file::sync_dir(&self.path);
             Ok(())
         })();
@@ -725,22 +809,110 @@ mod platform {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_store_kinds_have_fixed_disjoint_profile_paths_and_captured_identity() {
+        let account = Uuid::new_v4();
+        let grid = "b".repeat(64);
+        let workspaces = NativeDirectory::select(NativeStoreKind::Workspaces, account, &grid).unwrap();
+        let boards = NativeDirectory::select(NativeStoreKind::Boards, account, &grid).unwrap();
+        assert!(workspaces.matches(NativeStoreKind::Workspaces, account, &grid));
+        assert!(!workspaces.matches(NativeStoreKind::Boards, account, &grid));
+        assert!(boards.matches(NativeStoreKind::Boards, account, &grid));
+        assert_ne!(workspaces.path, boards.path);
+        assert!(
+            workspaces
+                .path
+                .ends_with(Path::new("named-workspaces").join(account.to_string()).join(&grid))
+        );
+        assert!(
+            boards
+                .path
+                .ends_with(Path::new("gesture-boards").join(account.to_string()).join(&grid))
+        );
+        let _a = workspaces.lock().unwrap();
+        let _b = boards.lock().unwrap();
+        workspaces.publish(b"workspaces", None).unwrap();
+        boards.publish(b"boards", None).unwrap();
+        assert_eq!(workspaces.read().unwrap().unwrap(), b"workspaces");
+        assert_eq!(boards.read().unwrap().unwrap(), b"boards");
+        assert!(workspaces.path.join("named-v1.json").is_file());
+        assert!(boards.path.join("boards-v1.json").is_file());
+    }
+    #[test]
+    fn native_store_cancellation_before_io_or_after_sync_never_replaces_original_bytes() {
+        let d = NativeDirectory::select(NativeStoreKind::Boards, Uuid::new_v4(), &"c".repeat(64)).unwrap();
+        let _lock = d.lock().unwrap();
+        d.publish(b"original", None).unwrap();
+        let cancelled = NativeStoreCancellation::new();
+        cancelled.cancel();
+        assert_eq!(
+            d.publish_cancellable(b"replacement", Some(b"original"), &cancelled)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::Interrupted
+        );
+        let cancellation = NativeStoreCancellation::new();
+        let during_flush = cancellation.clone();
+        assert_eq!(
+            d.publish_staged(b"replacement", Some(b"original"), Some(&cancellation), move || during_flush
+                .cancel())
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::Interrupted
+        );
+        assert_eq!(d.read().unwrap().unwrap(), b"original");
+        assert!(
+            std::fs::read_dir(&d.path)
+                .unwrap()
+                .all(|e| !e.unwrap().file_name().to_string_lossy().starts_with(".native-store-"))
+        );
+        let current = NativeStoreCancellation::new();
+        d.publish_cancellable(b"new", Some(b"original"), &current).unwrap();
+        assert_eq!(d.read().unwrap().unwrap(), b"new");
+    }
+    #[test]
+    fn native_store_kind_limits_reject_oversized_reads_and_publication_without_writeback() {
+        let account = Uuid::new_v4();
+        let grid = "d".repeat(64);
+        let small = NativeDirectory::select(NativeStoreKind::Workspaces, account, &grid).unwrap();
+        let _lock = small.lock().unwrap();
+        small.publish(b"original", None).unwrap();
+        assert!(
+            small
+                .publish(&vec![0; NativeStoreKind::Workspaces.max_bytes() + 1], Some(b"original"))
+                .is_err()
+        );
+        assert_eq!(small.read().unwrap().unwrap(), b"original");
+        let large = NativeDirectory::select(NativeStoreKind::Boards, account, &grid).unwrap();
+        let _lock = large.lock().unwrap();
+        let path = large.path.join("boards-v1.json");
+        let mut file = create_private_file(&path).unwrap();
+        file.write_all(&vec![0; NativeStoreKind::Boards.max_bytes() + 1]).unwrap();
+        file.sync_all().unwrap();
+        drop(file);
+        assert!(large.read().is_err());
+        assert!(large.publish(b"replacement", None).is_err());
+        assert_eq!(
+            std::fs::metadata(path).unwrap().len(),
+            (NativeStoreKind::Boards.max_bytes() + 1) as u64
+        );
+    }
     #[cfg(windows)]
     #[test]
     fn native_workspace_windows_hardlinks_to_private_data_lock_and_temporary_handles_are_rejected() {
-        let d = WorkspaceDirectory::select(Uuid::new_v4(), &"c".repeat(64)).unwrap();
+        let d = NativeDirectory::select(NativeStoreKind::Workspaces, Uuid::new_v4(), &"c".repeat(64)).unwrap();
         let lock = d.lock().unwrap();
         d.publish(b"original", None).unwrap();
         drop(lock);
         let path = d.path.join("named-v1.json");
         let alias = d.path.join("data-alias");
         std::fs::hard_link(&path, &alias).unwrap();
-        assert!(d.read(64).is_err(), "matching private ACL does not make a hardlink safe");
+        assert!(d.read().is_err(), "matching private ACL does not make a hardlink safe");
         assert!(d.publish(b"replacement", Some(b"original")).is_err());
         assert_eq!(std::fs::read(&path).unwrap(), b"original");
         assert_eq!(std::fs::read(&alias).unwrap(), b"original");
         std::fs::remove_file(alias).unwrap();
-        assert_eq!(d.read(64).unwrap().unwrap(), b"original");
+        assert_eq!(d.read().unwrap().unwrap(), b"original");
         let lock_alias = d.path.join("lock-alias");
         std::fs::hard_link(d.path.join("store.lock"), &lock_alias).unwrap();
         assert!(d.lock().is_err());
@@ -760,22 +932,22 @@ mod tests {
     }
     #[test]
     fn native_workspace_private_store_is_exclusive_and_never_repairs_a_link_or_public_file() {
-        let d = WorkspaceDirectory::select(Uuid::new_v4(), &"a".repeat(64)).unwrap();
+        let d = NativeDirectory::select(NativeStoreKind::Workspaces, Uuid::new_v4(), &"a".repeat(64)).unwrap();
         let lock = d.lock().unwrap();
         assert!(d.lock().is_err());
         d.publish(b"original", None).unwrap();
-        assert_eq!(d.read(64).unwrap().unwrap(), b"original");
+        assert_eq!(d.read().unwrap().unwrap(), b"original");
         drop(lock);
         #[cfg(unix)]
         {
             use std::os::unix::fs::{PermissionsExt, symlink};
             let path = d.path.join("named-v1.json");
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
-            assert!(d.read(64).is_err());
+            assert!(d.read().is_err());
             assert_eq!(std::fs::read(&path).unwrap(), b"original");
             std::fs::remove_file(&path).unwrap();
             symlink(d.path.join("store.lock"), &path).unwrap();
-            assert!(d.read(64).is_err());
+            assert!(d.read().is_err());
             std::fs::remove_file(path).unwrap();
         }
     }
