@@ -19,7 +19,8 @@ use std::thread::JoinHandle;
 use uuid::Uuid;
 
 mod groups;
-pub use groups::{GroupEditTicket, GroupError, GroupScope, GroupStatus, LoginGrid};
+pub use super::account_metadata_origin::GridDigest as LoginGrid;
+pub use groups::{GroupEditTicket, GroupError, GroupScope, GroupStatus};
 
 pub const FILE: &str = "favorites_order.json";
 /// FT_FAVORITE.
@@ -48,7 +49,6 @@ pub struct Favorites {
     groups: Option<groups::Groups>,
     group_workers: groups::WorkerPool,
     group_start_status: GroupStatus,
-    pending_login_grid: groups::PendingLoginGrid,
     /// Sort index of each favourite (LLFavoritesOrderStorage::mSortIndexes).
     order: HashMap<Uuid, i32>,
     storage: Option<Storage>,
@@ -66,18 +66,6 @@ pub struct Favorites {
 }
 
 impl Favorites {
-    /// Capture only the immutable URI digest from the ACTUAL request about to
-    /// be submitted. No credential or raw URI is copied into Favorite metadata.
-    pub fn capture_login_grid(&mut self, request: &aurora_net::LoginRequest) {
-        self.pending_login_grid.submitted(request);
-    }
-    pub fn cancel_login_grid(&mut self) {
-        self.pending_login_grid.failed();
-    }
-    pub fn take_login_grid(&mut self) -> Option<LoginGrid> {
-        self.pending_login_grid.completed()
-    }
-
     /// A missing/ambiguous login attempt never falls back to mutable settings.
     /// The old order format/path/worker remains independent and unchanged.
     pub fn bind_groups(&mut self, scope: Option<GroupScope>, directory: PathBuf) {

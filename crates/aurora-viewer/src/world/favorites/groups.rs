@@ -2,10 +2,9 @@
 //! metadata only: no Inventory mutation, login authority or simulator request.
 //! Behavior port of LLFavoritesBarCtrl::rebuildFolderEntries / doToSelected
 //! (indra/newview/llfavoritesbar.cpp, FSLandmarkFavoriteFolders, LGPL 2.1).
-use super::Inventory;
+use super::{Inventory, LoginGrid};
 use crossbeam_channel::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
@@ -87,44 +86,6 @@ impl Drop for WorkerPermit {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub struct LoginGrid([u8; 32]);
-impl LoginGrid {
-    fn from_uri(uri: &str) -> Option<Self> {
-        let uri = uri.trim();
-        (!uri.is_empty() && uri.len() <= 4096 && !uri.chars().any(char::is_control)).then(|| Self(Sha256::digest(uri.as_bytes()).into()))
-    }
-}
-#[derive(Default)]
-pub(super) enum PendingLoginGrid {
-    #[default]
-    Empty,
-    Submitted(LoginGrid),
-    Ambiguous,
-}
-impl PendingLoginGrid {
-    pub fn submitted(&mut self, request: &aurora_net::LoginRequest) {
-        let Some(grid) = LoginGrid::from_uri(&request.login_uri) else {
-            *self = Self::Ambiguous;
-            return;
-        };
-        match self {
-            Self::Empty => *self = Self::Submitted(grid),
-            Self::Submitted(original) if *original == grid => {}
-            Self::Submitted(_) | Self::Ambiguous => *self = Self::Ambiguous,
-        }
-    }
-    pub fn completed(&mut self) -> Option<LoginGrid> {
-        match std::mem::take(self) {
-            Self::Submitted(grid) => Some(grid),
-            _ => None,
-        }
-    }
-    pub fn failed(&mut self) {
-        *self = Self::Empty;
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct GroupScope {
     account: Uuid,
     session: Uuid,
@@ -138,7 +99,7 @@ impl GroupScope {
         self.account == account && self.session == session && inventory.owner == account
     }
     fn path(self, directory: &Path) -> PathBuf {
-        let hex: String = self.grid.0.iter().map(|byte| format!("{byte:02x}")).collect();
+        let hex = self.grid.namespace();
         directory.join(format!("favorites_groups_{hex}.json"))
     }
 }
@@ -331,7 +292,7 @@ fn read(path: &Path, scope: GroupScope) -> io::Result<Snapshot> {
         return Err(invalid());
     }
     let doc: Document = serde_json::from_slice(&bytes).map_err(|_| invalid())?;
-    if doc.version != VERSION || doc.account != scope.account || doc.grid != scope.grid.0 || doc.publication == 0 {
+    if doc.version != VERSION || doc.account != scope.account || doc.grid != scope.grid.bytes() || doc.publication == 0 {
         return Err(invalid());
     }
     Ok(Snapshot {
@@ -386,7 +347,7 @@ fn publish(path: &Path, scope: GroupScope, rows: &Assignments, publication: u64,
     let bytes = serde_json::to_vec(&Document {
         version: VERSION,
         account: scope.account,
-        grid: scope.grid.0,
+        grid: scope.grid.bytes(),
         publication,
         assignments: rows.clone(),
     })
