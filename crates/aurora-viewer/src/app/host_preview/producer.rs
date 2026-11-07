@@ -132,6 +132,12 @@ impl Producer {
             bridge.suspend_preview_source();
         }
     }
+    fn new_metadata_domain(&mut self, token: Option<ConnectionToken>) -> bool {
+        let Some(token) = token else { return false };
+        let changed = self.connection.is_none_or(|old| !old.same_metadata(token));
+        self.connection = Some(token);
+        changed
+    }
     fn observe(&mut self, app: &mut App, gfx: &mut Gfx, photo: PhotoContext, now: Instant, force: bool) -> Option<Context> {
         if let Some(bridge) = &mut app.host_session {
             bridge.refresh_preview_source();
@@ -141,16 +147,15 @@ impl Producer {
             .as_ref()
             .and_then(|bridge| bridge.preview_channel())
             .and_then(|channel| channel.connection());
-        let same = match (self.connection, token) {
-            (Some(old), Some(new)) => old.same_metadata(new),
-            (None, None) => true,
-            _ => false,
-        };
-        if !same {
+        if self.new_metadata_domain(token) {
             self.cancel(app, &mut gfx.renderer, Unavailable::Denied);
             self.ledger.reset_domain();
         }
-        self.connection = token;
+        // None also means the try-only mailbox read was busy. It cannot
+        // authorize capture or refresh a pending deadline, but it is not proof
+        // of a new metadata domain. A genuine reconnect has a fresh token and
+        // resets the old demand above before any new admission.
+
         app.configure_host_chat_rules();
         let remembered = self.ledger.current().is_some() && token.is_some();
         let facts = app.host_preview_facts(Some(gfx), photo, remembered);

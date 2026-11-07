@@ -194,3 +194,65 @@ fn native_producer_capture_barrier_and_full_retirement_have_distinct_permanent_w
     producer.retain = Some(EpochFence::new());
     assert!(!retention.current(), "same-looking restored source cannot revive the old witness");
 }
+
+#[test]
+fn native_producer_busy_connection_read_preserves_original_config_but_cannot_authorize_capture() {
+    let world = world();
+    let now = Instant::now();
+    let mut native = HostPreview::default();
+    native.sync(facts(&world, now), now);
+    let active = native.policy.unwrap();
+    let token = ConnectionToken::transport_fixture(active.source(), 1, 1, 1).unwrap();
+    let mut producer = Producer::default();
+    assert!(producer.new_metadata_domain(Some(token)));
+    let receipt = producer
+        .ledger
+        .apply(active.source(), 1, 7, config(PreviewRate::One), None)
+        .unwrap();
+    let original = producer.ledger.current();
+    producer.last_capture = Some(now);
+    assert!(!producer.new_metadata_domain(None), "unavailable read cannot prove replacement");
+    assert_eq!(producer.connection, Some(token));
+    assert_eq!(producer.ledger.current(), original);
+    assert_eq!(producer.last_capture, Some(now), "original rate age cannot renew");
+    let mut unavailable = facts(&world, now);
+    unavailable.remembered = false; // Actual current read None, never cached token.
+    native.sync(unavailable, now);
+    let policy = native.policy.unwrap();
+    assert!(!policy.access().capture_active);
+    assert_eq!(
+        policy.epochs(),
+        active.epochs(),
+        "unavailable read does not revoke admitted history"
+    );
+    assert!(
+        native_layout(
+            policy,
+            producer.ledger.current(),
+            native.observed.unwrap().active,
+            native.observed.unwrap().viewport
+        )
+        .is_none()
+    );
+    assert!(!producer.new_metadata_domain(Some(token)));
+    assert_eq!(
+        producer.ledger.apply(active.source(), 1, 7, config(PreviewRate::One), None),
+        Some(receipt)
+    );
+    let next_pixel = ConnectionToken::transport_fixture(active.source(), 1, 2, 1).unwrap();
+    assert!(
+        !producer.new_metadata_domain(Some(next_pixel)),
+        "fresh pixel role is the same metadata domain"
+    );
+    let reconnected = ConnectionToken::transport_fixture(active.source(), 2, 1, 1).unwrap();
+    assert!(
+        producer.new_metadata_domain(Some(reconnected)),
+        "genuine reconnect must retire old demand"
+    );
+    producer.ledger.reset_domain(); // Same branch as observe, before layout/admission.
+    assert!(producer.ledger.current().is_none());
+    assert!(
+        !producer.rate_ready(now + Duration::from_secs(10)),
+        "old accepted config is never replayed"
+    );
+}
