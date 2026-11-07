@@ -226,8 +226,34 @@ pub(crate) fn sampleable(format: wgpu::TextureFormat, usage: wgpu::TextureUsages
 struct Pending {
     frame: FrameCapture,
     callback: MapCallback,
-    mapped: bool,
+    mapping: Mapping,
     packed: Option<CapturePixels>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Mapping {
+    NotRequested,
+    Requested,
+    Released,
+}
+impl Mapping {
+    fn release(&mut self, failed: bool) -> bool {
+        let requested = *self == Self::Requested;
+        *self = Self::Released;
+        // A failed callback has already returned wgpu's buffer to Idle.
+        // Unmapping Idle is a validation error, not an idempotent operation.
+        requested && !failed
+    }
+}
+impl Pending {
+    fn release_mapping(&mut self, staging: &wgpu::Buffer) {
+        // The render owner also polls this device. Native map callbacks finish
+        // on that polling thread before it can run this release. Mark Released
+        // before unmap: canceling a pending map can call its callback inline.
+        if self.mapping.release(self.callback.failed()) {
+            staging.unmap();
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -496,14 +522,14 @@ impl GpuCapture {
         self.pending = Some(Pending {
             frame,
             callback,
-            mapped: false,
+            mapping: Mapping::NotRequested,
             packed: None,
         });
     }
 
     pub fn after_submit(&mut self, queue: &wgpu::Queue) {
         if let Some(pending) = &mut self.pending
-            && !pending.mapped
+            && pending.mapping == Mapping::NotRequested
         {
             let Some(retired) = self.pair.submitted() else {
                 return;
@@ -521,11 +547,11 @@ impl GpuCapture {
             });
             let callback = pending.callback.clone();
             let map_credit = pair.lease.clone();
+            pending.mapping = Mapping::Requested;
             pair.staging.map_async(wgpu::MapMode::Read, .., move |result| {
                 callback.complete(result.is_ok());
                 drop(map_credit);
             });
-            pending.mapped = true;
         }
     }
 
@@ -551,7 +577,7 @@ impl GpuCapture {
                 };
                 matches!(state.queue.poll_map(self.shared.now()), Ok(Some(request)) if request.token() == pending.frame.request.token())
             };
-            if !ready || !pending.mapped {
+            if !ready || pending.mapping != Mapping::Requested {
                 return;
             }
             let pixels = match self.shared.budget.pixels(pending.frame.request.layout()) {
@@ -570,7 +596,7 @@ impl GpuCapture {
                 Ok(mapped) => pack_rows(&mapped, pixels.bytes_mut(), pending.frame.request.layout()),
                 Err(_) => Err(CaptureError::MapFailed),
             };
-            pair.staging.unmap();
+            pending.release_mapping(&pair.staging);
             self.pair.unmapped();
             let packed = match result.and_then(|_| pixels.finish()) {
                 Ok(pixels) => pixels,
@@ -601,13 +627,12 @@ impl GpuCapture {
     }
 
     fn release_pending(&mut self, retire: bool) {
-        if self.pending.is_some() {
+        if let Some(mut pending) = self.pending.take() {
             if let Some(pair) = &self.pair.value {
-                pair.staging.unmap();
+                pending.release_mapping(&pair.staging);
             }
             self.pair.unmapped();
         }
-        self.pending = None;
         if retire {
             self.pair.retire(self.shared.generation());
         } else {
@@ -618,9 +643,7 @@ impl GpuCapture {
 
 impl Drop for GpuCapture {
     fn drop(&mut self) {
-        if let Some(pair) = &self.pair.value {
-            pair.staging.unmap();
-        }
+        self.release_pending(true);
         // Submitted/map callback leases retain physical allocation credit even
         // if renderer teardown drops this cache before GPU retirement.
     }
@@ -698,6 +721,30 @@ mod tests {
             pixel.copy_from_slice(&[23, 47, 91, 255]);
         }
         pixels.finish().unwrap()
+    }
+
+    #[test]
+    fn viewport_gpu_mapping_release_distinguishes_unrequested_failed_pending_and_already_unmapped() {
+        for completed in [None, Some(false), Some(true)] {
+            let shared = shared();
+            let frame = request(&shared);
+            let callback = shared.begin(&frame, frame.request.boundary(), 1).unwrap();
+            if let Some(success) = completed {
+                callback.complete(success);
+            }
+            let mut idle = Mapping::NotRequested;
+            assert!(!idle.release(callback.failed()), "no map request means no unmap");
+            assert_eq!(idle, Mapping::Released);
+            let mut requested = Mapping::Requested;
+            assert_eq!(requested.release(callback.failed()), completed != Some(false));
+            assert_eq!(requested, Mapping::Released);
+            assert!(!requested.release(callback.failed()), "release is exactly once");
+            assert_ne!(
+                requested,
+                Mapping::NotRequested,
+                "packing/retry cannot remap an already released buffer"
+            );
+        }
     }
 
     #[test]
@@ -1128,6 +1175,174 @@ mod tests {
                 }
                 assert_eq!(actual[3], 255);
             }
+        }
+    }
+
+    fn poll_gpu_until(device: &wgpu::Device, mut ready: impl FnMut() -> bool) {
+        let deadline = Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            device.poll(wgpu::PollType::Poll).expect("nonblocking synthetic lifecycle poll");
+            if ready() {
+                return;
+            }
+            assert!(Instant::now() < deadline, "synthetic lifecycle did not retire");
+            std::thread::yield_now();
+        }
+    }
+
+    fn gpu_image(device: &wgpu::Device, capture: &mut GpuCapture) -> CapturedViewport {
+        let mut result = None;
+        poll_gpu_until(device, || {
+            capture.maintain();
+            result = capture.shared.take().unwrap();
+            result.is_some()
+        });
+        let Some(CaptureOutcome::Ready(image)) = result else {
+            panic!("synthetic lifecycle capture failed");
+        };
+        image
+    }
+
+    #[test]
+    #[ignore = "requires an explicitly requested offline GPU run; synthetic textures only"]
+    fn viewport_gpu_synthetic_mapping_success_reuse_cancel_and_drop_have_no_validation_errors() {
+        let _gpu = crate::test_gpu::lock();
+        let instance = wgpu::Instance::default();
+        let adapter = pollster::block_on(instance.request_adapter(&Default::default())).expect("synthetic lifecycle GPU adapter");
+        let (device, queue) = pollster::block_on(adapter.request_device(&Default::default())).expect("synthetic lifecycle GPU device");
+        // Keep wgpu's default validation handler: any invalid map/unmap panics.
+        let source = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("synthetic lifecycle source"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 64,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let bytes = [47, 83, 127, 255].repeat(64 * 64);
+        queue.write_texture(
+            source.as_image_copy(),
+            &bytes,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(256),
+                rows_per_image: Some(64),
+            },
+            source.size(),
+        );
+        let make_shared = || {
+            let shared = Shared::with_budget((64, 64), CaptureBudget::new(WORKER_CAPTURE_BYTES).unwrap()).unwrap();
+            shared.clock_override.store(0, Ordering::Release);
+            shared
+        };
+        let encode = |capture: &mut GpuCapture, index| {
+            let shared = capture.shared.clone();
+            let viewport = WorldViewport::full((64, 64));
+            let frame = shared
+                .request(shared.boundary(1, (64, 64)).unwrap(), viewport, CaptureCap::Small)
+                .unwrap();
+            let mut encoder = device.create_command_encoder(&Default::default());
+            capture.encode(
+                &device,
+                &queue,
+                &mut encoder,
+                &source,
+                frame.clone(),
+                frame.request.boundary(),
+                viewport,
+                index,
+            );
+            assert_eq!(capture.pending.as_ref().unwrap().mapping, Mapping::NotRequested);
+            (frame, encoder)
+        };
+
+        // Two successful requests reuse the exact real staging allocation.
+        // Completed packing and idle cache Drop must not call unmap again.
+        let shared = make_shared();
+        let mut capture = GpuCapture::new(shared.clone());
+        let (first, encoder) = encode(&mut capture, 1);
+        queue.submit([encoder.finish()]);
+        capture.after_submit(&queue);
+        let image = gpu_image(&device, &mut capture);
+        assert!(
+            image
+                .pixels()
+                .bytes()
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|pixel| *pixel == [47, 83, 127, 255])
+        );
+        drop(image);
+        poll_gpu_until(&device, || {
+            capture.maintain();
+            !capture.has_pending()
+        });
+        let staging = capture.pair.value.as_ref().unwrap().staging.clone();
+        let (second, encoder) = encode(&mut capture, 2);
+        assert_ne!(first.request.token(), second.request.token());
+        assert_eq!(capture.pair.value.as_ref().unwrap().staging, staging);
+        queue.submit([encoder.finish()]);
+        capture.after_submit(&queue);
+        drop(gpu_image(&device, &mut capture));
+        poll_gpu_until(&device, || {
+            capture.maintain();
+            !capture.has_pending()
+        });
+        drop(staging);
+        drop(capture);
+        assert_eq!(shared.budget.used(), 0);
+
+        // No map was requested and no encoded work is submitted in this case.
+        // Discard the encoder before retiring its unsubmitted resource pair.
+        let shared = make_shared();
+        let mut capture = GpuCapture::new(shared.clone());
+        let (_, encoder) = encode(&mut capture, 3);
+        drop(encoder);
+        capture.invalidate();
+        assert!(capture.pending.is_none());
+        drop(capture);
+        assert_eq!(shared.budget.used(), 0);
+
+        for (index, wait_ready, drop_owner) in [(4, false, false), (5, true, false), (6, false, true), (7, true, true)] {
+            let shared = make_shared();
+            let mut capture = Some(GpuCapture::new(shared.clone()));
+            let (_, encoder) = encode(capture.as_mut().unwrap(), index);
+            queue.submit([encoder.finish()]);
+            capture.as_mut().unwrap().after_submit(&queue);
+            if wait_ready {
+                // Callback success has actually mapped the buffer, but packing
+                // has not run. Both cancel and Drop must unmap it exactly once.
+                poll_gpu_until(&device, || shared.lock().unwrap().queue.poll_map(shared.now()).unwrap().is_some());
+            }
+            let retired = capture.as_ref().unwrap().pair.flight.as_ref().unwrap().retired.clone();
+            let layout = capture.as_ref().unwrap().pending.as_ref().unwrap().frame.request.layout();
+            if drop_owner {
+                drop(capture.take());
+                assert!(
+                    shared.budget.used() >= layout.payload_bytes() + layout.staging_bytes() || retired.load(Ordering::Acquire),
+                    "submitted GPU credit cannot disappear before its retirement callback"
+                );
+                poll_gpu_until(&device, || shared.budget.used() == 0);
+            } else {
+                capture.as_mut().unwrap().invalidate();
+                poll_gpu_until(&device, || {
+                    capture.as_mut().unwrap().maintain();
+                    !capture.as_ref().unwrap().has_pending()
+                });
+                drop(capture.take());
+            }
+            assert_eq!(shared.budget.used(), 0);
+            assert!(
+                !matches!(shared.take().unwrap(), Some(CaptureOutcome::Ready(_))),
+                "late callback cannot publish canceled bytes"
+            );
         }
     }
 }

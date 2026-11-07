@@ -357,6 +357,10 @@ pub struct MapCallback {
     status: Arc<AtomicU8>,
 }
 impl MapCallback {
+    pub(crate) fn failed(&self) -> bool {
+        self.status.load(Ordering::Acquire) == 2
+    }
+
     pub fn token(&self) -> CaptureToken {
         self.request.token
     }
