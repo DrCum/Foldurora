@@ -14,6 +14,9 @@ mod chat_window;
 // Pure monitor bindings only; no production surface or image service enabled.
 #[cfg(test)]
 mod monitor_model;
+// Body only; native surface, image service and Shell entry remain disabled.
+#[cfg(test)]
+mod monitor_ui;
 mod native;
 mod preview_bootstrap;
 pub(crate) mod profile;

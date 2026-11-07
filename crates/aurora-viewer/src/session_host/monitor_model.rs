@@ -412,6 +412,16 @@ impl MonitorSet {
         self.origin(ticket.view) == Some(ticket)
     }
 
+    /// Local presentation/cycle scope only, including an unavailable tombstone.
+    /// Native/source actions still require validate()/can_exchange().
+    pub fn capture_view(&self, view: View) -> Option<Ticket> {
+        self.origin(view)
+    }
+
+    pub fn validate_view(&self, ticket: Ticket) -> bool {
+        self.origin_current(ticket)
+    }
+
     pub fn capture(&self, view: View) -> Option<Ticket> {
         let ticket = self.origin(view)?;
         (ticket.binding.enabled && self.current(ticket.source())).then_some(ticket)
@@ -447,8 +457,12 @@ impl MonitorSet {
         Some(Navigation { origin, target })
     }
 
+    pub fn validate_navigation(&self, navigation: Navigation) -> bool {
+        self.origin_current(navigation.origin) && self.current(navigation.target) && Some(navigation.target.preview) != self.active
+    }
+
     pub fn navigate(&mut self, navigation: Navigation) -> Result<Option<Changed>, Error> {
-        if !self.origin_current(navigation.origin) || !self.current(navigation.target) || Some(navigation.target.preview) == self.active {
+        if !self.validate_navigation(navigation) {
             return Ok(None);
         }
         self.pause()?;
@@ -567,8 +581,12 @@ impl MonitorSet {
         self.select_cycle(source)
     }
 
+    pub fn can_exchange(&self, ticket: Ticket) -> bool {
+        self.validate(ticket) && Some(ticket.source().preview) != self.active
+    }
+
     pub fn begin_exchange(&mut self, ticket: Ticket) -> Result<Option<Exchange>, Error> {
-        if !self.validate(ticket) || Some(ticket.source().preview) == self.active {
+        if !self.can_exchange(ticket) {
             return Ok(None);
         }
         let previous = self

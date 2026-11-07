@@ -176,6 +176,15 @@ fn monitor_source_unavailability_restoration_never_resurrects_a_paused_binding_o
     unavailable[0] = Source::new(source(1).slot(), source(1).chat(), false).unwrap();
     model.sync(&unavailable, order(), None).unwrap();
     assert!(!model.binding(view).unwrap().enabled && !model.validate(held));
+    let local = model.capture_view(view).unwrap();
+    assert!(
+        model.validate_view(local) && !model.validate(local),
+        "local scope grants no source authority"
+    );
+    model.set_blocked(true).unwrap();
+    assert!(!model.validate_view(local));
+    model.set_blocked(false).unwrap();
+    assert!(!model.validate_view(local), "unblocking cannot revive an old local action");
     model.sync(&all(), order(), None).unwrap();
     assert!(
         !model.binding(view).unwrap().enabled,

@@ -66,6 +66,31 @@ Open of current Active and binding survival across ordinary activation support
 the planned remembered-Active stage; no production UI, subscription or endpoint
 is enabled by this module. Source tests are authored and unrun.
 
+`session_host/monitor_ui.rs` and its `tests`/`visual` children are a dormant
+cfg(test)-only compact body over that model. They paint a fitted remembered
+Active image, captured Exchange/navigation controls, published settings and
+explicit canonical chat surfaces. Last-painted, clipped widget identities carry
+exact binding/input/settings tickets; the parent alone flushes delivered edits
+and applies transitions. `SharedChat::show_bound_for` refuses an unbound or
+mismatched source, drains latent UI Read intents, and borrows the existing
+source-owned draft/IME/Undo and operation receipts without selecting a fallback.
+The pure `selected_source_for` getter also serves the existing composer lookup.
+Local view tickets permit Pause/Play/interval recovery but grant no source,
+native, image, Send or Read authority.
+
+Images require an actual `AdmittedImage` and a borrowed
+`private_image::PrivateTextureView` matching exact source/binding, egui context,
+nonzero owner generation and binding namespace. The body neither copies pixels
+nor creates textures. Full service/native admission, credited pixel ownership,
+retirement and OS output destruction remain the surface owner's responsibility.
+Synthetic CPU visuals consume original sealed frames through that owner's
+fixture painter; inspected/cloned output is not a private presentation permit.
+This staged implementation remembers only authorized Active frames, retains a
+binding through ordinary activation, and permits explicit Open of current Active.
+Inactive production capture, native windows, subscriptions and menu enablement
+are not supplied by this body. Eleven actual-egui tests and one ignored
+24-capture-per-locale CPU fixture are authored; execution remains pending.
+
 The opt-in session controller starts before the ordinary viewer App/EventLoop.
 `session_host/{mod,software,ui}.rs` uses egui and the existing softbuffer CPU
 painter; it never initializes `aurora-render::Renderer`. `session_host/transport.rs`

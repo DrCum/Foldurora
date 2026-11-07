@@ -73,6 +73,29 @@ Windows ownership/IME or real-grid acceptance. Expanded top/bottom captures use
 real wheel input to show every profile and category across the pair; a control
 outside the filter scroll clip is not counted as visibly available.
 
+**Dormant Monitor CPU captures.**
+
+| Variable | Effect |
+|---|---|
+| `AURORA_MONITOR_VISUAL_DIR=<directory>` | Fresh output directory for the ignored synthetic Monitor body fixture |
+| `AURORA_MONITOR_VISUAL_LANGUAGE=en\|fr\|ja` | Isolated locale for that test process |
+
+These variables exist only under `cfg(test)`. After the private CPU image
+prerequisite is integrated, run
+`cargo test --workspace monitor_body_cpu_visual_fixture -- --ignored --test-threads=1 --nocapture`
+with one locale and fresh directory per process. The production dormant body
+and CPU painter define 24 PNG/JSON pairs per locale: image/chat, Options top and
+bottom reached by real wheel input, pending/failed settings, unavailable source
+and playing cycle, each at 540×580, 380×452/150% and 380×420. Required text/clip
+checks, actual pure SourceImages admission and hidden canonical-draft sentinels
+accompany the images. The surface owner consumes each original sealed frame;
+inspected output copies never gain presentation authority. The checker pixels,
+identities, chat and admission policies are synthetic. This does not execute
+native windows, authenticated image IO, persistence, GPU capture, Windows focus,
+real OS IME or grid routing; production endpoint/window enablement remains absent.
+Japanese captures require installed CJK fallback fonts. Tests and visuals are
+source-only until an exact executable receipt and actual results are recorded.
+
 **Native Linux Attention CPU input fixture.**
 
 | Variable | Effect |

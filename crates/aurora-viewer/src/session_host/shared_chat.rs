@@ -96,6 +96,68 @@ impl SharedChat {
         self.with_surface(surface, |model| model.show(ui, p, mode))
     }
 
+    /// Exact per-surface selection, without choosing a fallback source.
+    pub fn selected_source_for(&self, surface: ChatSurface) -> Option<ChatSource> {
+        if surface == self.surface {
+            self.selected
+        } else if surface == ChatSurface::Shared {
+            self.other_surfaces[self.surface.index() - 1].selected
+        } else {
+            self.other_surfaces[surface.index() - 1].selected
+        }
+    }
+
+    /// A monitor borrows the same canonical body, with its bound source shown
+    /// read-only. Parent flushes delivered edits before select_for/rebinding.
+    /// This facade grants no image, native-focus or IO authority.
+    #[cfg(test)]
+    pub fn show_bound_for(
+        &mut self,
+        surface: ChatSurface,
+        expected: ChatSource,
+        ui: &mut egui::Ui,
+        p: &Palette,
+        mode: InputMode,
+    ) -> Option<SendDraft> {
+        self.with_surface(surface, |model| {
+            // An unconsumed UI intent never survives a blocked/mismatched pass.
+            // The canonical queued operation/receipt ledgers remain untouched.
+            for state in &mut model.states {
+                state.ui.with_surface(surface, |ui| {
+                    let _ = ui.take_read_action();
+                });
+            }
+            if model.selected != Some(expected) || !model.states.iter().any(|state| state.ui.source() == expected) {
+                model.cancel_gestures();
+                chat_ui::cancel_input(ui.ctx());
+                egui::CentralPanel::default()
+                    .frame(crate::ui::widgets::overlay_frame(ui.ctx(), p))
+                    .show(ui, |ui| {
+                        ui.label(aurora_i18n::tr!("host-chat-source-unavailable"));
+                    });
+                return None;
+            }
+            let changed = std::mem::take(&mut model.changed);
+            if changed || mode == InputMode::Navigating {
+                chat_ui::cancel_input(ui.ctx());
+            }
+            let body_mode = if changed && mode == InputMode::Live {
+                InputMode::Navigating
+            } else {
+                mode
+            };
+            let state = model.states.iter_mut().find(|state| state.ui.source() == expected)?;
+            let caption = state.caption();
+            state.ui.with_surface(surface, |model| {
+                model.show_with_selector(ui, p, Some(&state.snapshot), &state.account, &state.grid, body_mode, |ui| {
+                    ui.add(egui::Label::new(RichText::new(&caption).strong()).truncate())
+                        .on_hover_text(&caption);
+                    false
+                })
+            })
+        })
+    }
+
     // Reserved for the bounded monitor surfaces; Shared keeps its existing facade.
     #[allow(dead_code)]
     pub fn take_read_action_for(&mut self, surface: ChatSurface) -> Option<ReadDraft> {
@@ -259,13 +321,7 @@ impl SharedChat {
     }
 
     pub fn composer_rect_for(&self, surface: ChatSurface, ctx: &egui::Context) -> Option<egui::Rect> {
-        let selected = if surface == self.surface {
-            self.selected
-        } else if surface == ChatSurface::Shared {
-            self.other_surfaces[self.surface.index() - 1].selected
-        } else {
-            self.other_surfaces[surface.index() - 1].selected
-        };
+        let selected = self.selected_source_for(surface);
         self.states
             .iter()
             .find(|state| Some(state.ui.source()) == selected)

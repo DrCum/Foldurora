@@ -1,5 +1,25 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Compact monitor body prerequisite (2026-11-07; no issue): cfg(test)-only
+  fitted, read-only Last active image with original admission age, Exchange,
+  canonical source-bound Chat, pin, bounded Options and four fixed/cycling view
+  contracts. Captured controls preserve prior-painted binding and published
+  settings; requests never move accepted checkmarks before an owner receipt.
+  Playing cycling is passive; pausing requires fresh composer focus. Eleven
+  actual-egui regressions cover stale gestures/options, blockers, unavailable
+  local recovery, clipped compact/scaled controls, admitted image/context/source
+  rejection, canonical three-context draft/Undo, IME and latent Read cancellation.
+  One ignored fixture defines 24 synthetic CPU captures per locale (EN/FR/JA),
+  consuming the surface owner's original sealed frames. Tests/captures are
+  authored and unrun; independent source review and integration remain pending.
+  Parent adapters still own edit-prefix flushing, acknowledgements, full
+  service/view/native image guards, pixel credits and cache/OS retirement.
+  No production Monitor window, menu, IO endpoint, inactive rendering or native
+  input path is enabled. Approved staged differences: explicit Open of current
+  Active and binding survival across ordinary activation; image/footer input
+  never implicitly promotes the source. Real inactive capture and Legacy
+  placement/default persistence remain later work, without placeholder controls.
+
 - 🔧 CPU monitor image/surface lifetime prerequisite (2026-11-07; no issue):
   shared 24 MiB private pixel credits, immutable source-sized ColorImage storage,
   borrowed User texture IDs, single pending image, exact local presentation
