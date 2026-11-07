@@ -191,6 +191,26 @@ impl ChatUi {
         self.source
     }
 
+    /// External navigation may select only an existing readable native target.
+    /// Reuse the retained editor and synchronize its exact policy/read metadata
+    /// before another surface pass can interpret input.
+    pub fn select_existing(&mut self, snapshot: &HostChatSnapshot, conversation: Conversation) -> bool {
+        let key = ChatKey {
+            source: self.source,
+            conversation,
+        };
+        if snapshot.source != self.source
+            || !eligible(snapshot)
+            || !supported(conversation)
+            || !native_policy(snapshot, key).is_some_and(|policy| policy.can_read)
+        {
+            return false;
+        }
+        self.select(conversation);
+        self.sync(Some(snapshot));
+        true
+    }
+
     #[cfg(all(test, target_os = "linux"))]
     pub(super) fn native_fixture_status(&self, ctx: Option<&egui::Context>) -> serde_json::Value {
         let response = ctx.and_then(|ctx| ctx.read_response(self.editor_id()));

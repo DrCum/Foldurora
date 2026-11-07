@@ -8,7 +8,7 @@ use super::slots::SlotId;
 use super::transport::{HostChatSnapshot, HostError, HostSnapshot};
 use crate::theme::Palette;
 use aurora_session::MAX_WORKERS;
-use aurora_session::chat::ChatSource;
+use aurora_session::chat::{ChatKey, ChatSource};
 use egui::{Id, RichText, vec2};
 use std::sync::Arc;
 
@@ -139,6 +139,22 @@ impl SharedChat {
         }
         self.selected = Some(source);
         self.cancel_gestures();
+    }
+
+    /// Select the exact existing native conversation for passive external
+    /// navigation, as `navigateAttention` does in tools/session-host/main.cpp.
+    /// Shell flushes delivered edits first and owns native window focus. An
+    /// unavailable target leaves the current selection intact, with no fallback.
+    pub fn select_key(&mut self, key: ChatKey) -> bool {
+        let Some(state) = self.states.iter_mut().find(|state| state.ui.source() == key.source) else {
+            return false;
+        };
+        if !state.ui.select_existing(&state.snapshot, key.conversation) {
+            return false;
+        }
+        self.selected = Some(key.source);
+        self.cancel_gestures();
+        true
     }
 
     pub fn cancel_gestures(&mut self) {

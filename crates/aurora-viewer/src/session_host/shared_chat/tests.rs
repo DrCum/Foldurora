@@ -867,3 +867,264 @@ fn shared_chat_read_press_switch_release_cannot_retarget_and_closed_policy_loss_
     let state = frames.model.states.iter().find(|state| state.ui.source() == source(1)).unwrap();
     assert!(!state.ui.has_read_metadata());
 }
+
+#[test]
+fn shared_chat_external_key_selects_exact_direct_and_syncs_native_read_metadata_before_drawing() {
+    let mut frames = Frames::new();
+    install_read(&mut frames, 1);
+    frames.type_text("Parked Nearby");
+    let target = ChatKey {
+        source: source(1),
+        conversation: direct(),
+    };
+    frames.model.sync(&frames.host, false);
+    assert!(frames.model.states[0].ui.has_read_metadata());
+    assert!(frames.model.select_key(target));
+    assert!(
+        !frames.model.states[0].ui.has_read_metadata(),
+        "Nearby metadata cannot survive until the target's first surface pass"
+    );
+    assert!(frames.model.take_read_action().is_none(), "selection does not acknowledge Read");
+    assert!(frames.show(Vec::new()).is_none(), "selection does not send");
+    frames.type_text("Exact Direct");
+    let draft = frames.send().unwrap();
+    assert_eq!(draft.key, target);
+    assert_eq!(draft.text.as_str(), "Exact Direct");
+    assert!(frames.model.select_key(ChatKey {
+        source: source(1),
+        conversation: Conversation::Nearby,
+    }));
+    assert!(frames.model.states[0].ui.has_read_metadata());
+    assert_eq!(frames.send().unwrap().text.as_str(), "Parked Nearby");
+}
+
+#[test]
+fn shared_chat_external_cross_source_navigation_retains_each_conversation_draft_and_undo() {
+    let mut frames = Frames::new();
+    let targets = [
+        ChatKey {
+            source: source(1),
+            conversation: Conversation::Nearby,
+        },
+        ChatKey {
+            source: source(1),
+            conversation: direct(),
+        },
+        ChatKey {
+            source: source(2),
+            conversation: direct(),
+        },
+    ];
+    for (index, target) in targets.iter().enumerate() {
+        assert!(frames.model.select_key(*target));
+        frames.type_text(&format!("Checkpoint {index}"));
+        frames.settle(65);
+        assert!(frames.show(vec![Event::Text(" plus edit".into())]).is_none());
+        frames.settle(65);
+    }
+    frames.reopen();
+    let command = Modifiers {
+        ctrl: true,
+        command: true,
+        ..Default::default()
+    };
+    for (index, target) in targets.iter().enumerate() {
+        assert!(frames.model.select_key(*target));
+        let draft = frames.send().unwrap();
+        assert_eq!(draft.key, *target);
+        assert_eq!(draft.text.as_str(), format!("Checkpoint {index} plus edit"));
+        let checkpoint = format!("Checkpoint {index}");
+        let mut restored = String::new();
+        for _ in 0..3 {
+            frames.click(Id::unique("host_chat_input_rect"));
+            assert!(frames.show(vec![key(Key::Z, true, false, command)]).is_none());
+            assert!(frames.show(vec![key(Key::Z, false, false, command)]).is_none());
+            restored = frames.send().map(|draft| draft.text.as_str().to_owned()).unwrap_or_default();
+            if restored == checkpoint {
+                break;
+            }
+        }
+        assert_eq!(restored, checkpoint, "Undo belongs to {target:?}");
+    }
+}
+
+#[test]
+fn shared_chat_external_key_rejects_unavailable_policy_source_and_unsupported_targets_without_fallback() {
+    for case in 0..13 {
+        let mut frames = Frames::new();
+        frames.type_text("Keep current sender");
+        let mut target = ChatKey {
+            source: source(2),
+            conversation: direct(),
+        };
+        let chat = Arc::make_mut(&mut frames.host.chat[1]);
+        match case {
+            0 => chat.conversations[1].policy.ready = false,
+            1 => chat.conversations[1].policy.lease_current = false,
+            2 => chat.conversations[1].policy.can_read = false,
+            3 => chat.conversations[1].policy.revision = 0,
+            4 => chat.authenticated = false,
+            5 => chat.live = false,
+            6 => target.source.lease_epoch += 1,
+            7 => target.source.session.generation += 1,
+            8 => target.conversation = Conversation::Direct(ConversationId::from_bytes([99; 16]).unwrap()),
+            9 | 10 => {
+                let id = ConversationId::from_bytes([99; 16]).unwrap();
+                target.conversation = if case == 9 {
+                    Conversation::Group(id)
+                } else {
+                    Conversation::Conference(id)
+                };
+                chat.conversations[1].policy.key = target;
+            }
+            11 => chat.conversations[1].policy.key.source = source(3),
+            12 => {
+                frames.host.workers.remove(1);
+            }
+            _ => unreachable!(),
+        };
+        frames.model.sync(&frames.host, false);
+        assert!(!frames.model.select_key(target), "rejected case {case}");
+        assert_eq!(frames.model.selected, Some(source(1)), "no fallback for case {case}");
+        assert!(frames.model.take_read_action().is_none());
+        assert!(frames.show(Vec::new()).is_none());
+        let draft = frames.send().unwrap();
+        assert_eq!(draft.key.source, source(1));
+        assert_eq!(draft.key.conversation, Conversation::Nearby);
+        assert_eq!(draft.text.as_str(), "Keep current sender");
+    }
+}
+
+#[test]
+fn shared_chat_external_key_accepts_read_only_existing_targets_but_not_an_unbounded_catalogue_tail() {
+    let mut frames = Frames::new();
+    let target = ChatKey {
+        source: source(2),
+        conversation: direct(),
+    };
+    let chat = Arc::make_mut(&mut frames.host.chat[1]);
+    chat.conversations[1].policy.can_send = false;
+    frames.model.sync(&frames.host, false);
+    assert!(frames.model.select_key(target));
+    assert_eq!(frames.model.selected, Some(source(2)));
+    assert!(frames.send().is_none());
+
+    let chat = Arc::make_mut(&mut frames.host.chat[1]);
+    let template = chat.conversations[0].clone();
+    chat.conversations = vec![template; aurora_session::chat::MAX_CONVERSATIONS];
+    chat.conversations.push(ConversationInfo {
+        title: Label::new("Outside retained catalogue").unwrap(),
+        policy: NativeChatPolicy {
+            key: target,
+            revision: 2,
+            lease_current: true,
+            ready: true,
+            can_read: true,
+            can_send: true,
+        },
+    });
+    frames.model.sync(&frames.host, false);
+    assert!(!frames.model.select_key(target));
+    assert!(frames.model.take_read_action().is_none());
+}
+
+#[test]
+fn shared_chat_external_navigation_preserves_captured_send_and_read_admission_and_completion() {
+    use crate::session_host::chat_broker::{ReadOperation, ReadStatus};
+    use aurora_session::chat::ReadOutcome;
+
+    let mut frames = Frames::new();
+    install_read(&mut frames, 1);
+    frames.type_text("Captured Nearby send");
+    let sent = frames.send().unwrap();
+    assert!(frames.click(Id::unique("host_chat_read_rect")).is_none());
+    let read = frames.model.take_read_action().unwrap();
+    let target = ChatKey {
+        source: source(2),
+        conversation: direct(),
+    };
+    assert!(frames.model.select_key(target));
+    frames.type_text("Unrelated Direct draft");
+    // Local admission arrives after navigation and must use its captured key.
+    frames.model.queued(&sent, 42);
+    frames.model.queued_read(read, 43);
+    let draft = frames.send().unwrap();
+    assert_eq!(draft.key, target);
+    assert_eq!(draft.text.as_str(), "Unrelated Direct draft");
+    assert!(frames.model.select_key(ChatKey {
+        source: source(1),
+        conversation: direct(),
+    }));
+    assert!(frames.send().is_none(), "pending Send still belongs to the original source");
+    let chat = Arc::make_mut(&mut frames.host.chat[0]);
+    chat.receipts.push(SendReceipt {
+        key: sent.key,
+        request: 42,
+        outcome: SendOutcome::AcceptedLocally,
+    });
+    chat.read_operations.push(ReadOperation {
+        request: read.request(43),
+        status: ReadStatus::Completed(ReadOutcome::Applied),
+    });
+    frames.model.sync(&frames.host, false);
+    frames.type_text("Different conversation after completion");
+    let draft = frames.send().unwrap();
+    assert_eq!(draft.key.conversation, direct());
+    assert_eq!(draft.key.source, source(1));
+    assert!(frames.model.select_key(sent.key));
+    assert!(frames.send().is_none(), "captured old text was consumed, never replayed");
+    assert!(frames.click(Id::unique("host_chat_read_rect")).is_none());
+    assert_eq!(
+        frames.model.take_read_action().unwrap().key,
+        read.key,
+        "the old conversation's terminal completion released its Read gate"
+    );
+    assert!(frames.model.select_key(target));
+    assert_eq!(frames.send().unwrap().text.as_str(), "Unrelated Direct draft");
+}
+
+#[test]
+fn shared_chat_external_navigation_flushes_delivered_edits_and_fences_held_pointer_and_enter() {
+    let mut frames = Frames::new();
+    frames.type_text("Old Nearby");
+    let target = ChatKey {
+        source: source(2),
+        conversation: direct(),
+    };
+    assert!(frames.model.select_key(target));
+    frames.type_text("Target Direct");
+    let old = ChatKey {
+        source: source(1),
+        conversation: Conversation::Nearby,
+    };
+    assert!(frames.model.select_key(old));
+    frames.click(Id::unique("host_chat_input_rect"));
+    let at = frames.rect(Id::unique("host_chat_send_rect")).center();
+    // This is the existing production edit-only flush composition used by
+    // Shell before external selection; neither queued gesture can send here.
+    frames.flush(vec![
+        Event::Text(" plus delivered".into()),
+        key(Key::Enter, true, false, Modifiers::NONE),
+        Event::PointerMoved(at),
+        Event::PointerButton {
+            pos: at,
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: Modifiers::NONE,
+        },
+    ]);
+    assert!(frames.model.select_key(target));
+    assert!(frames.pointer(at, false).is_none());
+    assert!(frames.show(vec![key(Key::Enter, true, true, Modifiers::NONE)]).is_none());
+    assert!(frames.model.take_read_action().is_none());
+    assert!(frames.show(vec![key(Key::Enter, false, false, Modifiers::NONE)]).is_none());
+    assert_eq!(frames.send().unwrap().text.as_str(), "Target Direct");
+    assert!(frames.model.select_key(old));
+    assert_eq!(frames.send().unwrap().text.as_str(), "Old Nearby plus delivered");
+
+    let at = frames.rect(Id::unique("host_chat_send_rect")).center();
+    assert!(frames.pointer(at, true).is_none());
+    assert!(frames.model.select_key(old), "reopening the same key also cancels its held gesture");
+    assert!(frames.pointer(at, false).is_none());
+    assert_eq!(frames.send().unwrap().key, old);
+}
