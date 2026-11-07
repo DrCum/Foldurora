@@ -156,7 +156,7 @@ pub(super) struct HostPreview {
 
 impl HostPreview {
     /// Return true when any old capture must be canceled. A normal park changes
-    /// capture access/revision but keeps physical/privacy/history epochs stable.
+    /// capture access/fences but keeps every export/history epoch stable.
     fn sync(&mut self, facts: NativePreviewFacts, now: Instant) -> bool {
         if self.exhausted || self.observed_at.is_some_and(|previous| now < previous) {
             self.exhausted = true;
@@ -166,12 +166,20 @@ impl HostPreview {
         self.observed_at = Some(now);
         let scope = facts.scope.filter(|scope| scope.expires_at > now);
         let source = scope.map(|scope| scope.source);
+        // Active is optional while parked; the last acknowledged activation is
+        // still the same source's monotonic watermark. Zero would regress the
+        // host SourceImages policy and incorrectly discard retained history.
+        let activation = self
+            .policy
+            .filter(|policy| Some(policy.source()) == source)
+            .map_or(0, |policy| policy.access().activation);
         let active = facts
             .authority
             .filter(|authority| {
                 Some(authority.scope.source) == source
                     && authority.scope.expires_at > now
                     && authority.activation != 0
+                    && authority.activation >= activation
                     && facts.physical.is_some_and(|physical| {
                         physical.device == authority.boundary.device_epoch() && physical.size == authority.boundary.size()
                     })
@@ -210,7 +218,11 @@ impl HostPreview {
         let privacy_changed = old.is_none_or(|old| old.world != next.world || old.retention_ready != next.retention_ready);
         let physical_changed = source_changed || old.is_none_or(|old| old.physical != next.physical);
         let viewport_changed = source_changed || old.is_none_or(|old| old.viewport != next.viewport);
-        if !advance(&mut self.revision)
+        // PreviewEpochs, including revision, invalidate already-admitted
+        // history in SourceImages. Capture-only transitions use access fields
+        // and renderer/native capture fences instead of an export epoch.
+        let export_changed = source_changed || privacy_changed || physical_changed || viewport_changed;
+        if (export_changed && !advance(&mut self.revision))
             || (privacy_changed && !advance(&mut self.privacy))
             || (physical_changed && (!advance(&mut self.render) || !advance(&mut self.surface)))
             || (viewport_changed && !advance(&mut self.viewport))
@@ -229,7 +241,7 @@ impl HostPreview {
         let access = PreviewAccess {
             ready: retention_ready,
             active: retention_ready && active.is_some(),
-            activation: active.map_or(0, |grant| grant.activation),
+            activation: active.map_or(activation, |grant| grant.activation),
             capture_active: capture,
             retain_last_active: retention_ready,
         };
@@ -611,15 +623,14 @@ mod tests {
         let history = model.policy.unwrap();
         assert!(!history.access().active && !history.access().capture_active);
         assert!(history.access().retain_last_active);
-        assert_eq!(history.epochs().privacy(), active.epochs().privacy());
-        assert_eq!(history.epochs().render(), active.epochs().render());
-        assert_eq!(history.epochs().viewport(), active.epochs().viewport());
-        assert_eq!(history.epochs().surface(), active.epochs().surface());
-        assert!(history.epochs().revision() > active.epochs().revision());
-        assert!(!model.sync(facts(&world, now), now));
+        assert_eq!(history.epochs(), active.epochs());
+        assert_eq!(history.access().activation, active.access().activation);
+        let mut restored = facts(&world, now);
+        restored.capture_generation = 2;
+        assert!(!model.sync(restored, now));
         assert!(
             model.policy.unwrap().access().capture_active,
-            "reactivation earns fresh revision, never a late old frame"
+            "reactivation changes capture access, never retained export epochs"
         );
     }
 
@@ -802,5 +813,176 @@ mod tests {
             model.exhausted && model.policy.is_none(),
             "future observation cannot revive with a regressed clock"
         );
+    }
+
+    fn admitted_history(
+        world: &World,
+        now: Instant,
+    ) -> (
+        HostPreview,
+        aurora_session::preview_image::SourceImages,
+        aurora_session::preview_image::ImageBudget,
+        aurora_session::preview_image::AdmittedImage,
+        aurora_session::preview_image::PreviewGeometry,
+    ) {
+        use aurora_session::preview_image::{HOST_IMAGE_BYTES, ImageBudget, PreviewGeometry, PreviewStamp, SourceImages};
+        let mut native = HostPreview::default();
+        native.sync(facts(world, now), now);
+        let policy = native.policy.unwrap();
+        let budget = ImageBudget::new(HOST_IMAGE_BYTES).unwrap();
+        let mut images = SourceImages::new(policy.source(), budget.clone()).unwrap();
+        images.sync(policy, 0).unwrap();
+        let geometry = PreviewGeometry::new([1280, 720], [0, 0, 1280, 720], aurora_session::PreviewSize::Small).unwrap();
+        let claim = images.request(1, 1, geometry, 10).unwrap();
+        let stamp = PreviewStamp::new(claim, 1, policy.epochs().surface(), 1, geometry).unwrap();
+        let historical = images.admit(stamp, budget.reserve(geometry).unwrap(), 11).unwrap();
+        (native, images, budget, historical, geometry)
+    }
+
+    #[test]
+    fn preview_native_policy_source_images_retains_admitted_history_across_capture_only_transitions() {
+        use aurora_session::preview_image::{ImageError, PreviewStamp};
+        let world = world();
+        let now = Instant::now();
+        for case in 0..5 {
+            let (mut native, mut images, budget, historical, geometry) = admitted_history(&world, now);
+            let before = native.policy.unwrap();
+            let late_claim = images.request(1, 1, geometry, 20).unwrap();
+            let late = PreviewStamp::new(late_claim, 2, before.epochs().surface(), 2, geometry).unwrap();
+            let mut input = facts(&world, now);
+            match case {
+                0 => {
+                    input.authority = None;
+                    input.capture_ready = false;
+                    input.capture_generation += 1;
+                }
+                1 => input.photo.context = aurora_render::PhotoContext::Record,
+                2 => input.remembered = false,
+                3 => {
+                    input.capture_ready = false;
+                    input.capture_generation += 1;
+                }
+                4 => input.authority.as_mut().unwrap().activation += 1,
+                _ => unreachable!(),
+            }
+            native.sync(input, now + Duration::from_millis(21));
+            let after = native.policy.unwrap();
+            assert_eq!(
+                after.epochs(),
+                before.epochs(),
+                "capture-only case {case} must not export a purge epoch"
+            );
+            assert!(
+                after.access().activation >= before.access().activation,
+                "monotonic source watermark"
+            );
+            images.sync(after, 21).unwrap();
+            assert!(historical.current(21), "held admitted history survives case {case}");
+            assert_eq!(images.retained(21).unwrap().unwrap().stamp(), historical.stamp());
+            assert!(
+                matches!(images.admit(late, budget.reserve(geometry).unwrap(), 22), Err(ImageError::Stale)),
+                "late old-grant/request completion rejected for case {case}"
+            );
+            let mut restored = facts(&world, now);
+            restored.authority.as_mut().unwrap().activation = after.access().activation;
+            restored.capture_generation += 2;
+            native.sync(restored, now + Duration::from_millis(30));
+            let restored = native.policy.unwrap();
+            assert_eq!(restored.epochs(), before.epochs());
+            images.sync(restored, 30).unwrap();
+            let fresh = images.request(1, 1, geometry, 31).unwrap();
+            assert_ne!(fresh, late_claim);
+            assert!(
+                matches!(images.admit(late, budget.reserve(geometry).unwrap(), 32), Err(ImageError::Stale)),
+                "restoration never revives the old pending request for case {case}"
+            );
+            let fresh = PreviewStamp::new(fresh, 2, restored.epochs().surface(), 3, geometry).unwrap();
+            assert!(images.admit(fresh, budget.reserve(geometry).unwrap(), 33).is_ok());
+            assert!(historical.current(33));
+        }
+    }
+
+    #[test]
+    fn preview_native_policy_source_images_purges_source_privacy_and_physical_loss_without_revival() {
+        use aurora_session::preview_image::{ImageError, PreviewStamp};
+        let mut world = world();
+        let now = Instant::now();
+        let issuer = Uuid::from_u128(140);
+        for case in 0..3 {
+            let (mut native, mut images, budget, held, geometry) = admitted_history(&world, now);
+            let before = native.policy.unwrap();
+            let late_claim = images.request(1, 1, geometry, 20).unwrap();
+            let late = PreviewStamp::new(late_claim, 2, before.epochs().surface(), 2, geometry).unwrap();
+            let mut input = facts(&world, now);
+            match case {
+                0 => {
+                    let source = input.scope.unwrap().source;
+                    let mut session = source.session();
+                    session.generation += 1;
+                    input.scope.as_mut().unwrap().source = PreviewSource::new(source.worker(), session, source.lease_epoch()).unwrap();
+                }
+                1 => {
+                    command(&mut world, issuer, "@showloc=n");
+                    input.world = WorldPolicy::observe(&world);
+                }
+                2 => input.physical = None,
+                _ => unreachable!(),
+            }
+            native.sync(input, now + Duration::from_millis(21));
+            let denied = native.policy.unwrap();
+            assert_ne!(denied.epochs(), before.epochs());
+            let result = images.sync(denied, 21);
+            if case == 0 {
+                assert_eq!(result, Err(ImageError::Stale));
+            } else {
+                result.unwrap();
+            }
+            assert!(!held.current(21), "case {case} revokes an externally held admitted handle");
+            assert!(matches!(
+                images.admit(late, budget.reserve(geometry).unwrap(), 22),
+                Err(ImageError::Stale)
+            ));
+            if case == 1 {
+                command(&mut world, issuer, "@clear");
+            }
+            let mut restored = facts(&world, now);
+            if case == 2 {
+                restored.physical.as_mut().unwrap().generation += 1;
+            }
+            native.sync(restored, now + Duration::from_millis(30));
+            let result = images.sync(native.policy.unwrap(), 30);
+            if case == 0 {
+                assert_eq!(result, Err(ImageError::Stale));
+            } else {
+                result.unwrap();
+            }
+            assert!(!held.current(30), "case {case} restoration never revives the old handle");
+            assert!(images.retained(30).unwrap().is_none());
+        }
+    }
+
+    #[test]
+    fn preview_native_activation_watermark_rejects_regression_without_export_epoch_change() {
+        let world = world();
+        let now = Instant::now();
+        let mut native = HostPreview::default();
+        native.sync(facts(&world, now), now);
+        let before = native.policy.unwrap();
+        let mut regressed = facts(&world, now);
+        regressed.authority.as_mut().unwrap().activation -= 1;
+        native.sync(regressed, now);
+        let after = native.policy.unwrap();
+        assert!(!after.access().active && !after.access().capture_active);
+        assert_eq!(after.access().activation, before.access().activation);
+        assert_eq!(after.epochs(), before.epochs());
+        let mut generation = facts(&world, now);
+        generation.capture_generation += 1;
+        native.sync(generation, now);
+        assert_eq!(
+            native.policy.unwrap().epochs(),
+            before.epochs(),
+            "publication generation is a separate capture fence"
+        );
+        assert_eq!(native.observed.unwrap().capture_generation, 2);
     }
 }

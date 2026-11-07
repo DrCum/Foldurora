@@ -40,7 +40,10 @@
   and a CPU-only App policy model before parked returns/UI paint. Actual native
   RLVa privacy/unresolved visual registrations, loaded mute state, derender
   witnesses and temporary/point/folder locked HUDs are checked; all photo contexts
-  and source/lease/recovery loss fail closed. Pure/native-World tests are authored,
+  and source/lease/recovery loss fail closed. Capture-only changes preserve all
+  export epochs and the source activation watermark; composed SourceImages tests
+  check retained admitted history, rejected late frames and permanent purge.
+  Pure/native-World tests are authored,
   not executed. Explicit OpenMonitor binding will own internal RememberActive
   demand later; current production demand is absent. No endpoint, image request,
   outgoing pixels, standby rendering or monitor UI is enabled. This is stricter

@@ -180,7 +180,11 @@ the strict Review source/grant core but requires visible exact-PID geometry
 without granting keyboard foreground. A successful world Grant may record an
 optional actual capture boundary; missing image support never rejects hosting.
 Checked policy epochs distinguish normal Active-to-Standby capture revocation
-from physical/privacy/history loss. Borrowed-out Gfx is passed explicitly, and
+from physical/privacy/history loss. Every PreviewEpochs field, including export
+revision, stays stable on capture-only transitions; an inactive source retains
+its last acknowledged activation watermark. The composed SourceImages tests
+cover admitted-history retention and late-completion rejection at this seam.
+Borrowed-out Gfx is passed explicitly, and
 WorkerBridge is restored before observation. Production remembered-view demand
 is absent: this prerequisite starts no endpoint, request, pixel IO or GPU loop.
 Renderer physical witnesses are sampled for this local model; continuous IO-side
