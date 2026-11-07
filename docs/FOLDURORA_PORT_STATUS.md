@@ -155,16 +155,53 @@ These are synthetic GPU texture tests, not native Windows/NVIDIA/producer or
 human acceptance. Receipts are
 `.scratch/review-monitor-integration-024ff943/{source-expectations.json,early-checks-receipt.json,gpu-outcome-audit.json}`.
 
-The full Linux workspace outcome and
-[new Windows run 42396161551](https://github.com/DrCum/Foldurora/actions/runs/42396161551)
-remain **pending verification at this checkpoint**. The native 2d component pass
-and 15d Windows package do not supply those missing results. Canonical monitor,
-image model/backend/transport/native permit work remains separately scoped;
-no live inactive producer, production image endpoint or full monitor parity is
-established by these receipts. Earlier source-only fixture/driver checkpoints
-remain distinct from the compiled 2d test ELF and driver identified above.
+Exact 024 Linux validation now reports **8,154 passed, one inherited terrain
+precision failure, 56 ignored**, with all **333 required names passing once**.
+All **90 synthetic CPU Attention captures** passed (30 each EN/FR/JA). Its
+separate six-case native Linux CPU Attention run also passed, using test ELF
+SHA-256 `a385a6aabb6229d92820aaf62004668d8a459a15b220b7c0592d94eca03abe92`
+and unchanged driver `f0f80738`; suite `suite-onywebhu` took **63.629 seconds**.
+These remain synthetic component checks: all seven filters fit, native wheel
+edges were zero, and no World/Shared Chat/authentication/preferences IO/Windows/
+grid/real IME/native Review acceptance is established. Full receipts are retained
+under `.scratch/review-monitor-integration-024ff943/`; the full run is not green
+because the inherited renderer failure remains. No normal viewer build was run
+on exact 024; its normal-build identity must not be inferred from a later source.
 
-The [Review 024 Windows acceptance handoff](#review-024-windows-acceptance-handoff)
+[Windows run 42396161551](https://github.com/DrCum/Foldurora/actions/runs/42396161551)
+is preserved as a **negative exact-024 candidate**: **8,120 passed, one failed,
+54 ignored**, across 33 summaries. Of 333 required names, 332 passed once and
+`viewport_gpu_shader_validates_without_a_driver_and_capture_path_has_no_waits`
+failed once in both logs. Source review confirmed a test-only CRLF delimiter
+false positive in that source scanner; this explanation does not turn the failed
+run green. Parser, formatting, strict Clippy, build and package passed. Both ZIP
+CRCs, hashes, source/PE/version and all seven icons passed static verification;
+the package remains negative. Receipt:
+`.scratch/windows-ci-42396161551/receipt.json`, SHA-256
+`d9515eca7baa96bd6f6a072f312ab5a0a4bf3811c7a8c049c3d9ed42b3d19d8d`.
+
+The separate newline-tolerant test/workflow fix is published at
+[`eb5e49f167a437391f1d9e42d35a62129cf52784`](https://github.com/DrCum/Foldurora/commit/eb5e49f167a437391f1d9e42d35a62129cf52784),
+tree `4d25fd8d9f82fe6937640819a10777af8ad24d2b`, branch
+`fix/attention-review-windows`.
+[Windows run 42401453027](https://github.com/DrCum/Foldurora/actions/runs/42401453027)
+is **in progress and unverified at this checkpoint**. Its artifact identity,
+Windows package version and hashes remain pending; no prior green result transfers.
+Exact eb5 Linux qualified Clippy passed in **114.740 seconds**, the targeted
+scanner test passed, and the normal viewer build passed in **347.870 seconds**.
+That separate Linux executable is **672,080,440 bytes**, version
+`Aurora Viewer 0.0.0+1617.geb5e49f16`, SHA-256
+`de62603127f0e6d84412abb57eacf43493a1bdf4ba0063e463d0f8118085d2d3`.
+These are Linux build checks, not Windows or native acceptance. Receipts are
+`.scratch/attention-review-windows-eb5e49f1/{targeted-scanner-receipt.json,normal-build-receipt.json}`;
+no full Linux suite rerun is claimed for this test/workflow-only fix.
+
+Canonical monitor, image model/backend/transport/native permit work remains
+separately scoped. No live inactive producer, production image endpoint or full
+monitor parity is established by these receipts. Earlier source-only checkpoints
+and the 2d native gallery remain distinct from exact 024 and eb5 evidence.
+
+The [Review eb5 Windows acceptance handoff](#review-eb5-windows-acceptance-handoff)
 below is a prepared recipe for the eventual exact package; no human result or
 handoff delivery is implied.
 
@@ -186,27 +223,28 @@ Human/platform follow-up for the exact eventual package:
   the exact tested commit. Keep that report without attributing it to this
   package or declaring full camera, GPU/device-loss or port parity acceptance.
 
-## Review 024 Windows acceptance handoff
+## Review eb5 Windows acceptance handoff
 
 Prepared recipe only; Windows/human acceptance is pending. No test request is
 being sent by this document. Continue other work while human testing is unavailable.
 
-Candidate source: `024ff943ac6feeef092fd83f906dc48e04a2dcbe`;
-tree `8a7a34df39586866c5a53b1aab3fbf01981957f9`;
-branch `feat/attention-review-integration`;
-[Windows run 42396161551](https://github.com/DrCum/Foldurora/actions/runs/42396161551).
-The final 024 artifact ID, package version and ZIP/executable SHA-256 values are
-**pending verification**; do not substitute another build's values.
+Candidate source: `eb5e49f167a437391f1d9e42d35a62129cf52784`;
+tree `4d25fd8d9f82fe6937640819a10777af8ad24d2b`;
+branch `fix/attention-review-windows`;
+[Windows run 42401453027](https://github.com/DrCum/Foldurora/actions/runs/42401453027).
+The final eb5 artifact ID, Windows package version and ZIP/executable SHA-256
+values are **pending verification**. The preceding 024 Windows run is negative;
+its single CRLF scanner failure is not a passing result or an acceptance package.
 
 The separate MVP at `15d33e6c9225bb476f224df02446e3d8c8c94c8d` has
 [verified artifact 13583034550](https://github.com/DrCum/Foldurora/actions/runs/42390650825/artifacts/13583034550),
 version `0.9.3-beta.20261106.1+207.g15d33e6c9`. It has no native Review;
-its green checks do not validate 024. Keep that baseline and all **14 prior local
-artifacts and their source heads** intact. Add a separate 024 folder/worktree.
+its green checks do not validate eb5. Keep that baseline and all **14 prior local
+artifacts and their source heads** intact. Add a separate eb5 folder/worktree.
 
-The builder may use the 024 CI artifact once verified, or a cached local build
+The builder may use the eb5 CI artifact once verified, or a cached local build
 from that exact commit with its own recorded checks/version/hashes. Do not mix
-controller and worker executables: both must come from the same 024 package.
+controller and worker executables: both must come from the same eb5 package.
 No installation, profile migration/deletion, merge or release is part of this handoff.
 For a local build, record source/tree and the resulting executable hash:
 
@@ -234,12 +272,14 @@ Perform these eight checks in both UI styles where available:
    issue a separate host **Mark conversation read** action. Passive host
    navigation and **Dismiss reminder** must not queue an explicit Read or
    activate a World; native read-on-draw remains normal.
-3. **No accidental Send.** Hold Enter/Space, leave IME text uncommitted, and
-   switch or Review. Held/repeated keys, old IME commits and queued clicks/keys
+3. **No accidental Send.** In separate cases, test held Enter/Space,
+   uncommitted IME text, and queued clicks/keys while switching or reviewing.
+   Held/repeated keys, old IME commits and queued clicks/keys
    must not send into the new composer. Release and start a fresh gesture before
    any intentional Send; nothing should be replayed automatically.
 4. **Drafts and Undo.** Keep different unsent drafts for two characters and
-   conversations. Navigate and close/reopen Shared Chat or its existing popout.
+   conversations. Navigate and close/reopen Shared Chat or the viewer's existing
+   native chat popout.
    Each draft and Undo history stays with its own source/conversation; Review
    must not send, overwrite or clear another draft.
 5. **Honest Cancel.** Try **Cancel review** while waiting for activation, then
