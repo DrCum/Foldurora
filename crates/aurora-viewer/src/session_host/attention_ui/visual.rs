@@ -157,6 +157,26 @@ impl Fixture {
         }
     }
 
+    fn scroll_filters_to_bottom(&mut self) {
+        for _ in 0..3 {
+            let clip = self
+                .context
+                .data(|data| data.get_temp::<Rect>(Id::unique("attention_filter_scroll")))
+                .unwrap();
+            self.events(vec![
+                Event::PointerMoved(clip.center()),
+                Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    phase: egui::TouchPhase::Move,
+                    source: egui::MouseWheelSource::Wheel,
+                    delta: vec2(0.0, -1000.0),
+                    modifiers: Modifiers::NONE,
+                },
+            ]);
+            self.show();
+        }
+    }
+
     fn capture(&mut self, output: &Path, name: &str, required: &[&str], forbidden: &[&str]) -> Value {
         for _ in 0..4 {
             self.show();
@@ -188,6 +208,9 @@ impl Fixture {
             "image": format!("{name}.png"), "locale": aurora_i18n::language(), "logical_size": self.logical,
             "physical_size": physical, "pixels_per_point": self.scale, "selected_key": self.model.selected(),
             "reminder_count": self.model.rows().len(), "published_preferences": self.host.attention_preferences.preferences,
+            "filters_open": self.body.filters_open,
+            "filter_viewport": self.body.filters_open.then(|| self.context.data(|data| data.get_temp::<Rect>(Id::unique("attention_filter_scroll"))).map(|rect| [rect.min.x, rect.min.y, rect.max.x, rect.max.y])),
+            "filter_content_size": self.body.filters_open.then(|| self.context.data(|data| data.get_temp::<egui::Vec2>(Id::unique("attention_filter_content"))).map(|size| [size.x, size.y])),
             "missing_or_clipped_required_text": missing, "privacy_leaks": leaked,
             "painted_text": self.texts.iter().map(|(text, complete)| json!({"text": text, "fully_visible": complete})).collect::<Vec<_>>(),
         });
@@ -216,12 +239,32 @@ fn layout(output: &Path, name: &str, logical: [u32; 2], scale: f32) -> Vec<Value
         &[],
     )];
     f.toggle_filters();
+    let profiles: Vec<_> = SlotId::all()
+        .map(|slot| {
+            format!(
+                "{} · Same profile",
+                aurora_i18n::tr!("host-profile-default", number = i64::from(slot.number()))
+            )
+        })
+        .collect();
+    let mut top_required = vec![
+        aurora_i18n::tr!("host-attention-filters"),
+        aurora_i18n::tr!("host-attention-profiles"),
+        aurora_i18n::tr!("host-attention-open"),
+        aurora_i18n::tr!("host-attention-dismiss"),
+        identity.as_str(),
+    ];
+    top_required.extend(profiles[..4].iter().map(String::as_str));
+    records.push(f.capture(output, &format!("{name}-07-expanded-filters"), &top_required, &[]));
+    // Narrow/localized captions can legitimately require scrolling. Capture
+    // both ends through real wheel events, requiring every profile and both
+    // categories fully visible at least once across these two scenes.
+    f.scroll_filters_to_bottom();
     records.push(f.capture(
         output,
-        &format!("{name}-07-expanded-filters"),
+        &format!("{name}-08-expanded-filters-bottom"),
         &[
-            aurora_i18n::tr!("host-attention-filters"),
-            aurora_i18n::tr!("host-attention-profiles"),
+            &profiles[4],
             aurora_i18n::tr!("host-attention-nearby"),
             aurora_i18n::tr!("host-attention-direct"),
             aurora_i18n::tr!("host-attention-open"),

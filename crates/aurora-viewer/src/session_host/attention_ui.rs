@@ -221,66 +221,96 @@ impl AttentionUi {
                         .show(ui, |ui| {
                             ui.add_enabled_ui(live, |ui| {
                                 ui.label(RichText::new(aurora_i18n::tr!("host-attention-profiles")).strong());
-                                ui.horizontal_wrapped(|ui| {
-                                    for slot in SlotId::all() {
-                                        let name = aurora_i18n::tr!("host-profile-default", number = i64::from(slot.number()));
-                                        let custom = snapshot.slots.iter().find(|item| item.id == slot).map(|item| item.label.as_str());
-                                        let caption = custom
-                                            .filter(|label| !label.is_empty())
-                                            .map_or(name.clone(), |label| format!("{name} · {label}"));
-                                        let index = usize::from(u8::from(slot));
-                                        let response = published_checkbox(
-                                            ui,
-                                            p,
-                                            state.preferences.include_slots[index],
-                                            caption,
-                                            Id::unique(("attention_slot", slot)),
-                                        );
-                                        let mut desired = state.preferences;
-                                        desired.include_slots[index] = !desired.include_slots[index];
-                                        self.control(
-                                            ui,
-                                            response,
-                                            Id::unique(("attention_slot", slot)),
-                                            Some(Intent::Preferences {
-                                                base: state.preferences,
-                                                desired,
-                                            }),
-                                            live,
-                                            &mut activated,
-                                        );
-                                    }
-                                });
-                                ui.horizontal_wrapped(|ui| {
-                                    for (kind, label, value) in [
-                                        ("nearby", aurora_i18n::tr!("host-attention-nearby"), state.preferences.nearby),
-                                        ("direct", aurora_i18n::tr!("host-attention-direct"), state.preferences.direct),
-                                    ] {
-                                        let response = published_checkbox(ui, p, value, label, Id::unique(("attention_kind", kind)));
-                                        let mut desired = state.preferences;
-                                        if kind == "nearby" {
-                                            desired.nearby = !value;
-                                        } else {
-                                            desired.direct = !value;
+                                // Give each caption a full, stable cell width before
+                                // shaping it. A wrapping horizontal row can offer
+                                // only a few trailing pixels to the next checkbox.
+                                let cell_width = ((ui.available_width() - ui.spacing().item_spacing.x) / 2.0).max(1.0);
+                                egui::Grid::new("attention_filter_grid")
+                                    .num_columns(2)
+                                    .min_col_width(cell_width)
+                                    .max_col_width(cell_width)
+                                    .show(ui, |ui| {
+                                        for (index, slot) in SlotId::all().enumerate() {
+                                            let name = aurora_i18n::tr!("host-profile-default", number = i64::from(slot.number()));
+                                            let custom = snapshot.slots.iter().find(|item| item.id == slot).map(|item| item.label.as_str());
+                                            let caption = custom
+                                                .filter(|label| !label.is_empty())
+                                                .map_or(name.clone(), |label| format!("{name} · {label}"));
+                                            let response = ui
+                                                .allocate_ui_with_layout(
+                                                    vec2(cell_width, 0.0),
+                                                    egui::Layout::top_down(egui::Align::Min),
+                                                    |ui| {
+                                                        ui.set_max_width(cell_width);
+                                                        published_checkbox(
+                                                            ui,
+                                                            p,
+                                                            state.preferences.include_slots[index],
+                                                            caption,
+                                                            Id::unique(("attention_slot", slot)),
+                                                        )
+                                                    },
+                                                )
+                                                .inner;
+                                            let mut desired = state.preferences;
+                                            desired.include_slots[index] = !desired.include_slots[index];
+                                            self.control(
+                                                ui,
+                                                response,
+                                                Id::unique(("attention_slot", slot)),
+                                                Some(Intent::Preferences {
+                                                    base: state.preferences,
+                                                    desired,
+                                                }),
+                                                live,
+                                                &mut activated,
+                                            );
+                                            if index % 2 == 1 {
+                                                ui.end_row();
+                                            }
                                         }
-                                        self.control(
-                                            ui,
-                                            response,
-                                            Id::unique(("attention_kind", kind)),
-                                            Some(Intent::Preferences {
-                                                base: state.preferences,
-                                                desired,
-                                            }),
-                                            live,
-                                            &mut activated,
-                                        );
-                                    }
-                                });
+                                        ui.end_row();
+                                        for (kind, label, value) in [
+                                            ("nearby", aurora_i18n::tr!("host-attention-nearby"), state.preferences.nearby),
+                                            ("direct", aurora_i18n::tr!("host-attention-direct"), state.preferences.direct),
+                                        ] {
+                                            let response = ui
+                                                .allocate_ui_with_layout(
+                                                    vec2(cell_width, 0.0),
+                                                    egui::Layout::top_down(egui::Align::Min),
+                                                    |ui| {
+                                                        ui.set_max_width(cell_width);
+                                                        published_checkbox(ui, p, value, label, Id::unique(("attention_kind", kind)))
+                                                    },
+                                                )
+                                                .inner;
+                                            let mut desired = state.preferences;
+                                            if kind == "nearby" {
+                                                desired.nearby = !value;
+                                            } else {
+                                                desired.direct = !value;
+                                            }
+                                            self.control(
+                                                ui,
+                                                response,
+                                                Id::unique(("attention_kind", kind)),
+                                                Some(Intent::Preferences {
+                                                    base: state.preferences,
+                                                    desired,
+                                                }),
+                                                live,
+                                                &mut activated,
+                                            );
+                                        }
+                                        ui.end_row();
+                                    });
                             });
                         });
                     #[cfg(test)]
-                    ui.ctx()
-                        .data_mut(|data| data.insert_temp(Id::unique("attention_filter_scroll"), scroll.inner_rect));
+                    ui.ctx().data_mut(|data| {
+                        data.insert_temp(Id::unique("attention_filter_scroll"), scroll.inner_rect);
+                        data.insert_temp(Id::unique("attention_filter_content"), scroll.content_size);
+                    });
                     #[cfg(not(test))]
                     let _ = scroll;
                 }

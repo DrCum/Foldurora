@@ -233,6 +233,34 @@ impl Frames {
         self.pointer(at, false)
     }
 
+    fn scroll_filter_into_view(&mut self, id: Id) {
+        for _ in 0..24 {
+            let rect = self.rect(id);
+            let clip = self
+                .context
+                .data(|data| data.get_temp::<Rect>(Id::unique("attention_filter_scroll")))
+                .unwrap();
+            if clip.contains_rect(rect) {
+                return;
+            }
+            let delta = if rect.top() < clip.top() { 70.0 } else { -70.0 };
+            assert!(
+                self.show(vec![
+                    Event::PointerMoved(clip.center()),
+                    Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Point,
+                        phase: egui::TouchPhase::Move,
+                        source: egui::MouseWheelSource::Wheel,
+                        delta: vec2(0.0, delta),
+                        modifiers: Modifiers::NONE,
+                    }
+                ])
+                .is_none()
+            );
+        }
+        panic!("filter must be reachable through its actual wheel-driven viewport");
+    }
+
     fn first(&self) -> ChatKey {
         self.model.rows()[0].key
     }
@@ -793,4 +821,70 @@ fn attention_short_filters_scroll_to_offscreen_category_before_saving() {
         !f.host.attention_preferences.preferences.nearby,
         "intent does not optimistically publish settings"
     );
+}
+
+#[test]
+fn attention_filter_cells_keep_bounded_geometry_and_all_settings_reachable() {
+    for logical in [[540.0, 580.0], [380.0, 580.0], [380.0, 420.0]] {
+        for long_names in [false, true] {
+            let mut f = Frames::for_size(logical);
+            if long_names {
+                for (index, slot) in f.host.slots.iter_mut().enumerate() {
+                    slot.label = SlotLabel::new(if index % 2 == 0 {
+                        "Long synthetic profile name with enough words to fill this slot"
+                    } else {
+                        "長いプロフィール名を確認するための合成名"
+                    })
+                    .unwrap();
+                }
+            }
+            assert!(f.click(Id::unique("attention_filter_toggle")).is_none());
+            f.settle();
+            let content = f
+                .context
+                .data(|data| data.get_temp::<egui::Vec2>(Id::unique("attention_filter_content")))
+                .unwrap();
+            assert!(
+                content.is_finite() && content.y > 0.0 && content.y < 600.0,
+                "filter content must not grow a letter at a time: {logical:?}, {content:?}"
+            );
+            let mut controls: Vec<_> = SlotId::all()
+                .map(|slot| {
+                    let mut expected = Preferences::default();
+                    expected.include_slots[usize::from(u8::from(slot))] = false;
+                    (Id::unique(("attention_slot", slot)), expected)
+                })
+                .collect();
+            controls.push((
+                Id::unique(("attention_kind", "nearby")),
+                Preferences {
+                    nearby: true,
+                    ..Preferences::default()
+                },
+            ));
+            controls.push((
+                Id::unique(("attention_kind", "direct")),
+                Preferences {
+                    direct: false,
+                    ..Preferences::default()
+                },
+            ));
+            for (id, expected) in controls {
+                let rect = f.rect(id);
+                assert!(rect.min.is_finite() && rect.max.is_finite() && rect.width() > 0.0 && rect.height() > 0.0);
+                assert!(
+                    rect.width() <= logical[0] / 2.0 + 1.0 && rect.height() <= 140.0,
+                    "full-width cell measurement bounds each control: {logical:?}, {rect:?}"
+                );
+                f.scroll_filter_into_view(id);
+                let Some(Action::Preferences(desired)) = f.click(id) else {
+                    panic!("every visible profile/category must accept its real pointer gesture");
+                };
+                assert_eq!(desired, expected);
+                assert_eq!(f.host.attention_preferences.preferences, Preferences::default());
+                f.body.queue_failed(); // No IO owner is installed in this UI fixture.
+                f.settle();
+            }
+        }
+    }
 }
