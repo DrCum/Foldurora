@@ -1,0 +1,1983 @@
+{
+  "captures": [
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "normal-01-selected.png",
+      "locale": "en",
+      "logical_size": [
+        540,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Unread conversations from your saved profiles."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filters"
+        },
+        {
+          "fully_visible": true,
+          "text": "Open shared chat"
+        },
+        {
+          "fully_visible": true,
+          "text": "Previous"
+        },
+        {
+          "fully_visible": true,
+          "text": "Next"
+        },
+        {
+          "fully_visible": true,
+          "text": "Dismiss reminder"
+        },
+        {
+          "fully_visible": true,
+          "text": "Opening chat does not mark messages as read. Dismissing only hides this reminder until new activity."
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        }
+      ],
+      "physical_size": [
+        540,
+        580
+      ],
+      "pixels_per_point": 1.0,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": [
+        452.1875,
+        157.0
+      ],
+      "filter_viewport": [
+        1.0,
+        55.0,
+        539.0,
+        215.0
+      ],
+      "filters_open": true,
+      "image": "normal-07-expanded-filters.png",
+      "locale": "en",
+      "logical_size": [
+        540,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Unread conversations from your saved profiles."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filters"
+        },
+        {
+          "fully_visible": true,
+          "text": "Include profiles"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 1 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 2 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 3 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 4 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 5 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Nearby chat"
+        },
+        {
+          "fully_visible": true,
+          "text": "Direct messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Open shared chat"
+        },
+        {
+          "fully_visible": true,
+          "text": "Previous"
+        },
+        {
+          "fully_visible": true,
+          "text": "Next"
+        },
+        {
+          "fully_visible": true,
+          "text": "Dismiss reminder"
+        },
+        {
+          "fully_visible": true,
+          "text": "Opening chat does not mark messages as read. Dismissing only hides this reminder until new activity."
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": false,
+          "text": "Character 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        }
+      ],
+      "physical_size": [
+        540,
+        580
+      ],
+      "pixels_per_point": 1.0,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": [
+        452.1875,
+        157.0
+      ],
+      "filter_viewport": [
+        1.0,
+        55.0,
+        539.0,
+        215.0
+      ],
+      "filters_open": true,
+      "image": "normal-08-expanded-filters-bottom.png",
+      "locale": "en",
+      "logical_size": [
+        540,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Unread conversations from your saved profiles."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filters"
+        },
+        {
+          "fully_visible": true,
+          "text": "Include profiles"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 1 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 2 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 3 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 4 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 5 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Nearby chat"
+        },
+        {
+          "fully_visible": true,
+          "text": "Direct messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Open shared chat"
+        },
+        {
+          "fully_visible": true,
+          "text": "Previous"
+        },
+        {
+          "fully_visible": true,
+          "text": "Next"
+        },
+        {
+          "fully_visible": true,
+          "text": "Dismiss reminder"
+        },
+        {
+          "fully_visible": true,
+          "text": "Opening chat does not mark messages as read. Dismissing only hides this reminder until new activity."
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": false,
+          "text": "Character 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        }
+      ],
+      "physical_size": [
+        540,
+        580
+      ],
+      "pixels_per_point": 1.0,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "normal-02-saving.png",
+      "locale": "en",
+      "logical_size": [
+        540,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Unread conversations from your saved profiles."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filters"
+        },
+        {
+          "fully_visible": true,
+          "text": "Saving reminder settings…"
+        },
+        {
+          "fully_visible": true,
+          "text": "Open shared chat"
+        },
+        {
+          "fully_visible": true,
+          "text": "Previous"
+        },
+        {
+          "fully_visible": true,
+          "text": "Next"
+        },
+        {
+          "fully_visible": true,
+          "text": "Dismiss reminder"
+        },
+        {
+          "fully_visible": true,
+          "text": "Opening chat does not mark messages as read. Dismissing only hides this reminder until new activity."
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        }
+      ],
+      "physical_size": [
+        540,
+        580
+      ],
+      "pixels_per_point": 1.0,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "normal-03-save-failed.png",
+      "locale": "en",
+      "logical_size": [
+        540,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Unread conversations from your saved profiles."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filters"
+        },
+        {
+          "fully_visible": true,
+          "text": "Reminder settings could not be saved. Your previous settings are still in use."
+        },
+        {
+          "fully_visible": true,
+          "text": "Open shared chat"
+        },
+        {
+          "fully_visible": true,
+          "text": "Previous"
+        },
+        {
+          "fully_visible": true,
+          "text": "Next"
+        },
+        {
+          "fully_visible": true,
+          "text": "Dismiss reminder"
+        },
+        {
+          "fully_visible": true,
+          "text": "Opening chat does not mark messages as read. Dismissing only hides this reminder until new activity."
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        }
+      ],
+      "physical_size": [
+        540,
+        580
+      ],
+      "pixels_per_point": 1.0,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "normal-04-selected-unavailable.png",
+      "locale": "en",
+      "logical_size": [
+        540,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Unread conversations from your saved profiles."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filters"
+        },
+        {
+          "fully_visible": true,
+          "text": "Reminder settings could not be saved. Your previous settings are still in use."
+        },
+        {
+          "fully_visible": true,
+          "text": "Open shared chat"
+        },
+        {
+          "fully_visible": true,
+          "text": "Previous"
+        },
+        {
+          "fully_visible": true,
+          "text": "Next"
+        },
+        {
+          "fully_visible": true,
+          "text": "Dismiss reminder"
+        },
+        {
+          "fully_visible": true,
+          "text": "Opening chat does not mark messages as read. Dismissing only hides this reminder until new activity."
+        },
+        {
+          "fully_visible": true,
+          "text": "The selected reminder is unavailable. Select another reminder to continue."
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        }
+      ],
+      "physical_size": [
+        540,
+        580
+      ],
+      "pixels_per_point": 1.0,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 4,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "normal-05-empty.png",
+      "locale": "en",
+      "logical_size": [
+        540,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Unread conversations from your saved profiles."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filters"
+        },
+        {
+          "fully_visible": true,
+          "text": "Reminder settings could not be saved. Your previous settings are still in use."
+        },
+        {
+          "fully_visible": true,
+          "text": "Open shared chat"
+        },
+        {
+          "fully_visible": true,
+          "text": "Previous"
+        },
+        {
+          "fully_visible": true,
+          "text": "Next"
+        },
+        {
+          "fully_visible": true,
+          "text": "Dismiss reminder"
+        },
+        {
+          "fully_visible": true,
+          "text": "Opening chat does not mark messages as read. Dismissing only hides this reminder until new activity."
+        },
+        {
+          "fully_visible": true,
+          "text": "The selected reminder is unavailable. Select another reminder to continue."
+        },
+        {
+          "fully_visible": true,
+          "text": "No unread conversation reminders match these filters."
+        }
+      ],
+      "physical_size": [
+        540,
+        580
+      ],
+      "pixels_per_point": 1.0,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 0,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "normal-06-load-failed.png",
+      "locale": "en",
+      "logical_size": [
+        540,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Unread conversations from your saved profiles."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filters"
+        },
+        {
+          "fully_visible": true,
+          "text": "Reminder settings could not be loaded. Reminders are unavailable; shared chat remains available."
+        },
+        {
+          "fully_visible": true,
+          "text": "Open shared chat"
+        },
+        {
+          "fully_visible": true,
+          "text": "Previous"
+        },
+        {
+          "fully_visible": true,
+          "text": "Next"
+        },
+        {
+          "fully_visible": true,
+          "text": "Dismiss reminder"
+        },
+        {
+          "fully_visible": true,
+          "text": "Opening chat does not mark messages as read. Dismissing only hides this reminder until new activity."
+        }
+      ],
+      "physical_size": [
+        540,
+        580
+      ],
+      "pixels_per_point": 1.0,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": false,
+        "include_slots": [
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 0,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "narrow-150pct-01-selected.png",
+      "locale": "en",
+      "logical_size": [
+        380,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Unread conversations from your saved profiles."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filters"
+        },
+        {
+          "fully_visible": true,
+          "text": "Open shared chat"
+        },
+        {
+          "fully_visible": true,
+          "text": "Previous"
+        },
+        {
+          "fully_visible": true,
+          "text": "Next"
+        },
+        {
+          "fully_visible": true,
+          "text": "Dismiss reminder"
+        },
+        {
+          "fully_visible": true,
+          "text": "Opening chat does not mark messages as read. Dismissing only hides this reminder until new activity."
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        }
+      ],
+      "physical_size": [
+        570,
+        870
+      ],
+      "pixels_per_point": 1.5,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": [
+        372.1875,
+        157.0
+      ],
+      "filter_viewport": [
+        1.0,
+        55.0,
+        379.0,
+        215.0
+      ],
+      "filters_open": true,
+      "image": "narrow-150pct-07-expanded-filters.png",
+      "locale": "en",
+      "logical_size": [
+        380,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Unread conversations from your saved profiles."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filters"
+        },
+        {
+          "fully_visible": true,
+          "text": "Include profiles"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 1 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 2 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 3 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 4 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 5 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Nearby chat"
+        },
+        {
+          "fully_visible": true,
+          "text": "Direct messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Open shared chat"
+        },
+        {
+          "fully_visible": true,
+          "text": "Previous"
+        },
+        {
+          "fully_visible": true,
+          "text": "Next"
+        },
+        {
+          "fully_visible": true,
+          "text": "Dismiss reminder"
+        },
+        {
+          "fully_visible": true,
+          "text": "Opening chat does not mark messages as read. Dismissing only hides this reminder until new activity."
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": false,
+          "text": "Character 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        }
+      ],
+      "physical_size": [
+        570,
+        870
+      ],
+      "pixels_per_point": 1.5,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": [
+        372.1875,
+        157.0
+      ],
+      "filter_viewport": [
+        1.0,
+        55.0,
+        379.0,
+        215.0
+      ],
+      "filters_open": true,
+      "image": "narrow-150pct-08-expanded-filters-bottom.png",
+      "locale": "en",
+      "logical_size": [
+        380,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Unread conversations from your saved profiles."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filters"
+        },
+        {
+          "fully_visible": true,
+          "text": "Include profiles"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 1 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 2 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 3 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 4 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 5 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Nearby chat"
+        },
+        {
+          "fully_visible": true,
+          "text": "Direct messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Open shared chat"
+        },
+        {
+          "fully_visible": true,
+          "text": "Previous"
+        },
+        {
+          "fully_visible": true,
+          "text": "Next"
+        },
+        {
+          "fully_visible": true,
+          "text": "Dismiss reminder"
+        },
+        {
+          "fully_visible": true,
+          "text": "Opening chat does not mark messages as read. Dismissing only hides this reminder until new activity."
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": false,
+          "text": "Character 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        }
+      ],
+      "physical_size": [
+        570,
+        870
+      ],
+      "pixels_per_point": 1.5,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "narrow-150pct-02-saving.png",
+      "locale": "en",
+      "logical_size": [
+        380,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Unread conversations from your saved profiles."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filters"
+        },
+        {
+          "fully_visible": true,
+          "text": "Saving reminder settings…"
+        },
+        {
+          "fully_visible": true,
+          "text": "Open shared chat"
+        },
+        {
+          "fully_visible": true,
+          "text": "Previous"
+        },
+        {
+          "fully_visible": true,
+          "text": "Next"
+        },
+        {
+          "fully_visible": true,
+          "text": "Dismiss reminder"
+        },
+        {
+          "fully_visible": true,
+          "text": "Opening chat does not mark messages as read. Dismissing only hides this reminder until new activity."
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        }
+      ],
+      "physical_size": [
+        570,
+        870
+      ],
+      "pixels_per_point": 1.5,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "narrow-150pct-03-save-failed.png",
+      "locale": "en",
+      "logical_size": [
+        380,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Unread conversations from your saved profiles."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filters"
+        },
+        {
+          "fully_visible": true,
+          "text": "Reminder settings could not be saved. Your previous settings are still in use."
+        },
+        {
+          "fully_visible": true,
+          "text": "Open shared chat"
+        },
+        {
+          "fully_visible": true,
+          "text": "Previous"
+        },
+        {
+          "fully_visible": true,
+          "text": "Next"
+        },
+        {
+          "fully_visible": true,
+          "text": "Dismiss reminder"
+        },
+        {
+          "fully_visible": true,
+          "text": "Opening chat does not mark messages as read. Dismissing only hides this reminder until new activity."
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        }
+      ],
+      "physical_size": [
+        570,
+        870
+      ],
+      "pixels_per_point": 1.5,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "narrow-150pct-04-selected-unavailable.png",
+      "locale": "en",
+      "logical_size": [
+        380,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Unread conversations from your saved profiles."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filters"
+        },
+        {
+          "fully_visible": true,
+          "text": "Reminder settings could not be saved. Your previous settings are still in use."
+        },
+        {
+          "fully_visible": true,
+          "text": "Open shared chat"
+        },
+        {
+          "fully_visible": true,
+          "text": "Previous"
+        },
+        {
+          "fully_visible": true,
+          "text": "Next"
+        },
+        {
+          "fully_visible": true,
+          "text": "Dismiss reminder"
+        },
+        {
+          "fully_visible": true,
+          "text": "Opening chat does not mark messages as read. Dismissing only hides this reminder until new activity."
+        },
+        {
+          "fully_visible": true,
+          "text": "The selected reminder is unavailable. Select another reminder to continue."
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        }
+      ],
+      "physical_size": [
+        570,
+        870
+      ],
+      "pixels_per_point": 1.5,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 4,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "narrow-150pct-05-empty.png",
+      "locale": "en",
+      "logical_size": [
+        380,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Unread conversations from your saved profiles."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filters"
+        },
+        {
+          "fully_visible": true,
+          "text": "Reminder settings could not be saved. Your previous settings are still in use."
+        },
+        {
+          "fully_visible": true,
+          "text": "Open shared chat"
+        },
+        {
+          "fully_visible": true,
+          "text": "Previous"
+        },
+        {
+          "fully_visible": true,
+          "text": "Next"
+        },
+        {
+          "fully_visible": true,
+          "text": "Dismiss reminder"
+        },
+        {
+          "fully_visible": true,
+          "text": "Opening chat does not mark messages as read. Dismissing only hides this reminder until new activity."
+        },
+        {
+          "fully_visible": true,
+          "text": "The selected reminder is unavailable. Select another reminder to continue."
+        },
+        {
+          "fully_visible": true,
+          "text": "No unread conversation reminders match these filters."
+        }
+      ],
+      "physical_size": [
+        570,
+        870
+      ],
+      "pixels_per_point": 1.5,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 0,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "narrow-150pct-06-load-failed.png",
+      "locale": "en",
+      "logical_size": [
+        380,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Unread conversations from your saved profiles."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filters"
+        },
+        {
+          "fully_visible": true,
+          "text": "Reminder settings could not be loaded. Reminders are unavailable; shared chat remains available."
+        },
+        {
+          "fully_visible": true,
+          "text": "Open shared chat"
+        },
+        {
+          "fully_visible": true,
+          "text": "Previous"
+        },
+        {
+          "fully_visible": true,
+          "text": "Next"
+        },
+        {
+          "fully_visible": true,
+          "text": "Dismiss reminder"
+        },
+        {
+          "fully_visible": true,
+          "text": "Opening chat does not mark messages as read. Dismissing only hides this reminder until new activity."
+        }
+      ],
+      "physical_size": [
+        570,
+        870
+      ],
+      "pixels_per_point": 1.5,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": false,
+        "include_slots": [
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 0,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "short-01-selected.png",
+      "locale": "en",
+      "logical_size": [
+        380,
+        420
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Unread conversations from your saved profiles."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filters"
+        },
+        {
+          "fully_visible": true,
+          "text": "Open shared chat"
+        },
+        {
+          "fully_visible": true,
+          "text": "Previous"
+        },
+        {
+          "fully_visible": true,
+          "text": "Next"
+        },
+        {
+          "fully_visible": true,
+          "text": "Dismiss reminder"
+        },
+        {
+          "fully_visible": true,
+          "text": "Opening chat does not mark messages as read. Dismissing only hides this reminder until new activity."
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": false,
+          "text": "Character 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        }
+      ],
+      "physical_size": [
+        380,
+        420
+      ],
+      "pixels_per_point": 1.0,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": [
+        367.1875,
+        157.0
+      ],
+      "filter_viewport": [
+        1.0,
+        55.0,
+        369.0,
+        135.0
+      ],
+      "filters_open": true,
+      "image": "short-02-expanded-filters.png",
+      "locale": "en",
+      "logical_size": [
+        380,
+        420
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Unread conversations from your saved profiles."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filters"
+        },
+        {
+          "fully_visible": true,
+          "text": "Include profiles"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 1 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 2 · Same profile"
+        },
+        {
+          "fully_visible": false,
+          "text": "Character 3 · Same profile"
+        },
+        {
+          "fully_visible": false,
+          "text": "Character 4 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Open shared chat"
+        },
+        {
+          "fully_visible": true,
+          "text": "Previous"
+        },
+        {
+          "fully_visible": true,
+          "text": "Next"
+        },
+        {
+          "fully_visible": true,
+          "text": "Dismiss reminder"
+        },
+        {
+          "fully_visible": true,
+          "text": "Opening chat does not mark messages as read. Dismissing only hides this reminder until new activity."
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        },
+        {
+          "fully_visible": true,
+          "text": "Character 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 unread messages"
+        }
+      ],
+      "physical_size": [
+        380,
+        420
+      ],
+      "pixels_per_point": 1.0,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    }
+  ],
+  "fixture": "production AttentionUi + SoftwareWindow CPU painter, synthetic data",
+  "locale": "en",
+  "native_window_acceptance": false,
+  "network_or_grid": false,
+  "no_transcript_or_draft_copy": true
+}

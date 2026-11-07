@@ -1,0 +1,1983 @@
+{
+  "captures": [
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "normal-01-selected.png",
+      "locale": "fr",
+      "logical_size": [
+        540,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Conversations non lues de vos profils enregistrés."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filtres"
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat partagé"
+        },
+        {
+          "fully_visible": true,
+          "text": "Précédent"
+        },
+        {
+          "fully_visible": true,
+          "text": "Suivant"
+        },
+        {
+          "fully_visible": true,
+          "text": "Masquer le rappel"
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat ne marque aucun message comme lu. Masquer le rappel le cache jusqu’à une nouvelle activité."
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        }
+      ],
+      "physical_size": [
+        540,
+        580
+      ],
+      "pixels_per_point": 1.0,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": [
+        465.0625,
+        157.0
+      ],
+      "filter_viewport": [
+        1.0,
+        55.0,
+        539.0,
+        215.0
+      ],
+      "filters_open": true,
+      "image": "normal-07-expanded-filters.png",
+      "locale": "fr",
+      "logical_size": [
+        540,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Conversations non lues de vos profils enregistrés."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filtres"
+        },
+        {
+          "fully_visible": true,
+          "text": "Profils inclus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 1 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 2 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 3 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 4 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 5 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Chat à proximité"
+        },
+        {
+          "fully_visible": true,
+          "text": "Messages directs"
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat partagé"
+        },
+        {
+          "fully_visible": true,
+          "text": "Précédent"
+        },
+        {
+          "fully_visible": true,
+          "text": "Suivant"
+        },
+        {
+          "fully_visible": true,
+          "text": "Masquer le rappel"
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat ne marque aucun message comme lu. Masquer le rappel le cache jusqu’à une nouvelle activité."
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": false,
+          "text": "Personnage 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        }
+      ],
+      "physical_size": [
+        540,
+        580
+      ],
+      "pixels_per_point": 1.0,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": [
+        465.0625,
+        157.0
+      ],
+      "filter_viewport": [
+        1.0,
+        55.0,
+        539.0,
+        215.0
+      ],
+      "filters_open": true,
+      "image": "normal-08-expanded-filters-bottom.png",
+      "locale": "fr",
+      "logical_size": [
+        540,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Conversations non lues de vos profils enregistrés."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filtres"
+        },
+        {
+          "fully_visible": true,
+          "text": "Profils inclus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 1 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 2 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 3 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 4 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 5 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Chat à proximité"
+        },
+        {
+          "fully_visible": true,
+          "text": "Messages directs"
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat partagé"
+        },
+        {
+          "fully_visible": true,
+          "text": "Précédent"
+        },
+        {
+          "fully_visible": true,
+          "text": "Suivant"
+        },
+        {
+          "fully_visible": true,
+          "text": "Masquer le rappel"
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat ne marque aucun message comme lu. Masquer le rappel le cache jusqu’à une nouvelle activité."
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": false,
+          "text": "Personnage 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        }
+      ],
+      "physical_size": [
+        540,
+        580
+      ],
+      "pixels_per_point": 1.0,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "normal-02-saving.png",
+      "locale": "fr",
+      "logical_size": [
+        540,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Conversations non lues de vos profils enregistrés."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filtres"
+        },
+        {
+          "fully_visible": true,
+          "text": "Enregistrement des réglages des rappels…"
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat partagé"
+        },
+        {
+          "fully_visible": true,
+          "text": "Précédent"
+        },
+        {
+          "fully_visible": true,
+          "text": "Suivant"
+        },
+        {
+          "fully_visible": true,
+          "text": "Masquer le rappel"
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat ne marque aucun message comme lu. Masquer le rappel le cache jusqu’à une nouvelle activité."
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        }
+      ],
+      "physical_size": [
+        540,
+        580
+      ],
+      "pixels_per_point": 1.0,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "normal-03-save-failed.png",
+      "locale": "fr",
+      "logical_size": [
+        540,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Conversations non lues de vos profils enregistrés."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filtres"
+        },
+        {
+          "fully_visible": true,
+          "text": "Les réglages des rappels n’ont pas pu être enregistrés. Vos réglages précédents restent utilisés."
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat partagé"
+        },
+        {
+          "fully_visible": true,
+          "text": "Précédent"
+        },
+        {
+          "fully_visible": true,
+          "text": "Suivant"
+        },
+        {
+          "fully_visible": true,
+          "text": "Masquer le rappel"
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat ne marque aucun message comme lu. Masquer le rappel le cache jusqu’à une nouvelle activité."
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        }
+      ],
+      "physical_size": [
+        540,
+        580
+      ],
+      "pixels_per_point": 1.0,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "normal-04-selected-unavailable.png",
+      "locale": "fr",
+      "logical_size": [
+        540,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Conversations non lues de vos profils enregistrés."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filtres"
+        },
+        {
+          "fully_visible": true,
+          "text": "Les réglages des rappels n’ont pas pu être enregistrés. Vos réglages précédents restent utilisés."
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat partagé"
+        },
+        {
+          "fully_visible": true,
+          "text": "Précédent"
+        },
+        {
+          "fully_visible": true,
+          "text": "Suivant"
+        },
+        {
+          "fully_visible": true,
+          "text": "Masquer le rappel"
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat ne marque aucun message comme lu. Masquer le rappel le cache jusqu’à une nouvelle activité."
+        },
+        {
+          "fully_visible": true,
+          "text": "Le rappel sélectionné est indisponible. Sélectionnez un autre rappel pour continuer."
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        }
+      ],
+      "physical_size": [
+        540,
+        580
+      ],
+      "pixels_per_point": 1.0,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 4,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "normal-05-empty.png",
+      "locale": "fr",
+      "logical_size": [
+        540,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Conversations non lues de vos profils enregistrés."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filtres"
+        },
+        {
+          "fully_visible": true,
+          "text": "Les réglages des rappels n’ont pas pu être enregistrés. Vos réglages précédents restent utilisés."
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat partagé"
+        },
+        {
+          "fully_visible": true,
+          "text": "Précédent"
+        },
+        {
+          "fully_visible": true,
+          "text": "Suivant"
+        },
+        {
+          "fully_visible": true,
+          "text": "Masquer le rappel"
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat ne marque aucun message comme lu. Masquer le rappel le cache jusqu’à une nouvelle activité."
+        },
+        {
+          "fully_visible": true,
+          "text": "Le rappel sélectionné est indisponible. Sélectionnez un autre rappel pour continuer."
+        },
+        {
+          "fully_visible": true,
+          "text": "Aucun rappel de conversation non lue ne correspond aux filtres."
+        }
+      ],
+      "physical_size": [
+        540,
+        580
+      ],
+      "pixels_per_point": 1.0,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 0,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "normal-06-load-failed.png",
+      "locale": "fr",
+      "logical_size": [
+        540,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Conversations non lues de vos profils enregistrés."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filtres"
+        },
+        {
+          "fully_visible": true,
+          "text": "Les réglages des rappels n’ont pas pu être chargés. Les rappels sont indisponibles ; le chat partagé reste accessible."
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat partagé"
+        },
+        {
+          "fully_visible": true,
+          "text": "Précédent"
+        },
+        {
+          "fully_visible": true,
+          "text": "Suivant"
+        },
+        {
+          "fully_visible": true,
+          "text": "Masquer le rappel"
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat ne marque aucun message comme lu. Masquer le rappel le cache jusqu’à une nouvelle activité."
+        }
+      ],
+      "physical_size": [
+        540,
+        580
+      ],
+      "pixels_per_point": 1.0,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": false,
+        "include_slots": [
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 0,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "narrow-150pct-01-selected.png",
+      "locale": "fr",
+      "logical_size": [
+        380,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Conversations non lues de vos profils enregistrés."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filtres"
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat partagé"
+        },
+        {
+          "fully_visible": true,
+          "text": "Précédent"
+        },
+        {
+          "fully_visible": true,
+          "text": "Suivant"
+        },
+        {
+          "fully_visible": true,
+          "text": "Masquer le rappel"
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat ne marque aucun message comme lu. Masquer le rappel le cache jusqu’à une nouvelle activité."
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        }
+      ],
+      "physical_size": [
+        570,
+        870
+      ],
+      "pixels_per_point": 1.5,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": [
+        341.0,
+        175.0
+      ],
+      "filter_viewport": [
+        1.0,
+        55.0,
+        369.0,
+        215.0
+      ],
+      "filters_open": true,
+      "image": "narrow-150pct-07-expanded-filters.png",
+      "locale": "fr",
+      "logical_size": [
+        380,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Conversations non lues de vos profils enregistrés."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filtres"
+        },
+        {
+          "fully_visible": true,
+          "text": "Profils inclus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 1 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 2 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 3 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 4 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 5 · Same profile"
+        },
+        {
+          "fully_visible": false,
+          "text": "Chat à proximité"
+        },
+        {
+          "fully_visible": false,
+          "text": "Messages directs"
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat partagé"
+        },
+        {
+          "fully_visible": true,
+          "text": "Précédent"
+        },
+        {
+          "fully_visible": true,
+          "text": "Suivant"
+        },
+        {
+          "fully_visible": true,
+          "text": "Masquer le rappel"
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat ne marque aucun message comme lu. Masquer le rappel le cache jusqu’à une nouvelle activité."
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": false,
+          "text": "Personnage 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        }
+      ],
+      "physical_size": [
+        570,
+        870
+      ],
+      "pixels_per_point": 1.5,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": [
+        341.0,
+        175.0
+      ],
+      "filter_viewport": [
+        1.0,
+        55.0,
+        369.0,
+        215.0
+      ],
+      "filters_open": true,
+      "image": "narrow-150pct-08-expanded-filters-bottom.png",
+      "locale": "fr",
+      "logical_size": [
+        380,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Conversations non lues de vos profils enregistrés."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filtres"
+        },
+        {
+          "fully_visible": false,
+          "text": "Profils inclus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 1 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 2 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 3 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 4 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 5 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Chat à proximité"
+        },
+        {
+          "fully_visible": true,
+          "text": "Messages directs"
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat partagé"
+        },
+        {
+          "fully_visible": true,
+          "text": "Précédent"
+        },
+        {
+          "fully_visible": true,
+          "text": "Suivant"
+        },
+        {
+          "fully_visible": true,
+          "text": "Masquer le rappel"
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat ne marque aucun message comme lu. Masquer le rappel le cache jusqu’à une nouvelle activité."
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": false,
+          "text": "Personnage 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        }
+      ],
+      "physical_size": [
+        570,
+        870
+      ],
+      "pixels_per_point": 1.5,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "narrow-150pct-02-saving.png",
+      "locale": "fr",
+      "logical_size": [
+        380,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Conversations non lues de vos profils enregistrés."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filtres"
+        },
+        {
+          "fully_visible": true,
+          "text": "Enregistrement des réglages des rappels…"
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat partagé"
+        },
+        {
+          "fully_visible": true,
+          "text": "Précédent"
+        },
+        {
+          "fully_visible": true,
+          "text": "Suivant"
+        },
+        {
+          "fully_visible": true,
+          "text": "Masquer le rappel"
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat ne marque aucun message comme lu. Masquer le rappel le cache jusqu’à une nouvelle activité."
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        }
+      ],
+      "physical_size": [
+        570,
+        870
+      ],
+      "pixels_per_point": 1.5,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "narrow-150pct-03-save-failed.png",
+      "locale": "fr",
+      "logical_size": [
+        380,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Conversations non lues de vos profils enregistrés."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filtres"
+        },
+        {
+          "fully_visible": true,
+          "text": "Les réglages des rappels n’ont pas pu être enregistrés. Vos réglages précédents restent utilisés."
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat partagé"
+        },
+        {
+          "fully_visible": true,
+          "text": "Précédent"
+        },
+        {
+          "fully_visible": true,
+          "text": "Suivant"
+        },
+        {
+          "fully_visible": true,
+          "text": "Masquer le rappel"
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat ne marque aucun message comme lu. Masquer le rappel le cache jusqu’à une nouvelle activité."
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        }
+      ],
+      "physical_size": [
+        570,
+        870
+      ],
+      "pixels_per_point": 1.5,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "narrow-150pct-04-selected-unavailable.png",
+      "locale": "fr",
+      "logical_size": [
+        380,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Conversations non lues de vos profils enregistrés."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filtres"
+        },
+        {
+          "fully_visible": true,
+          "text": "Les réglages des rappels n’ont pas pu être enregistrés. Vos réglages précédents restent utilisés."
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat partagé"
+        },
+        {
+          "fully_visible": true,
+          "text": "Précédent"
+        },
+        {
+          "fully_visible": true,
+          "text": "Suivant"
+        },
+        {
+          "fully_visible": true,
+          "text": "Masquer le rappel"
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat ne marque aucun message comme lu. Masquer le rappel le cache jusqu’à une nouvelle activité."
+        },
+        {
+          "fully_visible": true,
+          "text": "Le rappel sélectionné est indisponible. Sélectionnez un autre rappel pour continuer."
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        }
+      ],
+      "physical_size": [
+        570,
+        870
+      ],
+      "pixels_per_point": 1.5,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 4,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "narrow-150pct-05-empty.png",
+      "locale": "fr",
+      "logical_size": [
+        380,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Conversations non lues de vos profils enregistrés."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filtres"
+        },
+        {
+          "fully_visible": true,
+          "text": "Les réglages des rappels n’ont pas pu être enregistrés. Vos réglages précédents restent utilisés."
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat partagé"
+        },
+        {
+          "fully_visible": true,
+          "text": "Précédent"
+        },
+        {
+          "fully_visible": true,
+          "text": "Suivant"
+        },
+        {
+          "fully_visible": true,
+          "text": "Masquer le rappel"
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat ne marque aucun message comme lu. Masquer le rappel le cache jusqu’à une nouvelle activité."
+        },
+        {
+          "fully_visible": true,
+          "text": "Le rappel sélectionné est indisponible. Sélectionnez un autre rappel pour continuer."
+        },
+        {
+          "fully_visible": true,
+          "text": "Aucun rappel de conversation non lue ne correspond aux filtres."
+        }
+      ],
+      "physical_size": [
+        570,
+        870
+      ],
+      "pixels_per_point": 1.5,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 0,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "narrow-150pct-06-load-failed.png",
+      "locale": "fr",
+      "logical_size": [
+        380,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Conversations non lues de vos profils enregistrés."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filtres"
+        },
+        {
+          "fully_visible": true,
+          "text": "Les réglages des rappels n’ont pas pu être chargés. Les rappels sont indisponibles ; le chat partagé reste accessible."
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat partagé"
+        },
+        {
+          "fully_visible": true,
+          "text": "Précédent"
+        },
+        {
+          "fully_visible": true,
+          "text": "Suivant"
+        },
+        {
+          "fully_visible": true,
+          "text": "Masquer le rappel"
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat ne marque aucun message comme lu. Masquer le rappel le cache jusqu’à une nouvelle activité."
+        }
+      ],
+      "physical_size": [
+        570,
+        870
+      ],
+      "pixels_per_point": 1.5,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": false,
+        "include_slots": [
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 0,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "short-01-selected.png",
+      "locale": "fr",
+      "logical_size": [
+        380,
+        420
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Conversations non lues de vos profils enregistrés."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filtres"
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat partagé"
+        },
+        {
+          "fully_visible": true,
+          "text": "Précédent"
+        },
+        {
+          "fully_visible": true,
+          "text": "Suivant"
+        },
+        {
+          "fully_visible": true,
+          "text": "Masquer le rappel"
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat ne marque aucun message comme lu. Masquer le rappel le cache jusqu’à une nouvelle activité."
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": false,
+          "text": "Personnage 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        }
+      ],
+      "physical_size": [
+        380,
+        420
+      ],
+      "pixels_per_point": 1.0,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": [
+        340.65625,
+        175.0
+      ],
+      "filter_viewport": [
+        1.0,
+        55.0,
+        369.0,
+        135.0
+      ],
+      "filters_open": true,
+      "image": "short-02-expanded-filters.png",
+      "locale": "fr",
+      "logical_size": [
+        380,
+        420
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "Conversations non lues de vos profils enregistrés."
+        },
+        {
+          "fully_visible": true,
+          "text": "Filtres"
+        },
+        {
+          "fully_visible": true,
+          "text": "Profils inclus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 1 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 2 · Same profile"
+        },
+        {
+          "fully_visible": false,
+          "text": "Personnage 3 · Same profile"
+        },
+        {
+          "fully_visible": false,
+          "text": "Personnage 4 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat partagé"
+        },
+        {
+          "fully_visible": true,
+          "text": "Précédent"
+        },
+        {
+          "fully_visible": true,
+          "text": "Suivant"
+        },
+        {
+          "fully_visible": true,
+          "text": "Masquer le rappel"
+        },
+        {
+          "fully_visible": true,
+          "text": "Ouvrir le chat ne marque aucun message comme lu. Masquer le rappel le cache jusqu’à une nouvelle activité."
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        },
+        {
+          "fully_visible": true,
+          "text": "Personnage 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 7 messages non lus"
+        }
+      ],
+      "physical_size": [
+        380,
+        420
+      ],
+      "pixels_per_point": 1.0,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    }
+  ],
+  "fixture": "production AttentionUi + SoftwareWindow CPU painter, synthetic data",
+  "locale": "fr",
+  "native_window_acceptance": false,
+  "network_or_grid": false,
+  "no_transcript_or_draft_copy": true
+}

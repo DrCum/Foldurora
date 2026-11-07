@@ -1,0 +1,98 @@
+{
+  "source_commit": "9a6918b4e7334e4da319449b56e985107e6b5cd5",
+  "source_tree": "05c292eec0b67dfc934278df7624b41571a223a1",
+  "at_utc": "2026-11-07T14:59:06.790291+00:00",
+  "steps": [
+    {
+      "step": "clippy",
+      "command": [
+        "cargo",
+        "clippy",
+        "--workspace",
+        "--all-targets",
+        "--locked",
+        "--",
+        "-D",
+        "warnings",
+        "-A",
+        "dead_code"
+      ],
+      "exit_code": 0,
+      "seconds": 120.508
+    },
+    {
+      "step": "tests",
+      "command": [
+        "cargo",
+        "test",
+        "--workspace",
+        "--locked",
+        "--no-fail-fast"
+      ],
+      "exit_code": 101,
+      "seconds": 576.203
+    },
+    {
+      "step": "visual-en",
+      "command": [
+        "/workspace/work/viewport-dropdown-width/target/debug/deps/aurora_viewer-bcade733304cb40d",
+        "--exact",
+        "session_host::attention_ui::visual::attention_cpu_visual_fixture",
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "seconds": 11.357
+    },
+    {
+      "step": "visual-fr",
+      "command": [
+        "/workspace/work/viewport-dropdown-width/target/debug/deps/aurora_viewer-bcade733304cb40d",
+        "--exact",
+        "session_host::attention_ui::visual::attention_cpu_visual_fixture",
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "seconds": 11.222
+    },
+    {
+      "step": "visual-ja",
+      "command": [
+        "/workspace/work/viewport-dropdown-width/target/debug/deps/aurora_viewer-bcade733304cb40d",
+        "--exact",
+        "session_host::attention_ui::visual::attention_cpu_visual_fixture",
+        "--ignored",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "seconds": 11.583
+    }
+  ],
+  "linux_inherited_terrain_failure_permitted_in_full_suite": true,
+  "native_or_grid": false,
+  "completed_clippy_cache_headroom": {
+    "removed": [
+      "target/debug/incremental/aurora_viewer-2g3grflfpoqjk/s-hnxxf20d55-145mwcm-abi8z6wecy6vyruh4tkm5gg6t",
+      "target/debug/incremental/aurora_viewer-3n4vu0ycx2jhw/s-hnxxf20ejd-03z150o-7rv6fc2rwwhcih6taauq38sc7"
+    ],
+    "free_before": 7431430144,
+    "free_after": 8502571008,
+    "source_artifacts_and_binary_outputs_preserved": true
+  },
+  "full_test_counts": {
+    "passed": 8020,
+    "failed": 1,
+    "ignored": 53
+  },
+  "full_test_summaries": 32,
+  "all_203_required_pass_exactly_once": true,
+  "test_elf_sha256": "a5f017ee4d2834c3cbbf6b6e4794007c16ca3c98bdf4025ae70db23dc043cbfc",
+  "test_elf_bytes": 770055472,
+  "all_54_cpu_captures_pass": true,
+  "tracked_source_clean": true,
+  "frozen_test_elf": "/workspace/work/viewport-dropdown-width/.scratch/attention-validation-9a6918b4/frozen-validated-test"
+}

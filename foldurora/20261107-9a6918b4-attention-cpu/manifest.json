@@ -1,0 +1,74 @@
+{
+  "source_commit": "9a6918b4e7334e4da319449b56e985107e6b5cd5",
+  "source_tree": "05c292eec0b67dfc934278df7624b41571a223a1",
+  "test_elf_sha256": "a5f017ee4d2834c3cbbf6b6e4794007c16ca3c98bdf4025ae70db23dc043cbfc",
+  "test_elf_bytes": 770055472,
+  "original_pngs_copied_unchanged": 6,
+  "validated_cpu_captures": 54,
+  "published_subset_only": true,
+  "native_window_acceptance": false,
+  "authentication_or_grid": false,
+  "preference_file_io": false,
+  "files": [
+    {
+      "file": "en/normal-01-selected.png",
+      "original": "visual-en/normal-01-selected.png",
+      "sha256": "eabe4619e28ca65d7ca002b64fcbc5955b7146af81daaf494b7ae8274a590ed5",
+      "bytes": 97849
+    },
+    {
+      "file": "en/normal-07-expanded-filters.png",
+      "original": "visual-en/normal-07-expanded-filters.png",
+      "sha256": "e2cde35ea8467bcbd15e8df4aed52bad7223840ee78a7e1e1a5d83ff6a89b643",
+      "bytes": 115364
+    },
+    {
+      "file": "fr/narrow-150pct-08-expanded-filters-bottom.png",
+      "original": "visual-fr/narrow-150pct-08-expanded-filters-bottom.png",
+      "sha256": "270097adc8706be2ea864feb09daa8ef601a837efdf262a4a64042156416ab51",
+      "bytes": 183743
+    },
+    {
+      "file": "ja/short-02-expanded-filters.png",
+      "original": "visual-ja/short-02-expanded-filters.png",
+      "sha256": "c4cea7e82d7d93ec3d71606a63a6204115d6448b447852a0e5fc5021a46e7868",
+      "bytes": 79131
+    },
+    {
+      "file": "en/normal-03-save-failed.png",
+      "original": "visual-en/normal-03-save-failed.png",
+      "sha256": "d505182bff5138c7e0081efad6047b4fd90515d4b38adef1cac955496d98a72c",
+      "bytes": 105904
+    },
+    {
+      "file": "ja/narrow-150pct-06-load-failed.png",
+      "original": "visual-ja/narrow-150pct-06-load-failed.png",
+      "sha256": "aeb2bf72457b062eff5acdbbef50ade2f883a4e93c0c019e63da174ab3d33671",
+      "bytes": 74486
+    },
+    {
+      "file": "manifests/en.json",
+      "original": "visual-en/manifest.json",
+      "sha256": "005441cf8d1a4e7b6f22997347ea89105fcce49c2ba913e9558bafd6bf40f995",
+      "bytes": 58023
+    },
+    {
+      "file": "manifests/fr.json",
+      "original": "visual-fr/manifest.json",
+      "sha256": "710261d1e58fb0da6684b6fa857441d049ac01b10ef3ff18666ce269ac31658b",
+      "bytes": 59049
+    },
+    {
+      "file": "manifests/ja.json",
+      "original": "visual-ja/manifest.json",
+      "sha256": "0a9bc07583741d38e120c02301bf162f800b1a3992990386ca13a267378297a8",
+      "bytes": 60398
+    },
+    {
+      "file": "validation-receipt.json",
+      "original": "validation-receipt.json",
+      "sha256": "2126d33fb41c9f751b147f2c3c8e7388f609629136d962ba3fe312146d0172ea",
+      "bytes": 2813
+    }
+  ]
+}

@@ -1,0 +1,1983 @@
+{
+  "captures": [
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "normal-01-selected.png",
+      "locale": "ja",
+      "logical_size": [
+        540,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "保存済みプロフィールの未読の会話です。"
+        },
+        {
+          "fully_visible": true,
+          "text": "絞り込み"
+        },
+        {
+          "fully_visible": true,
+          "text": "共有チャットを開く"
+        },
+        {
+          "fully_visible": true,
+          "text": "前へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "次へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "お知らせを非表示"
+        },
+        {
+          "fully_visible": true,
+          "text": "チャットを開いても既読にはなりません。非表示にしたお知らせは、新しい動きがあると再表示されます。"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        }
+      ],
+      "physical_size": [
+        540,
+        580
+      ],
+      "pixels_per_point": 1.0,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": [
+        468.96875,
+        157.0
+      ],
+      "filter_viewport": [
+        1.0,
+        55.0,
+        539.0,
+        215.0
+      ],
+      "filters_open": true,
+      "image": "normal-07-expanded-filters.png",
+      "locale": "ja",
+      "logical_size": [
+        540,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "保存済みプロフィールの未読の会話です。"
+        },
+        {
+          "fully_visible": true,
+          "text": "絞り込み"
+        },
+        {
+          "fully_visible": true,
+          "text": "対象のプロフィール"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 1 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 2 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 3 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 4 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 5 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "近くのチャット"
+        },
+        {
+          "fully_visible": true,
+          "text": "ダイレクトメッセージ"
+        },
+        {
+          "fully_visible": true,
+          "text": "共有チャットを開く"
+        },
+        {
+          "fully_visible": true,
+          "text": "前へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "次へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "お知らせを非表示"
+        },
+        {
+          "fully_visible": true,
+          "text": "チャットを開いても既読にはなりません。非表示にしたお知らせは、新しい動きがあると再表示されます。"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": false,
+          "text": "キャラクター 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        }
+      ],
+      "physical_size": [
+        540,
+        580
+      ],
+      "pixels_per_point": 1.0,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": [
+        468.96875,
+        157.0
+      ],
+      "filter_viewport": [
+        1.0,
+        55.0,
+        539.0,
+        215.0
+      ],
+      "filters_open": true,
+      "image": "normal-08-expanded-filters-bottom.png",
+      "locale": "ja",
+      "logical_size": [
+        540,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "保存済みプロフィールの未読の会話です。"
+        },
+        {
+          "fully_visible": true,
+          "text": "絞り込み"
+        },
+        {
+          "fully_visible": true,
+          "text": "対象のプロフィール"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 1 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 2 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 3 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 4 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 5 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "近くのチャット"
+        },
+        {
+          "fully_visible": true,
+          "text": "ダイレクトメッセージ"
+        },
+        {
+          "fully_visible": true,
+          "text": "共有チャットを開く"
+        },
+        {
+          "fully_visible": true,
+          "text": "前へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "次へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "お知らせを非表示"
+        },
+        {
+          "fully_visible": true,
+          "text": "チャットを開いても既読にはなりません。非表示にしたお知らせは、新しい動きがあると再表示されます。"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": false,
+          "text": "キャラクター 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        }
+      ],
+      "physical_size": [
+        540,
+        580
+      ],
+      "pixels_per_point": 1.0,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "normal-02-saving.png",
+      "locale": "ja",
+      "logical_size": [
+        540,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "保存済みプロフィールの未読の会話です。"
+        },
+        {
+          "fully_visible": true,
+          "text": "絞り込み"
+        },
+        {
+          "fully_visible": true,
+          "text": "お知らせの設定を保存中…"
+        },
+        {
+          "fully_visible": true,
+          "text": "共有チャットを開く"
+        },
+        {
+          "fully_visible": true,
+          "text": "前へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "次へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "お知らせを非表示"
+        },
+        {
+          "fully_visible": true,
+          "text": "チャットを開いても既読にはなりません。非表示にしたお知らせは、新しい動きがあると再表示されます。"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        }
+      ],
+      "physical_size": [
+        540,
+        580
+      ],
+      "pixels_per_point": 1.0,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "normal-03-save-failed.png",
+      "locale": "ja",
+      "logical_size": [
+        540,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "保存済みプロフィールの未読の会話です。"
+        },
+        {
+          "fully_visible": true,
+          "text": "絞り込み"
+        },
+        {
+          "fully_visible": true,
+          "text": "お知らせの設定を保存できませんでした。以前の設定が引き続き使用されます。"
+        },
+        {
+          "fully_visible": true,
+          "text": "共有チャットを開く"
+        },
+        {
+          "fully_visible": true,
+          "text": "前へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "次へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "お知らせを非表示"
+        },
+        {
+          "fully_visible": true,
+          "text": "チャットを開いても既読にはなりません。非表示にしたお知らせは、新しい動きがあると再表示されます。"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        }
+      ],
+      "physical_size": [
+        540,
+        580
+      ],
+      "pixels_per_point": 1.0,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "normal-04-selected-unavailable.png",
+      "locale": "ja",
+      "logical_size": [
+        540,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "保存済みプロフィールの未読の会話です。"
+        },
+        {
+          "fully_visible": true,
+          "text": "絞り込み"
+        },
+        {
+          "fully_visible": true,
+          "text": "お知らせの設定を保存できませんでした。以前の設定が引き続き使用されます。"
+        },
+        {
+          "fully_visible": true,
+          "text": "共有チャットを開く"
+        },
+        {
+          "fully_visible": true,
+          "text": "前へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "次へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "お知らせを非表示"
+        },
+        {
+          "fully_visible": true,
+          "text": "チャットを開いても既読にはなりません。非表示にしたお知らせは、新しい動きがあると再表示されます。"
+        },
+        {
+          "fully_visible": true,
+          "text": "選択したお知らせは利用できません。別のお知らせを選択してください。"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        }
+      ],
+      "physical_size": [
+        540,
+        580
+      ],
+      "pixels_per_point": 1.0,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 4,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "normal-05-empty.png",
+      "locale": "ja",
+      "logical_size": [
+        540,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "保存済みプロフィールの未読の会話です。"
+        },
+        {
+          "fully_visible": true,
+          "text": "絞り込み"
+        },
+        {
+          "fully_visible": true,
+          "text": "お知らせの設定を保存できませんでした。以前の設定が引き続き使用されます。"
+        },
+        {
+          "fully_visible": true,
+          "text": "共有チャットを開く"
+        },
+        {
+          "fully_visible": true,
+          "text": "前へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "次へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "お知らせを非表示"
+        },
+        {
+          "fully_visible": true,
+          "text": "チャットを開いても既読にはなりません。非表示にしたお知らせは、新しい動きがあると再表示されます。"
+        },
+        {
+          "fully_visible": true,
+          "text": "選択したお知らせは利用できません。別のお知らせを選択してください。"
+        },
+        {
+          "fully_visible": true,
+          "text": "この絞り込みに一致する未読の会話はありません。"
+        }
+      ],
+      "physical_size": [
+        540,
+        580
+      ],
+      "pixels_per_point": 1.0,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 0,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "normal-06-load-failed.png",
+      "locale": "ja",
+      "logical_size": [
+        540,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "保存済みプロフィールの未読の会話です。"
+        },
+        {
+          "fully_visible": true,
+          "text": "絞り込み"
+        },
+        {
+          "fully_visible": true,
+          "text": "お知らせの設定を読み込めませんでした。お知らせは利用できませんが、共有チャットは引き続き利用できます。"
+        },
+        {
+          "fully_visible": true,
+          "text": "共有チャットを開く"
+        },
+        {
+          "fully_visible": true,
+          "text": "前へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "次へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "お知らせを非表示"
+        },
+        {
+          "fully_visible": true,
+          "text": "チャットを開いても既読にはなりません。非表示にしたお知らせは、新しい動きがあると再表示されます。"
+        }
+      ],
+      "physical_size": [
+        540,
+        580
+      ],
+      "pixels_per_point": 1.0,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": false,
+        "include_slots": [
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 0,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "narrow-150pct-01-selected.png",
+      "locale": "ja",
+      "logical_size": [
+        380,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "保存済みプロフィールの未読の会話です。"
+        },
+        {
+          "fully_visible": true,
+          "text": "絞り込み"
+        },
+        {
+          "fully_visible": true,
+          "text": "共有チャットを開く"
+        },
+        {
+          "fully_visible": true,
+          "text": "前へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "次へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "お知らせを非表示"
+        },
+        {
+          "fully_visible": true,
+          "text": "チャットを開いても既読にはなりません。非表示にしたお知らせは、新しい動きがあると再表示されます。"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        }
+      ],
+      "physical_size": [
+        570,
+        870
+      ],
+      "pixels_per_point": 1.5,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": [
+        344.3125,
+        175.0
+      ],
+      "filter_viewport": [
+        1.0,
+        55.0,
+        369.0,
+        215.0
+      ],
+      "filters_open": true,
+      "image": "narrow-150pct-07-expanded-filters.png",
+      "locale": "ja",
+      "logical_size": [
+        380,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "保存済みプロフィールの未読の会話です。"
+        },
+        {
+          "fully_visible": true,
+          "text": "絞り込み"
+        },
+        {
+          "fully_visible": true,
+          "text": "対象のプロフィール"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 1 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 2 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 3 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 4 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 5 · Same profile"
+        },
+        {
+          "fully_visible": false,
+          "text": "近くのチャット"
+        },
+        {
+          "fully_visible": false,
+          "text": "ダイレクトメッセージ"
+        },
+        {
+          "fully_visible": true,
+          "text": "共有チャットを開く"
+        },
+        {
+          "fully_visible": true,
+          "text": "前へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "次へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "お知らせを非表示"
+        },
+        {
+          "fully_visible": true,
+          "text": "チャットを開いても既読にはなりません。非表示にしたお知らせは、新しい動きがあると再表示されます。"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": false,
+          "text": "キャラクター 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        }
+      ],
+      "physical_size": [
+        570,
+        870
+      ],
+      "pixels_per_point": 1.5,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": [
+        344.3125,
+        175.0
+      ],
+      "filter_viewport": [
+        1.0,
+        55.0,
+        369.0,
+        215.0
+      ],
+      "filters_open": true,
+      "image": "narrow-150pct-08-expanded-filters-bottom.png",
+      "locale": "ja",
+      "logical_size": [
+        380,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "保存済みプロフィールの未読の会話です。"
+        },
+        {
+          "fully_visible": true,
+          "text": "絞り込み"
+        },
+        {
+          "fully_visible": false,
+          "text": "対象のプロフィール"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 1 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 2 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 3 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 4 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 5 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "近くのチャット"
+        },
+        {
+          "fully_visible": true,
+          "text": "ダイレクトメッセージ"
+        },
+        {
+          "fully_visible": true,
+          "text": "共有チャットを開く"
+        },
+        {
+          "fully_visible": true,
+          "text": "前へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "次へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "お知らせを非表示"
+        },
+        {
+          "fully_visible": true,
+          "text": "チャットを開いても既読にはなりません。非表示にしたお知らせは、新しい動きがあると再表示されます。"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": false,
+          "text": "キャラクター 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        }
+      ],
+      "physical_size": [
+        570,
+        870
+      ],
+      "pixels_per_point": 1.5,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "narrow-150pct-02-saving.png",
+      "locale": "ja",
+      "logical_size": [
+        380,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "保存済みプロフィールの未読の会話です。"
+        },
+        {
+          "fully_visible": true,
+          "text": "絞り込み"
+        },
+        {
+          "fully_visible": true,
+          "text": "お知らせの設定を保存中…"
+        },
+        {
+          "fully_visible": true,
+          "text": "共有チャットを開く"
+        },
+        {
+          "fully_visible": true,
+          "text": "前へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "次へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "お知らせを非表示"
+        },
+        {
+          "fully_visible": true,
+          "text": "チャットを開いても既読にはなりません。非表示にしたお知らせは、新しい動きがあると再表示されます。"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        }
+      ],
+      "physical_size": [
+        570,
+        870
+      ],
+      "pixels_per_point": 1.5,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "narrow-150pct-03-save-failed.png",
+      "locale": "ja",
+      "logical_size": [
+        380,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "保存済みプロフィールの未読の会話です。"
+        },
+        {
+          "fully_visible": true,
+          "text": "絞り込み"
+        },
+        {
+          "fully_visible": true,
+          "text": "お知らせの設定を保存できませんでした。以前の設定が引き続き使用されます。"
+        },
+        {
+          "fully_visible": true,
+          "text": "共有チャットを開く"
+        },
+        {
+          "fully_visible": true,
+          "text": "前へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "次へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "お知らせを非表示"
+        },
+        {
+          "fully_visible": true,
+          "text": "チャットを開いても既読にはなりません。非表示にしたお知らせは、新しい動きがあると再表示されます。"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        }
+      ],
+      "physical_size": [
+        570,
+        870
+      ],
+      "pixels_per_point": 1.5,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "narrow-150pct-04-selected-unavailable.png",
+      "locale": "ja",
+      "logical_size": [
+        380,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "保存済みプロフィールの未読の会話です。"
+        },
+        {
+          "fully_visible": true,
+          "text": "絞り込み"
+        },
+        {
+          "fully_visible": true,
+          "text": "お知らせの設定を保存できませんでした。以前の設定が引き続き使用されます。"
+        },
+        {
+          "fully_visible": true,
+          "text": "共有チャットを開く"
+        },
+        {
+          "fully_visible": true,
+          "text": "前へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "次へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "お知らせを非表示"
+        },
+        {
+          "fully_visible": true,
+          "text": "チャットを開いても既読にはなりません。非表示にしたお知らせは、新しい動きがあると再表示されます。"
+        },
+        {
+          "fully_visible": true,
+          "text": "選択したお知らせは利用できません。別のお知らせを選択してください。"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        }
+      ],
+      "physical_size": [
+        570,
+        870
+      ],
+      "pixels_per_point": 1.5,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 4,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "narrow-150pct-05-empty.png",
+      "locale": "ja",
+      "logical_size": [
+        380,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "保存済みプロフィールの未読の会話です。"
+        },
+        {
+          "fully_visible": true,
+          "text": "絞り込み"
+        },
+        {
+          "fully_visible": true,
+          "text": "お知らせの設定を保存できませんでした。以前の設定が引き続き使用されます。"
+        },
+        {
+          "fully_visible": true,
+          "text": "共有チャットを開く"
+        },
+        {
+          "fully_visible": true,
+          "text": "前へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "次へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "お知らせを非表示"
+        },
+        {
+          "fully_visible": true,
+          "text": "チャットを開いても既読にはなりません。非表示にしたお知らせは、新しい動きがあると再表示されます。"
+        },
+        {
+          "fully_visible": true,
+          "text": "選択したお知らせは利用できません。別のお知らせを選択してください。"
+        },
+        {
+          "fully_visible": true,
+          "text": "この絞り込みに一致する未読の会話はありません。"
+        }
+      ],
+      "physical_size": [
+        570,
+        870
+      ],
+      "pixels_per_point": 1.5,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 0,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "narrow-150pct-06-load-failed.png",
+      "locale": "ja",
+      "logical_size": [
+        380,
+        580
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "保存済みプロフィールの未読の会話です。"
+        },
+        {
+          "fully_visible": true,
+          "text": "絞り込み"
+        },
+        {
+          "fully_visible": true,
+          "text": "お知らせの設定を読み込めませんでした。お知らせは利用できませんが、共有チャットは引き続き利用できます。"
+        },
+        {
+          "fully_visible": true,
+          "text": "共有チャットを開く"
+        },
+        {
+          "fully_visible": true,
+          "text": "前へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "次へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "お知らせを非表示"
+        },
+        {
+          "fully_visible": true,
+          "text": "チャットを開いても既読にはなりません。非表示にしたお知らせは、新しい動きがあると再表示されます。"
+        }
+      ],
+      "physical_size": [
+        570,
+        870
+      ],
+      "pixels_per_point": 1.5,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": false,
+        "include_slots": [
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 0,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": null,
+      "filter_viewport": null,
+      "filters_open": false,
+      "image": "short-01-selected.png",
+      "locale": "ja",
+      "logical_size": [
+        380,
+        420
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "保存済みプロフィールの未読の会話です。"
+        },
+        {
+          "fully_visible": true,
+          "text": "絞り込み"
+        },
+        {
+          "fully_visible": true,
+          "text": "共有チャットを開く"
+        },
+        {
+          "fully_visible": true,
+          "text": "前へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "次へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "お知らせを非表示"
+        },
+        {
+          "fully_visible": true,
+          "text": "チャットを開いても既読にはなりません。非表示にしたお知らせは、新しい動きがあると再表示されます。"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 4 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": false,
+          "text": "キャラクター 5 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        }
+      ],
+      "physical_size": [
+        380,
+        420
+      ],
+      "pixels_per_point": 1.0,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    },
+    {
+      "filter_content_size": [
+        344.65625,
+        175.0
+      ],
+      "filter_viewport": [
+        1.0,
+        55.0,
+        369.0,
+        135.0
+      ],
+      "filters_open": true,
+      "image": "short-02-expanded-filters.png",
+      "locale": "ja",
+      "logical_size": [
+        380,
+        420
+      ],
+      "missing_or_clipped_required_text": [],
+      "painted_text": [
+        {
+          "fully_visible": true,
+          "text": "保存済みプロフィールの未読の会話です。"
+        },
+        {
+          "fully_visible": true,
+          "text": "絞り込み"
+        },
+        {
+          "fully_visible": true,
+          "text": "対象のプロフィール"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 1 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 2 · Same profile"
+        },
+        {
+          "fully_visible": false,
+          "text": "キャラクター 3 · Same profile"
+        },
+        {
+          "fully_visible": false,
+          "text": "キャラクター 4 · Same profile"
+        },
+        {
+          "fully_visible": true,
+          "text": "共有チャットを開く"
+        },
+        {
+          "fully_visible": true,
+          "text": "前へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "次へ"
+        },
+        {
+          "fully_visible": true,
+          "text": "お知らせを非表示"
+        },
+        {
+          "fully_visible": true,
+          "text": "チャットを開いても既読にはなりません。非表示にしたお知らせは、新しい動きがあると再表示されます。"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 1 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic selected conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 2 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        },
+        {
+          "fully_visible": true,
+          "text": "キャラクター 3 · Same profile\nSynthetic Resident · Synthetic Grid\nSynthetic conversation · 未読7件"
+        }
+      ],
+      "physical_size": [
+        380,
+        420
+      ],
+      "pixels_per_point": 1.0,
+      "privacy_leaks": [],
+      "published_preferences": {
+        "direct": true,
+        "include_slots": [
+          true,
+          true,
+          true,
+          true,
+          true
+        ],
+        "nearby": false,
+        "oldest_first": false
+      },
+      "reminder_count": 5,
+      "selected_key": {
+        "conversation": {
+          "id": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+          "kind": "direct"
+        },
+        "source": {
+          "lease_epoch": 7,
+          "session": {
+            "account": "0101010101010101010101010101010101010101010101010101010101010101",
+            "generation": 1,
+            "grid": "0606060606060606060606060606060606060606060606060606060606060606",
+            "session": "01010101010101010101010101010101"
+          },
+          "worker": {
+            "host": "02020202020202020202020202020202",
+            "installation": "0101010101010101010101010101010101010101010101010101010101010101",
+            "worker": "01010101010101010101010101010101"
+          }
+        }
+      }
+    }
+  ],
+  "fixture": "production AttentionUi + SoftwareWindow CPU painter, synthetic data",
+  "locale": "ja",
+  "native_window_acceptance": false,
+  "network_or_grid": false,
+  "no_transcript_or_draft_copy": true
+}
