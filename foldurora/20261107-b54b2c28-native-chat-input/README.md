@@ -3,7 +3,8 @@
 These five original PNGs are unchanged native Linux CPU-window captures, using
 real X11/XTest input with the production ChatWindow/egui-winit/software painter.
 All identities, policies, drafts and receipts are synthetic. No broker, real
-profile, authentication, socket, worker, World or grid submission is involved.
+profile, viewer authentication, chat IPC socket, worker, World or grid submission
+is involved. Private X11 display/authentication serves only the test windows.
 The images do not show a Windows build or physical GPU rendering.
 
 Runtime source: `b54b2c28f2ccadc7ce05c18a4badafea14ff2d08`, version
