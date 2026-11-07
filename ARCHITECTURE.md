@@ -1,5 +1,15 @@
 # Aurora Viewer architecture
 
+`ui/inventory/folder_jump/model.rs` is a test-registered prerequisite for a
+separate loaded-folder chooser. It indexes actual personal Inventory metadata
+incrementally, keeps the best 60 name/path matches, and captures exact
+source/revision/query/selection tickets. Retained node/text limits are explicit;
+completed limited subsets remain usable with final current parent-chain checks.
+The model never queues content fetches, edits Inventory, changes normal search,
+or opens a window. Eight portable tests are authored and unrun. Real entry,
+shortcut, source observation and themed chooser integration remain disabled
+pending the pinned folder-policy mapping review and the next UI slice.
+
 `session_host/monitor_manager.rs` is the Shell-owned bounded binding/operation
 front for four fixed monitors and one cycling view. It depends on the separately
 authored real `preview_projection` facade; no local IO stub or inferred image

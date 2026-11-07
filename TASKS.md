@@ -1,5 +1,19 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Loaded Inventory folder jump, bounded model prerequisite (2026-11-07;
+  no issue): port pinned Legacy FSFloaterFolderJump leaf/path ranking, empty
+  top-level results and best-60 ordering using resumable loaded-folder work.
+  Depth/name/path/node/text bounds reject malformed or oversized branches;
+  completed limited retained subsets still permit fresh exact navigation.
+  Exact login/profile/owner/revision/policy/input correlations and final actual
+  parent-chain checks prevent held results from choosing replacements. Eight
+  actual-Inventory portable tests are authored and unrun; cfg(test) registration
+  exposes no menu/shortcut/runtime entry and no fetch/move/send/delete operation.
+  Root policy review, themed actual-egui chooser, Inventory-local Ctrl/Cmd+J
+  conflict handling, production owner observation and independent/runtime
+  validation remain required. Index caps are a stricter bounded difference
+  from Legacy's unbounded retained index, with explicit incomplete status.
+
 - 🔧 Actual native LastActive producer front, phase 1 (2026-11-07; no issue):
   WorkerBridge privately mints accepted Online control tokens with original
   receipt/expiry and stable revocable witness; optional image startup and source
