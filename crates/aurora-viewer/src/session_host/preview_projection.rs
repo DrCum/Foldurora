@@ -446,8 +446,6 @@ impl PreviewRead {
 }
 pub(super) struct PreviewStatus {
     control: Arc<ControlSnapshot>,
-    generation: u64,
-    request: u64,
     view_guard: super::preview_io::EpochFence,
     shared: Arc<Shared>,
     sources: Vec<ViewSource>,
@@ -466,12 +464,6 @@ impl PreviewStatus {
     }
     pub fn active(&self) -> Option<PreviewSource> {
         self.control.active
-    }
-    pub fn generation(&self) -> u64 {
-        self.generation
-    }
-    pub fn request(&self) -> u64 {
-        self.request
     }
     pub fn settings_receipts(&self) -> &[SettingsReceipt] {
         &self.settings

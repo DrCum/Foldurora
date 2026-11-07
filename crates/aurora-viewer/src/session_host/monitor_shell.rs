@@ -275,17 +275,17 @@ impl Shell {
             }
             return true;
         }
-        if let Err(error) = self.refresh_monitors(event_loop) {
-            if !matches!(error, PreviewError::Busy | PreviewError::Stale) {
-                if let Some(mut window) = self.monitor_windows[at].take() {
-                    window.retire(&mut self.shared_chat);
-                }
-                self.monitor_error(error);
-                if let Err(error) = self.publish_monitors(event_loop) {
-                    self.monitor_error(error);
-                }
-                return true;
+        if let Err(error) = self.refresh_monitors(event_loop)
+            && !matches!(error, PreviewError::Busy | PreviewError::Stale)
+        {
+            if let Some(mut window) = self.monitor_windows[at].take() {
+                window.retire(&mut self.shared_chat);
             }
+            self.monitor_error(error);
+            if let Err(error) = self.publish_monitors(event_loop) {
+                self.monitor_error(error);
+            }
+            return true;
         }
         let Some(read) = self.monitor_read(view) else {
             if let Some(mut window) = self.monitor_windows[at].take() {

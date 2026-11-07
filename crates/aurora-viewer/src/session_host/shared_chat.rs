@@ -110,7 +110,7 @@ impl SharedChat {
     /// A monitor borrows the same canonical body, with its bound source shown
     /// read-only. Parent flushes delivered edits before select_for/rebinding.
     /// This facade grants no image, native-focus or IO authority.
-    #[cfg(test)]
+    #[cfg(any(windows, test))]
     pub fn show_bound_for(
         &mut self,
         surface: ChatSurface,

@@ -348,7 +348,6 @@ impl MonitorWindow {
                 }
             }
         }
-        drop(flush);
         let chat = shared.into_inner();
         self.binding = manager.model().binding(view).unwrap_or(binding);
         self.body.sync(view, manager.model(), manager.state(view));
@@ -390,15 +389,15 @@ impl MonitorWindow {
             self.staged = Some(retained);
         }
         if let Some(next) = read.prepared() {
-            if let Some(old) = &self.staged {
-                if old.revision() == next.revision() {
-                    if old.admitted().stamp() != next.admitted().stamp() {
-                        return false;
-                    }
-                    // Only refresh the guard of the exact immutable pixel pair.
-                    self.staged = Some(next.clone());
-                    return true;
+            if let Some(old) = &self.staged
+                && old.revision() == next.revision()
+            {
+                if old.admitted().stamp() != next.admitted().stamp() {
+                    return false;
                 }
+                // Only refresh the guard of the exact immutable pixel pair.
+                self.staged = Some(next.clone());
+                return true;
             }
             if self.surface.stage(self.namespace.get(), next.image()).is_err() {
                 return false;
@@ -500,10 +499,10 @@ impl MonitorWindow {
             self.previous = None;
             self.last_frame = Some(Instant::now());
             self.repaint = Instant::now().checked_add(delay);
-            if let Some(placement) = self.restore_placement.take() {
-                if !read.view_current() || self.surface.request_placement(event_loop, placement, &mut flush).is_err() {
-                    return (action, true);
-                }
+            if let Some(placement) = self.restore_placement.take()
+                && (!read.view_current() || self.surface.request_placement(event_loop, placement, &mut flush).is_err())
+            {
+                return (action, true);
             }
             if let Some(desired) = self.pin_on_show.take() {
                 match self.surface.pin(event_loop, desired, &mut flush) {

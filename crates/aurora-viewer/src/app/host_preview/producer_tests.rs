@@ -154,9 +154,13 @@ fn native_producer_rate_gate_uses_original_request_time_without_catchup_or_futur
 fn native_producer_command_age_has_absolute_deadline_and_metadata_stays_inside_fixed_reserve() {
     let now = Instant::now();
     assert!(Producer::fresh(now, now));
-    assert!(Producer::fresh(now, now + TTL - Duration::from_nanos(1)));
+    assert!(Producer::fresh(now, now + TTL - Duration::from_millis(1)));
     assert!(!Producer::fresh(now, now + TTL));
-    assert!(!Producer::fresh(now + Duration::from_nanos(1), now));
+    // Windows Instant arithmetic can round a 1 ns offset back to the same
+    // counter tick. Keep the future-time check distinct from the exact expiry.
+    let future = now + Duration::from_millis(1);
+    assert!(future > now);
+    assert!(!Producer::fresh(future, now));
     let producer = Producer::default();
     // Real static layouts + actual receipt allocation, conservatively reserving
     // two contexts/pending commands/accepted proofs and 32 small Arc allocations.

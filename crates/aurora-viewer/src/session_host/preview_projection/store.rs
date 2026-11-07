@@ -576,8 +576,6 @@ pub(super) fn status(shared: &Arc<Shared>) -> Result<PreviewStatus, PreviewError
             let result = PreviewStatus {
                 sources: control.sources.iter().map(|(source, _)| *source).collect(),
                 control: control.clone(),
-                generation: store.generation,
-                request: store.request,
                 view_guard: shared.frontdoor.view_fence(store.generation),
                 shared: shared.clone(),
                 settings: store.settings_done.iter().copied().collect(),

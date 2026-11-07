@@ -133,9 +133,9 @@ impl SoftwareWindow {
         Ok(delay)
     }
 
-    /// Dormant private monitor path. The caller reserves the entire physical
+    /// Private monitor path. The caller reserves the entire physical
     /// Windows DIB before this resize and destroys this owned window on error.
-    #[cfg(all(test, windows))]
+    #[cfg(windows)]
     #[allow(clippy::too_many_arguments)] // Preserve the existing paint inputs plus the private borrow/gate.
     pub(super) fn present_private(
         &mut self,
