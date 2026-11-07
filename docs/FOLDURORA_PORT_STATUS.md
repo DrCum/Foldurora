@@ -12,11 +12,14 @@ download. The earlier `70c1b5cd` package has the preceding host layout. Native W
 profile/draft and compact-host acceptance remain pending. Branding and photo-mode
 viewport work are separate in-progress follow-ups, not fixes included in `399ffd79`.
 
-Local source checkpoint `e640d4fc` now combines the branding and photo-viewport
-follow-ups on `feat/foldurora-photo-branding`. It is not yet pushed or built.
-Source review and Linux Clippy passed; full tests are in progress, and normal-build,
-actual GPU-demo and native Windows evidence remain pending. Its source changes
-must not be attributed to the compact `399ffd79` package.
+Frozen source checkpoint `f5ae21d5` combines the branding, photo-viewport and
+narrow-preview follow-ups on the pushed `feat/foldurora-photo-branding` branch.
+Source review, formatting, diff checks and final Linux Clippy passed; the corrected
+full-workspace rerun is compiling and its exact-source Windows run is in progress.
+The local build prompt was given to the user; delivery to the builder and its start
+are unconfirmed. Normal-build, actual GPU-demo and native Windows evidence remain
+pending. These source changes must not be attributed to the compact `399ffd79`
+package.
 
 ## Frozen test candidates
 
@@ -27,7 +30,7 @@ must not be attributed to the compact `399ffd79` package.
 | `8cd9a2aa005491b651e5bb8591d94fd6fb891520` | Combined backend/profile checkpoint: host/menu fixes, retained conversation drafts, crash details fallback and five persistent renameable slots | [Windows run 42311181216](https://github.com/DrCum/Foldurora/actions/runs/42311181216) passed: 7,818 tests passed, 0 failed, 49 ignored. Scripts, formatting, strict Clippy, normal build and packaging passed; downloaded package identity, manifest and checksums were verified. | This checkpoint has a known profile-popup margin overlap corrected by `70c1b5cd`. Native host/profile/chat and human grid acceptance remain pending. |
 | `70c1b5cda927547b28e5a5ff9713e861771aaee7` | Earlier verified test candidate, `fix/profile-popup-bounds`: bounds the profile popup including its frame and wraps occupied-profile help inline | [Windows run 42315300611](https://github.com/DrCum/Foldurora/actions/runs/42315300611) passed: 7,819 tests passed, 0 failed, 49 ignored; all 28 applicable named regressions passed exactly once. Scripts, formatting, strict Clippy, normal build and packaging passed. Downloaded manifest, checksums and executable/PE identity were verified. Fresh Linux CPU UI and sequential demo-worker evidence is recorded below. | Offline native Windows host/profile/chat, human grid, physical GPU/multi-monitor and performance acceptance remain pending. |
 | `399ffd796ccba8e9468bbc9ff7b19eff5017d4bc` | Latest verified compact package, `feat/compact-host-integration`: compact strip, full-width world, explicit management drawer and popup islands | [Windows run 42327859777](https://github.com/DrCum/Foldurora/actions/runs/42327859777) passed: 7,827 tests passed, 0 failed, 50 ignored; all 36 applicable named regressions passed exactly once. Parser, formatting, strict Clippy, tests, build and packaging passed. Downloaded manifests, checksums and executable/PE identity were verified. Linux and visual evidence is recorded below. | Native popup-island composition/hit testing, world input/handoff/recovery, profiles/drafts, physical GPU/multi-monitor, performance and human grid acceptance remain pending. Earlier local `8b738ea8` native results do not transfer to this binary. |
-| `e640d4fc8524f55c6eb4568470050fb5d07f51b6` | Local frozen photo/branding follow-up, `feat/foldurora-photo-branding`; not yet pushed | Source review passed and Linux Clippy passed in 34.93s. Full workspace tests are in progress. | Normal binary build, actual GPU demo, exact-source Windows pipeline/package, native photo/export/icon and human grid acceptance remain pending. No runtime evidence is claimed. |
+| `f5ae21d535da3a338bace51ffb03af7beeb040c6` | Frozen, pushed photo/branding follow-up, `feat/foldurora-photo-branding`, including narrow scene/output and rounded-preview corrections | Source review, formatting and diff checks passed; final Linux Clippy passed in 34.48s. Corrected full-workspace tests are compiling. [Windows run 42334134158](https://github.com/DrCum/Foldurora/actions/runs/42334134158) is in progress. | Normal binary build, actual GPU demo, completed exact-source Windows checks/package, native photo/export/icon and human grid acceptance remain pending. The local build prompt was given to the user; delivery/start are unconfirmed. No new runtime evidence is claimed. |
 
 Keep these sources and their packages separate. No candidate is merged, installed
 or released by this work. Both the verified `70c1b5cd` package checkpoint and
@@ -321,21 +324,44 @@ passed, and its downloaded package and raw receipt are verified above. This
 automated result does not establish native Windows popup hit testing, embedded
 world behavior or profile/draft acceptance.
 
-### Local photo/branding checkpoint e640d4fc
+### Frozen photo/branding checkpoint f5ae21d5
 
-The unpushed `e640d4fc8524f55c6eb4568470050fb5d07f51b6` source combines supplied
+The frozen, pushed `f5ae21d535da3a338bace51ffb03af7beeb040c6` source combines supplied
 purple-folder artwork (`8e9e8789`), photo-guide and overlay bounds
 (`f7898573`/`092c8fdf`), aligned live-world/capture scope (`dc0a4063`) and valid
-narrow scene/output aspects (`477a212c`). Clean exports frame the bounded live
-world at the chosen output aspect; Interface output preserves the complete
-workspace with its bounded scene, rejecting unsupported aspect/size combinations
-and canceling on canvas/UI-scale changes. These are source changes awaiting full
-tests, normal-build and runtime validation, not accepted photo/export behavior.
+narrow scene/output aspects (`477a212c`). The rounded-preview correction
+(`d995b4dd`) keeps the selected full-photo framing independently of preview target
+rounding, including narrow targets; fixture corrections are included at `f5ae21d5`.
+Clean exports frame the bounded live world at the chosen output aspect; Interface
+output preserves the complete workspace with its bounded scene, rejecting
+unsupported aspect/size combinations and canceling on canvas/UI-scale changes.
+These changes passed source review and await completed full tests, normal-build
+and runtime validation; accepted photo/export behavior is not yet established.
 
-Source review and final Linux Clippy passed (34.93s). Full workspace tests remain
-in progress; the normal binary and actual GPU demo have not run. No runtime,
-native icon, Windows capture or export acceptance is inferred from the earlier
-compact-controller screenshots or package. Existing captures remain unchanged.
+The first full-workspace run at earlier source
+`e640d4fc8524f55c6eb4568470050fb5d07f51b6` reported **7,866 passed, 4 failed,
+50 ignored**. One failure is the inherited terrain case; the other three
+were fixture assumptions about default UHD versus Window resolution, egui's
+pending zoom and AF bracket shape representation. Those fixtures are corrected
+in the frozen source, but successful retesting is not yet claimed. That earlier
+source had passed review and Linux Clippy in 34.93s.
+
+Final `f5ae21d5` formatting, diff checks and Linux workspace/all-target Clippy
+passed (34.48s, with the existing `-A dead-code` allowance). The corrected full
+workspace rerun is compiling. Exact-source
+[Windows run 42334134158](https://github.com/DrCum/Foldurora/actions/runs/42334134158)
+is in progress; no completed package is verified. The exact local build-only
+prompt was given to the user, but builder delivery/start remain unknown. The
+normal binary and actual GPU demo have not run. No new runtime, native icon,
+Windows capture or export acceptance is inferred from the earlier
+compact-controller screenshots or package. Existing captures and the verified
+`399ffd79` download remain unchanged.
+
+Official upstream is pinned at `576dd54a707677bf5b93dd696142cc17fbdef270`.
+The inventory contains 58 commits since `ae2fd1016ec83304719fa131312e2ac69c8f37a6`:
+17 were already imported, leaving 41 outstanding at that inventory checkpoint.
+A reviewed safe batch is being integrated separately from frozen `f5ae21d5`;
+no completed integration, merge or validation result is claimed for that work.
 
 ## Selected visual evidence
 
@@ -386,8 +412,8 @@ to that capture commit; they do not depend on the cloud `.scratch` directories.
 | Fade and Birdseye switches | Native activation exists; Folderstorm's visual transitions are not ported. | Preserve fenced GPU/input handoff; design each transition around native camera/render actions after host acceptance. |
 | Assistant and other tools | Aurora has native inventory/appearance/camera actions; Folderstorm's adapter and some tools remain. | Port bounded typed actions after the supporting account/workspace models, rather than generic input injection. |
 | Profile import/migration | Stable new slots exist; migration of old generated profiles or ordinary viewer preferences is not implemented. | Decide explicit import/copy behavior later; keep credentials, writable caches and live-session authority separate. Moving installations does not silently migrate profiles. |
-| Foldurora branding — separate follow-up | Supplied purple-folder artwork is integrated in local source `e640d4fc`; build/runtime/native icon validation is pending. It is not included in `399ffd79`. | Build and validate the exact photo/branding follow-up separately. |
-| Photo/camera viewport — separate follow-up | The reported `8b738ea8` / `+110` scene expansion remains in `399ffd79`. Source `e640d4fc` aligns the live photo scene/guides/output to the world scope, including narrow aspect handling; compiled/runtime evidence is pending. | Validate clean and Interface exports, viewport/guide alignment and native controls on the exact new binary. No fix is claimed in `399ffd79`. |
+| Foldurora branding — separate follow-up | Supplied purple-folder artwork is integrated in frozen, pushed `f5ae21d5`; source review and Linux lint passed, while build/runtime/native icon validation is pending. It is not included in `399ffd79`. | Complete exact-source Linux/Windows validation and native icon acceptance separately. |
+| Photo/camera viewport — separate follow-up | The reported `8b738ea8` / `+110` scene expansion remains in `399ffd79`. Frozen `f5ae21d5` aligns the live photo scene/guides/output to the world scope, including narrow scene/output and rounded-preview handling. Source review and Linux lint passed; corrected full tests and Windows checks are in progress, with build/runtime acceptance pending. | Validate clean and Interface exports, viewport/guide alignment and native controls on the exact new binary. No fix is claimed in `399ffd79`. |
 
 Folderstorm can later acknowledge a visible, following, at-tail transcript after
 a configured delay (default 60 seconds with visible-read acknowledgment enabled).
@@ -416,9 +442,10 @@ separate installation for these profiles.
 
 The current compact target is exact source `399ffd79`. Its package is verified
 and the artifact link has been supplied to the user, explicitly excluding the
-photo/branding follow-up. The user also has the exact local-build prompt, but
-delivery to the local builder is unconfirmed. New native testing must cover
-compact dropdowns/tooltips over the actual world, keyboard/narrow/enlarged-UI
+photo/branding follow-up. The user also has the separate exact local-build prompt
+for frozen `f5ae21d5`, but delivery/start at the local builder are unconfirmed.
+The verified compact package remains the download target here. New native testing
+must cover compact dropdowns/tooltips over the actual world, keyboard/narrow/enlarged-UI
 access and Manage open/hide. Earlier
 local `8b738ea8` native results do not establish these outcomes on the compact build.
 
