@@ -11,6 +11,9 @@ pub(crate) mod chat_io;
 pub(crate) mod chat_transport;
 mod chat_ui;
 mod chat_window;
+// Pure monitor bindings only; no production surface or image service enabled.
+#[cfg(test)]
+mod monitor_model;
 mod native;
 mod preview_bootstrap;
 pub(crate) mod profile;
