@@ -9,6 +9,11 @@ nonblocking OS lock plus revision/content comparison. Source/model/item/previous
 assignment tickets, one pending save and canceled owner publication keep stale
 editors from retargeting. All three Favorites layouts share the first-member
 projection and original landmark actions; no remote Inventory operation is added.
+Two process-wide Favorite-name worker slots are acquired before channels/spawn
+and held until the actual worker exits, including canceled OS IO/mutex waits.
+Replacing a source immediately clears its model; a busy replacement stays empty
+and retries admission only from nonblocking polling. Logical cancellation cannot
+refund a slot or spawn another worker; existing order-file IO remains separate.
 
 The disabled CPU/body integration preserves the reviewed private surface and
 Monitor body atoms on the existing disabled monitor foundations. Production
