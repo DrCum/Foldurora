@@ -18,7 +18,7 @@ pub use read::*;
 mod review;
 pub use review::*;
 
-pub const VERSION: u16 = 2;
+pub const VERSION: u16 = 3;
 pub const MAX_PACKET_BYTES: usize = 4096;
 /// One native UDP chat/IM part (`aurora-net::message_split`), in UTF-8 bytes.
 pub const MAX_TEXT_BYTES: usize = 1023;
@@ -532,6 +532,8 @@ pub enum ChatCommand {
     Send(SendRequest),
     MarkRead(MarkReadRequest),
     QueryReadReceipt(ReadReceiptQuery),
+    ReviewConversation(ReviewConversationRequest),
+    QueryReviewReceipt(ReviewReceiptQuery),
     Poll { after_event: u64 },
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -543,6 +545,7 @@ pub enum ChatEvent {
     Receipt(SendReceipt),
     ReadBatch(Vec<ReadStateRow>),
     ReadReceipt(ReadReceiptReply),
+    ReviewReceipt(ReviewReceiptReply),
     Gap { through_event: u64 },
     Unsupported,
 }
@@ -570,12 +573,15 @@ impl fmt::Debug for ChatPacket {
             ChatMessage::Command(ChatCommand::Send(_)) => "send",
             ChatMessage::Command(ChatCommand::MarkRead(_)) => "mark_read",
             ChatMessage::Command(ChatCommand::QueryReadReceipt(_)) => "query_read_receipt",
+            ChatMessage::Command(ChatCommand::ReviewConversation(_)) => "review_conversation",
+            ChatMessage::Command(ChatCommand::QueryReviewReceipt(_)) => "query_review_receipt",
             ChatMessage::Command(ChatCommand::Poll { .. }) => "poll",
             ChatMessage::Event(ChatEvent::Conversation(_)) => "conversation",
             ChatMessage::Event(ChatEvent::Line(_)) => "line",
             ChatMessage::Event(ChatEvent::Receipt(_)) => "receipt",
             ChatMessage::Event(ChatEvent::ReadBatch(_)) => "read_batch",
             ChatMessage::Event(ChatEvent::ReadReceipt(_)) => "read_receipt",
+            ChatMessage::Event(ChatEvent::ReviewReceipt(_)) => "review_receipt",
             ChatMessage::Event(ChatEvent::Gap { .. }) => "gap",
             ChatMessage::Event(ChatEvent::Unsupported) => "unsupported",
         };
@@ -616,6 +622,14 @@ impl ChatPacket {
                 if let ChatCommand::Send(request) = command {
                     request.validate()?;
                     source = request.key.source;
+                }
+                if let ChatCommand::ReviewConversation(request) = command {
+                    request.validate()?;
+                    source = request.target.key.source;
+                }
+                if let ChatCommand::QueryReviewReceipt(query) = command {
+                    query.validate()?;
+                    source = query.key.source;
                 }
             }
             ChatMessage::Event(event) => match event {
@@ -663,6 +677,13 @@ impl ChatPacket {
                     {
                         return Err(ChatError::Invalid);
                     }
+                }
+                ChatEvent::ReviewReceipt(reply) => {
+                    reply.validate()?;
+                    if self.reply_to == 0 {
+                        return Err(ChatError::Sequence);
+                    }
+                    source = reply.query.key.source;
                 }
                 ChatEvent::Gap { through_event } if *through_event == 0 => return Err(ChatError::Sequence),
                 _ => {}

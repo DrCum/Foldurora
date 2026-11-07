@@ -85,17 +85,26 @@ fn review_dtos_validate_full_source_positive_sequences_and_nearby_or_direct_only
     let mut nearby = valid;
     nearby.target.key.conversation = Conversation::Nearby;
     nearby.target.observed.through = 0;
-    assert!(nearby.validate().is_ok(), "an initial native observation may have no counted arrivals");
+    assert!(
+        nearby.validate().is_ok(),
+        "an initial native observation may have no counted arrivals"
+    );
 
     for changed in [
         ReviewConversationRequest { request: 0, ..valid },
         ReviewConversationRequest { activation: 0, ..valid },
         ReviewConversationRequest {
-            target: ReviewCapture { policy_revision: 0, ..valid.target },
+            target: ReviewCapture {
+                policy_revision: 0,
+                ..valid.target
+            },
             ..valid
         },
         ReviewConversationRequest {
-            target: ReviewCapture { observed: ObservedIncoming { epoch: 0, through: 17 }, ..valid.target },
+            target: ReviewCapture {
+                observed: ObservedIncoming { epoch: 0, through: 17 },
+                ..valid.target
+            },
             ..valid
         },
     ] {
@@ -118,11 +127,21 @@ fn review_dtos_validate_full_source_positive_sequences_and_nearby_or_direct_only
     let mut invalid = valid;
     invalid.target.key.source.lease_epoch = 0;
     assert_eq!(invalid.validate(), Err(ChatError::Binding));
-    assert!(matches!(ReviewReceiptLedger::new(invalid.target.key.source), Err(ChatError::Binding)));
+    assert!(matches!(
+        ReviewReceiptLedger::new(invalid.target.key.source),
+        Err(ChatError::Binding)
+    ));
     invalid = valid;
     invalid.target.key.source.session.generation = 0;
     assert_eq!(invalid.validate(), Err(ChatError::Binding));
-    assert_eq!(ReviewReceiptQuery { request: 0, ..query(valid) }.validate(), Err(ChatError::Sequence));
+    assert_eq!(
+        ReviewReceiptQuery {
+            request: 0,
+            ..query(valid)
+        }
+        .validate(),
+        Err(ChatError::Sequence)
+    );
 }
 
 #[test]
@@ -144,7 +163,10 @@ fn review_dtos_are_closed_body_free_and_maximum_full_id_serialization_is_bounded
     };
     maximum.target.key.conversation = Conversation::Direct(ConversationId::from_bytes([255; 16]).unwrap());
     maximum.target.policy_revision = u64::MAX;
-    maximum.target.observed = ObservedIncoming { epoch: u64::MAX, through: u64::MAX };
+    maximum.target.observed = ObservedIncoming {
+        epoch: u64::MAX,
+        through: u64::MAX,
+    };
     maximum.activation = u64::MAX;
     assert!(maximum.validate().is_ok());
     round_trip(&maximum.target);
@@ -160,11 +182,17 @@ fn review_dtos_are_closed_body_free_and_maximum_full_id_serialization_is_bounded
         let receipt = receipt(maximum, outcome);
         assert!(receipt.validate().is_ok() && receipt.matches(maximum));
         round_trip(&receipt);
-        let reply = ReviewReceiptReply { query: query(maximum), receipt: Some(receipt) };
+        let reply = ReviewReceiptReply {
+            query: query(maximum),
+            receipt: Some(receipt),
+        };
         assert_eq!(reply.validate_for(maximum), Ok(()));
         round_trip(&reply);
     }
-    round_trip(&ReviewReceiptReply { query: query(maximum), receipt: None });
+    round_trip(&ReviewReceiptReply {
+        query: query(maximum),
+        receipt: None,
+    });
 
     // Identifiers serialize as fixed lowercase hex: there is no free text that
     // could increase output through quoting/Unicode escapes. Escaped input IDs
@@ -192,7 +220,11 @@ fn review_dtos_are_closed_body_free_and_maximum_full_id_serialization_is_bounded
     let mut unknown = serde_json::to_value(query(maximum)).unwrap();
     unknown["activation"] = 1.into();
     assert!(serde_json::from_value::<ReviewReceiptQuery>(unknown).is_err());
-    let mut unknown = serde_json::to_value(ReviewReceiptReply { query: query(maximum), receipt: None }).unwrap();
+    let mut unknown = serde_json::to_value(ReviewReceiptReply {
+        query: query(maximum),
+        receipt: None,
+    })
+    .unwrap();
     unknown["retry"] = true.into();
     assert!(serde_json::from_value::<ReviewReceiptReply>(unknown).is_err());
     for outcome in ["pending", "uncertain", "send", "accept_offer", "export_asset"] {
@@ -204,32 +236,169 @@ fn review_dtos_are_closed_body_free_and_maximum_full_id_serialization_is_bounded
 }
 
 #[test]
-fn review_prerequisite_does_not_expose_v2_commands_events_or_change_protocol_versions() {
-    assert_eq!(VERSION, 2);
+fn review_v3_codec_roundtrips_closed_variants_and_rejects_old_versions() {
+    assert_eq!(VERSION, 3);
     assert_eq!(PROTOCOL_VERSION, 1);
-    let packet = ChatPacket {
+    let operation = request(1);
+    for message in [
+        ChatMessage::Command(ChatCommand::ReviewConversation(operation)),
+        ChatMessage::Command(ChatCommand::QueryReviewReceipt(query(operation))),
+        ChatMessage::Event(ChatEvent::ReviewReceipt(ReviewReceiptReply {
+            query: query(operation),
+            receipt: Some(receipt(operation, ReviewOutcome::OpenedLocally)),
+        })),
+        ChatMessage::Event(ChatEvent::ReviewReceipt(ReviewReceiptReply {
+            query: query(operation),
+            receipt: None,
+        })),
+    ] {
+        let packet = ChatPacket {
+            version: VERSION,
+            source: source(),
+            sequence: 1,
+            reply_to: if matches!(message, ChatMessage::Command(_)) { 0 } else { 1 },
+            message,
+        };
+        let encoded = encode(&packet).unwrap();
+        assert_eq!(decode(&encoded), Ok(packet.clone()));
+        for version in [1, 2, 4] {
+            let unsupported = ChatPacket { version, ..packet.clone() };
+            assert_eq!(encode(&unsupported), Err(ChatError::Version));
+            assert_eq!(decode(&serde_json::to_vec(&unsupported).unwrap()), Err(ChatError::Version));
+        }
+        let mut unknown: Value = serde_json::from_slice(&encoded).unwrap();
+        unknown["message"]["body"]["data"]["text"] = "\"\\Synthetic text".into();
+        assert_eq!(decode(&serde_json::to_vec(&unknown).unwrap()), Err(ChatError::Malformed));
+        for unsupported in ["accept_offer", "send_keys", "review_attention", "export_asset"] {
+            let mut unknown: Value = serde_json::from_slice(&encoded).unwrap();
+            unknown["message"]["body"]["type"] = unsupported.into();
+            assert_eq!(decode(&serde_json::to_vec(&unknown).unwrap()), Err(ChatError::Malformed));
+        }
+        let debug = format!("{packet:?}");
+        assert!(debug.contains("review"));
+        for private_field in ["policy_revision", "activation", "observed", "installation", "account", "grid"] {
+            assert!(
+                !debug.contains(private_field),
+                "packet Debug must not include captures or grant/source identity"
+            );
+        }
+    }
+}
+
+#[test]
+fn review_v3_maximum_packets_and_escaped_input_obey_the_existing_wire_bound() {
+    let mut maximum = request(u64::MAX);
+    // Every opaque ID already serializes at its full fixed width, regardless
+    // of its byte values. Maximize all variable-width sequence fields too.
+    maximum.target.key.source.session.generation = u64::MAX;
+    maximum.target.key.source.lease_epoch = u64::MAX;
+    maximum.target.policy_revision = u64::MAX;
+    maximum.target.observed = ObservedIncoming {
+        epoch: u64::MAX,
+        through: u64::MAX,
+    };
+    maximum.activation = u64::MAX;
+    for message in [
+        ChatMessage::Command(ChatCommand::ReviewConversation(maximum)),
+        ChatMessage::Command(ChatCommand::QueryReviewReceipt(query(maximum))),
+        ChatMessage::Event(ChatEvent::ReviewReceipt(ReviewReceiptReply {
+            query: query(maximum),
+            receipt: Some(receipt(maximum, ReviewOutcome::RejectedNative)),
+        })),
+    ] {
+        let packet = ChatPacket {
+            version: VERSION,
+            source: maximum.target.key.source,
+            sequence: u64::MAX,
+            reply_to: if matches!(message, ChatMessage::Command(_)) { 0 } else { u64::MAX },
+            message,
+        };
+        let encoded = encode(&packet).unwrap();
+        assert!(encoded.len() <= MAX_PACKET_BYTES);
+        assert_eq!(decode(&encoded), Ok(packet.clone()));
+        assert!(
+            !encoded.contains(&b'\\'),
+            "no accepted field contains free text requiring output escaping"
+        );
+        let installation = Value::String(maximum.target.key.source.worker.installation.to_string());
+        let escaped_one = String::from_utf8(encoded.clone()).unwrap().replacen(
+            &serde_json::to_string(&installation).unwrap(),
+            &escaped_strings(&installation),
+            1,
+        );
+        assert!(escaped_one.len() <= MAX_PACKET_BYTES);
+        let decoded = decode(escaped_one.as_bytes()).unwrap();
+        assert_eq!(decoded, packet);
+        assert_eq!(encode(&decoded).unwrap(), encoded);
+        let escaped = escaped_strings(&serde_json::to_value(&packet).unwrap());
+        assert_eq!(serde_json::from_str::<ChatPacket>(&escaped).unwrap(), packet);
+        // Arbitrary escaped input must pass the same byte cap before parsing;
+        // canonical output is bounded even when accepted input used escapes.
+        assert!(escaped.len() > MAX_PACKET_BYTES);
+        assert_eq!(decode(escaped.as_bytes()), Err(ChatError::Oversized));
+    }
+}
+
+#[test]
+fn review_v3_packet_validation_binds_source_query_receipt_and_command_direction() {
+    let original = request(1);
+    let mut other = original;
+    other.target.key.source.session.generation += 1;
+    for message in [
+        ChatMessage::Command(ChatCommand::ReviewConversation(other)),
+        ChatMessage::Command(ChatCommand::QueryReviewReceipt(query(other))),
+        ChatMessage::Event(ChatEvent::ReviewReceipt(ReviewReceiptReply {
+            query: query(other),
+            receipt: Some(receipt(other, ReviewOutcome::OpenedLocally)),
+        })),
+    ] {
+        let packet = ChatPacket {
+            version: VERSION,
+            source: source(),
+            sequence: 1,
+            reply_to: if matches!(message, ChatMessage::Command(_)) { 0 } else { 1 },
+            message,
+        };
+        assert_eq!(encode(&packet), Err(ChatError::Binding));
+        assert_eq!(decode(&serde_json::to_vec(&packet).unwrap()), Err(ChatError::Binding));
+    }
+    let mut packet = ChatPacket {
         version: VERSION,
         source: source(),
         sequence: 1,
-        reply_to: 0,
-        message: ChatMessage::Command(ChatCommand::Poll { after_event: 0 }),
+        reply_to: 1,
+        message: ChatMessage::Command(ChatCommand::ReviewConversation(original)),
     };
-    for command in ["review_conversation", "query_review_receipt"] {
-        let mut unknown = serde_json::to_value(&packet).unwrap();
-        unknown["message"]["body"]["type"] = command.into();
-        unknown["message"]["body"]["data"] = serde_json::to_value(request(1)).unwrap();
-        assert_eq!(decode(&serde_json::to_vec(&unknown).unwrap()), Err(ChatError::Malformed));
-    }
-    let mut unknown = serde_json::to_value(&packet).unwrap();
-    unknown["message"]["direction"] = "event".into();
-    unknown["message"]["body"]["type"] = "review_receipt".into();
-    unknown["message"]["body"]["data"] = serde_json::to_value(ReviewReceiptReply { query: query(request(1)), receipt: None }).unwrap();
-    assert_eq!(decode(&serde_json::to_vec(&unknown).unwrap()), Err(ChatError::Malformed));
-    let mut old = packet;
-    old.version = 1;
-    assert_eq!(decode(&serde_json::to_vec(&old).unwrap()), Err(ChatError::Version));
-    old.version = 3;
-    assert_eq!(decode(&serde_json::to_vec(&old).unwrap()), Err(ChatError::Version));
+    assert_eq!(packet.validate(), Err(ChatError::Sequence));
+    packet.reply_to = 0;
+    packet.message = ChatMessage::Command(ChatCommand::QueryReviewReceipt(ReviewReceiptQuery {
+        request: 0,
+        ..query(original)
+    }));
+    assert_eq!(packet.validate(), Err(ChatError::Sequence));
+    packet.message = ChatMessage::Event(ChatEvent::ReviewReceipt(ReviewReceiptReply {
+        query: query(original),
+        receipt: Some(receipt(original, ReviewOutcome::OpenedLocally)),
+    }));
+    assert_eq!(packet.validate(), Err(ChatError::Sequence), "receipt events must answer a command");
+    packet.reply_to = 1;
+    packet.message = ChatMessage::Event(ChatEvent::ReviewReceipt(ReviewReceiptReply {
+        query: query(original),
+        receipt: Some(receipt(other, ReviewOutcome::OpenedLocally)),
+    }));
+    assert_eq!(packet.validate(), Err(ChatError::Binding));
+    let mut invalid = original;
+    invalid.target.policy_revision = 0;
+    packet.message = ChatMessage::Event(ChatEvent::ReviewReceipt(ReviewReceiptReply {
+        query: query(original),
+        receipt: Some(receipt(invalid, ReviewOutcome::OpenedLocally)),
+    }));
+    assert_eq!(packet.validate(), Err(ChatError::Sequence));
+    invalid = original;
+    invalid.target.key.conversation = Conversation::Group(ConversationId::from_bytes([7; 16]).unwrap());
+    packet.reply_to = 0;
+    packet.message = ChatMessage::Command(ChatCommand::ReviewConversation(invalid));
+    assert_eq!(packet.validate(), Err(ChatError::Invalid));
 }
 
 #[test]
@@ -271,7 +440,10 @@ fn review_unfinished_reservations_block_replay_new_operations_and_eviction() {
     assert_eq!(ledger.reserve(request(pending.request + 1)), Err(ChatError::Busy));
     assert_eq!(ledger.query(query(pending)).unwrap().receipt, None);
     assert_eq!(ledger.retained_count(), MAX_REVIEW_RECEIPTS);
-    assert!(ledger.query(query(request(1))).unwrap().receipt.is_some(), "a blocked admission cannot evict older receipts");
+    assert!(
+        ledger.query(query(request(1))).unwrap().receipt.is_some(),
+        "a blocked admission cannot evict older receipts"
+    );
     let final_receipt = ledger.finish(pending, ReviewOutcome::Expired).unwrap();
     assert_eq!(ledger.reserve(pending), Ok(Some(final_receipt)));
 }
@@ -320,18 +492,30 @@ fn review_request_changes_cannot_finish_query_or_attribute_another_capture() {
     assert_eq!(ledger.query(query(changed_conversation)), Err(ChatError::RequestChanged));
     for changed in [changed_policy, changed_epoch, changed_through, changed_grant] {
         assert!(!immutable.matches(changed));
-        let reply = ReviewReceiptReply { query: query(original), receipt: Some(receipt(changed, ReviewOutcome::OpenedLocally)) };
+        let reply = ReviewReceiptReply {
+            query: query(original),
+            receipt: Some(receipt(changed, ReviewOutcome::OpenedLocally)),
+        };
         assert_eq!(reply.validate(), Ok(()));
         assert_eq!(reply.validate_for(original), Err(ChatError::RequestChanged));
     }
     for changed in [changed_conversation, ReviewConversationRequest { request: 2, ..original }] {
-        let reply = ReviewReceiptReply { query: query(original), receipt: Some(receipt(changed, ReviewOutcome::OpenedLocally)) };
+        let reply = ReviewReceiptReply {
+            query: query(original),
+            receipt: Some(receipt(changed, ReviewOutcome::OpenedLocally)),
+        };
         assert_eq!(reply.validate(), Err(ChatError::Binding));
     }
-    let absent = ReviewReceiptReply { query: query(original), receipt: None };
+    let absent = ReviewReceiptReply {
+        query: query(original),
+        receipt: None,
+    };
     assert_eq!(absent.validate_for(original), Ok(()));
     assert_eq!(absent.validate_for(changed_conversation), Err(ChatError::Binding));
-    assert_eq!(ledger.finish(request(2), ReviewOutcome::OpenedLocally), Err(ChatError::UnknownReceipt));
+    assert_eq!(
+        ledger.finish(request(2), ReviewOutcome::OpenedLocally),
+        Err(ChatError::UnknownReceipt)
+    );
 }
 
 #[test]
@@ -347,7 +531,10 @@ fn review_bounded_history_fences_evicted_and_skipped_ids_and_cannot_overflow() {
     assert_eq!(ledger.reserve(request(2)), Err(ChatError::StaleRequest));
     assert_eq!(ledger.reserve(request(3)), Err(ChatError::StaleRequest));
     assert_eq!(ledger.query(query(request(2))).unwrap().receipt, None);
-    assert_eq!(ledger.finish(request(2), ReviewOutcome::OpenedLocally), Err(ChatError::UnknownReceipt));
+    assert_eq!(
+        ledger.finish(request(2), ReviewOutcome::OpenedLocally),
+        Err(ChatError::UnknownReceipt)
+    );
     let last = request(u64::MAX);
     ledger.reserve(last).unwrap();
     let final_receipt = ledger.finish(last, ReviewOutcome::Expired).unwrap();
@@ -380,7 +567,11 @@ fn review_source_reset_is_monotonic_exact_and_retires_old_reservations() {
     invalid = next;
     invalid.lease_epoch = 0;
     assert_eq!(ledger.reset(invalid), Err(ChatError::Binding));
-    assert_eq!(ledger.reserve(current), Err(ChatError::Busy), "rejected resets preserve the unfinished reservation");
+    assert_eq!(
+        ledger.reserve(current),
+        Err(ChatError::Busy),
+        "rejected resets preserve the unfinished reservation"
+    );
 
     let mut newer_lease = next;
     newer_lease.lease_epoch += 1;
@@ -390,14 +581,26 @@ fn review_source_reset_is_monotonic_exact_and_retires_old_reservations() {
     wrong.target.key.source = next;
     assert_eq!(ledger.reserve(wrong), Err(ChatError::Binding));
     current.target.key.source = newer_lease;
-    assert_eq!(ledger.reserve(current), Ok(None), "a fresh exact source owns its own request namespace");
+    assert_eq!(
+        ledger.reserve(current),
+        Ok(None),
+        "a fresh exact source owns its own request namespace"
+    );
     let mut changed_login = newer_lease;
     changed_login.session.session = SessionId::from_bytes([10; 16]).unwrap();
     changed_login.lease_epoch += 1;
-    assert_eq!(ledger.reset(changed_login), Err(ChatError::Binding), "a new lease cannot excuse a stale login generation");
+    assert_eq!(
+        ledger.reset(changed_login),
+        Err(ChatError::Binding),
+        "a new lease cannot excuse a stale login generation"
+    );
     changed_login.session.generation += 1;
     assert_eq!(ledger.reset(changed_login), Ok(true));
     let mut other_worker = changed_login;
     other_worker.worker.worker = WorkerId::from_bytes([11; 16]).unwrap();
-    assert_eq!(ledger.reset(other_worker), Ok(true), "a fresh worker identity follows the common source rule");
+    assert_eq!(
+        ledger.reset(other_worker),
+        Ok(true),
+        "a fresh worker identity follows the common source rule"
+    );
 }

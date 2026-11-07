@@ -1,6 +1,6 @@
 //! Typed prerequisite for explicit native conversation review, following
-//! ReviewChat in indra/newview/fssessionworker.cpp. These DTOs and receipts do
-//! not expose a chat command, activate a world, open UI or authorize sending.
+//! ReviewChat in indra/newview/fssessionworker.cpp. These chat V3 DTOs and
+//! receipts do not themselves activate a world, open UI or authorize sending.
 //! The eventual owning App adapter must still verify an existing conversation,
 //! current read/privacy policy and the exact acknowledged Active input grant.
 
