@@ -380,7 +380,7 @@ fn fav_menu(resp: &egui::Response, p: &Palette, fav: &Favorite, out: &mut Option
                 data.insert_temp(editor_id, editor);
             }
         } else if editor.as_ref().is_some_and(|editor| editor.owner == resp.id) {
-            data.remove_temp::<GroupEditor>(editor_id);
+            data.remove::<GroupEditor>(editor_id);
         }
     });
 }
