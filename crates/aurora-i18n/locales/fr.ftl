@@ -13372,7 +13372,7 @@ host-start-flush-failed = L’hôte de sessions n’a pas pu terminer l’écrit
     Journal de diagnostic : { $path }
 
 # Profils de personnage persistants : le nom du profil ne remplace pas le compte connecté.
-host-profile-select = Profil de personnage pour la prochaine connexion
+host-profile-select = Profil de personnage
 host-profile-default = Personnage { $number }
 host-profile-occupied = Utilisé
 host-profile-occupied-help = Une fenêtre utilise encore ce profil. Fermez-la avant de rouvrir le profil.
@@ -13381,3 +13381,7 @@ host-profile-name-help = Choisissez un nom court. Laissez vide pour rétablir le
 host-profile-name-invalid = Ce nom est trop long ou contient des caractères non pris en charge.
 host-profile-controller-busy = Un autre hôte de sessions utilise déjà ces profils de personnage.
 host-profile-registry-missing = Le registre des profils de personnage est absent, mais des dossiers de profil existent. Ils ont été conservés ; restaurez le registre avant de rouvrir ces profils.
+
+# Compact session-host controls.
+host-manage = Gérer les personnages
+host-manage-hide = Masquer la gestion des personnages

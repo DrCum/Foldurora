@@ -125,6 +125,31 @@ compatibility is claimed.
 - Reduced-resolution monitors are a later stage; protocol/budget models or an
   uninvoked renderer backend alone are not that feature.
 
+## Compact controls
+
+The default host leaves the world the full client width below one 38-point
+control strip. It contains the five-profile selector, manual Open login,
+Activate, source-bound Chat, running-character tabs, character management and
+Close. Long names truncate; character tabs condense to their slot number before
+using a bounded horizontal scroller. Hover text retains the profile, logged-in
+account, grid and session state.
+
+Committing a Ready live profile selection requests the ordinary fenced switch.
+Selecting a free profile still requires an explicit Open login and manual login;
+selecting a busy or unready session exposes management. The selected profile is
+not an acknowledgment: only the exact confirmed hosted worker is highlighted.
+Character management reveals the search, saved accounts, Rename, session details
+and Detach actions. Its deliberate drawer resize follows the same viewport
+handoff as an ordinary host resize. Notices and errors use a fixed status badge
+with full hover text; tabs remain visible and world geometry stays unchanged.
+Close still requires confirmation and leaves sessions running in their own viewer
+windows.
+
+Native Windows acceptance must check compact drop-downs/tooltips over the world,
+keyboard access, narrow/enlarged-UI controls, management open/close, and the same
+title-bar drag, switch and detach paths as the earlier host. The layout does not
+add shared Chat, Attention or preview monitors.
+
 ## Acceptance before recommending a build
 
 Automated checks must include identity/replay/lease rejection, stale and

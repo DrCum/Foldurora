@@ -13376,7 +13376,7 @@ host-start-flush-failed = The session host could not finish writing its diagnost
     Diagnostic log: { $path }
 
 # Persistent character profiles: a label never replaces the logged-in account.
-host-profile-select = Character profile for the next login
+host-profile-select = Character profile
 host-profile-default = Character { $number }
 host-profile-occupied = In use
 host-profile-occupied-help = This profile still has a viewer open. Close that viewer before opening the profile again.
@@ -13385,3 +13385,7 @@ host-profile-name-help = Use a short name. Leave empty to restore the numbered n
 host-profile-name-invalid = This name is too long or contains unsupported characters.
 host-profile-controller-busy = Another session host is already using these character profiles.
 host-profile-registry-missing = The character profile registry is missing, but profile folders already exist. They were preserved; restore the registry before reopening these profiles.
+
+# Compact session-host controls.
+host-manage = Manage characters
+host-manage-hide = Hide character management

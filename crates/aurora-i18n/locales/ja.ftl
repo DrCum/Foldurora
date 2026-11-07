@@ -13349,7 +13349,7 @@ host-start-flush-failed = セッションホストの診断ログへの書き込
     診断ログ: { $path }
 
 # 永続的なキャラクタープロファイル。表示名とログイン中のアカウントは別です。
-host-profile-select = 次のログインに使うキャラクタープロファイル
+host-profile-select = キャラクタープロフィール
 host-profile-default = キャラクター { $number }
 host-profile-occupied = 使用中
 host-profile-occupied-help = このプロファイルを使うビューアーが開いています。閉じてからプロファイルを開き直してください。
@@ -13358,3 +13358,7 @@ host-profile-name-help = 短い名前を入力してください。空欄にす�
 host-profile-name-invalid = 名前が長すぎるか、使用できない文字が含まれています。
 host-profile-controller-busy = 別のセッションホストがこれらのキャラクタープロファイルを使用しています。
 host-profile-registry-missing = キャラクタープロファイルの登録情報がありませんが、プロファイルフォルダーは存在します。フォルダーは保持されています。登録情報を復元してから開き直してください。
+
+# Compact session-host controls.
+host-manage = キャラクターを管理
+host-manage-hide = キャラクター管理を閉じる

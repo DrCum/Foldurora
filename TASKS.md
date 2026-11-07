@@ -1,5 +1,18 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Compact session-host controls (human request, 2026-11-06; no issue): replace
+  the permanent roster and large heading with one 38-point profile/action/character
+  strip, following `layoutCharacters` in `tools/session-host/main.cpp`. Keep
+  actual account/grid identity separate from profile labels; committed Ready
+  selections request the existing fenced activation and only acknowledged worlds
+  receive the active highlight. Character names condense to numbered tabs and
+  scroll inside a bounded area when needed. Search, saved logins, Rename, status
+  and Detach remain in explicit character management. Notices use a fixed strip
+  badge without hiding tabs or resizing the world. Existing source-bound chat, manual login and confirmed Close
+  actions are preserved. Actual egui regressions cover layout/zoom, exact actions,
+  duplicate labels, acknowledgments and status geometry; integrated checks, visual
+  review and native Windows popup/drawer/switch/drag acceptance remain pending.
+
 - 🔧 Profile picker cutout bounds (visual review, 2026-11-06; no issue): keep
   the outer dropdown frame inside the host roster, including long names,
   narrow canvases and fractional zoom. Respect egui's inner popup budget rather

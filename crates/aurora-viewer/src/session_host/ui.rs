@@ -28,6 +28,7 @@ pub(super) enum Notice {
 pub(super) struct HostUi {
     selected: Option<WorkerId>,
     search: String,
+    management_open: bool,
     selected_slot: Option<SlotId>,
     rename: Option<(SlotId, String)>,
     pub close_prompt: bool,
@@ -56,204 +57,177 @@ impl HostUi {
         let mut action = None;
         let ctx = ui.ctx().clone();
         let frame = widgets::overlay_frame(&ctx, p);
+        // Port of layoutCharacters (tools/session-host/main.cpp): keep the
+        // character controls on one compact row, reducing names to slot numbers
+        // before taking space from the world. Management remains an explicit view.
         egui::Panel::top("session_host_header")
-            .exact_size(58.0)
-            .frame(frame)
+            .exact_size(38.0)
+            .frame(frame.inner_margin(egui::Margin::symmetric(4, 4)))
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    widgets::glyph(ui, "users-group", p.violet_pale, 24.0);
-                    ui.vertical(|ui| {
-                        ui.label(RichText::new(aurora_i18n::tr!("host-title")).strong().size(18.0));
-                        ui.label(RichText::new(aurora_i18n::tr!("host-manual-login-help")).small().color(p.muted));
-                    });
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let close = widgets::action_button(ui, p, "x", aurora_i18n::tr!("host-close"), ActionKind::Flat, vec2(0.0, 30.0));
-                        #[cfg(test)]
-                        ctx.data_mut(|data| data.insert_temp(Id::unique("host_request_close"), close.rect));
-                        if close.clicked() {
-                            self.close_prompt = true;
-                        }
-                    });
-                });
+                action = self.strip(ui, p, snapshot, native_ready, hosted, closing);
             });
-        let side_width = (ctx.content_rect().width() * 0.3).clamp(260.0, 340.0);
-        egui::Panel::left("session_host_roster")
-            .exact_size(side_width)
-            .frame(frame)
-            .show(ui, |ui| {
-                ui.add(
-                    TextEdit::singleline(&mut self.search)
-                        .hint_text(aurora_i18n::tr!("host-search"))
-                        .char_limit(128),
-                );
-                ui.add_space(8.0);
-                self.slot_picker(ui, p, snapshot, closing);
-                let login_slot = self.login_slot(snapshot);
-                let open = ui
-                    .add_enabled_ui(!closing && !snapshot.stopped && login_slot.is_some(), |ui| {
-                        widgets::action_button(
-                            ui,
-                            p,
-                            "login-2",
-                            aurora_i18n::tr!("host-open-login"),
-                            ActionKind::Primary,
-                            vec2(ui.available_width(), 32.0),
-                        )
-                    })
-                    .inner;
-                #[cfg(test)]
-                ctx.data_mut(|data| data.insert_temp(Id::unique("host_slot_open"), open.rect));
-                if open.clicked() {
-                    action = Some(Action::OpenLogin(None, login_slot));
-                }
-                ui.add_space(10.0);
-                let query = self.search.trim().to_lowercase();
-                egui::ScrollArea::vertical().id_salt("session_host_rows").show(ui, |ui| {
-                    widgets::organization_header(ui, p, aurora_i18n::tr!("host-running-sessions"));
-                    let mut count = 0;
-                    for worker in snapshot.workers.iter().take(MAX_WORKERS).filter(|worker| {
-                        matches(display_name(worker), display_grid(worker), &query)
-                            || worker
-                                .slot
-                                .and_then(|id| snapshot.slots.iter().find(|slot| slot.id == id))
-                                .is_some_and(|slot| slot_name(slot).to_lowercase().contains(&query))
-                    }) {
-                        count += 1;
-                        let id = worker.binding.worker.worker;
-                        ui.push_id(id.to_string(), |ui| {
-                            if let Some(slot) = worker.slot.and_then(|id| snapshot.slots.iter().find(|slot| slot.id == id)) {
-                                ui.label(RichText::new(slot_name(slot)).small().color(p.violet_pale));
-                            }
-                            let label = display_name(worker);
-                            let selected = self.selected == Some(id);
-                            if widgets::navigation(ui, p, "user-filled", label, selected).clicked() {
-                                self.selected = Some(id);
-                            }
-                            ui.label(RichText::new(display_grid(worker)).small().color(p.muted));
-                            ui.label(
-                                RichText::new(status(worker))
-                                    .small()
-                                    .color(if worker.reachable { p.muted } else { p.warn }),
-                            );
-                            if hosted == Some(id) {
-                                ui.label(RichText::new(aurora_i18n::tr!("host-hosted")).small().color(p.success));
-                            }
-                            if snapshot.pending == Some(id) {
-                                ui.label(RichText::new(aurora_i18n::tr!("host-switching")).small().color(p.violet_pale));
-                            }
-                            if worker.status.as_ref().is_some_and(|status| status.keyboard_focused) {
-                                ui.label(RichText::new(aurora_i18n::tr!("host-keyboard-focus")).small().color(p.teal));
-                            }
-                            ui.horizontal_wrapped(|ui| {
-                                let ready = !closing
-                                    && !snapshot.stopped
-                                    && snapshot.can_activate
-                                    && snapshot.pending.is_none()
-                                    && hosted != Some(id)
-                                    && native_ready
-                                    && activation_ready(worker);
-                                let activate = ui
-                                    .add_enabled_ui(ready, |ui| {
+        if self.management_open {
+            let side_width = (ctx.content_rect().width() * 0.3)
+                .clamp(260.0, 340.0)
+                .min((ctx.content_rect().width() - 120.0).max(120.0));
+            egui::Panel::left("session_host_roster")
+                .exact_size(side_width)
+                .frame(frame)
+                .show(ui, |ui| {
+                    ui.add(
+                        TextEdit::singleline(&mut self.search)
+                            .hint_text(aurora_i18n::tr!("host-search"))
+                            .char_limit(128),
+                    );
+                    ui.add_space(8.0);
+                    self.slot_management(ui, p, snapshot, closing);
+                    let login_slot = self.login_slot(snapshot);
+                    ui.add_space(10.0);
+                    let query = self.search.trim().to_lowercase();
+                    egui::ScrollArea::vertical().id_salt("session_host_rows").show(ui, |ui| {
+                        widgets::organization_header(ui, p, aurora_i18n::tr!("host-running-sessions"));
+                        let mut count = 0;
+                        for worker in snapshot.workers.iter().take(MAX_WORKERS).filter(|worker| {
+                            matches(display_name(worker), display_grid(worker), &query)
+                                || worker
+                                    .slot
+                                    .and_then(|id| snapshot.slots.iter().find(|slot| slot.id == id))
+                                    .is_some_and(|slot| slot_name(slot).to_lowercase().contains(&query))
+                        }) {
+                            count += 1;
+                            let id = worker.binding.worker.worker;
+                            ui.push_id(binding_id(worker.binding), |ui| {
+                                if let Some(slot) = worker.slot.and_then(|id| snapshot.slots.iter().find(|slot| slot.id == id)) {
+                                    ui.label(RichText::new(slot_name(slot)).small().color(p.violet_pale));
+                                }
+                                let label = display_name(worker);
+                                let selected = self.selected == Some(id);
+                                if widgets::navigation(ui, p, "user-filled", label, selected).clicked() {
+                                    self.selected = Some(id);
+                                    if let Some(slot) = worker.slot {
+                                        self.selected_slot = Some(slot);
+                                    }
+                                }
+                                ui.label(RichText::new(display_grid(worker)).small().color(p.muted));
+                                ui.label(
+                                    RichText::new(status(worker))
+                                        .small()
+                                        .color(if worker.reachable { p.muted } else { p.warn }),
+                                );
+                                if hosted == Some(id) {
+                                    ui.label(RichText::new(aurora_i18n::tr!("host-hosted")).small().color(p.success));
+                                }
+                                if snapshot.pending == Some(id) {
+                                    ui.label(RichText::new(aurora_i18n::tr!("host-switching")).small().color(p.violet_pale));
+                                }
+                                if worker.status.as_ref().is_some_and(|status| status.keyboard_focused) {
+                                    ui.label(RichText::new(aurora_i18n::tr!("host-keyboard-focus")).small().color(p.teal));
+                                }
+                                ui.horizontal_wrapped(|ui| {
+                                    let ready = can_activate(snapshot, worker, native_ready, hosted, closing);
+                                    let activate = ui
+                                        .add_enabled_ui(ready, |ui| {
+                                            widgets::action_button(
+                                                ui,
+                                                p,
+                                                "arrows-exchange",
+                                                aurora_i18n::tr!("host-activate"),
+                                                ActionKind::Flat,
+                                                vec2(0.0, 28.0),
+                                            )
+                                        })
+                                        .inner;
+                                    #[cfg(test)]
+                                    ctx.data_mut(|data| data.insert_temp(Id::unique(("host_activate", id)), activate.rect));
+                                    if activate.clicked() {
+                                        action = Some(Action::Activate(id));
+                                    }
+                                    if let Some(source) = chat_source(snapshot, worker) {
+                                        let response = ui
+                                            .push_id(("host_chat", source.lease_epoch), |ui| {
+                                                widgets::action_button_if(
+                                                    ui,
+                                                    p,
+                                                    "messages-filled",
+                                                    aurora_i18n::tr!("host-chat-open"),
+                                                    ActionKind::Flat,
+                                                    vec2(0.0, 28.0),
+                                                    !closing && !snapshot.stopped,
+                                                )
+                                            })
+                                            .inner;
+                                        #[cfg(test)]
+                                        ctx.data_mut(|data| data.insert_temp(Id::unique(("host_chat_open", id)), response.rect));
+                                        if response.clicked() {
+                                            action = Some(Action::OpenChat(source));
+                                        }
+                                    }
+                                    let detach = ui
+                                        .add_enabled_ui(!closing && !snapshot.stopped, |ui| {
+                                            widgets::action_button(
+                                                ui,
+                                                p,
+                                                "external-link",
+                                                aurora_i18n::tr!("host-detach"),
+                                                ActionKind::Flat,
+                                                vec2(0.0, 28.0),
+                                            )
+                                        })
+                                        .inner
+                                        .on_hover_text(aurora_i18n::tr!("host-detach-help"));
+                                    #[cfg(test)]
+                                    ctx.data_mut(|data| data.insert_temp(Id::unique(("host_detach", id)), detach.rect));
+                                    if detach.clicked() {
+                                        action = Some(Action::Detach(id));
+                                    }
+                                });
+                                ui.add_space(12.0);
+                            });
+                        }
+                        if count == 0 {
+                            ui.label(RichText::new(aurora_i18n::tr!("host-no-sessions")).color(p.muted));
+                        }
+                        ui.add_space(10.0);
+                        widgets::organization_header(ui, p, aurora_i18n::tr!("host-saved-characters"));
+                        for account in snapshot
+                            .accounts
+                            .iter()
+                            .take(64)
+                            .filter(|account| matches(&account.label, &account.grid, &query))
+                        {
+                            ui.push_id(account.key.to_string(), |ui| {
+                                ui.label(RichText::new(&account.label).strong());
+                                ui.label(RichText::new(&account.grid).small().color(p.muted));
+                                let opening = snapshot.opening.contains(&account.key);
+                                let response = ui
+                                    .add_enabled_ui(!closing && !snapshot.stopped && !opening && login_slot.is_some(), |ui| {
                                         widgets::action_button(
                                             ui,
                                             p,
-                                            "arrows-exchange",
-                                            aurora_i18n::tr!("host-activate"),
+                                            "login-2",
+                                            aurora_i18n::tr!("host-open-login"),
                                             ActionKind::Flat,
                                             vec2(0.0, 28.0),
                                         )
                                     })
                                     .inner;
                                 #[cfg(test)]
-                                ctx.data_mut(|data| data.insert_temp(Id::unique(("host_activate", id)), activate.rect));
-                                if activate.clicked() {
-                                    action = Some(Action::Activate(id));
+                                ctx.data_mut(|data| data.insert_temp(Id::unique(("host_open", account.key)), response.rect));
+                                if response.clicked() {
+                                    action = Some(Action::OpenLogin(Some(account.key), login_slot));
                                 }
-                                if let Some(chat) = snapshot
-                                    .chat
-                                    .iter()
-                                    .find(|chat| chat.source.binding() == worker.binding && super::chat_ui::eligible(chat))
-                                {
-                                    let response = widgets::action_button_if(
-                                        ui,
-                                        p,
-                                        "messages-filled",
-                                        aurora_i18n::tr!("host-chat-open"),
-                                        ActionKind::Flat,
-                                        vec2(0.0, 28.0),
-                                        !closing && !snapshot.stopped,
-                                    );
-                                    #[cfg(test)]
-                                    ctx.data_mut(|data| data.insert_temp(Id::unique(("host_chat_open", id)), response.rect));
-                                    if response.clicked() {
-                                        action = Some(Action::OpenChat(chat.source));
-                                    }
+                                if opening {
+                                    ui.label(RichText::new(aurora_i18n::tr!("host-opening")).small().color(p.muted));
                                 }
-                                let detach = ui
-                                    .add_enabled_ui(!closing && !snapshot.stopped, |ui| {
-                                        widgets::action_button(
-                                            ui,
-                                            p,
-                                            "external-link",
-                                            aurora_i18n::tr!("host-detach"),
-                                            ActionKind::Flat,
-                                            vec2(0.0, 28.0),
-                                        )
-                                    })
-                                    .inner
-                                    .on_hover_text(aurora_i18n::tr!("host-detach-help"));
-                                #[cfg(test)]
-                                ctx.data_mut(|data| data.insert_temp(Id::unique(("host_detach", id)), detach.rect));
-                                if detach.clicked() {
-                                    action = Some(Action::Detach(id));
-                                }
+                                ui.add_space(12.0);
                             });
-                            ui.add_space(12.0);
-                        });
-                    }
-                    if count == 0 {
-                        ui.label(RichText::new(aurora_i18n::tr!("host-no-sessions")).color(p.muted));
-                    }
-                    ui.add_space(10.0);
-                    widgets::organization_header(ui, p, aurora_i18n::tr!("host-saved-characters"));
-                    for account in snapshot
-                        .accounts
-                        .iter()
-                        .take(64)
-                        .filter(|account| matches(&account.label, &account.grid, &query))
-                    {
-                        ui.push_id(account.key.to_string(), |ui| {
-                            ui.label(RichText::new(&account.label).strong());
-                            ui.label(RichText::new(&account.grid).small().color(p.muted));
-                            let opening = snapshot.opening.contains(&account.key);
-                            let response = ui
-                                .add_enabled_ui(!closing && !snapshot.stopped && !opening && login_slot.is_some(), |ui| {
-                                    widgets::action_button(
-                                        ui,
-                                        p,
-                                        "login-2",
-                                        aurora_i18n::tr!("host-open-login"),
-                                        ActionKind::Flat,
-                                        vec2(0.0, 28.0),
-                                    )
-                                })
-                                .inner;
-                            #[cfg(test)]
-                            ctx.data_mut(|data| data.insert_temp(Id::unique(("host_open", account.key)), response.rect));
-                            if response.clicked() {
-                                action = Some(Action::OpenLogin(Some(account.key), login_slot));
-                            }
-                            if opening {
-                                ui.label(RichText::new(aurora_i18n::tr!("host-opening")).small().color(p.muted));
-                            }
-                            ui.add_space(12.0);
-                        });
-                    }
-                    if snapshot.accounts.is_empty() {
-                        ui.label(RichText::new(aurora_i18n::tr!("host-no-saved-characters")).color(p.muted));
-                    }
+                        }
+                        if snapshot.accounts.is_empty() {
+                            ui.label(RichText::new(aurora_i18n::tr!("host-no-saved-characters")).color(p.muted));
+                        }
+                    });
                 });
-            });
+        }
         let world = ui.available_rect_before_wrap();
         egui::CentralPanel::default().frame(frame).show(ui, |ui| {
             ui.vertical_centered(|ui| {
@@ -329,13 +303,275 @@ impl HostUi {
         Output { action, world }
     }
 
+    fn strip(
+        &mut self,
+        ui: &mut egui::Ui,
+        p: &Palette,
+        snapshot: &HostSnapshot,
+        native_ready: bool,
+        hosted: Option<WorkerId>,
+        closing: bool,
+    ) -> Option<Action> {
+        let mut action = None;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            let width = (ui.available_width() * 0.22).clamp(96.0, 220.0);
+            let selection_changed = self.slot_picker(ui, snapshot, width);
+            if selection_changed {
+                if let Some(worker) = self.selected_worker(snapshot) {
+                    if can_activate(snapshot, worker, native_ready, hosted, closing) {
+                        action = Some(Action::Activate(worker.binding.worker.worker));
+                    } else if hosted != Some(worker.binding.worker.worker) {
+                        self.management_open = true;
+                    }
+                } else if self.login_slot(snapshot).is_none() {
+                    self.management_open = true;
+                }
+            }
+            let enabled = !closing && !snapshot.stopped;
+            let login_slot = self.login_slot(snapshot);
+            let open = ui
+                .push_id(("host_strip_open", self.selected_slot), |ui| {
+                    compact_button(
+                        ui,
+                        p,
+                        "login-2",
+                        aurora_i18n::tr!("host-open-login"),
+                        ActionKind::Primary,
+                        enabled && login_slot.is_some(),
+                    )
+                })
+                .inner;
+            #[cfg(test)]
+            ui.ctx().data_mut(|data| data.insert_temp(Id::unique("host_slot_open"), open.rect));
+            if open.clicked() {
+                action = Some(Action::OpenLogin(None, login_slot));
+            }
+            let selected = self.selected_worker(snapshot);
+            let activate = ui
+                .push_id(("host_strip_activate", selected.map(|worker| binding_id(worker.binding))), |ui| {
+                    compact_button(
+                        ui,
+                        p,
+                        "arrows-exchange",
+                        aurora_i18n::tr!("host-activate"),
+                        ActionKind::Flat,
+                        selected.is_some_and(|worker| can_activate(snapshot, worker, native_ready, hosted, closing)),
+                    )
+                })
+                .inner;
+            #[cfg(test)]
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(Id::unique("host_strip_activate"), activate.rect));
+            if activate.clicked()
+                && let Some(worker) = selected
+            {
+                action = Some(Action::Activate(worker.binding.worker.worker));
+            }
+            let source = selected.and_then(|worker| chat_source(snapshot, worker));
+            let chat = ui
+                .push_id(
+                    (
+                        "host_strip_chat",
+                        source.map(|source| (binding_id(source.binding()), source.lease_epoch)),
+                    ),
+                    |ui| {
+                        compact_button(
+                            ui,
+                            p,
+                            "messages-filled",
+                            aurora_i18n::tr!("host-chat-open"),
+                            ActionKind::Flat,
+                            enabled && source.is_some(),
+                        )
+                    },
+                )
+                .inner;
+            #[cfg(test)]
+            ui.ctx().data_mut(|data| data.insert_temp(Id::unique("host_strip_chat"), chat.rect));
+            if chat.clicked()
+                && let Some(source) = source
+            {
+                action = Some(Action::OpenChat(source));
+            }
+            // Reserve Manage and Close before assigning the remaining width to
+            // tabs. The bounded scroller keeps them reachable at enlarged UI zoom.
+            let tabs_width = (ui.available_width() - 64.0).max(0.0);
+            ui.allocate_ui_with_layout(vec2(tabs_width, 28.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.set_min_width(tabs_width);
+                ui.set_min_height(28.0);
+                let characters_width = (tabs_width - 32.0).max(0.0);
+                ui.allocate_ui_with_layout(
+                    vec2(characters_width, 28.0),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        ui.set_min_width(characters_width);
+                        if let Some(tab_action) = self.tabs(ui, p, snapshot, native_ready, hosted, closing) {
+                            action = Some(tab_action);
+                        }
+                    },
+                );
+                let status = if closing {
+                    Some((aurora_i18n::tr!("host-closing").to_owned(), false))
+                } else if snapshot.stopped {
+                    Some((aurora_i18n::tr!("host-stopped").to_owned(), true))
+                } else if let Some(error) = snapshot.error.as_ref().or(snapshot.registry_error.as_ref()) {
+                    Some((error.clone(), true))
+                } else {
+                    self.notice
+                        .map(|notice| (notice_text(notice).to_owned(), matches!(notice, Notice::Error(_))))
+                };
+                if let Some((message, warning)) = status {
+                    let response = compact_button(
+                        ui,
+                        p,
+                        if warning { "alert-triangle-filled" } else { "info-circle-filled" },
+                        &message,
+                        if warning { ActionKind::Caution } else { ActionKind::Flat },
+                        true,
+                    );
+                    #[cfg(test)]
+                    ui.ctx().data_mut(|data| data.insert_temp(Id::unique("host_status"), response.rect));
+                    if response.clicked() {
+                        self.management_open = true;
+                    }
+                } else {
+                    ui.allocate_space(vec2(28.0, 28.0));
+                }
+            });
+            let attention = snapshot.registry_error.is_some() || snapshot.error.is_some() || matches!(self.notice, Some(Notice::Error(_)));
+            let manage = compact_button(
+                ui,
+                p,
+                "settings",
+                if self.management_open {
+                    aurora_i18n::tr!("host-manage-hide")
+                } else {
+                    aurora_i18n::tr!("host-manage")
+                },
+                if attention {
+                    ActionKind::Caution
+                } else if self.management_open {
+                    ActionKind::Primary
+                } else {
+                    ActionKind::Flat
+                },
+                !closing,
+            );
+            #[cfg(test)]
+            ui.ctx().data_mut(|data| data.insert_temp(Id::unique("host_manage"), manage.rect));
+            if manage.clicked() {
+                self.management_open = !self.management_open;
+            }
+            let close = compact_button(ui, p, "x", aurora_i18n::tr!("host-close"), ActionKind::FlatDanger, !closing);
+            #[cfg(test)]
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(Id::unique("host_request_close"), close.rect));
+            if close.clicked() {
+                self.close_prompt = true;
+            }
+        });
+        action
+    }
+
+    fn selected_worker<'a>(&self, snapshot: &'a HostSnapshot) -> Option<&'a WorkerSummary> {
+        self.selected
+            .and_then(|id| snapshot.workers.iter().find(|worker| worker.binding.worker.worker == id))
+            .or_else(|| {
+                snapshot
+                    .workers
+                    .iter()
+                    .find(|worker| worker.slot.is_some() && worker.slot == self.selected_slot)
+            })
+    }
+
+    fn tabs(
+        &mut self,
+        ui: &mut egui::Ui,
+        p: &Palette,
+        snapshot: &HostSnapshot,
+        native_ready: bool,
+        hosted: Option<WorkerId>,
+        closing: bool,
+    ) -> Option<Action> {
+        let mut action = None;
+        let count = snapshot.workers.len().min(MAX_WORKERS);
+        let width = ((ui.available_width() - (count.saturating_sub(1) as f32 * 4.0)) / count.max(1) as f32).clamp(28.0, 150.0);
+        egui::ScrollArea::horizontal()
+            .id_salt("session_host_tabs")
+            .max_height(28.0)
+            .min_scrolled_height(28.0)
+            .auto_shrink([false, false])
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+            .show(ui, |ui| {
+                #[cfg(test)]
+                ui.ctx()
+                    .data_mut(|data| data.insert_temp(Id::unique("host_tabs_clip"), ui.clip_rect()));
+                ui.horizontal(|ui| {
+                    for (index, worker) in snapshot.workers.iter().take(MAX_WORKERS).enumerate() {
+                        let id = worker.binding.worker.worker;
+                        ui.push_id(binding_id(worker.binding), |ui| {
+                            let slot = worker.slot.and_then(|id| snapshot.slots.iter().find(|slot| slot.id == id));
+                            let number = slot.map_or(index + 1, |slot| usize::from(slot.id.number()));
+                            let name = slot.map(slot_name).unwrap_or_else(|| display_name(worker).to_owned());
+                            let label = if width < 86.0 {
+                                number.to_string()
+                            } else {
+                                format!("{number}: {name}")
+                            };
+                            let ready = can_activate(snapshot, worker, native_ready, hosted, closing);
+                            let active = hosted == Some(id);
+                            let button = egui::Button::new(RichText::new(label).color(if active { p.on_accent } else { p.ink }))
+                                .truncate()
+                                .selected(active);
+                            let response = ui
+                                .add_enabled_ui(ready || (active && !closing && !snapshot.stopped), |ui| {
+                                    ui.add_sized(vec2(width, 28.0), button)
+                                })
+                                .inner;
+                            #[cfg(test)]
+                            ui.ctx().data_mut(|data| {
+                                data.insert_temp(Id::unique(("host_tab", id)), response.rect);
+                                data.insert_temp(Id::unique(("host_tab_active", id)), active);
+                            });
+                            if response.has_focus() {
+                                response.scroll_to_me(Some(egui::Align::Center));
+                            }
+                            let tip = format!(
+                                "{name}\n{} · {}\n{}{}",
+                                display_name(worker),
+                                display_grid(worker),
+                                status(worker),
+                                if snapshot.pending == Some(id) {
+                                    format!(" · {}", aurora_i18n::tr!("host-switching"))
+                                } else {
+                                    String::new()
+                                }
+                            );
+                            let response = response.on_hover_text(tip.clone()).on_disabled_hover_text(tip);
+                            if response.clicked() {
+                                self.selected = Some(id);
+                                if let Some(slot) = worker.slot {
+                                    self.selected_slot = Some(slot);
+                                }
+                                if ready {
+                                    action = Some(Action::Activate(id));
+                                }
+                            }
+                        });
+                    }
+                });
+            });
+        action
+    }
+
     fn login_slot(&self, snapshot: &HostSnapshot) -> Option<SlotId> {
         self.selected_slot
             .and_then(|id| snapshot.slots.iter().find(|slot| slot.id == id && slot.available))
             .map(|slot| slot.id)
     }
 
-    fn slot_picker(&mut self, ui: &mut egui::Ui, p: &Palette, snapshot: &HostSnapshot, closing: bool) {
+    fn slot_picker(&mut self, ui: &mut egui::Ui, snapshot: &HostSnapshot, width: f32) -> bool {
         if self.selected_slot.is_none() {
             self.selected_slot = snapshot
                 .slots
@@ -344,18 +580,16 @@ impl HostUi {
                 .or(snapshot.slots.first())
                 .map(|slot| slot.id);
         }
-        ui.label(RichText::new(aurora_i18n::tr!("host-profile-select")).small().color(p.muted));
+        let previous = self.selected_slot;
         let selected = self.selected_slot.and_then(|id| snapshot.slots.iter().find(|slot| slot.id == id));
-        let text = selected.map(slot_name).unwrap_or_default();
-        let width = ui.available_width();
+        let text = selected.map(|slot| slot_caption(slot, snapshot)).unwrap_or_default();
         let combo = egui::ComboBox::from_id_salt("host_profile_slot")
             .selected_text(text)
             .width(width)
             .truncate()
             .show_ui(ui, |ui| {
-                // Popup already deducted its frame from the button's outer
-                // width. Restoring that outer width here adds the margins
-                // again, painting into the native world's cutout.
+                // Preserve the popup's inner width budget; its frame must not
+                // re-add the outer button margins around long profile names.
                 let inner_width = (width - egui::Frame::popup(ui.style()).total_margin().sum().x).max(1.0);
                 ui.set_max_width(ui.available_width().min(inner_width));
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
@@ -364,9 +598,9 @@ impl HostUi {
                     .data_mut(|data| data.insert_temp(Id::unique("host_slot_popup_area"), ui.layer_id().id));
                 for slot in snapshot.slots.iter().take(MAX_WORKERS) {
                     let text = if slot.available {
-                        slot_name(slot)
+                        slot_caption(slot, snapshot)
                     } else {
-                        format!("{} · {}", slot_name(slot), aurora_i18n::tr!("host-profile-occupied"))
+                        format!("{} · {}", slot_caption(slot, snapshot), aurora_i18n::tr!("host-profile-occupied"))
                     };
                     let response = ui.selectable_value(&mut self.selected_slot, Some(slot.id), text);
                     #[cfg(test)]
@@ -383,8 +617,30 @@ impl HostUi {
                 data.remove::<Id>(Id::unique("host_slot_popup_area"));
             }
         });
-        #[cfg(not(test))]
-        let _ = combo;
+        let selected = self.selected_slot.and_then(|id| snapshot.slots.iter().find(|slot| slot.id == id));
+        let tip = selected
+            .map(|slot| {
+                let caption = slot_caption(slot, snapshot);
+                if let Some(worker) = snapshot.workers.iter().find(|worker| worker.slot == Some(slot.id)) {
+                    format!("{caption}\n{}\n{}", display_grid(worker), status(worker))
+                } else {
+                    caption
+                }
+            })
+            .unwrap_or_else(|| aurora_i18n::tr!("host-profile-select").to_owned());
+        combo.response.on_hover_text(tip);
+        if self.selected_slot != previous {
+            self.selected = snapshot
+                .workers
+                .iter()
+                .find(|worker| worker.slot == self.selected_slot)
+                .map(|worker| worker.binding.worker.worker);
+        }
+        self.selected_slot != previous
+    }
+
+    fn slot_management(&mut self, ui: &mut egui::Ui, p: &Palette, snapshot: &HostSnapshot, closing: bool) {
+        ui.label(RichText::new(aurora_i18n::tr!("host-profile-select")).small().color(p.muted));
         let selected = self.selected_slot.and_then(|id| snapshot.slots.iter().find(|slot| slot.id == id));
         ui.horizontal_wrapped(|ui| {
             let rename = widgets::action_button_if(
@@ -458,6 +714,49 @@ impl HostUi {
             self.rename = None;
         }
         action
+    }
+}
+
+fn binding_id(binding: aurora_session::Binding) -> Id {
+    Id::unique((
+        "host_worker",
+        (binding.worker.installation, binding.worker.host, binding.worker.worker),
+        binding
+            .session
+            .map(|session| (session.session, session.account, session.grid, session.generation)),
+    ))
+}
+
+fn compact_button(ui: &mut egui::Ui, p: &Palette, icon: &str, label: &str, kind: ActionKind, enabled: bool) -> egui::Response {
+    let response = widgets::action_button_if(ui, p, icon, "", kind, vec2(28.0, 28.0), enabled).on_hover_text(label);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled && ui.is_enabled(), label));
+    response
+}
+
+fn can_activate(snapshot: &HostSnapshot, worker: &WorkerSummary, native_ready: bool, hosted: Option<WorkerId>, closing: bool) -> bool {
+    !closing
+        && !snapshot.stopped
+        && snapshot.can_activate
+        && snapshot.pending.is_none()
+        && hosted != Some(worker.binding.worker.worker)
+        && native_ready
+        && activation_ready(worker)
+}
+
+fn chat_source(snapshot: &HostSnapshot, worker: &WorkerSummary) -> Option<aurora_session::chat::ChatSource> {
+    snapshot
+        .chat
+        .iter()
+        .find(|chat| chat.source.binding() == worker.binding && super::chat_ui::eligible(chat))
+        .map(|chat| chat.source)
+}
+
+fn slot_caption(slot: &SlotSummary, snapshot: &HostSnapshot) -> String {
+    let profile = format!("{}: {}", slot.id.number(), slot_name(slot));
+    if let Some(worker) = snapshot.workers.iter().find(|worker| worker.slot == Some(slot.id)) {
+        format!("{profile} · {}", display_name(worker))
+    } else {
+        profile
     }
 }
 
@@ -681,6 +980,7 @@ mod tests {
         ui: HostUi,
         frame: u64,
         size: egui::Vec2,
+        hosted: Option<WorkerId>,
     }
 
     impl Frames {
@@ -696,6 +996,7 @@ mod tests {
                 ui: HostUi::default(),
                 frame: 0,
                 size: vec2(1240.0, 800.0),
+                hosted: None,
             }
         }
 
@@ -715,11 +1016,12 @@ mod tests {
                     ..Default::default()
                 },
                 |ui| {
-                    let shown = self.ui.show(ui, &p, snapshot, native_ready, None, false);
+                    let shown = self.ui.show(ui, &p, snapshot, native_ready, self.hosted, false);
                     ui.ctx()
                         .data_mut(|data| data.insert_temp(Id::unique("host_world_rect"), shown.world));
                     action = action.take().or(shown.action);
-                    assert!(shown.world.left() >= 260.0 && shown.world.top() >= 58.0);
+                    assert!(shown.world.is_positive(), "the compact shell must retain a usable world rectangle");
+                    assert!(self.ctx.content_rect().expand(1.0).contains_rect(shown.world));
                 },
             );
             assert!(
@@ -759,6 +1061,7 @@ mod tests {
         let worker = snapshot.workers[0].binding.worker.worker;
         let account = snapshot.accounts[0].key;
         let mut frames = Frames::new();
+        frames.ui.management_open = true;
         assert_eq!(frames.click(&snapshot, Id::unique(("host_activate", worker)), true), None);
         snapshot.can_activate = true;
         assert_eq!(frames.click(&snapshot, Id::unique(("host_activate", worker)), false), None);
@@ -805,6 +1108,8 @@ mod tests {
             None,
             "occupied profile cannot launch"
         );
+        assert_eq!(frames.click(&snapshot, Id::unique("host_manage"), false), None);
+        assert!(frames.ui.management_open);
         assert_eq!(frames.click(&snapshot, Id::unique("host_slot_rename"), false), None);
         assert!(frames.ui.modal_open(), "rename dialog must cover the fitted native world");
         frames.click(&snapshot, Id::unique("host_slot_name"), false);
@@ -840,7 +1145,7 @@ mod tests {
     }
 
     #[test]
-    fn profile_selector_outer_popup_stays_in_roster_with_long_names_narrow_windows_and_fractional_zoom() {
+    fn compact_profile_selector_outer_popup_stays_on_canvas_with_long_names_narrow_windows_and_fractional_zoom() {
         let mut snapshot = snapshot();
         for (index, slot) in snapshot.slots.iter_mut().enumerate() {
             slot.label = SlotLabel::new(&if index % 2 == 0 { "W".repeat(64) } else { "キャラ".repeat(7) }).unwrap();
@@ -883,9 +1188,14 @@ mod tests {
                     .unwrap();
                 let tolerance = 1.0 / frames.ctx.pixels_per_point();
                 assert!(outer.is_positive(), "popup must be laid out");
+                let canvas = frames.ctx.content_rect();
                 assert!(
-                    outer.left() >= -tolerance && outer.right() <= world.left() + tolerance,
-                    "outer popup {outer:?} crosses roster/world boundary {world:?}, size {size:?}, zoom {zoom}"
+                    canvas.expand(tolerance).contains_rect(outer),
+                    "outer popup {outer:?} must fit canvas {canvas:?}, size {size:?}, zoom {zoom}"
+                );
+                assert!(
+                    outer.intersects(world),
+                    "compact menus deliberately overlay the world; native presentation must preserve this popup"
                 );
                 assert!(
                     outer.width() <= button.width() + tolerance,
@@ -936,6 +1246,7 @@ mod tests {
         };
         snapshot.chat.push(Arc::new(chat.clone()));
         let mut frames = Frames::new();
+        frames.ui.management_open = true;
         frames.show(&snapshot, Vec::new(), true);
         assert!(
             frames
@@ -949,11 +1260,57 @@ mod tests {
             frames.click(&snapshot, Id::unique(("host_chat_open", worker)), true),
             Some(Action::OpenChat(source))
         );
+        assert_eq!(
+            frames.click(&snapshot, Id::unique("host_strip_chat"), true),
+            Some(Action::OpenChat(source))
+        );
         assert_eq!(snapshot.active, None);
+        let at = frames
+            .ctx
+            .data(|data| data.get_temp::<Rect>(Id::unique("host_strip_chat")))
+            .unwrap()
+            .center();
+        frames.show(&snapshot, vec![egui::Event::PointerMoved(at)], true);
+        assert_eq!(
+            frames.show(
+                &snapshot,
+                vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                true
+            ),
+            None
+        );
+        chat.source.lease_epoch += 1;
+        chat.conversations[0].policy.key.source = chat.source;
+        snapshot.chat[0] = Arc::new(chat.clone());
+        frames.show(&snapshot, Vec::new(), true);
+        assert_eq!(
+            frames.show(
+                &snapshot,
+                vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                true
+            ),
+            None,
+            "a pointer gesture must not retarget to a replacement chat lease"
+        );
+        assert_eq!(
+            frames.click(&snapshot, Id::unique("host_strip_chat"), true),
+            Some(Action::OpenChat(chat.source))
+        );
         chat.source.session.generation += 1;
         chat.conversations[0].policy.key.source = chat.source;
         snapshot.chat[0] = Arc::new(chat);
         let mut frames = Frames::new();
+        frames.ui.management_open = true;
         frames.show(&snapshot, Vec::new(), true);
         assert!(
             frames
@@ -962,6 +1319,7 @@ mod tests {
                 .is_none(),
             "new session metadata cannot authorize the old worker binding"
         );
+        assert_eq!(frames.click(&snapshot, Id::unique("host_strip_chat"), true), None);
     }
 
     #[test]
@@ -969,6 +1327,270 @@ mod tests {
         assert!(matches("Demo One", "Example Grid", "example"));
         assert!(matches("Demo One", "Example Grid", "one"));
         assert!(!matches("Demo One", "Example Grid", "missing"));
+    }
+
+    fn five_workers() -> HostSnapshot {
+        let mut snapshot = snapshot();
+        let base = snapshot.workers[0].clone();
+        snapshot.workers = SlotId::all()
+            .enumerate()
+            .map(|(index, slot)| {
+                let mut worker = base.clone();
+                worker.slot = Some(slot);
+                worker.binding.worker.worker = WorkerId::from_bytes([index as u8 + 10; 16]).unwrap();
+                worker.binding.session.as_mut().unwrap().session = SessionId::from_bytes([index as u8 + 20; 16]).unwrap();
+                worker
+            })
+            .collect();
+        for (index, slot) in snapshot.slots.iter_mut().enumerate() {
+            slot.available = false;
+            slot.label = SlotLabel::new(&if index % 2 == 0 { "W".repeat(64) } else { "キャラ".repeat(7) }).unwrap();
+        }
+        snapshot
+    }
+
+    #[test]
+    fn compact_host_keeps_full_width_world_and_essential_controls_inside_narrow_zoomed_canvas() {
+        let snapshot = five_workers();
+        for (size, zoom) in [
+            (vec2(1240.0, 800.0), 1.0),
+            (vec2(760.0, 600.0), 1.0),
+            (vec2(760.0, 600.0), 1.5),
+            (vec2(540.0, 680.0), 1.5),
+        ] {
+            let mut frames = Frames::new();
+            frames.size = size;
+            frames.ctx.set_zoom_factor(zoom);
+            for _ in 0..6 {
+                frames.show(&snapshot, Vec::new(), true);
+            }
+            let canvas = frames.ctx.content_rect();
+            let world = frames
+                .ctx
+                .data(|data| data.get_temp::<Rect>(Id::unique("host_world_rect")))
+                .unwrap();
+            let tolerance = 1.0 / frames.ctx.pixels_per_point();
+            assert!(
+                (world.left() - canvas.left()).abs() <= tolerance,
+                "management must not occupy the default world: {world:?}"
+            );
+            assert!((world.right() - canvas.right()).abs() <= tolerance);
+            assert!(
+                world.top() - canvas.top() <= 40.0,
+                "host controls should remain one compact row: {world:?}"
+            );
+            for key in [
+                "host_slot_combo",
+                "host_slot_open",
+                "host_strip_activate",
+                "host_strip_chat",
+                "host_manage",
+                "host_request_close",
+            ] {
+                let rect = frames.ctx.data(|data| data.get_temp::<Rect>(Id::unique(key))).unwrap();
+                assert!(
+                    canvas.expand(tolerance).contains_rect(rect),
+                    "{key} {rect:?} escapes {canvas:?} at {size:?}/{zoom}"
+                );
+                assert!(
+                    rect.bottom() <= world.top() + tolerance,
+                    "{key} must not be behind the native world"
+                );
+            }
+            let clip = frames.ctx.data(|data| data.get_temp::<Rect>(Id::unique("host_tabs_clip"))).unwrap();
+            assert!(
+                clip.right() <= canvas.right() + tolerance,
+                "scrolled character tabs must retain a bounded clip"
+            );
+            assert_eq!(frames.click(&snapshot, Id::unique("host_manage"), true), None);
+            assert!(frames.ui.management_open);
+            let managed = frames
+                .ctx
+                .data(|data| data.get_temp::<Rect>(Id::unique("host_world_rect")))
+                .unwrap();
+            assert!(managed.left() > world.left(), "management is an explicit, reversible layout change");
+            assert_eq!(frames.click(&snapshot, Id::unique("host_manage"), true), None);
+            let restored = frames
+                .ctx
+                .data(|data| data.get_temp::<Rect>(Id::unique("host_world_rect")))
+                .unwrap();
+            assert_eq!(restored, world);
+        }
+    }
+
+    #[test]
+    fn compact_profile_commit_activates_exact_ready_worker_without_optimistic_active_highlight() {
+        let mut snapshot = five_workers();
+        snapshot.can_activate = true;
+        let first = snapshot.workers[0].binding.worker.worker;
+        let second = snapshot.workers[1].binding.worker.worker;
+        let third = snapshot.workers[2].binding.worker.worker;
+        let mut frames = Frames::new();
+        frames.hosted = Some(first);
+        assert_eq!(frames.click(&snapshot, Id::unique("host_slot_combo"), true), None);
+        assert_eq!(
+            frames.click(&snapshot, Id::unique(("host_slot_pick", snapshot.slots[1].id)), true),
+            Some(Action::Activate(second))
+        );
+        assert_eq!(frames.ui.selected_slot, snapshot.workers[1].slot);
+        frames.show(&snapshot, Vec::new(), true);
+        assert_eq!(
+            frames
+                .ctx
+                .data(|data| data.get_temp::<bool>(Id::unique(("host_tab_active", first)))),
+            Some(true)
+        );
+        assert_eq!(
+            frames
+                .ctx
+                .data(|data| data.get_temp::<bool>(Id::unique(("host_tab_active", second)))),
+            Some(false)
+        );
+        snapshot.pending = Some(second);
+        assert_eq!(frames.click(&snapshot, Id::unique("host_slot_combo"), true), None);
+        assert_eq!(
+            frames.click(&snapshot, Id::unique(("host_slot_pick", snapshot.slots[2].id)), true),
+            None
+        );
+        assert_eq!(frames.ui.selected, Some(third));
+        assert!(
+            frames.ui.management_open,
+            "a busy/unready selection must expose management without activating"
+        );
+        snapshot.pending = None;
+        assert_eq!(frames.click(&snapshot, Id::unique("host_strip_activate"), false), None);
+        assert_eq!(
+            frames.click(&snapshot, Id::unique("host_strip_activate"), true),
+            Some(Action::Activate(third))
+        );
+        assert_eq!(snapshot.active, None, "UI intent never changes acknowledged ownership");
+    }
+
+    #[test]
+    fn compact_character_tabs_keep_duplicate_labels_bound_to_their_exact_worker() {
+        let mut snapshot = five_workers();
+        snapshot.can_activate = true;
+        for slot in &mut snapshot.slots {
+            slot.label = SlotLabel::new("Same label").unwrap();
+        }
+        let first = snapshot.workers[0].binding.worker.worker;
+        let last = snapshot.workers[4].binding.worker.worker;
+        let mut frames = Frames::new();
+        assert_eq!(
+            frames.click(&snapshot, Id::unique(("host_tab", last)), true),
+            Some(Action::Activate(last))
+        );
+        assert_eq!(frames.ui.selected_slot, snapshot.workers[4].slot);
+        snapshot.workers[0].status.as_mut().unwrap().blocked = true;
+        assert_eq!(frames.click(&snapshot, Id::unique(("host_tab", first)), true), None);
+        snapshot.workers[0].status.as_mut().unwrap().blocked = false;
+        assert_eq!(frames.click(&snapshot, Id::unique(("host_tab", first)), false), None);
+        assert_eq!(
+            frames.click(&snapshot, Id::unique(("host_tab", first)), true),
+            Some(Action::Activate(first))
+        );
+    }
+
+    #[test]
+    fn compact_status_keeps_tabs_interactive_and_preserves_world_and_essential_button_geometry() {
+        let mut snapshot = five_workers();
+        snapshot.can_activate = true;
+        let first = snapshot.workers[0].binding.worker.worker;
+        let second = snapshot.workers[1].binding.worker.worker;
+        let mut frames = Frames::new();
+        frames.hosted = Some(first);
+        for _ in 0..4 {
+            frames.show(&snapshot, Vec::new(), true);
+        }
+        let rect = |frames: &Frames, key: &str| frames.ctx.data(|data| data.get_temp::<Rect>(Id::unique(key))).unwrap();
+        let world = rect(&frames, "host_world_rect");
+        let manage = rect(&frames, "host_manage");
+        let close = rect(&frames, "host_request_close");
+        for notice in [Notice::Queued, Notice::Error(HostError::Busy)] {
+            frames.ui.notice = Some(notice);
+            for _ in 0..4 {
+                frames.show(&snapshot, Vec::new(), true);
+            }
+            assert_eq!(
+                frames.click(&snapshot, Id::unique(("host_tab", second)), true),
+                Some(Action::Activate(second)),
+                "a queued/error notice must not remove the primary character tabs"
+            );
+            let status = rect(&frames, "host_status");
+            assert!(status.bottom() <= world.top(), "status must remain above the native cutout");
+            assert_eq!(rect(&frames, "host_world_rect"), world);
+            assert_eq!(rect(&frames, "host_manage"), manage);
+            assert_eq!(rect(&frames, "host_request_close"), close);
+        }
+        snapshot.registry_error = Some("Synthetic registry failure".into());
+        snapshot.pending = Some(second);
+        frames.ctx.data_mut(|data| {
+            data.remove::<Rect>(Id::unique(("host_tab", second)));
+        });
+        frames.show(&snapshot, Vec::new(), true);
+        assert!(
+            frames
+                .ctx
+                .data(|data| data.get_temp::<Rect>(Id::unique(("host_tab", second))))
+                .is_some(),
+            "pending gates must leave live tab widgets mounted"
+        );
+        assert_eq!(frames.click(&snapshot, Id::unique(("host_tab", second)), true), None);
+        assert_eq!(rect(&frames, "host_world_rect"), world);
+        assert_eq!(rect(&frames, "host_manage"), manage);
+        assert_eq!(rect(&frames, "host_request_close"), close);
+    }
+
+    #[test]
+    fn compact_tabs_never_retarget_a_press_when_workers_reorder_before_release() {
+        let mut snapshot = five_workers();
+        snapshot.can_activate = true;
+        let first = snapshot.workers[0].binding.worker.worker;
+        let mut frames = Frames::new();
+        for _ in 0..4 {
+            frames.show(&snapshot, Vec::new(), true);
+        }
+        let at = frames
+            .ctx
+            .data(|data| data.get_temp::<Rect>(Id::unique(("host_tab", first))))
+            .unwrap()
+            .center();
+        frames.show(&snapshot, vec![egui::Event::PointerMoved(at)], true);
+        assert_eq!(
+            frames.show(
+                &snapshot,
+                vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                true
+            ),
+            None
+        );
+        snapshot.workers.swap(0, 1);
+        frames.show(&snapshot, Vec::new(), true);
+        assert_eq!(
+            frames.show(
+                &snapshot,
+                vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                true
+            ),
+            None,
+            "reordered display positions must not reinterpret a pending character click"
+        );
+        let target = snapshot.workers[0].binding.worker.worker;
+        assert_eq!(
+            frames.click(&snapshot, Id::unique(("host_tab", target)), true),
+            Some(Action::Activate(target)),
+            "a fresh explicit click may activate the new occupant"
+        );
     }
 
     #[test]
