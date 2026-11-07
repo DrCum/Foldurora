@@ -7,7 +7,8 @@ use aurora_assets::gesture::Gesture;
 use aurora_session::{GridKey, chat::ChatSource};
 use std::{
     collections::BTreeMap,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::Arc,
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
     time::{Duration, Instant},
 };
 use uuid::Uuid;
@@ -71,6 +72,7 @@ pub(crate) struct Ticket {
     action: u64,
     catalogue: u64,
     board_revision: u64,
+    board_epoch: u64,
     board: BoardId,
     tile: TileId,
     target: PlaybackItem,
@@ -93,12 +95,14 @@ pub(crate) struct BoardTicket {
     action: u64,
     catalogue: u64,
     board_revision: u64,
+    board_epoch: u64,
     board: BoardId,
     captured_at: Instant,
 }
 pub(crate) struct Ready {
     ticket: Ticket,
     definition: Gesture,
+    cancellation: Arc<AtomicBool>,
 }
 impl Ready {
     pub fn definition(&self) -> &Gesture {
@@ -110,6 +114,10 @@ pub(crate) enum Click {
     NeedsCache(Ticket),
     AlreadyLoading,
     Stopped(Vec<Effect>),
+}
+struct BoardFence {
+    epoch: u64,
+    current: Arc<AtomicBool>,
 }
 struct Owned {
     board: BoardId,
@@ -124,6 +132,8 @@ pub(crate) struct Playback {
     facts: Option<Facts>,
     pending: BTreeMap<Uuid, Ticket>,
     owned: BTreeMap<Uuid, Owned>,
+    board_fences: BTreeMap<BoardId, BoardFence>,
+    next_board_epoch: u64,
 }
 impl Default for Playback {
     fn default() -> Self {
@@ -140,6 +150,8 @@ impl Default for Playback {
             facts: None,
             pending: BTreeMap::new(),
             owned: BTreeMap::new(),
+            board_fences: BTreeMap::new(),
+            next_board_epoch: 1,
         }
     }
 }
@@ -153,6 +165,10 @@ impl Playback {
         self.facts = None;
         self.pending.clear();
         self.owned.clear();
+        for fence in self.board_fences.values() {
+            fence.current.store(false, Ordering::Release);
+        }
+        self.board_fences.clear();
     }
     pub fn bind(&mut self, facts: Option<Facts>) -> Result<(), Error> {
         let facts = facts.filter(|f| f.valid());
@@ -167,6 +183,10 @@ impl Playback {
             self.owned.clear();
         }
         self.pending.clear();
+        for fence in self.board_fences.values() {
+            fence.current.store(false, Ordering::Release);
+        }
+        self.board_fences.clear();
         self.facts = facts;
         Ok(())
     }
@@ -228,6 +248,7 @@ impl Playback {
             action: self.action,
             catalogue: data.revision,
             board_revision: b.revision,
+            board_epoch: self.board_epoch(board),
             board,
             tile,
             target,
@@ -242,6 +263,7 @@ impl Playback {
             || t.window != self.window
             || t.action != self.action
             || target != t.target
+            || t.board_epoch != self.board_epoch(t.board)
             || (!pending && data.revision != t.catalogue)
             || now.checked_duration_since(t.captured_at).is_none_or(|age| age >= DEADLINE)
         {
@@ -264,7 +286,36 @@ impl Playback {
         }
         Ok(())
     }
-    fn ready(&self, t: Ticket, manager: &Manager) -> Result<Ready, Error> {
+    fn board_epoch(&self, board: BoardId) -> u64 {
+        self.board_fences.get(&board).map_or(0, |f| f.epoch)
+    }
+    fn prune_fences(&mut self, data: &Catalogue) {
+        self.board_fences.retain(|board, fence| {
+            if data.board(*board).is_some() {
+                true
+            } else {
+                fence.current.store(false, Ordering::Release);
+                false
+            }
+        });
+    }
+    fn fence(&mut self, board: BoardId, data: &Catalogue) -> Result<Arc<AtomicBool>, Error> {
+        self.prune_fences(data);
+        if !self.board_fences.contains_key(&board) {
+            if self.board_fences.len() >= MAX_BOARDS {
+                return Err(Error::Busy);
+            }
+            self.board_fences.insert(
+                board,
+                BoardFence {
+                    epoch: 0,
+                    current: Arc::new(AtomicBool::new(true)),
+                },
+            );
+        }
+        Ok(self.board_fences[&board].current.clone())
+    }
+    fn ready(&mut self, mut t: Ticket, data: &Catalogue, manager: &Manager) -> Result<Ready, Error> {
         if !manager.enabled {
             return Err(Error::Blocked);
         }
@@ -276,9 +327,14 @@ impl Playback {
             .get(&t.item())
             .filter(|e| e.asset == t.target.asset())
             .ok_or(Error::Loading)?;
+        let cancellation = self.fence(t.board, data)?;
+        // Waiting may span unrelated board edits; final Ready is bound to this
+        // current catalogue without changing its original action/deadline.
+        t.catalogue = data.revision;
         Ok(Ready {
             ticket: t,
             definition: entry.definition.clone(),
+            cancellation,
         })
     }
     pub fn click(
@@ -304,7 +360,7 @@ impl Playback {
         if self.pending.contains_key(&t.item()) {
             return Ok(Click::AlreadyLoading);
         }
-        match self.ready(t, manager) {
+        match self.ready(t, data, manager) {
             Ok(ready) => Ok(Click::Ready(ready)),
             Err(Error::Loading) => {
                 if self.pending.len() >= MAX_PENDING {
@@ -326,8 +382,32 @@ impl Playback {
         self.pending.remove(&t.item());
         true
     }
-    pub fn cancel_board(&mut self, board: BoardId) {
+    pub fn cancel_board(&mut self, board: BoardId, data: &Catalogue) -> Result<(), Error> {
+        self.current(data)?;
+        self.prune_fences(data);
+        if data.board(board).is_none() {
+            return Err(Error::Missing);
+        }
+        let Some(next) = self.next_board_epoch.checked_add(1) else {
+            self.fail_closed();
+            return Err(Error::Exhausted);
+        };
+        if !self.board_fences.contains_key(&board) && self.board_fences.len() >= MAX_BOARDS {
+            return Err(Error::Busy);
+        }
+        if let Some(old) = self.board_fences.get(&board) {
+            old.current.store(false, Ordering::Release);
+        }
+        self.board_fences.insert(
+            board,
+            BoardFence {
+                epoch: self.next_board_epoch,
+                current: Arc::new(AtomicBool::new(true)),
+            },
+        );
+        self.next_board_epoch = next;
         self.pending.retain(|_, t| t.board != board);
+        Ok(())
     }
     pub fn expire(&mut self, now: Instant) {
         self.pending
@@ -348,7 +428,7 @@ impl Playback {
             self.cancel_pending(t);
             return Err(e);
         }
-        let result = self.ready(t, manager);
+        let result = self.ready(t, data, manager);
         if !matches!(result, Err(Error::Loading)) {
             self.cancel_pending(t);
         }
@@ -365,7 +445,10 @@ impl Playback {
         manager: &mut Manager,
         now: Instant,
     ) -> Result<(), Error> {
-        self.validate(ready.ticket, data, target, now, true)?;
+        if !ready.cancellation.load(Ordering::Acquire) {
+            return Err(Error::Stale);
+        }
+        self.validate(ready.ticket, data, target, now, false)?;
         if !manager.enabled {
             return Err(Error::Blocked);
         }
@@ -397,6 +480,7 @@ impl Playback {
             action: self.action,
             catalogue: data.revision,
             board_revision: revision,
+            board_epoch: self.board_epoch(board),
             board,
             captured_at: now,
         })
@@ -410,12 +494,13 @@ impl Playback {
             || from.window != self.window
             || from.action != self.action
             || now.checked_duration_since(from.captured_at).is_none_or(|age| age >= DEADLINE)
+            || from.board_epoch != self.board_epoch(from.board)
             || from.catalogue != data.revision
             || data.board(from.board).is_none_or(|b| b.revision != from.board_revision)
         {
             return Err(Error::Stale);
         }
-        self.cancel_board(from.board);
+        self.cancel_board(from.board, data)?;
         let items: Vec<_> = self
             .owned
             .iter()
