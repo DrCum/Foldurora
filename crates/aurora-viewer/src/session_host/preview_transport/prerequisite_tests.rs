@@ -117,12 +117,10 @@ fn preview_worker_capture_and_full_framing_queues_obey_seven_plus_one_mebibyte_p
         .unwrap();
     // One Policy is already queued. Fill all remaining metadata slots while
     // the renderer pool and the pixel writer retain their real allocations.
-    for request in 1..32 {
+    for _ in 1..32 {
         h.worker
             .queue_metadata(Metadata::Unavailable {
-                source: source(3),
-                connection: 8,
-                request,
+                claim: h.stamp.claim(),
                 reason: aurora_session::preview_wire::Unavailable::Busy,
             })
             .unwrap();
@@ -140,9 +138,7 @@ fn preview_worker_capture_and_full_framing_queues_obey_seven_plus_one_mebibyte_p
     // Metadata overflow fails closed and drops the one queued pixel allocation.
     assert!(matches!(
         h.worker.queue_metadata(Metadata::Unavailable {
-            source: source(3),
-            connection: 8,
-            request: 32,
+            claim: h.stamp.claim(),
             reason: aurora_session::preview_wire::Unavailable::Busy,
         }),
         Err(Error::Busy)

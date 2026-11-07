@@ -5,6 +5,7 @@ use aurora_session::preview_image::PreviewStamp;
 
 enum Publication {
     Renderer(CapturePublicationGuard),
+    Native(Box<super::super::preview_io::CapturePermitGuard>),
     // Codec/resource fixtures only. This is not a native/render permit and is
     // inaccessible outside this private test boundary.
     #[cfg(test)]
@@ -40,8 +41,25 @@ impl CapturedBody {
         }
         Ok(Self { frame, publication })
     }
+    pub(super) fn guarded(
+        stamp: PreviewStamp,
+        frame: CapturedViewport,
+        guard: Box<super::super::preview_io::CapturePermitGuard>,
+    ) -> Result<Self, Error> {
+        if !guard.accepts(stamp, &frame, std::time::Instant::now()) {
+            return Err(Error::Expired);
+        }
+        Self::checked(stamp, frame, Publication::Native(guard))
+    }
+    pub fn check(&self) -> Result<(), Error> {
+        if let Publication::Native(guard) = &self.publication {
+            return guard.transport_check();
+        }
+        if self.current() { Ok(()) } else { Err(Error::Expired) }
+    }
     pub fn current(&self) -> bool {
         match &self.publication {
+            Publication::Native(guard) => guard.current(std::time::Instant::now()),
             Publication::Renderer(guard) => guard.current() && guard.token() == self.frame.request().token(),
             #[cfg(test)]
             Publication::Fixture { token, current } => {

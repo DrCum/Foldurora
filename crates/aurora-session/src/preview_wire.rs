@@ -9,7 +9,7 @@ use crate::{PreviewRate, PreviewSize};
 use serde::{Deserialize, Serialize};
 use std::io::{self, Write};
 
-pub const VERSION: u16 = 2;
+pub const VERSION: u16 = 3;
 pub const MAX_METADATA_BYTES: usize = 4096;
 pub const HEADER_BYTES: usize = 48;
 pub const TAG_BYTES: usize = 32;
@@ -204,9 +204,7 @@ pub enum Metadata {
         demand: u64,
     },
     Unavailable {
-        source: PreviewSource,
-        connection: u64,
-        request: u64,
+        claim: CaptureClaim,
         reason: Unavailable,
     },
 }
@@ -230,13 +228,11 @@ impl Metadata {
     pub fn source(self) -> PreviewSource {
         match self {
             Self::Policy { policy, .. } => policy.source(),
-            Self::Capture(claim) => claim.source(),
+            Self::Capture(claim) | Self::Unavailable { claim, .. } => claim.source(),
             Self::Layout { layout, .. } => layout.source(),
-            Self::Invalidate { source, .. }
-            | Self::Demand { source, .. }
-            | Self::Stop { source, .. }
-            | Self::Stopped { source, .. }
-            | Self::Unavailable { source, .. } => source,
+            Self::Invalidate { source, .. } | Self::Demand { source, .. } | Self::Stop { source, .. } | Self::Stopped { source, .. } => {
+                source
+            }
             Self::CaptureStopped { source, .. } | Self::CaptureStopAck { source, .. } => source,
         }
     }
@@ -246,12 +242,11 @@ impl Metadata {
             | Self::Invalidate { connection, .. }
             | Self::Demand { connection, .. }
             | Self::Stop { connection, .. }
-            | Self::Stopped { connection, .. }
-            | Self::Unavailable { connection, .. } => connection,
+            | Self::Stopped { connection, .. } => connection,
             Self::Layout { connection, .. } | Self::CaptureStopped { connection, .. } | Self::CaptureStopAck { connection, .. } => {
                 connection
             }
-            Self::Capture(claim) => claim.connection(),
+            Self::Capture(claim) | Self::Unavailable { claim, .. } => claim.connection(),
         }
     }
     pub fn direction(self) -> Direction {
@@ -282,10 +277,7 @@ impl Metadata {
                 Ok(())
             }
             Self::CaptureStopAck { pixel_epoch: 0, .. } | Self::CaptureStopAck { stop: 0, .. } => Err(WireError::Sequence),
-            Self::Demand { demand: 0, .. }
-            | Self::Stop { demand: 0, .. }
-            | Self::Stopped { demand: 0, .. }
-            | Self::Unavailable { request: 0, .. } => Err(WireError::Sequence),
+            Self::Demand { demand: 0, .. } | Self::Stop { demand: 0, .. } | Self::Stopped { demand: 0, .. } => Err(WireError::Sequence),
             _ => Ok(()),
         }
     }

@@ -8,6 +8,8 @@ use ring::{
     rand::{SecureRandom, SystemRandom},
 };
 
+// Authentication schema remains V2; only image data framing/schema advances.
+const AUTH_VERSION: u16 = 2;
 const AUTH_DOMAIN: &[u8] = b"aurora-session-preview/auth/v1";
 const DATA_DOMAIN: &[u8] = b"aurora-session-preview/data/v1";
 const AUTH_MILLIS: u64 = 1000;
@@ -42,7 +44,7 @@ impl std::fmt::Debug for AuthBytes {
 fn envelope(scope: Scope, stage: u8, value: &[u8]) -> AuthBytes {
     let mut bytes = [0; AUTH_MAX];
     bytes[..4].copy_from_slice(b"APAU");
-    bytes[4..6].copy_from_slice(&VERSION.to_be_bytes());
+    bytes[4..6].copy_from_slice(&AUTH_VERSION.to_be_bytes());
     bytes[6] = scope.lane as u8;
     bytes[7] = stage;
     bytes[8..16].copy_from_slice(&scope.connection.to_be_bytes());
@@ -57,7 +59,7 @@ fn check(scope: Scope, stage: u8, bytes: &[u8], len: usize) -> Result<&[u8], Err
     if !scope.valid()
         || bytes.len() != 24 + len
         || &bytes[..4] != b"APAU"
-        || bytes[4..6] != VERSION.to_be_bytes()
+        || bytes[4..6] != AUTH_VERSION.to_be_bytes()
         || bytes[6] != scope.lane as u8
         || bytes[7] != stage
         || bytes[8..16] != scope.connection.to_be_bytes()
@@ -70,12 +72,20 @@ fn check(scope: Scope, stage: u8, bytes: &[u8], len: usize) -> Result<&[u8], Err
 
 /// Every proof/derived key binds full installation/host/worker/session/account/
 /// grid/generation/lease, the role, connection generation and both fresh nonces.
-fn context(mut context: hmac::Context, domain: &[u8], role: &[u8], scope: Scope, server: &[u8; 32], client: &[u8; 32]) -> hmac::Context {
+fn context(
+    mut context: hmac::Context,
+    domain: &[u8],
+    version: u16,
+    role: &[u8],
+    scope: Scope,
+    server: &[u8; 32],
+    client: &[u8; 32],
+) -> hmac::Context {
     let worker = scope.source.worker();
     let session = scope.source.session();
     for part in [
         domain,
-        &VERSION.to_be_bytes(),
+        &version.to_be_bytes(),
         role,
         &[scope.lane as u8],
         &scope.connection.to_be_bytes(),
@@ -96,7 +106,7 @@ fn context(mut context: hmac::Context, domain: &[u8], role: &[u8], scope: Scope,
     context
 }
 fn proof(secret: &PreviewSecret, role: u8, scope: Scope, server: &[u8; 32], client: &[u8; 32]) -> [u8; TAG_BYTES] {
-    let tag = context(secret.context(), AUTH_DOMAIN, &[role], scope, server, client).sign();
+    let tag = context(secret.context(), AUTH_DOMAIN, AUTH_VERSION, &[role], scope, server, client).sign();
     let mut bytes = [0; TAG_BYTES];
     bytes.copy_from_slice(tag.as_ref());
     bytes
@@ -104,7 +114,7 @@ fn proof(secret: &PreviewSecret, role: u8, scope: Scope, server: &[u8; 32], clie
 fn verifies(secret: &PreviewSecret, role: u8, scope: Scope, server: &[u8; 32], client: &[u8; 32], tag: &[u8]) -> bool {
     // The outer HMAC makes ring::hmac::verify available for constant-time
     // verification of the domain/role-separated incremental proof digest.
-    let digest = context(secret.context(), AUTH_DOMAIN, &[role], scope, server, client).sign();
+    let digest = context(secret.context(), AUTH_DOMAIN, AUTH_VERSION, &[role], scope, server, client).sign();
     secret.verifies(digest.as_ref(), tag)
 }
 fn signed_proof(secret: &PreviewSecret, role: u8, scope: Scope, server: &[u8; 32], client: &[u8; 32]) -> [u8; TAG_BYTES] {
@@ -226,7 +236,16 @@ pub(crate) struct Keys {
 impl Keys {
     fn new(scope: Scope, direction: Direction, secret: &PreviewSecret, server: &[u8; 32], client: &[u8; 32]) -> Self {
         let derive = |purpose| {
-            let tag = context(secret.context(), DATA_DOMAIN, &[purpose, direction as u8], scope, server, client).sign();
+            let tag = context(
+                secret.context(),
+                DATA_DOMAIN,
+                VERSION,
+                &[purpose, direction as u8],
+                scope,
+                server,
+                client,
+            )
+            .sign();
             hmac::Key::new(hmac::HMAC_SHA256, tag.as_ref())
         };
         Self {
@@ -277,6 +296,9 @@ pub(crate) struct Authenticated {
     pub(super) receive: Keys,
 }
 impl Authenticated {
+    pub fn scope(&self) -> Scope {
+        self.scope
+    }
     fn new(scope: Scope, side: Side, secret: &PreviewSecret, server: &[u8; 32], client: &[u8; 32]) -> Self {
         Self {
             scope,

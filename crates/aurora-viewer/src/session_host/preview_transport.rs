@@ -14,8 +14,8 @@ use std::io;
 
 pub(super) use super::preview_bootstrap::PreviewSecret;
 pub(super) use admission::{Admissions, RoundRobin};
-pub(super) use auth::{HostHandshake, WorkerHandshake};
-pub(super) use stream::{AdmittedPixels, Pair, Received, TickBudget, UnadmittedPixels};
+pub(super) use auth::{Authenticated, HostHandshake, WorkerHandshake};
+pub(super) use stream::{AdmittedPixels, Pair, Received, TickBudget, UnadmittedPixels, worker_storage_ceiling};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Error {
@@ -28,6 +28,7 @@ pub(crate) enum Error {
     Busy,
     Closed,
     Expired,
+    CaptureRevoked,
     Io(io::ErrorKind),
 }
 

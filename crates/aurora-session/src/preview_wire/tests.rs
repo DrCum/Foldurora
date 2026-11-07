@@ -114,9 +114,7 @@ fn preview_wire_maximal_closed_metadata_and_full_stamp_fit_fixed_storage_without
             demand: u64::MAX,
         },
         Metadata::Unavailable {
-            source: source(),
-            connection: u64::MAX,
-            request: u64::MAX,
+            claim,
             reason: Unavailable::Unsupported,
         },
     ];
@@ -196,15 +194,14 @@ fn preview_wire_metadata_rejects_unknown_generic_payloads_binding_directions_and
         })
         .is_err()
     );
-    assert!(
-        encode_metadata(Metadata::Unavailable {
-            source: source(),
-            connection: 1,
-            request: 0,
-            reason: Unavailable::Busy
-        })
-        .is_err()
-    );
+    let mut bad = serde_json::to_value(Metadata::Unavailable {
+        claim: claim(PreviewSize::Small),
+        reason: Unavailable::Busy,
+    })
+    .unwrap();
+    bad["data"]["claim"]["request"] = 0.into();
+    let bytes = serde_json::to_vec(&bad).unwrap();
+    assert!(decode_metadata(header(Lane::Metadata, Direction::WorkerToHost, &bytes, 0), &bytes).is_err());
 }
 
 #[test]
@@ -313,7 +310,7 @@ fn preview_wire_hello_is_fixed_untrusted_worker_only_and_rejects_every_partial_s
 }
 
 #[test]
-fn preview_wire_v2_role_epoch_layout_and_capture_stop_are_closed_and_direction_bound() {
+fn preview_wire_v3_role_epoch_layout_and_capture_stop_are_closed_and_direction_bound() {
     let layout = PreviewLayout::new(
         source(),
         policy().epochs(),
@@ -386,4 +383,24 @@ fn preview_wire_v2_role_epoch_layout_and_capture_stop_are_closed_and_direction_b
     assert_eq!(Header::decode(&v1), Err(WireError::Version));
     assert!(Header::new(Lane::Metadata, Direction::WorkerToHost, 1, 2, 1, 10, 0).is_err());
     assert!(Header::new(Lane::Pixels, Direction::WorkerToHost, 1, 0, 1, 10, 64).is_err());
+}
+
+#[test]
+fn preview_wire_v3_unavailable_retains_full_claim_and_rejects_old_request_only_shape() {
+    let captured = claim(PreviewSize::Small);
+    let unavailable = Metadata::Unavailable {
+        claim: captured,
+        reason: Unavailable::Busy,
+    };
+    let encoded = encode_metadata(unavailable).unwrap();
+    let h = header(Lane::Metadata, Direction::WorkerToHost, encoded.as_slice(), 0);
+    assert_eq!(decode_metadata(h, encoded.as_slice()).unwrap(), unavailable);
+    let old = serde_json::json!({"type":"unavailable","data":{"source":captured.source(),"connection":captured.connection(),"request":captured.request(),"reason":"busy"}});
+    let old = serde_json::to_vec(&old).unwrap();
+    assert!(decode_metadata(header(Lane::Metadata, Direction::WorkerToHost, &old, 0), &old).is_err());
+    for version in [1u16, 2] {
+        let mut bytes = h.encode();
+        bytes[4..6].copy_from_slice(&version.to_be_bytes());
+        assert_eq!(Header::decode(&bytes), Err(WireError::Version));
+    }
 }

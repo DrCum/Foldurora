@@ -125,6 +125,16 @@
   enablement or inactive rendering is shipped. Future service integration must implement
   exact stop/ACK/single-worker-close ordering, source/view/intent fences and the
   host 32/24/8 MiB plus worker 7/1 MiB partitions; auth loss purges history.
+  - 🔧 Disabled IO core increment: actual bounded loopback host/worker owners,
+    strict full-source/lease authentication, metadata-first independent roles,
+    zero-copy moved capture sender, synchronous capture/retention barriers,
+    expected stop/ACK/single-worker-close, fresh role reattachment and bounded
+    asynchronous teardown. Image V3 unavailable outcomes bind full claims;
+    auth V2/Hello V1/control/chat remain unchanged, with no old-shape fallback.
+    Checked pixel preparation callbacks reject mid-copy source revocation.
+    Owned-loopback and fake mailbox/clock/fragment tests
+    are authored but unrun. Both service and transport stay cfg(test); no App,
+    Broker scheduling, bootstrap endpoint or UI/capture enablement is connected.
 
 - 🔧 Monitor image prerequisites (2026-11-07; no issue): pure bounded capture
   geometry, callback/request identities and byte credits; exact source/policy

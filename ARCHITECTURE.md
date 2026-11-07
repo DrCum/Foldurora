@@ -206,7 +206,7 @@ constructing a host controller or opening preference storage. Its private X11
 driver contract is in `docs/TESTING.md`; it does not establish native delivery.
 
 `aurora-session::preview_wire` adds a closed last-active image wire prerequisite:
-fixed 48-byte V2 headers and a fixed 96-byte untrusted worker-only Hello, bounded
+fixed 48-byte V3 headers and a fixed 96-byte untrusted worker-only Hello, bounded
 4096-byte strict metadata, exact fitted raw RGBA layouts and separate Metadata/Pixels roles. Pixels never enter serde.
 `session_host/preview_transport` is registered only under cfg(test): fresh mutual
 challenge proofs and direction/lane/source/connection-separated keys authenticate
@@ -270,10 +270,47 @@ Every partial write rechecks that original publication lease. Resource/codec
 fixtures use a private predicate only; they do not prove native/render permits.
 Fresh pixel-role attachment requires mutual authentication at a strictly higher
 role epoch with a new validity Arc; the retired Arc cannot become current again.
-V2 Layout/CaptureStopped/CaptureStopAck metadata is closed and source-qualified.
+V3 Layout/CaptureStopped/CaptureStopAck metadata is closed and source-qualified.
 The physical stop/ACK/close coordinator remains future service work: only the
 worker may initiate pixel close after the exact authenticated ACK, while privacy
 metadata continues independently. No endpoint is enabled by these DTOs.
+
+`session_host/preview_io` is also cfg(test)-only. It contains actual owned
+loopback listener/connect/auth/poll threads and typed HostChannel/WorkerChannel
+APIs, without App/Broker callers. Startup binds/connects off-thread; no source
+means no connect. Fixed full-source control permits precede challenge and final
+registration. At most ten pending handshakes/ten roles/five sources, absolute
+one-second deadlines, bounded mailboxes, per-source64KiB/global256KiB ticks and
+rotating pixel service bound progress. Every source's metadata is polled before
+any pixels. Existing libc/WinSock dependencies supply nonblocking connect.
+A single host/worker owner per process bounds thread/framing counts; Drop only
+revokes/wakes, while an explicit ended latch follows actual thread teardown.
+
+The IO core consumes readonly native/control/physical witnesses, never derives
+native permission from policy booleans. Capture fences bind the exact issued
+claim, connection/pixel role and original renderer deadline; per-operation checks
+also see source/connection retirement. Host handoff retains the original accepted
+capture proof through final owned admission; a fresh source lease cannot replace
+a revoked capture proof. Already-admitted RetainedFrame drawing uses current
+retention/source/model validity without an Active/capture requirement. Before-
+GUI view generations, Broker joins/scheduling and real native guard minting remain
+separate integration work. Private synthetic fixtures prove IO/codec/resources,
+not native authority or GPU behavior. The source author runs no socket fixtures.
+
+The host raw ImageBudget is process-global32MiB, shared across service restarts
+and held generations. UI24MiB and service8MiB remain reserved. Worker send moves
+the renderer allocation; no receive image pool or extra RGBA copy exists. An
+expected capture suspension drops new work immediately, keeps descriptors open,
+and only the worker physically closes after exact authenticated stop ACK; early
+EOF or ACK timeout faults retention. Reattachment requires a higher fresh role
+and permanently retired old validity. No new command/capture is replayed. Image-data V3 Unavailable carries the full
+immutable CaptureClaim, so request1 from an old model owner/demand/policy cannot
+clear a recreated owner's request1. Authentication envelope/proofs stay V2,
+Hello stays V1, and control/chat versions are unchanged. There is no old-shape
+fallback. RetainedFrame::with_pixels checks source/retention/model validity
+before and after a private preparation callback and anchors model-clock expiry
+to actual local elapsed time; the later UI must still fence view binding and
+publication and reserve its own credited copies.
 
 PreviewLayout and narrow CaptureClaim accessors expose checked geometry/policy
 agreement without minting capture authority. SourceImages::sync_observed uses

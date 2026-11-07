@@ -19,8 +19,11 @@ const METADATA_QUEUE: usize = 32;
 
 #[cfg(test)]
 pub(super) fn worker_framing_bound(pair: &Pair) -> (usize, [usize; 2], [usize; 2]) {
-    let queued = [pair.metadata.outgoing.len(), pair.pixels.outgoing.len()];
-    let capacities = [pair.metadata.outgoing.capacity(), pair.pixels.outgoing.capacity()];
+    let queued = [pair.metadata.outgoing.len(), pair.pixels.as_ref().map_or(0, |p| p.outgoing.len())];
+    let capacities = [
+        pair.metadata.outgoing.capacity(),
+        pair.pixels.as_ref().map_or(0, |p| p.outgoing.capacity()),
+    ];
     // Actual allocated deque capacities (not just logical lengths), current
     // receive storage and conservative transient output/auth/command reserves.
     // Each role consumes at most ROLE_OPERATIONS reads, hence output <=2*that;
@@ -32,6 +35,16 @@ pub(super) fn worker_framing_bound(pair: &Pair) -> (usize, [usize; 2], [usize; 2
         + 4 * std::mem::size_of::<Metadata>()
         + 4 * 4096;
     (bytes, queued, capacities)
+}
+
+#[cfg(test)]
+pub(crate) fn worker_storage_ceiling() -> usize {
+    std::mem::size_of::<Pair>()
+        + (METADATA_QUEUE + 4) * std::mem::size_of::<Outgoing>()
+        + 2 * ROLE_OPERATIONS * std::mem::size_of::<Received>()
+        + 6 * 96
+        + 4 * 4096
+        + 4 * std::mem::size_of::<Metadata>()
 }
 
 /// One shared tick budget across all <=5 source pairs. Start at a rotating
@@ -49,6 +62,12 @@ impl TickBudget {
     }
     pub fn remaining_bytes(&self) -> usize {
         self.bytes
+    }
+    pub fn external(&mut self, bytes: usize, operations: usize) -> (usize, usize) {
+        let granted = (bytes.min(self.bytes), operations.min(self.operations));
+        self.bytes -= granted.0;
+        self.operations -= granted.1;
+        granted
     }
 }
 struct Allowance<'a> {
@@ -108,6 +127,9 @@ impl UnadmittedPixels {
         let mut pixels = Self::blank(stamp, budget)?;
         pixels.bytes.copy_from_slice(input);
         Ok(pixels)
+    }
+    pub fn claim(&self) -> aurora_session::preview_image::CaptureClaim {
+        self.stamp.claim()
     }
     pub fn transport_current(&self) -> bool {
         self.validity
@@ -187,10 +209,16 @@ impl OutgoingPixels {
             Self::Captured(frame) => frame.bytes(),
         }
     }
-    fn current(&self) -> bool {
+    fn check(&self) -> Result<(), Error> {
         match self {
-            Self::Owned(pixels) => pixels.transport_current(),
-            Self::Captured(frame) => frame.current(),
+            Self::Owned(pixels) => {
+                if pixels.transport_current() {
+                    Ok(())
+                } else {
+                    Err(Error::Expired)
+                }
+            }
+            Self::Captured(frame) => frame.check(),
         }
     }
 }
@@ -210,8 +238,8 @@ impl Outgoing {
         }
     }
     fn write(&mut self, io: &mut impl Write, keys: &Keys, now: u64, allowance: &mut Allowance<'_>) -> Result<bool, Error> {
-        if self.pixels.as_ref().is_some_and(|pixels| !pixels.current()) {
-            return Err(Error::Expired);
+        if let Some(pixels) = &self.pixels {
+            pixels.check()?;
         }
         if self
             .began
@@ -396,6 +424,7 @@ struct Endpoint {
     outgoing: VecDeque<Outgoing>,
     sent: u64,
     received: u64,
+    flushed: u64,
     closed: bool,
 }
 impl Endpoint {
@@ -406,6 +435,7 @@ impl Endpoint {
             outgoing: VecDeque::new(),
             sent: 0,
             received: 0,
+            flushed: 0,
             closed: false,
         }
     }
@@ -447,6 +477,7 @@ impl Endpoint {
         now: u64,
         allowance: &mut Allowance<'_>,
         output: &mut Vec<Received>,
+        source_guard: Option<&super::super::preview_io::guards::IoSourceGuard>,
     ) -> Result<(), Error> {
         if self.closed {
             return Err(Error::Closed);
@@ -468,6 +499,10 @@ impl Endpoint {
         let mut read = true;
         let mut write = true;
         while (read || write) && allowance.operation(&mut operations) {
+            if source_guard.is_some_and(|guard| !guard.current()) {
+                self.close();
+                return Err(Error::Expired);
+            }
             if read {
                 match self.incoming.read(io, &self.auth, budget, self.received, now, allowance) {
                     Ok(Some(packet)) => {
@@ -487,6 +522,7 @@ impl Endpoint {
                 if let Some(frame) = self.outgoing.front_mut() {
                     match frame.write(io, &self.auth.send, now, allowance) {
                         Ok(true) => {
+                            self.flushed = frame.header.sequence();
                             self.outgoing.pop_front();
                         }
                         Ok(false) => {}
@@ -511,22 +547,22 @@ impl Endpoint {
 /// required. Final display/native authority still belongs to SourceImages.
 pub(crate) struct Pair {
     metadata: Endpoint,
-    pixels: Endpoint,
+    pixels: Option<Endpoint>,
+    pixel_epoch: u64,
     budget: Option<ImageBudget>,
     validity: Arc<AtomicU64>,
     policy: Option<PreviewPolicy>,
     now: u64,
     began: Option<u64>,
     policy_seen: Option<u64>,
+    source_guard: Option<super::super::preview_io::guards::IoSourceGuard>,
 }
 impl Pair {
     pub fn new(metadata: Authenticated, pixels: Authenticated, budget: ImageBudget) -> Result<Self, Error> {
         Self::from_roles(metadata, pixels, Some(budget))
     }
     fn from_roles(metadata: Authenticated, pixels: Authenticated, budget: Option<ImageBudget>) -> Result<Self, Error> {
-        if metadata.scope.lane != Lane::Metadata
-            || pixels.scope.lane != Lane::Pixels
-            || !metadata.scope.valid()
+        if pixels.scope.lane != Lane::Pixels
             || !pixels.scope.valid()
             || metadata.side != pixels.side
             || metadata.scope.source != pixels.scope.source
@@ -534,20 +570,57 @@ impl Pair {
         {
             return Err(Error::Binding);
         }
+        let mut pair = Self::metadata(metadata, budget)?;
+        pair.pixel_epoch = pixels.scope.role_epoch;
+        pair.pixels = Some(Endpoint::new(pixels));
+        Ok(pair)
+    }
+    /// Metadata can authenticate while parked, before any pixel connection.
+    pub fn metadata(metadata: Authenticated, budget: Option<ImageBudget>) -> Result<Self, Error> {
+        if metadata.scope.lane != Lane::Metadata || !metadata.scope.valid() || (metadata.side == Side::Host) != budget.is_some() {
+            return Err(Error::Binding);
+        }
         Ok(Self {
             metadata: Endpoint::new(metadata),
-            pixels: Endpoint::new(pixels),
+            pixels: None,
+            pixel_epoch: 0,
             budget,
             validity: Arc::new(AtomicU64::new(1)),
             policy: None,
             now: 0,
             began: None,
             policy_seen: None,
+            source_guard: None,
         })
     }
-    fn retire_pixels(&mut self) {
+    pub fn set_source_guard(&mut self, guard: super::super::preview_io::guards::IoSourceGuard) -> Result<(), Error> {
+        if guard.control.source != self.metadata.auth.scope.source || !guard.current() {
+            self.close();
+            return Err(Error::Binding);
+        }
+        self.source_guard = Some(guard);
+        Ok(())
+    }
+    pub fn metadata_queued(&self) -> u64 {
+        self.metadata.sent
+    }
+    pub fn metadata_flushed(&self) -> u64 {
+        self.metadata.flushed
+    }
+    pub fn pixel_pending(&self) -> bool {
+        self.pixels.as_ref().is_some_and(|p| !p.outgoing.is_empty())
+    }
+    pub fn has_pixels(&self) -> bool {
+        self.pixels.is_some()
+    }
+    pub fn suspend_pixels(&mut self) {
         self.validity.store(0, Ordering::Release);
-        self.pixels.close();
+        if let Some(mut pixel) = self.pixels.take() {
+            pixel.close();
+        }
+    }
+    fn retire_pixels(&mut self) {
+        self.suspend_pixels();
     }
     pub fn close(&mut self) {
         self.retire_pixels();
@@ -557,10 +630,7 @@ impl Pair {
         match metadata {
             Metadata::Invalidate { .. } => self.retire_pixels(),
             Metadata::CaptureStopped { policy, pixel_epoch, .. } => {
-                // A duplicate stop for an older authenticated role cannot
-                // retire a replacement. The future IO stop coordinator must
-                // also match the exact stop ID before any physical close/ACK.
-                if pixel_epoch != self.pixels.auth.scope.role_epoch {
+                if pixel_epoch != self.pixel_epoch {
                     return Ok(());
                 }
                 return self.metadata_effect(Metadata::Policy {
@@ -608,25 +678,27 @@ impl Pair {
         self.metadata_effect(metadata)?;
         let result = wire::encode_metadata(metadata)
             .map_err(Error::from)
-            .and_then(|metadata| self.metadata.enqueue(metadata, None));
+            .and_then(|m| self.metadata.enqueue(m, None));
         if result.is_err() {
             self.close();
         }
         result
     }
     pub fn queue_pixels(&mut self, pixels: UnadmittedPixels) -> Result<(), Error> {
-        if pixels.stamp.claim().source() != self.pixels.auth.scope.source
-            || pixels.stamp.claim().connection() != self.pixels.auth.scope.connection
+        if pixels.stamp.claim().source() != self.metadata.auth.scope.source
+            || pixels.stamp.claim().connection() != self.metadata.auth.scope.connection
             || !pixels.transport_current()
         {
             self.close();
             return Err(Error::Binding);
         }
-        if self.pixels.auth.side != Side::Worker {
+        if self.metadata.auth.side != Side::Worker {
             self.close();
             return Err(Error::Direction);
         }
         self.pixels
+            .as_mut()
+            .ok_or(Error::Closed)?
             .enqueue(wire::encode_stamp(pixels.stamp)?, Some(OutgoingPixels::Owned(pixels)))
     }
     pub fn queue_captured(
@@ -637,18 +709,28 @@ impl Pair {
     ) -> Result<(), Error> {
         self.queue_captured_body(stamp, CapturedBody::new(stamp, frame, guard)?)
     }
+    pub fn queue_guarded_capture(
+        &mut self,
+        stamp: PreviewStamp,
+        frame: aurora_render::viewport_capture::CapturedViewport,
+        guard: Box<super::super::preview_io::CapturePermitGuard>,
+    ) -> Result<(), Error> {
+        self.queue_captured_body(stamp, CapturedBody::guarded(stamp, frame, guard)?)
+    }
     fn queue_captured_body(&mut self, stamp: PreviewStamp, frame: CapturedBody) -> Result<(), Error> {
-        if self.pixels.auth.side != Side::Worker {
+        if self.metadata.auth.side != Side::Worker {
             return Err(Error::Direction);
         }
-        if stamp.claim().source() != self.pixels.auth.scope.source || stamp.claim().connection() != self.pixels.auth.scope.connection {
+        if stamp.claim().source() != self.metadata.auth.scope.source || stamp.claim().connection() != self.metadata.auth.scope.connection {
             return Err(Error::Binding);
         }
         self.pixels
+            .as_mut()
+            .ok_or(Error::Closed)?
             .enqueue(wire::encode_stamp(stamp)?, Some(OutgoingPixels::Captured(frame)))
     }
     #[cfg(test)]
-    pub(super) fn queue_captured_fixture(
+    pub(crate) fn queue_captured_fixture(
         &mut self,
         stamp: PreviewStamp,
         frame: aurora_render::viewport_capture::CapturedViewport,
@@ -656,8 +738,6 @@ impl Pair {
     ) -> Result<(), Error> {
         self.queue_captured_body(stamp, CapturedBody::fixture(stamp, frame, current)?)
     }
-    /// The worker has no image receive allocator and creates no second image
-    /// pool: outgoing captured bytes retain the renderer's original credit.
     pub fn worker(metadata: Authenticated, pixels: Authenticated) -> Result<Self, Error> {
         if metadata.side != Side::Worker {
             return Err(Error::Direction);
@@ -674,20 +754,76 @@ impl Pair {
         {
             return Err(Error::Binding);
         }
-        if !self.pixels.closed {
+        if self.pixels.is_some() {
             return Err(Error::Busy);
         }
-        if auth.scope.role_epoch <= self.pixels.auth.scope.role_epoch || self.policy.is_none_or(|policy| !policy.access().capture_active) {
+        if auth.scope.role_epoch <= self.pixel_epoch || self.policy.is_none_or(|p| !p.access().capture_active) {
             return Err(Error::Sequence);
         }
+        self.pixel_epoch = auth.scope.role_epoch;
         self.validity = Arc::new(AtomicU64::new(1));
-        self.pixels = Endpoint::new(auth);
+        self.pixels = Some(Endpoint::new(auth));
         Ok(())
     }
     pub fn poll(
         &mut self,
         metadata: &mut (impl Read + Write),
         pixels: &mut (impl Read + Write),
+        now: u64,
+        tick: &mut TickBudget,
+    ) -> Result<Vec<Received>, Error> {
+        self.poll_roles(metadata, Some(pixels), now, tick)
+    }
+    /// Service host first polls every source's metadata, then rotates pixels
+    /// with the remainder of each source's64KiB allowance.
+    pub fn poll_pixels_only<T: Read + Write>(
+        &mut self,
+        stream: &mut T,
+        now: u64,
+        tick: &mut TickBudget,
+        max_bytes: usize,
+    ) -> Result<Vec<Received>, Error> {
+        if now < self.now || self.metadata.closed {
+            self.close();
+            return Err(Error::Expired);
+        }
+        self.now = now;
+        if self.metadata.auth.side == Side::Host && self.policy_seen.is_none() {
+            return Err(Error::Binding);
+        }
+        let mut output = Vec::new();
+        let mut allowance = Allowance {
+            tick,
+            bytes: max_bytes.min(SOURCE_BYTES),
+        };
+        let Some(endpoint) = &mut self.pixels else { return Ok(output) };
+        if let Err(error) = endpoint.poll(
+            stream,
+            self.budget.as_ref(),
+            now,
+            &mut allowance,
+            &mut output,
+            self.source_guard.as_ref(),
+        ) {
+            if error == Error::CaptureRevoked {
+                self.retire_pixels();
+            } else {
+                self.close();
+            }
+            return Err(error);
+        }
+        let epoch = self.validity.load(Ordering::Acquire);
+        for packet in &mut output {
+            if let Received::UnadmittedPixels(pixels) = packet {
+                pixels.validity = Some((self.validity.clone(), epoch));
+            }
+        }
+        Ok(output)
+    }
+    pub fn poll_roles<T: Read + Write>(
+        &mut self,
+        metadata: &mut (impl Read + Write),
+        pixels: Option<&mut T>,
         now: u64,
         tick: &mut TickBudget,
     ) -> Result<Vec<Received>, Error> {
@@ -699,31 +835,48 @@ impl Pair {
         let began = *self.began.get_or_insert(now);
         let mut allowance = Allowance { tick, bytes: SOURCE_BYTES };
         let mut output = Vec::new();
-        if let Err(error) = self.metadata.poll(metadata, self.budget.as_ref(), now, &mut allowance, &mut output) {
+        if let Err(error) = self.metadata.poll(
+            metadata,
+            self.budget.as_ref(),
+            now,
+            &mut allowance,
+            &mut output,
+            self.source_guard.as_ref(),
+        ) {
             self.close();
             return Err(error);
         }
         for packet in &output {
             if let Received::Metadata(metadata) = packet {
                 if matches!(metadata, Metadata::Policy { .. })
-                    || matches!(metadata,Metadata::CaptureStopped {pixel_epoch,..} if *pixel_epoch==self.pixels.auth.scope.role_epoch)
+                    || matches!(metadata,Metadata::CaptureStopped{pixel_epoch,..} if *pixel_epoch==self.pixel_epoch)
                 {
                     self.policy_seen = Some(now);
                 }
                 self.metadata_effect(*metadata)?;
             }
         }
-        // A quiet-but-open metadata socket is not fresh privacy authority.
-        // Workers publish Policy independently; host pixels wait for it and
-        // retire after one second without a complete authenticated update.
         if self.metadata.auth.side == Side::Host && now.saturating_sub(self.policy_seen.unwrap_or(began)) >= PARTIAL_MILLIS {
             self.close();
             return Err(Error::Expired);
         }
-        if !self.pixels.closed && (self.metadata.auth.side == Side::Worker || self.policy_seen.is_some()) {
+        if (self.metadata.auth.side == Side::Worker || self.policy_seen.is_some())
+            && let (Some(endpoint), Some(stream)) = (&mut self.pixels, pixels)
+        {
             let before = output.len();
-            if let Err(error) = self.pixels.poll(pixels, self.budget.as_ref(), now, &mut allowance, &mut output) {
-                self.close();
+            if let Err(error) = endpoint.poll(
+                stream,
+                self.budget.as_ref(),
+                now,
+                &mut allowance,
+                &mut output,
+                self.source_guard.as_ref(),
+            ) {
+                if error == Error::CaptureRevoked {
+                    self.retire_pixels();
+                } else {
+                    self.close();
+                }
                 return Err(error);
             }
             let epoch = self.validity.load(Ordering::Acquire);

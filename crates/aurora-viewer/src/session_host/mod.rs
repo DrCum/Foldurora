@@ -23,6 +23,8 @@ pub(crate) mod profile;
 mod review;
 // Unused prerequisite only; native IO/bootstrap/authority integration is absent.
 #[cfg(test)]
+mod preview_io;
+#[cfg(test)]
 mod preview_transport;
 // Dormant CPU private-image lifetime prerequisite; no native monitor caller.
 #[cfg(test)]

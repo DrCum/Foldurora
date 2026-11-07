@@ -1,0 +1,258 @@
+//! Small caller/IO mailboxes. No codec, socket, MAC or image-size allocation
+//! occurs under these locks. Monotonic connection gates outlive moved handles.
+use super::*;
+use aurora_render::viewport_capture::CapturedViewport;
+use std::collections::VecDeque;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+
+#[derive(Clone)]
+pub(crate) struct SourceLease {
+    pub control: ControlGuard,
+}
+#[derive(Clone)]
+pub(crate) struct WorkerState {
+    pub policy: PreviewPolicy,
+    pub layout: Option<PreviewLayout>,
+    pub retention: SourceRetentionGuard,
+    pub capture: Option<EpochFence>,
+    pub native_observed_at: Instant,
+}
+impl WorkerState {
+    pub(super) fn capture_current(&self, now: Instant) -> bool {
+        self.current(now) && self.policy.access().capture_active && self.capture.as_ref().is_some_and(|c| c.current())
+    }
+    pub(super) fn current(&self, now: Instant) -> bool {
+        self.native_observed_at
+            .checked_add(DEADLINE)
+            .is_some_and(|end| self.retention.native_deadline() <= end)
+            && self.native_observed_at <= now
+            && now.duration_since(self.native_observed_at) < DEADLINE
+            && self.retention.current(now)
+            && self.policy == self.retention.policy
+            && self.layout.is_none_or(|layout| layout.matches_policy(self.policy))
+    }
+}
+pub(super) enum FrameOffer {
+    Native {
+        guard: Box<CapturePermitGuard>,
+        stamp: PreviewStamp,
+        frame: CapturedViewport,
+    },
+    // Private codec/resource fixture only; not a renderer/native authority.
+    #[cfg(test)]
+    Fixture {
+        token: ConnectionToken,
+        stamp: PreviewStamp,
+        frame: CapturedViewport,
+        current: Arc<AtomicBool>,
+    },
+}
+#[derive(Clone)]
+pub(crate) struct ReceivedCommand {
+    pub token: ConnectionToken,
+    pub received_at: Instant,
+    pub command: PreviewCommand,
+}
+pub(super) struct CommandOffer {
+    pub token: ConnectionToken,
+    pub command: PreviewCommand,
+    pub capture: Option<CaptureControlGuard>,
+}
+pub(super) enum Outcome {
+    Unavailable {
+        token: ConnectionToken,
+        claim: Box<CaptureClaim>,
+        reason: Unavailable,
+    },
+    Stopped {
+        token: ConnectionToken,
+        demand: u64,
+    },
+}
+pub(super) struct WorkerMailbox {
+    pub identity: WorkerIdentity,
+    pub lease: u64,
+    pub source: Option<SourceLease>,
+    pub state: Option<WorkerState>,
+    pub frame: Option<FrameOffer>,
+    pub commands: VecDeque<ReceivedCommand>,
+    pub outcomes: VecDeque<Outcome>,
+    pub token: Option<ConnectionToken>,
+    pub revision: u64,
+}
+impl WorkerMailbox {
+    pub fn new(identity: WorkerIdentity, lease: u64) -> Self {
+        Self {
+            identity,
+            lease,
+            source: None,
+            state: None,
+            frame: None,
+            commands: VecDeque::with_capacity(QUEUE),
+            outcomes: VecDeque::with_capacity(QUEUE),
+            token: None,
+            revision: 1,
+        }
+    }
+    pub fn accepts(&self, source: PreviewSource) -> bool {
+        source.worker() == self.identity && source.lease_epoch() == self.lease
+    }
+    pub fn reset(&mut self) {
+        self.revision = self.revision.checked_add(1).unwrap_or(0);
+        self.state = None;
+        self.frame = None;
+        self.commands.clear();
+        self.outcomes.clear();
+        self.token = None;
+        if self.revision == 0 {
+            self.source = None;
+        }
+    }
+}
+#[derive(Clone)]
+pub(crate) struct HostPermit {
+    pub source: PreviewSource,
+    pub secret: PreviewSecret,
+    pub control: ControlGuard,
+    pub registration: u64,
+}
+impl HostPermit {
+    pub(super) fn current(&self, now: Instant) -> bool {
+        self.source == self.control.source && self.control.current(now)
+    }
+}
+/// Body-free terminal/availability state. Source identity is explicit; labels
+/// never authorize a role or select a replacement worker.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Status {
+    Connecting,
+    Metadata,
+    Pixels,
+    CaptureStopped,
+    Fault,
+    Stopped,
+}
+#[derive(Clone)]
+pub(crate) struct Observation {
+    pub token: ConnectionToken,
+    pub policy: Option<PreviewPolicy>,
+    pub policy_received_at: Option<Instant>,
+    pub layout: Option<PreviewLayout>,
+    pub status: Status,
+    pub stopped_demand: Option<u64>,
+    pub unavailable: Option<(CaptureClaim, Unavailable)>,
+    pub(super) retention: EpochFence,
+    pub(super) capture: EpochFence,
+    pub(super) emergency: Arc<AtomicBool>,
+}
+impl Observation {
+    pub fn current(&self) -> bool {
+        !self.emergency.load(Ordering::Acquire)
+            && self.retention.current()
+            && self.policy_received_at.is_none_or(|at| at.elapsed() < DEADLINE)
+    }
+}
+/// Transport output remains unadmitted. A later Broker repeats current control,
+/// sync_observed and SourceImages::admit before any cache/UI publication.
+pub(crate) struct FrameHandoff {
+    pub token: ConnectionToken,
+    pub received_at: Instant,
+    pub(super) pixels: UnadmittedPixels,
+    pub(super) original_capture: CaptureControlGuard,
+    pub(super) retention: EpochFence,
+    pub(super) capture: EpochFence,
+    pub(super) emergency: Arc<AtomicBool>,
+}
+impl FrameHandoff {
+    pub fn admit(
+        self,
+        owner: &mut aurora_session::preview_image::SourceImages,
+        control: &ControlGuard,
+        now: u64,
+    ) -> Result<RetainedFrame, aurora_session::preview_image::ImageError> {
+        if self.emergency.load(Ordering::Acquire)
+            || !self.retention.current()
+            || !self.capture.current()
+            || !self.original_capture.current(self.pixels.claim(), Instant::now())
+            || control.source != self.token.source
+            || !control.current(Instant::now())
+        {
+            return Err(aurora_session::preview_image::ImageError::Stale);
+        }
+        let pixels = self.pixels.admit(owner, now)?;
+        Ok(RetainedFrame {
+            token: self.token,
+            pixels,
+            retention: self.retention,
+            emergency: self.emergency,
+            clock_anchor: (now, Instant::now()),
+        })
+    }
+}
+/// No current Active/capture fence is required after final admission. The later
+/// owner supplies fresh exact source-control proof on every draw/copy, and the
+/// admitted model handle enforces original authenticated metadata expiry.
+pub(crate) struct RetainedFrame {
+    pub token: ConnectionToken,
+    pixels: lane::AdmittedPixels,
+    retention: EpochFence,
+    emergency: Arc<AtomicBool>,
+    clock_anchor: (u64, Instant),
+}
+impl RetainedFrame {
+    fn current(&self, control: &ControlGuard, now: u64) -> Option<u64> {
+        if self.emergency.load(Ordering::Acquire)
+            || !self.retention.current()
+            || control.source != self.token.source
+            || !control.current(Instant::now())
+            || now < self.clock_anchor.0
+        {
+            return None;
+        }
+        // Anchor to actual local elapsed time: an old caller clock/read cannot
+        // freeze authority. Round up conservatively at millisecond boundaries.
+        let elapsed = u64::try_from(self.clock_anchor.1.elapsed().as_millis()).ok()?.checked_add(1)?;
+        let now = now.max(self.clock_anchor.0.checked_add(elapsed)?);
+        self.pixels.bytes(now).is_some().then_some(now)
+    }
+    /// Only prepare a private result inside this callback. The later UI owner
+    /// must reserve UI-copy credit and recheck view/binding fences before public
+    /// publication. A result is discarded if source/retention expires mid-copy.
+    pub fn with_pixels<R>(&self, control: &ControlGuard, now: u64, prepare: impl FnOnce(&[u8]) -> R) -> Option<R> {
+        let checked = self.current(control, now)?;
+        let result = prepare(self.pixels.bytes(checked)?);
+        self.current(control, now)?;
+        Some(result)
+    }
+}
+pub(crate) struct SourceUpdate {
+    pub observation: Observation,
+    pub frame: Option<FrameHandoff>,
+}
+pub(crate) struct HostUpdate {
+    pub sources: Vec<SourceUpdate>,
+    pub pending_roles: usize,
+    pub connected_roles: usize,
+    pub raw_bytes: usize,
+}
+pub(super) struct HostMailbox {
+    pub permits: Vec<HostPermit>,
+    pub revision: u64,
+    pub commands: VecDeque<CommandOffer>,
+    pub updates: Vec<SourceUpdate>,
+    pub diagnostics: [usize; 3],
+}
+impl HostMailbox {
+    pub fn new() -> Self {
+        Self {
+            permits: Vec::with_capacity(MAX_WORKERS),
+            revision: 1,
+            commands: VecDeque::with_capacity(QUEUE * MAX_WORKERS),
+            updates: Vec::with_capacity(MAX_WORKERS),
+            diagnostics: [0; 3],
+        }
+    }
+}
