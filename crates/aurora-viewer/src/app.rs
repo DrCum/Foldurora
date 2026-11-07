@@ -34,6 +34,7 @@ mod audio_mute;
 mod avatar_render_settings;
 mod bridge;
 mod busy_pause;
+mod folder_jump;
 mod movelock;
 mod particle_editor;
 mod portals;
@@ -1021,6 +1022,7 @@ pub struct App {
     env_beacons_saved: Option<[bool; 2]>,
     demo: bool,
     inventory_ui: ui::inventory::InventoryUi,
+    folder_jump: ui::inventory::folder_jump::Chooser,
     texture_library: ui::texture_library::LibraryUi,
     library_drag: texture_library::DragState,
     library_demo_seeded: bool,
@@ -1858,6 +1860,7 @@ impl App {
             env_beacons_saved: None,
             demo: false,
             inventory_ui: Default::default(),
+            folder_jump: Default::default(),
             texture_library: Default::default(),
             library_demo_seeded: false,
             library_drag: Default::default(),
@@ -4569,7 +4572,10 @@ impl App {
             Action::Friends => self.people_tab_shortcut(ui::people::TAB_FRIENDS),
             Action::Groups => self.people_tab_shortcut(ui::people::TAB_GROUPS),
             Action::ContactSets => self.people_tab_shortcut(ui::people::TAB_SETS),
-            Action::Inventory => ui::widgets::toggle_floater(&self.egui_ctx, "inventory", &mut self.panels.inventory),
+            Action::Inventory => {
+                ui::widgets::toggle_floater(&self.egui_ctx, "inventory", &mut self.panels.inventory);
+                self.observe_folder_jump();
+            }
             Action::NewInventoryWindow => self.inventory_ui.open_additional_window(&self.egui_ctx),
             Action::Appearance => ui::widgets::toggle_floater(&self.egui_ctx, "appearance", &mut self.panels.appearance),
             Action::Quit => self.request_exit(),
@@ -8916,6 +8922,7 @@ impl App {
                 self.on_app_event(app_ev);
             }
             self.observe_about_location();
+            self.observe_folder_jump();
             if workspace_boundary {
                 self.workspace_tick();
             }
@@ -16634,6 +16641,7 @@ impl App {
                     }
                 }
                 self.panels.inventory = open;
+                self.show_folder_jump(&ctx, &p);
                 ui::inventory::default_permissions::show(
                     &ctx,
                     &p,
@@ -20418,12 +20426,22 @@ impl ApplicationHandler for App {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        let folder_jump_window = self.gfx.as_ref().is_some_and(|gfx| gfx.window.id() == id);
+        if folder_jump_window {
+            self.folder_jump.event(&event);
+        }
         // the window of a lost device, on screen until its successor has
         // presented: its redraws and sizes are not the new renderer's
         if self.retired_window.as_ref().is_some_and(|w| w.id() == id) && !matches!(event, WindowEvent::CloseRequested) {
             return;
         }
         if self.review_input.observe(&event) {
+            return;
+        }
+        if folder_jump_window && self.folder_jump_event(&event) {
+            if let Some(gfx) = &self.gfx {
+                gfx.window.request_redraw();
+            }
             return;
         }
         // The system's view of the keys when the focus comes back is no key

@@ -246,6 +246,7 @@ pub(super) fn contents(
     images: &std::collections::HashMap<Uuid, egui::TextureHandle>,
     actions: &mut Vec<InvAction>,
 ) {
+    folder_jump::claim(ui, st);
     let layout = Layout::for_width(ui.available_width());
     st.aurora = Some(Frame {
         layout,

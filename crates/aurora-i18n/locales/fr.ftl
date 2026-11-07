@@ -13510,3 +13510,15 @@ workspaces-cancel = Annuler l’aperçu
 workspaces-previous = Précédent
 workspaces-retry = Réessayer
 workspaces-delete-confirm = Supprimer cet espace de travail enregistré ? La disposition actuelle est conservée.
+inventory-jump-title = Aller au dossier…
+inventory-jump-query = Nom du dossier ou chemin parent
+inventory-jump-scanning = Recherche dans les dossiers chargés…
+inventory-jump-query-limit = Utilisez au maximum 64 mots de recherche.
+inventory-jump-unavailable = Cette vue d’inventaire est indisponible.
+inventory-jump-limited = Limité aux dossiers chargés indexés ici. D’autres dossiers peuvent correspondre.
+inventory-jump-first = Affichage des { $count } premiers résultats parmi les dossiers indexés.
+inventory-jump-empty = Aucun dossier chargé ne correspond.
+inventory-jump-count = { $count ->
+    [one] { $count } dossier chargé correspond
+   *[other] { $count } dossiers chargés correspondent
+    }
