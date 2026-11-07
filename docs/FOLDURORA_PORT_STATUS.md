@@ -17,7 +17,9 @@ narrow-preview follow-ups on the pushed `feat/foldurora-photo-branding` branch.
 Source review, formatting, diff checks, final Linux Clippy and the normal build
 passed. Linux tests reported 7,870 passed, one inherited terrain failure and
 50 ignored; all 15 new photo/branding/UI regressions passed. Its exact-source
-Windows run is in progress. Actual photo-demo evidence is not yet complete.
+Windows receipt is still pending verification. Owned software-Vulkan checks now
+support bounded landscape, portrait and Interface exports plus the native Linux
+icon. Restricted 480-pixel viewfinder controls still overlap and clip.
 The local build prompt was given to the user; delivery to the builder and its start
 are unconfirmed. Native Windows photo/export/icon acceptance remains pending.
 These source changes must not be attributed to the compact `399ffd79`
@@ -40,7 +42,7 @@ prompt remain separate checkpoints.
 | `8cd9a2aa005491b651e5bb8591d94fd6fb891520` | Combined backend/profile checkpoint: host/menu fixes, retained conversation drafts, crash details fallback and five persistent renameable slots | [Windows run 42311181216](https://github.com/DrCum/Foldurora/actions/runs/42311181216) passed: 7,818 tests passed, 0 failed, 49 ignored. Scripts, formatting, strict Clippy, normal build and packaging passed; downloaded package identity, manifest and checksums were verified. | This checkpoint has a known profile-popup margin overlap corrected by `70c1b5cd`. Native host/profile/chat and human grid acceptance remain pending. |
 | `70c1b5cda927547b28e5a5ff9713e861771aaee7` | Earlier verified test candidate, `fix/profile-popup-bounds`: bounds the profile popup including its frame and wraps occupied-profile help inline | [Windows run 42315300611](https://github.com/DrCum/Foldurora/actions/runs/42315300611) passed: 7,819 tests passed, 0 failed, 49 ignored; all 28 applicable named regressions passed exactly once. Scripts, formatting, strict Clippy, normal build and packaging passed. Downloaded manifest, checksums and executable/PE identity were verified. Fresh Linux CPU UI and sequential demo-worker evidence is recorded below. | Offline native Windows host/profile/chat, human grid, physical GPU/multi-monitor and performance acceptance remain pending. |
 | `399ffd796ccba8e9468bbc9ff7b19eff5017d4bc` | Latest verified compact package, `feat/compact-host-integration`: compact strip, full-width world, explicit management drawer and popup islands | [Windows run 42327859777](https://github.com/DrCum/Foldurora/actions/runs/42327859777) passed: 7,827 tests passed, 0 failed, 50 ignored; all 36 applicable named regressions passed exactly once. Parser, formatting, strict Clippy, tests, build and packaging passed. Downloaded manifests, checksums and executable/PE identity were verified. Linux and visual evidence is recorded below. | Native popup-island composition/hit testing, world input/handoff/recovery, profiles/drafts, physical GPU/multi-monitor, performance and human grid acceptance remain pending. Earlier local `8b738ea8` native results do not transfer to this binary. |
-| `f5ae21d535da3a338bace51ffb03af7beeb040c6` | Frozen, pushed photo/branding follow-up, `feat/foldurora-photo-branding`, including narrow scene/output and rounded-preview corrections | Linux tests: 7,870 passed, one inherited terrain failure, 50 ignored; all 15 new regressions passed. Formatting/diff checks and Clippy passed (34.48s); normal build passed (4m32s). [Windows run 42334134158](https://github.com/DrCum/Foldurora/actions/runs/42334134158) is in progress. | First software-Vulkan attempt stopped before photo with no capture/export; approved warm-cache retry is unfinished. Completed Windows package, photo/export/icon runtime/native acceptance and human grid tests remain pending. Local-builder delivery/start are unconfirmed. |
+| `f5ae21d535da3a338bace51ffb03af7beeb040c6` | Frozen, pushed photo/branding follow-up, `feat/foldurora-photo-branding`, including narrow scene/output and rounded-preview corrections | Linux tests: 7,870 passed, one inherited terrain failure, 50 ignored; all 15 new regressions passed. Formatting/diff checks and Clippy passed (34.48s); normal build passed (4m32s). Owned software-Vulkan landscape, portrait, small Interface and native-icon checks passed within the scope below. | Restricted 480-pixel control overlap/clipping remains. Verified Windows package, native photo/export/icon, physical GPU, performance and human grid acceptance remain pending. Local-builder delivery/start are unconfirmed. |
 | `8750450f0161e03fe6ef48194aa58b28d49a2cb9` | Latest pushed source, `feat/foldurora-upstream-integration`: `f5ae21d5` plus 15 reviewed upstream commits | Source review and independent proof of all 15 `-x` non-`TASKS.md` patches passed. Two additional commits affect instructions/tracking/guides/workflow only. | Exact-source lint/tests, normal build, software-GPU demo, Windows package, native host/profile/photo/icon and human grid acceptance remain pending. Earlier `f5ae21d5` or `399ffd79` results do not validate this new source. |
 
 Keep these sources and their packages separate. No candidate is merged into main, installed
@@ -346,8 +348,9 @@ rounding, including narrow targets; fixture corrections are included at `f5ae21d
 Clean exports frame the bounded live world at the chosen output aspect; Interface
 output preserves the complete workspace with its bounded scene, rejecting
 unsupported aspect/size combinations and canceling on canvas/UI-scale changes.
-These changes passed source review, corrected Linux tests and a normal build;
-accepted photo/export behavior is not yet established.
+These changes passed source review, corrected Linux tests, a normal build and
+the bounded software-Vulkan checks below. Native Windows photo/export and
+polished narrow-control acceptance remain pending.
 
 The first full-workspace run at earlier source
 `e640d4fc8524f55c6eb4568470050fb5d07f51b6` reported **7,866 passed, 4 failed,
@@ -366,17 +369,39 @@ in **4m32s**, version `0.0.0+1510.gf5ae21d53`, SHA-256
 `0a251831eeb7a8da36a279c0fe4b20ae54e75584542d598af6a23968efb2a4c3`.
 Exact-source
 [Windows run 42334134158](https://github.com/DrCum/Foldurora/actions/runs/42334134158)
-is in progress; no completed package is verified. The exact local build-only
+has no verified package receipt here yet. The exact local build-only
 prompt was given to the user, but builder delivery/start remain unknown. The
 first owned software-Vulkan demo stopped before photo mode after a six-second
 startup stall in lavapipe; no capture or export was produced. That failed attempt
-is preserved privately as the OBK fixture. At this evidence checkpoint, one
-approved retry with warm task-local cache and INFO logging was still running as
-EuQU; no completed pass receipt is supplied yet.
-No real grid or ordinary profiles were used. This establishes neither a photo
-rendering defect nor a successful photo/export/icon runtime check. Earlier
-compact-controller screenshots remain source-specific; existing captures and
-the verified `399ffd79` download are unchanged.
+is preserved privately as the OBK fixture.
+
+One approved warm task-local-cache/INFO retry, with Cargo idle, completed the two
+mandatory actual 960×640-window cases normally. Restricted landscape kept its
+scene/guides in the right-hand world viewport and saved a 640×360 clean PNG.
+With unrestricted controls, the scene/guides stayed right-bound and saved a
+360×640 portrait PNG. Inspected green-panel boundaries match the centered
+guide/export transform within two landscape output pixels and one portrait
+pixel, allowing blur/rasterization tolerance. The actual native 64×64 window
+icon is the supplied purple folder with cyan/yellow details and transparency.
+
+A separately approved small Interface case completed normally in about 143s,
+saving the complete 960×640 workspace to 480×320. Inventory, World Map and
+Preferences remain; the visible scene boundary maps x480→x240, workspace
+UI/shadow (264,68)→(132,34), and the Inventory frame (13,70)→(6,35). Photo
+controls are intentionally omitted from that export. Other windows obscure
+much of the scene; visible boundaries and retained workspace geometry support
+this bounded check. All successful applications/drivers/displays exited normally
+with code 0, and all owned process groups are gone.
+
+**Open UI limitation:** restricted 480-pixel viewfinder controls/help overlap
+heavily and clip, and narrow toolbar crowding remains visible. The successful
+scope/composition checks do not establish full narrow-UI usability. The earlier
+cold stall is not explained by the later pass; no physical GPU-reset cause or
+general performance result is inferred. No real grid, ordinary profiles,
+credential-store or bootstrap/cache-key contents were used. The bounded receipt
+is `.scratch/photo-branding-smoke/RESULTS-F5AE21D5.md`; raw logs/authentication/test
+data remain private. These results belong to `f5ae21d5`, not `8750450f`, and the
+verified `399ffd79` download remains unchanged.
 
 ### Selective upstream source checkpoint 8750450f
 
@@ -406,6 +431,23 @@ not a merge of the entire upstream branch. No new PR, merge to main or release
 is claimed.
 
 ## Selected visual evidence
+
+### Photo/export and native icon — f5ae21d5
+
+The [seven-image gallery and sanitized provenance](https://github.com/DrCum/Foldurora/blob/34883cadfddfe4d1d557259dda03a43bbc6b443b/foldurora/20261107-f5ae21d5/README.md)
+contains only unchanged synthetic PNG copies. Earlier captures/history remain
+intact; no private settings files, raw logs/JSON, user reports or screenshots
+are republished.
+
+| Image | Raw PNG |
+| --- | --- |
+| Restricted landscape, frame 680 | [Open](https://raw.githubusercontent.com/DrCum/Foldurora/34883cadfddfe4d1d557259dda03a43bbc6b443b/foldurora/20261107-f5ae21d5/01-restricted-landscape-frame-680.png) |
+| Matching clean landscape export | [Open](https://raw.githubusercontent.com/DrCum/Foldurora/34883cadfddfe4d1d557259dda03a43bbc6b443b/foldurora/20261107-f5ae21d5/02-restricted-landscape-clean-export.png) |
+| Unrestricted controls, portrait, frame 680 | [Open](https://raw.githubusercontent.com/DrCum/Foldurora/34883cadfddfe4d1d557259dda03a43bbc6b443b/foldurora/20261107-f5ae21d5/03-unrestricted-portrait-frame-680.png) |
+| Matching clean portrait export | [Open](https://raw.githubusercontent.com/DrCum/Foldurora/34883cadfddfe4d1d557259dda03a43bbc6b443b/foldurora/20261107-f5ae21d5/04-unrestricted-portrait-clean-export.png) |
+| Native Linux 64-pixel window icon | [Open](https://raw.githubusercontent.com/DrCum/Foldurora/34883cadfddfe4d1d557259dda03a43bbc6b443b/foldurora/20261107-f5ae21d5/05-native-window-icon-64.png) |
+| Full Interface workspace, frame 680 | [Open](https://raw.githubusercontent.com/DrCum/Foldurora/34883cadfddfe4d1d557259dda03a43bbc6b443b/foldurora/20261107-f5ae21d5/06-interface-workspace-frame-680.png) |
+| Matching half-scale Interface export | [Open](https://raw.githubusercontent.com/DrCum/Foldurora/34883cadfddfe4d1d557259dda03a43bbc6b443b/foldurora/20261107-f5ae21d5/07-interface-workspace-export.png) |
 
 ### Compact 399ffd79
 
@@ -454,8 +496,8 @@ to that capture commit; they do not depend on the cloud `.scratch` directories.
 | Fade and Birdseye switches | Native activation exists; Folderstorm's visual transitions are not ported. | Preserve fenced GPU/input handoff; design each transition around native camera/render actions after host acceptance. |
 | Assistant and other tools | Aurora has native inventory/appearance/camera actions; Folderstorm's adapter and some tools remain. | Port bounded typed actions after the supporting account/workspace models, rather than generic input injection. |
 | Profile import/migration | Stable new slots exist; migration of old generated profiles or ordinary viewer preferences is not implemented. | Decide explicit import/copy behavior later; keep credentials, writable caches and live-session authority separate. Moving installations does not silently migrate profiles. |
-| Foldurora branding — separate follow-up | Supplied purple-folder artwork is integrated in frozen `f5ae21d5`; Linux tests/lint and normal build passed, while runtime/native icon acceptance is pending. It is not included in `399ffd79`; inheritance by `8750450f` is not compiled/runtime validation. | Complete exact-source Windows validation and native icon acceptance separately. |
-| Photo/camera viewport — separate follow-up | The reported `8b738ea8` / `+110` scene expansion remains in `399ffd79`. Frozen `f5ae21d5` aligns live photo scene/guides/output to world scope, including narrow aspects/previews; corrected Linux tests and normal build passed. Software-Vulkan photo/export acceptance has no completed receipt. | Validate clean and Interface exports, viewport/guide alignment and native controls on the exact new binary; repeat on integrated `8750450f`. No fix is claimed in `399ffd79`. |
+| Foldurora branding — separate follow-up | Frozen `f5ae21d5` passed Linux tests/build and actual native 64-pixel folder-icon inspection. It is not included in `399ffd79`; inheritance by `8750450f` is not compiled/runtime validation. | Complete exact-source Windows validation and native icon/taskbar acceptance separately. |
+| Photo/camera viewport — separate follow-up | Frozen `f5ae21d5` passed bounded software-Vulkan landscape/portrait clean exports and small full-workspace Interface output. Restricted 480-pixel viewfinder controls still overlap/clip. The reported older scene expansion remains in `399ffd79`. | Fix/validate narrow control usability and native Windows photo/export behavior; repeat scope/isolation checks on integrated `8750450f`. No fix is claimed in `399ffd79`. |
 | Selective upstream catch-up — separate integration | Pushed `8750450f` adds 15 reviewed upstream commits to `f5ae21d5`, with exact provenance proof and 26 remaining in the staged risk plan. No compiled/runtime result is claimed yet. | Validate the exact combined source before a package/runtime recommendation; preserve source-specific earlier evidence and the deferred dependency groups. |
 
 Folderstorm can later acknowledge a visible, following, at-tail transcript after
