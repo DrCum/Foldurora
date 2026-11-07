@@ -9125,6 +9125,22 @@ impl Backend {
         self.viewport_capture.as_ref().is_some_and(|capture| capture.has_pending())
     }
 
+    /// Prior-origin cleanup only. The ordinary completion/packing path is not
+    /// called when new capture eligibility has closed.
+    pub fn retire_viewport_capture(&mut self, origin: crate::viewport_capture::CaptureToken) {
+        if !self.viewport_capture_needs_maintenance() {
+            return;
+        }
+        self.lost.poll(&self.device);
+        if let Some(capture) = &mut self.viewport_capture {
+            if self.lost.get() {
+                capture.invalidate_physical();
+            } else {
+                capture.maintain_retirement(origin);
+            }
+        }
+    }
+
     /// World position of the opaque surface under a pixel of the last frame
     /// drawn (depth prepass read-back; None for the sky). Blocks on the GPU
     /// for one tiny copy: clicks only.

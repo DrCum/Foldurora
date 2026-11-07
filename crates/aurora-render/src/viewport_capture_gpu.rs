@@ -752,6 +752,15 @@ impl GpuCapture {
         self.pending.is_some() || self.pair.needs_maintenance(self.shared.generation())
     }
 
+    /// Cleanup-only: never allocate packed pixels, read mapped bytes or publish
+    /// a result. A delayed old probe cannot release a newer request's mapping.
+    pub fn maintain_retirement(&mut self, origin: CaptureToken) {
+        self.pair.poll(self.shared.generation());
+        if self.pending.as_ref().is_some_and(|pending| pending.frame.request.token() == origin) {
+            self.release_pending(true);
+        }
+    }
+
     fn release_pending(&mut self, retire: bool) {
         if let Some(mut pending) = self.pending.take() {
             if let Some(pair) = &self.pair.value {
@@ -1737,5 +1746,28 @@ mod tests {
                 "late callback cannot publish canceled bytes"
             );
         }
+
+        // Retirement-only maintenance cannot pack an already mapped eligible
+        // request, and an old origin cannot release a newer mapping.
+        let shared = make_shared();
+        let mut capture = GpuCapture::new(shared.clone());
+        let (current, encoder) = encode(&mut capture, 8);
+        queue.submit([encoder.finish()]);
+        capture.after_submit(&queue);
+        poll_gpu_until(&device, || shared.lock().unwrap().queue.poll_map(shared.now()).unwrap().is_some());
+        let before = shared.budget.used();
+        capture.maintain_retirement(first.request.token());
+        assert!(capture.pending.as_ref().unwrap().packed.is_none());
+        assert_eq!(capture.pending.as_ref().unwrap().frame.request.token(), current.request.token());
+        capture.maintain_retirement(current.request.token());
+        assert!(capture.pending.is_none());
+        assert!(shared.budget.used() <= before, "cleanup allocated no packed pixels");
+        assert!(!matches!(shared.take().unwrap(), Some(CaptureOutcome::Ready(_))));
+        poll_gpu_until(&device, || {
+            capture.maintain_retirement(current.request.token());
+            !capture.has_pending()
+        });
+        drop(capture);
+        assert_eq!(shared.budget.used(), 0);
     }
 }

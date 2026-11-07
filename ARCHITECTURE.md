@@ -420,7 +420,10 @@ map/submission retirement; stale Idle cannot cover a later request or handoff.
 The try-only frontend continuation works after capture-only XR/cancel gates
 close, prioritizes session fences, and creates no frame, proof or new capture.
 Default NoWork/known Idle touches no owner/device; cached and held credits remain
-charged independently. Eight pure/actual-owner regressions are authored and unrun.
+charged independently. Retirement-only owner work releases only its exact
+origin mapping and polls resource retirement; it cannot pack/allocate pixels or
+publish an image. Ordinary strict completion has a separate probe purpose. Nine
+pure/actual-owner regressions and an extended ignored GPU fixture are unrun.
 
 `chat_ui/view_state.rs` holds six bounded surface views. Source-owned `ChatUi`
 keeps canonical drafts, complete editor/Undo state and captured pending operations;

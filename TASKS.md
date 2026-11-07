@@ -5,7 +5,8 @@
   frontend revision and nonreused probes. Try-only cleanup survives capture-only
   XR/cancel gates, prioritizes session fences, and leaves default NoWork idle.
   Stale replies cannot certify later GPU work; cached/held credits stay charged.
-  Eight production-helper/actual-owner cases are authored and unrun. No new
+  Retirement probes never pack/publish pixels; normal completion stays separate.
+  Nine production-helper/actual-owner cases are authored and unrun. No new
   capture permission, App producer, endpoint, frame/proof, allocation or wait is
   enabled; independent source review and root-owned compilation/tests are next.
 

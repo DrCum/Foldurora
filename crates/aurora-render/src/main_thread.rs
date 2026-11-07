@@ -1827,8 +1827,24 @@ impl Renderer {
     /// a request, take/publish pixels, render a frame or prove a session fence.
     /// NoWork/Idle return without owner/device access. Credits still follow
     /// their real resource/callback/pixel clones, independently of this status.
+    /// Cancel an eligible request first: a live frontend watch returns Pending
+    /// without completing/packing that image. Ordinary polling is separate.
     pub fn poll_viewport_capture_retirement(
         &mut self,
+    ) -> Result<crate::viewport_capture::CaptureRetirementProgress, crate::viewport_capture::CaptureError> {
+        use crate::viewport_capture::CaptureRetirementProgress;
+        self.viewport_capture_retirement.available()?;
+        if self.viewport_capture_pending.is_some() || self.viewport_capture_watch.is_some() {
+            // Cleanup never drives completion/packing of an eligible capture.
+            // The caller must cancel it (or consume its ordinary result) first.
+            return Ok(CaptureRetirementProgress::Pending);
+        }
+        self.drive_viewport_capture_maintenance(crate::viewport_capture_retirement::Purpose::Retire)
+    }
+
+    fn drive_viewport_capture_maintenance(
+        &mut self,
+        purpose: crate::viewport_capture_retirement::Purpose,
     ) -> Result<crate::viewport_capture::CaptureRetirementProgress, crate::viewport_capture::CaptureError> {
         use crate::viewport_capture::{CaptureError, CaptureRetirementProgress};
         let frontend_pending = self.viewport_capture_pending.is_some() || self.viewport_capture_watch.is_some();
@@ -1853,7 +1869,7 @@ impl Renderer {
             }
         }
         let submitted = match &self.host {
-            Host::Thread { owner, .. } => self.viewport_capture_retirement.try_submit(owner, &self.session_fences),
+            Host::Thread { owner, .. } => self.viewport_capture_retirement.try_submit(owner, &self.session_fences, purpose),
             Host::Inline(_, _) => return Err(CaptureError::Unsupported),
         };
         match submitted {
@@ -1899,7 +1915,7 @@ impl Renderer {
         if self.session_fences.pending() {
             self.drive_session_fence().map_err(|_| CaptureError::DeviceLost)?;
         } else {
-            self.poll_viewport_capture_retirement()?;
+            self.drive_viewport_capture_maintenance(crate::viewport_capture_retirement::Purpose::Complete)?;
         }
         let result = self.viewport_capture.as_ref().ok_or(CaptureError::Unsupported)?.take()?;
         if result.is_some() {

@@ -482,7 +482,10 @@ fn run(mut backend: Backend, worker: Worker<Job, Done>) -> Backend {
             Job::Pick { x, y } => Done::Pick(backend.pick_world(x, y)),
             Job::SessionFence(ticket) => Done::SessionFence(backend.session_fence(ticket)),
             Job::MaintainViewportCapture(probe) => crate::viewport_capture_retirement::owner_result(probe, || {
-                backend.maintain_viewport_capture();
+                match probe.purpose() {
+                    crate::viewport_capture_retirement::Purpose::Complete => backend.maintain_viewport_capture(),
+                    crate::viewport_capture_retirement::Purpose::Retire => backend.retire_viewport_capture(probe.origin()),
+                }
                 backend.viewport_capture_needs_maintenance()
             }),
         };
@@ -520,11 +523,21 @@ mod tests {
         tracker.request(token).unwrap();
         let mut held = owner.0.state.lock();
         held.result = Some(Done::Pick(None));
-        assert!(tracker.try_submit(&owner, &fences).unwrap().is_none());
+        assert!(
+            tracker
+                .try_submit(&owner, &fences, crate::viewport_capture_retirement::Purpose::Retire)
+                .unwrap()
+                .is_none()
+        );
         assert!(matches!(&held.result, Some(Done::Pick(None))));
         assert!(held.job.is_none());
         drop(held);
-        assert!(matches!(tracker.try_submit(&owner, &fences).unwrap(), Some(Done::Pick(None))));
+        assert!(matches!(
+            tracker
+                .try_submit(&owner, &fences, crate::viewport_capture_retirement::Purpose::Retire)
+                .unwrap(),
+            Some(Done::Pick(None))
+        ));
         let (Job::MaintainViewportCapture(probe), _) = worker.next().unwrap() else {
             panic!("cleanup only")
         };

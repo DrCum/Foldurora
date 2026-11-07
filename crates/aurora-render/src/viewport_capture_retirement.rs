@@ -15,10 +15,25 @@ pub enum CaptureRetirementProgress {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Purpose {
+    Complete,
+    Retire,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Probe {
     origin: CaptureToken,
     revision: u64,
     serial: u64,
+    purpose: Purpose,
+}
+impl Probe {
+    pub fn origin(self) -> CaptureToken {
+        self.origin
+    }
+    pub fn purpose(self) -> Purpose {
+        self.purpose
+    }
 }
 
 #[derive(Default)]
@@ -63,7 +78,7 @@ impl Retirement {
             CaptureRetirementProgress::Pending
         })
     }
-    fn probe(&mut self) -> Result<Option<Probe>, CaptureError> {
+    fn probe(&mut self, purpose: Purpose) -> Result<Option<Probe>, CaptureError> {
         self.available()?;
         if self.idle || self.flight.is_some() {
             return Ok(None);
@@ -78,6 +93,7 @@ impl Retirement {
             origin,
             revision: self.revision,
             serial,
+            purpose,
         };
         self.flight = Some(probe);
         Ok(Some(probe))
@@ -98,11 +114,16 @@ impl Retirement {
     }
     /// Actual production owner seam, shared by ordinary result polling and
     /// retirement-only polling. Rejection consumes the serial, never its origin.
-    pub fn try_submit(&mut self, owner: &Owner<Job, Done>, fences: &crate::session_fence::Requests) -> Result<Option<Done>, CaptureError> {
+    pub fn try_submit(
+        &mut self,
+        owner: &Owner<Job, Done>,
+        fences: &crate::session_fence::Requests,
+        purpose: Purpose,
+    ) -> Result<Option<Done>, CaptureError> {
         if fences.pending() {
             return Ok(None);
         }
-        let Some(probe) = self.probe()? else { return Ok(None) };
+        let Some(probe) = self.probe(purpose)? else { return Ok(None) };
         match owner.try_submit_owned(Job::MaintainViewportCapture(probe)) {
             Ok(submitted) => Ok(submitted.previous),
             Err(TrySubmitError::Busy(_)) => {
@@ -162,7 +183,7 @@ mod tests {
         assert_eq!(tracker.progress(false), Ok(CaptureRetirementProgress::NoWork));
         assert!(
             tracker
-                .try_submit(&owner, &crate::session_fence::Requests::default())
+                .try_submit(&owner, &crate::session_fence::Requests::default(), Purpose::Retire)
                 .unwrap()
                 .is_none()
         );
@@ -173,24 +194,30 @@ mod tests {
         let (owner, worker) = handoff();
         let mut tracker = Retirement::default();
         tracker.request(token()).unwrap();
-        tracker.try_submit(&owner, &crate::session_fence::Requests::default()).unwrap();
+        tracker
+            .try_submit(&owner, &crate::session_fence::Requests::default(), Purpose::Retire)
+            .unwrap();
         let first = complete(&worker, true);
         receive(&mut tracker, &owner);
         assert_eq!(tracker.progress(false), Ok(CaptureRetirementProgress::Pending));
-        tracker.try_submit(&owner, &crate::session_fence::Requests::default()).unwrap();
+        tracker
+            .try_submit(&owner, &crate::session_fence::Requests::default(), Purpose::Retire)
+            .unwrap();
         let last = complete(&worker, false);
         assert_ne!(first, last);
         receive(&mut tracker, &owner);
         assert_eq!(tracker.progress(false), Ok(CaptureRetirementProgress::Idle));
         assert!(
             tracker
-                .try_submit(&owner, &crate::session_fence::Requests::default())
+                .try_submit(&owner, &crate::session_fence::Requests::default(), Purpose::Retire)
                 .unwrap()
                 .is_none()
         );
         tracker.dirty(); // Cancel/surface change retires an already cached pair.
         assert_eq!(tracker.progress(false), Ok(CaptureRetirementProgress::Pending));
-        tracker.try_submit(&owner, &crate::session_fence::Requests::default()).unwrap();
+        tracker
+            .try_submit(&owner, &crate::session_fence::Requests::default(), Purpose::Retire)
+            .unwrap();
         complete(&worker, false);
         receive(&mut tracker, &owner);
         assert_eq!(tracker.progress(false), Ok(CaptureRetirementProgress::Idle));
@@ -201,7 +228,9 @@ mod tests {
             let (owner, worker) = handoff();
             let mut tracker = Retirement::default();
             tracker.request(token()).unwrap();
-            tracker.try_submit(&owner, &crate::session_fence::Requests::default()).unwrap();
+            tracker
+                .try_submit(&owner, &crate::session_fence::Requests::default(), Purpose::Retire)
+                .unwrap();
             let old = complete(&worker, false);
             if replacement {
                 tracker.request(token()).unwrap();
@@ -210,7 +239,9 @@ mod tests {
             }
             receive(&mut tracker, &owner);
             assert_eq!(tracker.progress(false), Ok(CaptureRetirementProgress::Pending));
-            tracker.try_submit(&owner, &crate::session_fence::Requests::default()).unwrap();
+            tracker
+                .try_submit(&owner, &crate::session_fence::Requests::default(), Purpose::Retire)
+                .unwrap();
             let fresh = complete(&worker, false);
             receive(&mut tracker, &owner);
             tracker.receive(old, false); // Duplicate/out-of-order completion.
@@ -223,11 +254,11 @@ mod tests {
     fn viewport_retirement_recreated_frontend_rejects_old_probe_with_same_local_counters() {
         let mut old = Retirement::default();
         old.request(token()).unwrap();
-        let previous = old.probe().unwrap().unwrap();
+        let previous = old.probe(Purpose::Retire).unwrap().unwrap();
         drop(old);
         let mut replacement = Retirement::default();
         replacement.request(token()).unwrap();
-        let current = replacement.probe().unwrap().unwrap();
+        let current = replacement.probe(Purpose::Retire).unwrap().unwrap();
         assert_eq!(previous.serial, current.serial);
         assert_eq!(previous.revision, current.revision);
         assert_ne!(previous.origin, current.origin);
@@ -237,18 +268,42 @@ mod tests {
         assert_eq!(replacement.progress(false), Ok(CaptureRetirementProgress::Idle));
     }
     #[test]
+    fn viewport_retirement_complete_and_retire_jobs_keep_exact_origin_and_purpose() {
+        let (owner, worker) = handoff();
+        let mut tracker = Retirement::default();
+        let origin = token();
+        tracker.request(origin).unwrap();
+        let fences = crate::session_fence::Requests::default();
+        tracker.try_submit(&owner, &fences, Purpose::Complete).unwrap();
+        let previous = complete(&worker, false);
+        assert_eq!(previous.purpose(), Purpose::Complete);
+        tracker.dirty();
+        receive(&mut tracker, &owner);
+        assert_eq!(tracker.progress(false), Ok(CaptureRetirementProgress::Pending));
+        tracker.try_submit(&owner, &fences, Purpose::Retire).unwrap();
+        let retiring = complete(&worker, false);
+        assert_eq!(retiring.purpose(), Purpose::Retire);
+        assert_eq!(retiring.origin(), origin);
+        receive(&mut tracker, &owner);
+        assert_eq!(tracker.progress(false), Ok(CaptureRetirementProgress::Idle));
+    }
+    #[test]
     fn viewport_retirement_busy_owner_consumes_probe_without_losing_origin_or_reusing_serial() {
         let (owner, worker) = handoff();
         owner.try_submit(Job::Pick { x: 0.0, y: 0.0 }).unwrap().unwrap();
         let mut tracker = Retirement::default();
         tracker.request(token()).unwrap();
-        tracker.try_submit(&owner, &crate::session_fence::Requests::default()).unwrap();
+        tracker
+            .try_submit(&owner, &crate::session_fence::Requests::default(), Purpose::Retire)
+            .unwrap();
         let rejected = tracker.serial;
         assert!(tracker.flight.is_none());
         assert!(matches!(worker.next().unwrap().0, Job::Pick { .. }));
         worker.complete(Done::Pick(None));
         assert!(matches!(
-            tracker.try_submit(&owner, &crate::session_fence::Requests::default()).unwrap(),
+            tracker
+                .try_submit(&owner, &crate::session_fence::Requests::default(), Purpose::Retire)
+                .unwrap(),
             Some(Done::Pick(None))
         ));
         let accepted = complete(&worker, false);
@@ -264,13 +319,13 @@ mod tests {
         owner.try_submit(Job::SessionFence(9)).unwrap().unwrap();
         let mut tracker = Retirement::default();
         tracker.request(token()).unwrap();
-        assert!(tracker.try_submit(&owner, &fences).unwrap().is_none());
+        assert!(tracker.try_submit(&owner, &fences, Purpose::Retire).unwrap().is_none());
         assert_eq!(tracker.serial, 0, "pending fence precedes probe allocation");
         assert!(matches!(worker.next().unwrap().0, Job::SessionFence(9)));
         worker.complete(Done::SessionFence(crate::session_fence::Reply::Pending(9)));
         assert!(fences.cancel(9));
         assert!(matches!(
-            tracker.try_submit(&owner, &fences).unwrap(),
+            tracker.try_submit(&owner, &fences, Purpose::Retire).unwrap(),
             Some(Done::SessionFence(crate::session_fence::Reply::Pending(9)))
         ));
         complete(&worker, false);
@@ -288,7 +343,7 @@ mod tests {
                 tracker.dirty();
             } else {
                 tracker.serial = u64::MAX;
-                assert_eq!(tracker.probe(), Err(CaptureError::Exhausted));
+                assert_eq!(tracker.probe(Purpose::Retire), Err(CaptureError::Exhausted));
             }
             assert_eq!(tracker.progress(false), Err(CaptureError::Exhausted));
         }
@@ -297,7 +352,7 @@ mod tests {
         let mut tracker = Retirement::default();
         tracker.request(token()).unwrap();
         assert!(matches!(
-            tracker.try_submit(&owner, &crate::session_fence::Requests::default()),
+            tracker.try_submit(&owner, &crate::session_fence::Requests::default(), Purpose::Retire),
             Err(CaptureError::DeviceLost)
         ));
         assert_eq!(tracker.progress(false), Ok(CaptureRetirementProgress::Pending));
