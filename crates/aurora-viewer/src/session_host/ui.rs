@@ -238,7 +238,7 @@ impl HostUi {
         egui::CentralPanel::default().frame(frame).show(ui, |ui| {
             ui.vertical_centered(|ui| {
                 ui.add_space((ui.available_height() * 0.22).max(10.0));
-                widgets::glyph(ui, "device-desktop", p.violet_pale, 40.0);
+                widgets::glyph(ui, "device-desktop-filled", p.violet_pale, 40.0);
                 ui.add_space(12.0);
                 let active = hosted.and_then(|id| snapshot.workers.iter().find(|worker| worker.binding.worker.worker == id));
                 ui.label(
@@ -457,7 +457,7 @@ impl HostUi {
             let manage = compact_button(
                 ui,
                 p,
-                "settings",
+                "settings-filled",
                 if self.management_open {
                     aurora_i18n::tr!("host-manage-hide")
                 } else {

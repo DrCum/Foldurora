@@ -247,6 +247,26 @@ impl Frames {
         action
     }
 
+    fn check_icon_pixels(&self, key: &str, rect: Rect) {
+        // A laid-out clickable rectangle can still hide a missing embedded
+        // icon. Its central pixels must contain the glyph, not a flat face.
+        let inner = Rect::from_center_size(rect.center(), vec2(12.0, 12.0));
+        let native = self.logical.map(|size| (size as f32 * self.scale).round() as usize);
+        let edge = |value: f32, limit: usize| (value * self.scale).round().clamp(0.0, limit as f32) as usize;
+        let mut first = None;
+        let mut contrast = false;
+        for y in edge(inner.top(), native[1])..edge(inner.bottom(), native[1]) {
+            for x in edge(inner.left(), native[0])..edge(inner.right(), native[0]) {
+                let pixel = self.pixels[y * native[0] + x];
+                match first {
+                    None => first = Some(pixel),
+                    Some(first) => contrast |= pixel != first,
+                }
+            }
+        }
+        assert!(contrast, "{key} needs a visible glyph, not an empty icon-only button");
+    }
+
     fn capture(&mut self, directory: &Path, name: &str, snapshot: &HostSnapshot) -> Value {
         self.settle(snapshot);
         let canvas = self.context.content_rect();
@@ -270,6 +290,9 @@ impl Frames {
             let rect = self.rect(Id::unique(key));
             assert!(canvas.expand(tolerance).contains_rect(rect), "{key} escapes the controller canvas");
             assert!(rect.bottom() <= self.world.top() + tolerance, "{key} overlaps the world");
+            if key != "host_slot_combo" {
+                self.check_icon_pixels(key, rect);
+            }
             json!({"key": key, "rect": rect_json(rect)})
         })
         .collect();
