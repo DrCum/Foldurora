@@ -1,5 +1,18 @@
 # Aurora Viewer architecture
 
+`session_host/monitor_manager.rs` is the Shell-owned bounded binding/operation
+front for four fixed monitors and one cycling view. It depends on the separately
+authored real `preview_projection` facade; no local IO stub or inferred image
+authority is supplied. Five namespaces and published states retain exact pending
+settings correlations; one Exchange consumes only its matching typed terminal
+receipt after actual Active sync. Old delivered edits flush before binding,
+visibility or accepted-options transitions. Local Chat/pin changes cannot consume
+or overwrite an unrelated sampling receipt. Global host-projection namespaces
+are distinct from model incarnations. Initial view demand is empty; settings
+defaults remain Small/1 FPS. This source front does not promote the existing
+test-only image/model/body prerequisites or create a native route by itself.
+Seven portable manager regressions are authored, uncompiled and unrun.
+
 The disabled CPU/body integration preserves the reviewed private surface and
 Monitor body atoms on the existing disabled monitor foundations. Production
 Shell routing and launch/demand defaults are unchanged; new modules remain

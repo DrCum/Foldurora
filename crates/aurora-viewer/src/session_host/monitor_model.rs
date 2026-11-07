@@ -296,6 +296,22 @@ impl MonitorSet {
         self.bindings[view.index()]
     }
 
+    /// Presentation acknowledgement only. The parent must first correlate the
+    /// actual typed settings receipt to its immutable pending request. A later
+    /// local focus/Chat change is not a different source binding or a failed ACK.
+    pub fn ack_options(&mut self, view: View, expected: Binding, options: Options) -> Result<bool, Error> {
+        if self.binding(view) != Some(expected) || !expected.enabled || !self.current(expected.source) {
+            return Ok(false);
+        }
+        if expected.options != options {
+            self.cancel_input()?;
+            if let Some(binding) = &mut self.bindings[view.index()] {
+                binding.options = options;
+            }
+        }
+        Ok(true)
+    }
+
     fn current(&self, source: Source) -> bool {
         !self.exhausted && source.available && self.sources.contains(&source)
     }

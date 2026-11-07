@@ -20,6 +20,16 @@
   capture permission, App producer, endpoint, frame/proof, allocation or wait is
   enabled; independent source review and root-owned compilation/tests are next.
 
+- 🔧 Actual monitor Shell/window front (2026-11-07; no issue): implement the
+  bounded five-view manager against the separate real host projection contract.
+  Exact settings/Exchange receipts preserve canonical Chat/pin state; local
+  binding-only options acknowledgements cannot retarget a replaced source.
+  Visibility changes allocate process-fresh namespaces and flush old delivered
+  edits first. Popup/modal timer suspension resumes without catch-up. Seven
+  portable manager regressions are authored/uncompiled/unrun. Native window and
+  Shell routing are the next source phase; existing prerequisite cfg(test)
+  promotion, actual producer enablement and execution remain Root-owned.
+
 - 🔧 Combined monitor validation (2026-11-07; no issue): the component entries
   below describe their frozen author checkpoints. Root subsequently corrected
   the defining-module secret re-export, test helper shadowing and an unused

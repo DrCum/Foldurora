@@ -11,6 +11,10 @@ pub(crate) mod chat_io;
 pub(crate) mod chat_transport;
 mod chat_ui;
 mod chat_window;
+// Real host/window front; Root promotes its existing prerequisite modules only
+// after the separately authored host projection and native proof join review.
+#[cfg(any(windows, test))]
+mod monitor_manager;
 // Pure monitor bindings only; no production surface or image service enabled.
 #[cfg(test)]
 mod monitor_model;
@@ -19,6 +23,8 @@ mod monitor_model;
 mod monitor_ui;
 mod native;
 mod preview_bootstrap;
+#[cfg(any(windows, test))]
+mod preview_projection;
 pub(crate) mod profile;
 mod review;
 // Unused prerequisite only; native IO/bootstrap/authority integration is absent.
