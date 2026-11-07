@@ -653,8 +653,8 @@ impl SnapshotUi {
             aurora_i18n::tr!("photo-interface"),
             (!interface_possible).then(|| aurora_i18n::tr!("photo-interface-hint")),
             |ui| {
-                let mut on = s.interface && interface_possible;
-                ui.add_enabled_ui(interface_possible, |ui| {
+                let mut on = s.interface;
+                ui.add_enabled_ui(interface_possible || on, |ui| {
                     if widgets::switch(ui, p, &mut on).changed() {
                         s.interface = on;
                     }
@@ -874,7 +874,9 @@ impl SnapshotUi {
         let include_interface = s.interface && crate::snapshot::same_proportions(photo, window) && !self.freeze;
         let frame = scene_frame(screen, photo, include_interface);
         let controls = super::layout::toolbar_rect(ctx);
-        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::unique("photo_full_frame")));
+        let painter = ctx
+            .layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::unique("photo_full_frame")))
+            .with_clip_rect(screen);
         let mask = p.navy.gamma_multiply(0.62);
         for r in outside(screen, frame) {
             painter.rect_filled(r, 0.0, mask);
@@ -1380,7 +1382,9 @@ pub fn frozen(ctx: &egui::Context, p: &Palette, texture: &egui::TextureHandle) {
     let screen = super::layout::world_rect(ctx);
     let size = texture.size_vec2();
     let rect = fit(screen, size.x / size.y.max(1.0));
-    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::unique("photo_frozen")));
+    let painter = ctx
+        .layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::unique("photo_frozen")))
+        .with_clip_rect(screen);
     painter.rect_filled(screen, 0.0, p.navy);
     painter.image(
         texture.id(),
@@ -1752,6 +1756,7 @@ mod tests {
         viewfinder: crate::ui::viewfinder::Viewfinder,
         frozen: egui::TextureHandle,
         native_scale: f32,
+        edge_subjects: bool,
     }
 
     impl ViewportPhotoFixture {
@@ -1790,6 +1795,7 @@ mod tests {
                 viewfinder: Default::default(),
                 frozen,
                 native_scale: 1.25,
+                edge_subjects: false,
             }
         }
 
@@ -1873,7 +1879,7 @@ mod tests {
                 time: &time,
                 arriving: false,
             };
-            let frame = crate::ui::viewfinder::Frame {
+            let mut frame = crate::ui::viewfinder::Frame {
                 still: true,
                 now: self.frame as f64 / 60.0,
                 photo: view.photo,
@@ -1908,6 +1914,21 @@ mod tests {
                 posing: false,
                 reel: &reel,
             };
+            if self.edge_subjects {
+                let world = world.unwrap_or(native);
+                frame.point = world.right_top() + Vec2::new(-4.0, 3.0);
+                frame.face = Some((
+                    Rect::from_center_size(world.right_top() + Vec2::new(-30.0, 60.0), Vec2::new(120.0, 100.0)),
+                    true,
+                    "Edge face".to_owned(),
+                ));
+                frame.group.push((
+                    Rect::from_center_size(world.left_bottom() + Vec2::new(10.0, -20.0), Vec2::new(100.0, 100.0)),
+                    "Edge group".to_owned(),
+                ));
+                frame.points.push(world.right_top() + Vec2::new(-3.0, 4.0));
+                frame.zone = Some((2.0, 8.0));
+            }
             let mut raw = egui::RawInput {
                 screen_rect: Some(native),
                 time: Some(self.frame as f64 / 60.0),
@@ -2147,6 +2168,19 @@ mod tests {
                     assert_eq!(masks.len(), 2, "{scene:?}/{restricted}/{scale}");
                     assert_rect_near(masks[0], Rect::from_min_max(at(800.0, 300.0), expected.left_bottom()));
                     assert_rect_near(masks[1], Rect::from_min_max(expected.right_top(), at(2880.0, 1600.0)));
+                    for shape in &shapes {
+                        let scene_shape = match &shape.shape {
+                            egui::Shape::LineSegment { stroke, .. } => stroke.color == guide_color && stroke.width == 1.0,
+                            egui::Shape::Rect(rect) => rect.fill == mask,
+                            _ => false,
+                        };
+                        if scene_shape {
+                            assert!(
+                                f.bounds().expand(0.1).contains_rect(shape.clip_rect),
+                                "scene painter spills into the workspace"
+                            );
+                        }
+                    }
                     if scene == PhotoScene::Viewfinder {
                         let compare = f
                             .ctx
@@ -2191,21 +2225,113 @@ mod tests {
                 let picture = shapes
                     .iter()
                     .find_map(|shape| match &shape.shape {
-                        egui::Shape::Mesh(mesh) if mesh.texture_id == f.frozen.id() => Some(mesh.calc_bounds()),
+                        egui::Shape::Mesh(mesh) if mesh.texture_id == f.frozen.id() => Some((mesh.calc_bounds(), shape.clip_rect)),
                         _ => None,
                     })
                     .expect("actual held photo image");
                 let background = shapes
                     .iter()
                     .find_map(|shape| match &shape.shape {
-                        egui::Shape::Rect(rect) if rect.fill == p.navy => Some(rect.rect),
+                        egui::Shape::Rect(rect) if rect.fill == p.navy => Some((rect.rect, shape.clip_rect)),
                         _ => None,
                     })
                     .expect("actual held photo background");
-                assert_rect_near(picture, expected);
-                assert_rect_near(background, f.bounds());
+                assert_rect_near(picture.0, expected);
+                assert_rect_near(picture.1, f.bounds());
+                assert_rect_near(background.0, f.bounds());
+                assert_rect_near(background.1, f.bounds());
                 assert_rect_near(f.ctx.content_rect(), f.native());
             }
+        }
+    }
+
+    #[test]
+    fn actual_viewfinder_edge_subjects_and_comparison_clip_to_the_world_with_unrestricted_controls() {
+        for (native_scale, zoom) in [(1.25, 1.2), (2.0, 1.5)] {
+            let mut f = ViewportPhotoFixture::new(false);
+            f.scene = PhotoScene::Viewfinder;
+            f.native_scale = native_scale;
+            f.ctx.set_zoom_factor(zoom);
+            f.viewport.restrict_ui = false;
+            f.viewport.left = 50.0;
+            f.viewport.right = 5.0;
+            f.viewport.top = 20.0;
+            f.viewport.bottom = 10.0;
+            f.settings.viewfinder.display = crate::snapshot::viewfinder::Display::Essential;
+            f.viewfinder.hinted = true;
+            f.viewfinder.af.track(5.0, 0.0);
+            f.viewfinder.flash_at = Some(0.0);
+            f.edge_subjects = true;
+            f.frames(3);
+            let shapes = f.show(Vec::new());
+            let p = crate::theme::Theme::default().palette();
+            let world = f.bounds();
+            let zone = format!(
+                "{}–{} m",
+                crate::snapshot::viewfinder::distance_text(2.0),
+                crate::snapshot::viewfinder::distance_text(8.0)
+            );
+            let mut marks = 0;
+            let mut labels = std::collections::BTreeSet::new();
+            let mut overflowing_marks = 0;
+            let mut flash = false;
+            for shape in &shapes {
+                let mark = match &shape.shape {
+                    egui::Shape::LineSegment { stroke, .. } => stroke.color == p.success && stroke.width == 3.0,
+                    egui::Shape::Rect(rect) => rect.stroke.color == p.success && rect.stroke.width == 2.5,
+                    _ => false,
+                };
+                let label = matches!(&shape.shape, egui::Shape::Text(text) if ["Edge face", "Edge group", zone.as_str()].contains(&text.galley.text()));
+                if mark || label {
+                    assert_rect_near(shape.clip_rect, world);
+                    marks += usize::from(mark);
+                    if label && let egui::Shape::Text(text) = &shape.shape {
+                        labels.insert(text.galley.text().to_owned());
+                    }
+                    overflowing_marks += usize::from(mark && !world.contains_rect(shape.shape.visual_bounding_rect()));
+                }
+                if let egui::Shape::Rect(rect) = &shape.shape
+                    && rect.fill == p.navy
+                    && rect.rect == world
+                {
+                    assert_rect_near(shape.clip_rect, world);
+                    flash = true;
+                }
+            }
+            assert!(
+                marks >= 10 && labels.len() == 3,
+                "edge face, group, brackets and zone must be painted"
+            );
+            assert!(
+                overflowing_marks > 0,
+                "the fixture must exercise geometry crossing the world boundary"
+            );
+            assert!(flash, "the shutter blackout must be clipped to the world");
+            f.settings.looks.push(crate::snapshot::looks::Layer::new("Sepia"));
+            for compare in [0.0, 1.0] {
+                f.ui.looks.compare = Some(compare);
+                f.frames(3);
+                let shapes = f.show(Vec::new());
+                let mut comparison_shapes = 0;
+                for shape in &shapes {
+                    let comparison = match &shape.shape {
+                        egui::Shape::Text(text) => {
+                            [aurora_i18n::tr!("photo-look-before"), aurora_i18n::tr!("photo-look-after")].contains(&text.galley.text())
+                        }
+                        egui::Shape::Circle(circle) => circle.radius == 13.0,
+                        _ => false,
+                    };
+                    if comparison {
+                        assert!(
+                            world.expand(0.1).contains_rect(shape.clip_rect),
+                            "comparison overlay spills into the workspace"
+                        );
+                        comparison_shapes += 1;
+                    }
+                }
+                assert!(comparison_shapes >= 4, "comparison grip and labels must be painted at either edge");
+            }
+            assert_rect_near(f.ctx.content_rect(), f.native());
         }
     }
 

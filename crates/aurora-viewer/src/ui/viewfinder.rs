@@ -63,7 +63,7 @@ pub struct Viewfinder {
     /// And released in the same frame: the photo follows the focus.
     pub release: bool,
     pub af: Autofocus,
-    /// The AF point, in fractions of the screen (None: its centre).
+    /// The AF point, in fractions of the live world rectangle (None: its centre).
     pub point: Option<Pos2>,
     /// What the focus is on: an avatar (AF area Avatar), or the group of
     /// avatars and points Shift + click gathers, the first the one clicked
@@ -521,17 +521,19 @@ impl Viewfinder {
         let shows = display != Display::Hidden;
         let back = ctx.layer_painter(egui::LayerId::new(Order::Background, Id::unique("vf_back")));
         let front = ctx.layer_painter(egui::LayerId::new(Order::Middle, Id::unique("vf_front")));
+        let scene_back = back.with_clip_rect(screen);
+        let scene_front = front.with_clip_rect(screen);
 
         // the photo's proportions: the rest darkened, a fine frame, the guide
         let include_interface = s.interface && crate::snapshot::same_proportions(f.photo, f.window) && !panel.freeze;
         let frame = panel::scene_frame(screen, f.photo, include_interface);
         for r in panel::outside(screen, frame) {
-            back.rect_filled(r, 0.0, p.navy.gamma_multiply(0.66));
+            scene_back.rect_filled(r, 0.0, p.navy.gamma_multiply(0.66));
         }
         let border = if shows { 0.5 } else { 0.25 };
-        back.rect_stroke(frame, 0.0, Stroke::new(1.0, p.ink.gamma_multiply(border)), StrokeKind::Inside);
+        scene_back.rect_stroke(frame, 0.0, Stroke::new(1.0, p.ink.gamma_multiply(border)), StrokeKind::Inside);
         if shows && s.guide != Guide::None {
-            panel::guide_lines(&back, frame, s.guide, p.ink.gamma_multiply(0.4));
+            panel::guide_lines(&scene_back, frame, s.guide, p.ink.gamma_multiply(0.4));
         }
         if !s.looks.is_empty() {
             self.compare_line(ctx, p, frame, panel);
@@ -543,7 +545,7 @@ impl Viewfinder {
         if full {
             self.top_bar(ctx, p, &back, controls, s, panel, f, &mut out);
         }
-        self.af_point(ctx, p, &front, s, f);
+        self.af_point(ctx, p, &scene_front, s, f);
         // (the last photo's card takes its place while it shows)
         let card = f.now < self.review_until && f.review.is_some();
         if shows && !self.hinted && !self.menu && !self.help && !card {
@@ -645,7 +647,9 @@ impl Viewfinder {
             let k = ((f.now - t) as f32 / 0.18).clamp(0.0, 1.0);
             let alpha = if f.now - t < 0.09 { 1.0 } else { 1.0 - k };
             if alpha > 0.0 {
-                let top = ctx.layer_painter(egui::LayerId::new(Order::Foreground, Id::unique("vf_flash")));
+                let top = ctx
+                    .layer_painter(egui::LayerId::new(Order::Foreground, Id::unique("vf_flash")))
+                    .with_clip_rect(screen);
                 top.rect_filled(screen, 0.0, p.navy.gamma_multiply(alpha));
                 ctx.request_repaint();
             } else {

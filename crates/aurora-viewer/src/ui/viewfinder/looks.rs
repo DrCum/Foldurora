@@ -73,6 +73,7 @@ impl Viewfinder {
             .fade_in(false)
             .fixed_pos(grip.min)
             .show(ctx, |ui| {
+                ui.set_clip_rect(ui.clip_rect().intersect(frame));
                 let (rect, resp) = ui.allocate_exact_size(grip.size(), Sense::drag());
                 keep_keys(&resp);
                 if resp.dragged() {
@@ -94,7 +95,9 @@ impl Viewfinder {
                 super::icon(painter, "arrows-horizontal", Rect::from_center_size(c, Vec2::splat(16.0)), p.ink);
             });
         let font = bold(ctx, 12.0);
-        let painter = ctx.layer_painter(egui::LayerId::new(Order::Middle, Id::unique("vf_look_compare_labels")));
+        let painter = ctx
+            .layer_painter(egui::LayerId::new(Order::Middle, Id::unique("vf_look_compare_labels")))
+            .with_clip_rect(frame);
         let y = frame.top() + 18.0;
         shadow_text(
             &painter,
