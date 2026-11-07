@@ -417,6 +417,49 @@ fn chat_v2_read_codec_maximal_rows_receipts_and_closed_schema_fit_packets() {
         packet.message = ChatMessage::Event(ChatEvent::ReadBatch(vec![denied]));
         assert!(encode(&packet).is_ok());
     }
+    // Every Poll event remains a separate bounded packet: inline read policy
+    // rows do not share a packet with a maximum-size escaped chat line.
+    let largest_key = key(source, Conversation::Direct(ConversationId::from_bytes([255; 16]).unwrap()));
+    let largest_policy = NativeChatPolicy {
+        key: largest_key,
+        revision: u64::MAX,
+        lease_current: true,
+        ready: true,
+        can_send: false,
+        can_read: true,
+    };
+    for event in [
+        ChatEvent::Conversation(ConversationInfo {
+            policy: largest_policy,
+            title: Label::new(&"\"\\".repeat(64)).unwrap(),
+        }),
+        ChatEvent::Line(ChatLine {
+            key: largest_key,
+            event: u64::MAX,
+            policy_revision: u64::MAX,
+            sender: Label::new(&"\"\\".repeat(64)).unwrap(),
+            text: ChatText::new(&"\\".repeat(MAX_TEXT_BYTES)).unwrap(),
+            kind: LineKind::Incoming,
+            truncated: false,
+        }),
+        ChatEvent::Receipt(SendReceipt {
+            key: largest_key,
+            request: u64::MAX,
+            outcome: SendOutcome::AcceptedLocally,
+        }),
+        ChatEvent::Gap { through_event: u64::MAX },
+    ] {
+        let packet = ChatPacket {
+            version: VERSION,
+            source,
+            sequence: u64::MAX,
+            reply_to: u64::MAX,
+            message: ChatMessage::Event(event),
+        };
+        let encoded = encode(&packet).unwrap();
+        assert!(encoded.len() <= MAX_PACKET_BYTES);
+        assert_eq!(decode(&encoded), Ok(packet));
+    }
     let mut request = read_request(key(source, Conversation::Nearby), u64::MAX);
     request.observed = ObservedIncoming {
         epoch: u64::MAX,

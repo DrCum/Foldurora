@@ -7,7 +7,7 @@
   immutable bounded receipts. Native read-on-draw timing/defaults stay unchanged
   in both styles. No Attention, activation, automatic host reading, new IM,
   groups or offer responses. Source, privacy, race, bounds and actual-egui
-  regressions are being extended; only direct static checks have run so far.
+  regressions are authored; direct formatting, diff and locale-parity checks pass.
   Compiled/native/human acceptance remains pending.
 
 - 🔧 Shared Chat first stage (Folderstorm port, 2026-11-07; no issue): one owned

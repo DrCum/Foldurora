@@ -180,6 +180,18 @@ Chat V2 peers are required; older chat peers fail closed. Inactive New IM,
 Friends, contacts, groups, automatic host reading and Attention remain absent.
 The read stage's compiled, synthetic visual and native acceptance is pending.
 
+Read batches carry at most four source-relative rows, each with current native
+policy before its optional read metadata. Counts never change permission or
+composer revisions. Two dirty rows are prioritized and the remaining slots
+advance a fair cursor across at most 64 conversations, including under continuous
+new arrivals. Poll exports at most three history lines per page. Its complete
+reply bound is ten separate packets: one gap, one rotating policy, three line/
+policy pairs, one read batch and one Send receipt. Read commands and receipt
+queries each return one separate body-free reply. The driver reserves eleven
+reply slots before taking each FIFO command with a sixteen-slot reply queue; pressure
+leaves the command queued before any native mutation. Maximum escaped titles,
+UTF-8 payloads and integer fields remain subject to the 4,096-byte codec limit.
+
 ## Acceptance before recommending a build
 
 Automated checks must include identity/replay/lease rejection, stale and
