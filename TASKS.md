@@ -708,17 +708,24 @@
   acceptance remain pending. These receipts do not validate later combined source.
   Scene/export projection and camera/dial semantics are retained. See
   [the candidate guide](docs/FOLDURORA.md).
-- 🔧 Foldurora selected object-contents copy (human request, 2026-11-07;
-  no fork issue; upstream `54df367c7019`, PR Aurora-Viewer/Aurora-Viewer#2742):
+- 🟡 Foldurora selected object-contents copy (human request, 2026-11-07;
+  no fork issue; [PR #11](https://github.com/DrCum/Foldurora/pull/11);
+  upstream `54df367c7019`, PR Aurora-Viewer/Aurora-Viewer#2742):
   both editor layouts and the Open item menu copy only selected items into one
   object-named folder, using the existing move warning and verified receipt.
   Recheck current contents and source rights after confirmation and folder
   creation; refuse no-copy worn contents and newly unapproved moves. Explicit
   drag destinations and the full-copy button retain their separate behavior.
-  Imported regressions cover both layouts, selection, stale permissions and
-  approval strength. Foldurora validation is pending; upstream acceptance does
-  not establish acceptance of this fork. Shared app wiring, EN/FR/JA text and
-  documentation need coordination during integration.
+  Validation at `8cbf4d9e3f23`: formatting, strict Linux workspace/all-target
+  Clippy with the existing dead-code allowance, 73 contents tests, 18 transfer
+  tests, two catalogue checks and five theme guards passed. All four added
+  regressions and the updated queue test passed, including both editor layouts.
+  The normal development build passed. Exact-source Vulkan/Xvfb captures timed
+  out after 180/300 seconds; the first freeze reaches queue submission and
+  presentation in Lavapipe. No image or visual acceptance is claimed. Native
+  Windows, visual and human grid acceptance remain pending; no grid was used.
+  Shared app wiring, EN/FR/JA text, documentation and the Windows build allowlist
+  need Dev Agent coordination during integration. Slick was unavailable.
 
 - 🔧 Selective upstream catch-up (human request, 2026-11-07; no issue): apply
   sixteen reviewed upstream commits individually with `-x` to frozen photo/
