@@ -44,6 +44,10 @@ pub(super) struct Shared<T> {
     pub break_before_ack: AtomicBool,
     #[cfg(test)]
     pub hold_pixel_accept: AtomicBool,
+    #[cfg(test)]
+    pub hold_pixel_challenge: AtomicBool,
+    #[cfg(test)]
+    pub pixel_hello_waiting: AtomicBool,
     pub publication_failed: AtomicBool,
     pub stop: AtomicBool,
     pub ended: AtomicBool,
@@ -72,6 +76,10 @@ impl<T> Shared<T> {
             break_before_ack: AtomicBool::new(false),
             #[cfg(test)]
             hold_pixel_accept: AtomicBool::new(false),
+            #[cfg(test)]
+            hold_pixel_challenge: AtomicBool::new(false),
+            #[cfg(test)]
+            pixel_hello_waiting: AtomicBool::new(false),
             publication_failed: AtomicBool::new(false),
             stop: AtomicBool::new(false),
             ended: AtomicBool::new(false),

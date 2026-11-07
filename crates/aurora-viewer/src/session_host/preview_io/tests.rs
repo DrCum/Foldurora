@@ -700,3 +700,45 @@ fn preview_io_owned_loopback_park_after_host_pixel_accept_before_worker_finish_p
             .is_some()
     );
 }
+
+#[test]
+fn preview_io_owned_loopback_park_before_pixel_challenge_retires_role_without_losing_history() {
+    let mut io = Owned::new(true);
+    let old = io.ready();
+    let (mut model, handoff, _) = io.capture(PreviewSize::Small);
+    let image = handoff
+        .admit(&mut model, &io.control, io.host.shared.clock(Instant::now()))
+        .unwrap();
+    io.park();
+    until(|| io.observation(Status::CaptureStopped));
+    io.host.shared.hold_pixel_challenge.store(true, Ordering::Release);
+    io.restore();
+    until(|| io.host.shared.pixel_hello_waiting.load(Ordering::Acquire).then_some(()));
+    until(|| {
+        io.host
+            .take_update()?
+            .sources
+            .into_iter()
+            .find(|u| u.observation.policy.is_some_and(|p| p.access().capture_active))
+    });
+    io.park();
+    until(|| {
+        io.host
+            .take_update()?
+            .sources
+            .into_iter()
+            .find(|u| u.observation.policy.is_some_and(|p| !p.access().capture_active))
+    });
+    io.host.shared.hold_pixel_challenge.store(false, Ordering::Release);
+    io.host.shared.wake.notify_one();
+    until(|| {
+        io.observation(Status::CaptureStopped)
+            .filter(|o| o.token.pixel_epoch() > old.token.pixel_epoch())
+    });
+    assert!(!io.worker.frame_available());
+    assert!(
+        image
+            .with_pixels(&io.control, io.host.shared.clock(Instant::now()), |_| ())
+            .is_some()
+    );
+}

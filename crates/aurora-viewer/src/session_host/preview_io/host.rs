@@ -540,6 +540,12 @@ pub(super) fn run(installation: InstallationId, host: HostId, shared: Arc<Shared
                 continue;
             }
             if let Some(hello) = pending[index].io.hello() {
+                #[cfg(test)]
+                if hello.lane() == Lane::Pixels && shared.hold_pixel_challenge.load(Ordering::Acquire) {
+                    shared.pixel_hello_waiting.store(true, Ordering::Release);
+                    index += 1;
+                    continue;
+                }
                 let permit = {
                     let m = shared.mailbox.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                     if shared.emergency.load(Ordering::Acquire) || !pending[index].io.fresh() {
@@ -593,10 +599,13 @@ pub(super) fn run(installation: InstallationId, host: HostId, shared: Arc<Shared
                         pending.swap_remove(index);
                         continue;
                     };
+                    // A role started just before capture loss may reach Hello
+                    // after the retained/capture=false metadata. Authenticate
+                    // it only to finish exact retirement, never to publish pixels.
                     if duplicate
                         || s.pixels.is_some()
                         || s.suspension.is_some()
-                        || s.observation.policy.is_none_or(|p| !p.access().capture_active)
+                        || s.observation.policy.is_none_or(|p| !p.access().retain_last_active)
                     {
                         pending.swap_remove(index);
                         continue;
