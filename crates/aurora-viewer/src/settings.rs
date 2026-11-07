@@ -2159,7 +2159,13 @@ fn for_mode(dir: PathBuf) -> PathBuf {
 fn unit_test_root() -> Option<PathBuf> {
     #[cfg(test)]
     {
-        Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/unit-test-user-data"))
+        Some(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .ancestors()
+                .nth(2)
+                .expect("unit-test worktree root is unavailable")
+                .join("target/unit-test-user-data"),
+        )
     }
     #[cfg(not(test))]
     {

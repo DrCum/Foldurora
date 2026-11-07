@@ -504,10 +504,14 @@ mod tests {
             let texts = frames.run(vec![], |ui| {
                 super::super::options::show(ui.ctx(), &p, &icons, &mut s, &mut st, &mut true);
             });
-            found = texts
-                .iter()
-                .rfind(|t| t.source == aurora_i18n::tr!("workspaces-manage"))
-                .map(|t| t.rect.center());
+            // Cx::draw_row paints the control body before its identical,
+            // passive row label. The last matching text is not the button.
+            let matches: Vec<_> = texts.iter().filter(|t| t.source == aurora_i18n::tr!("workspaces-manage")).collect();
+            assert_eq!(matches.len(), 2, "actual manager button and passive row label");
+            let button = matches[0].rect;
+            let label = matches[1].rect;
+            assert!(button.left() > label.right(), "the control is to the right of its row label");
+            found = Some(button.center());
         }
         let pos = found.expect("actual Preferences Layout manager entry");
         let mut open_manager = false;
