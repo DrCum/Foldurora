@@ -1,5 +1,18 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Disabled CPU/body integration (2026-11-07; no issue): preserve the nine
+  reviewed CPU surface/body commits on exact disabled-foundation base b6d5ed6b.
+  CPU source at 25ae27c6 and body source at a59bd978 remain byte-identical;
+  only TASKS entry ordering required manual conflict resolution. Relevant named
+  inventory is 17 existing model + 12 body + 12 CPU definitions: 40 portable and
+  one Windows compile reference, plus one ignored 24-capture-per-locale fixture
+  (72 across EN/FR/JA). The base gains 24 regular definitions and that fixture.
+  Component source reviews remain scoped; this combination is uncompiled/unrun
+  and independent integration source review is pending. Both new modules remain
+  cfg(test), launch previews remain absent and actual remembered demand remains
+  false. No Shell entry/window, authenticated image IO core, native capture or
+  inactive rendering is enabled. Prior exact runtime evidence is not transferred.
+
 - 🔧 Compact monitor body prerequisite (2026-11-07; no issue): cfg(test)-only
   fitted, read-only Last active image with original admission age, Exchange,
   canonical source-bound Chat, pin, bounded Options and four fixed/cycling view

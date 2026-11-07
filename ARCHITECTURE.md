@@ -1,5 +1,11 @@
 # Aurora Viewer architecture
 
+The disabled CPU/body integration preserves the reviewed private surface and
+Monitor body atoms on the existing disabled monitor foundations. Production
+Shell routing and launch/demand defaults are unchanged; new modules remain
+cfg(test). Source/locale byte parity and test-definition inventories are separate
+from compilation, actual presentation, authenticated IO and runtime acceptance.
+
 `session_host/private_image.rs` and `private_image/{surface,tests}.rs` form a
 cfg(test)-only CPU monitor-image lifetime prerequisite. One injected 24 MiB
 byte-credit pool follows immutable ColorImage allocations and entire physical
