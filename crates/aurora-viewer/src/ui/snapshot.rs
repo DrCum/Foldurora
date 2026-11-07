@@ -2068,6 +2068,8 @@ mod tests {
                     f.show(vec![egui::Event::PointerMoved(point)]);
                     f.show(vec![egui::Event::MouseWheel {
                         unit: egui::MouseWheelUnit::Line,
+                        phase: egui::TouchPhase::Move,
+                        source: egui::MouseWheelSource::Unknown,
                         delta: Vec2::new(0.0, 1.0),
                         modifiers: egui::Modifiers::NONE,
                     }]);
