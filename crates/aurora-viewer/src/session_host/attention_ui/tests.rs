@@ -1260,3 +1260,56 @@ fn attention_review_cancel_remains_available_during_preference_load_or_save_fail
         assert_eq!(f.body.reviewing.as_ref().unwrap().status, Status::WaitingForGrant);
     }
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn attention_fixture_open_readiness_requires_valid_live_paint_after_cancellation() {
+    let mut f = Frames::new();
+    let selected = f.first();
+    f.choose(selected);
+    let id = Id::unique("attention_open");
+    f.rect(id);
+    let status = |f: &Frames| f.body.native_fixture_status(&f.model, &f.host.attention_preferences);
+    assert_eq!(status(&f)["open_ready"], true);
+    let first = status(&f)["open_painted"]["frame"].as_u64().unwrap();
+
+    f.body.cancel_gestures();
+    assert_eq!(status(&f)["open_ready"], false);
+    assert!(status(&f)["open_painted"].is_null());
+    assert!(f.pass(Vec::new(), InputMode::Navigating, true).is_none());
+    assert_eq!(status(&f)["open_ready"], false);
+    assert!(f.pass(Vec::new(), InputMode::Live, false).is_none());
+    assert_eq!(status(&f)["open_ready"], false);
+    assert!(f.show(vec![Event::WindowFocused(true)]).is_none());
+    assert_eq!(status(&f)["open_ready"], false);
+    f.settle();
+    assert_eq!(status(&f)["open_ready"], true);
+    assert!(status(&f)["open_painted"]["frame"].as_u64().unwrap() > first);
+
+    // A retained focused widget and row do not repair a revoked capture.
+    f.model.select(f.model.rows()[1].key);
+    assert_eq!(status(&f)["open_ready"], false);
+    f.settle();
+    assert_eq!(status(&f)["open_ready"], true);
+    let selected = f.model.selected().unwrap();
+    let chat = f.host.chat.iter_mut().find(|chat| chat.source == selected.source).unwrap();
+    let info = Arc::make_mut(chat)
+        .conversations
+        .iter_mut()
+        .find(|info| info.policy.key == selected)
+        .unwrap();
+    info.policy.revision += 1;
+    f.model.sync(&f.host, &f.host.attention_preferences.preferences);
+    f.body.sync(&f.model, &f.host.attention_preferences);
+    assert_eq!(status(&f)["open_ready"], false);
+    f.settle();
+    assert_eq!(status(&f)["open_ready"], true);
+    let at = f.rect(id).center();
+    assert!(f.pointer(at, true).is_none());
+    assert_eq!(status(&f)["open_live_valid"], true);
+    assert_eq!(status(&f)["open_ready"], false, "an existing gesture can mask a new key press");
+    f.body.surface_failed();
+    assert_eq!(status(&f)["open_ready"], false);
+    f.settle();
+    assert_eq!(status(&f)["open_ready"], true);
+}

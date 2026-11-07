@@ -58,6 +58,12 @@ impl Ticket {
     pub fn key(self) -> ChatKey {
         self.key
     }
+
+    #[cfg(all(test, target_os = "linux"))]
+    pub(super) fn native_fixture_status(self) -> serde_json::Value {
+        serde_json::json!({"key": self.key, "policy": self.policy, "read": self.read,
+            "observation": self.observation, "interaction": self.interaction})
+    }
 }
 
 #[derive(Clone, Copy, Debug)]

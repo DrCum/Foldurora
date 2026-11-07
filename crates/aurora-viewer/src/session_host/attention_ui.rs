@@ -66,6 +66,8 @@ struct PaintedControl {
     rect: egui::Rect,
     layer: egui::LayerId,
     intent: Intent,
+    #[cfg(all(test, target_os = "linux"))]
+    frame: u64,
 }
 
 #[derive(Clone, Copy)]
@@ -724,6 +726,8 @@ impl AttentionUi {
             rect: response.interact_rect.intersect(ui.clip_rect()),
             layer: response.layer_id,
             intent,
+            #[cfg(all(test, target_os = "linux"))]
+            frame: ui.ctx().cumulative_frame_nr(),
         });
         let owns =
             |pos| response.interact_rect.intersect(ui.clip_rect()).contains(pos) && ui.ctx().layer_id_at(pos) == Some(response.layer_id);
@@ -865,12 +869,28 @@ pub(super) fn native_fixture_host() -> HostSnapshot {
 
 #[cfg(all(test, target_os = "linux"))]
 impl AttentionUi {
-    pub(super) fn native_fixture_status(&self) -> serde_json::Value {
+    pub(super) fn native_fixture_status(&self, model: &Attention, state: &PreferenceState) -> serde_json::Value {
         let save = self.save.map(|save| match save {
             Save::Admitting => serde_json::json!({"state": "admitting"}),
             Save::Queued { ticket, preferences } => serde_json::json!({"state": "queued", "ticket": ticket, "preferences": preferences}),
         });
+        // controls contains only the committed previous paint's live, enabled
+        // responses. Focus/modality/surface cancellation clears it before any
+        // new frame, so context focus or stale rects alone cannot imply ready.
+        let open = self.controls.iter().find_map(|control| match control.intent {
+            Intent::Open(ticket) if control.id == Id::unique("attention_open") => Some((control, ticket)),
+            _ => None,
+        });
+        let open_live_valid =
+            state.writable && open.is_some_and(|(_, ticket)| model.selected() == Some(ticket.key()) && model.validate(ticket));
+        let open_painted = open.map(|(control, ticket)| {
+            serde_json::json!({"frame": control.frame,
+            "ticket": ticket.native_fixture_status(), "valid": model.validate(ticket),
+            "selected": model.selected() == Some(ticket.key()), "live_enabled": true})
+        });
         serde_json::json!({"gesture": self.gesture.is_some(), "save": save, "save_failed": self.save_failed,
+            "open_painted": open_painted, "open_live_valid": open_live_valid,
+            "open_ready": open_live_valid && self.gesture.is_none() && self.save.is_none() && !self.ime_composing,
             "filters_open": self.filters_open, "controls": self.controls.len(), "ime_composing": self.ime_composing})
     }
 }

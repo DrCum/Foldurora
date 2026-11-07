@@ -106,8 +106,10 @@ It never overrides `HOME`, `home` or `CODEX_HOME`. Use a frozen test executable
 with an exact source commit/SHA256 receipt and only the exact test above. Before
 every XTest action verify PID/start ticks, source version, exact title, native
 window ID/PID property, display/auth path, mapped geometry and actual X focus.
-Keep actions within 300 seconds and reserve 120 seconds for owned cleanup;
-the fixture has a 420-second wall limit. Do not drive the shared desktop.
+Keep actions within 300 seconds and reserve 120 seconds for owned cleanup.
+The driver owns an absolute process/startup deadline; the fixture's internal
+420-second event-loop limit starts after font initialization. Do not drive the
+shared desktop.
 
 The atomic 0600 `state.json` includes source version, PID, owner and Attention
 native window IDs; the Attention title is
@@ -120,8 +122,20 @@ actual completed production frame; `controls` contains
 Rects are logical `[left,top,right,bottom]`; apply `pixels_per_point` and
 `client_origin`, then recheck exact identity/geometry before each pointer edge.
 Hidden filter controls may retain previous rects: require `ui.filters_open`, a
-fresh painted frame and stable in-client geometry before using them. Readiness
+fresh painted frame and stable in-client geometry before using them. Geometry
 requires a painted mapped surface and stable rects across three state publishes.
+Activation readiness additionally requires `ui.open_ready=true`: the committed
+previous live paint must contain the actually enabled Open control, its full
+captured Ticket must validate against the current model and selected key, and
+there must be no existing gesture, pending save or IME composition.
+`ui.open_painted` records that mapping's frame and full Ticket; focus/modality/
+surface cancellation clears the mapping before another paint can repopulate it.
+Native key entries retain dispatch-time `event.before`/`after` predicates and
+are later annotated with `paint_effect` at the next actual production render,
+including its native window/frame and before/after predicates. A skipped
+throttled redraw cannot annotate an effect; closing cancels outstanding entries
+instead of attributing them to the reopened surface. Several queued key edges
+can share a render; that is not proof of individual egui passes.
 
 Write atomic private `control.json` of at most 4096 bytes, with increasing
 `serial`, printable `phase` of at most 64 characters, and exactly one `command`.
@@ -142,16 +156,25 @@ Driver acceptance sequence (preserve every assertion state and screenshot):
    and select a row using its actual pointer edges. Require exact selected full
    key. Move/click Open Chat to focus it, recording that baseline open intent.
    Record an eligible settled state: native window and Open control focused,
-   selected row/current policy valid, unblocked, writable preferences, no save.
+   selected row/current policy valid, unblocked, writable preferences, no save,
+   and `ui.open_ready=true` with the exact valid previous live-painted Ticket.
 2. For Return and Space separately, hold the key, focus the owned owner window,
    and require Attention focus loss. Refocus Attention with the key still held,
    settle actual focus and use only native Tab if needed to focus Open again.
    Preserve the first real held press even if `repeat=false`, then a real repeat.
    Every key event records `before` and `after` predicates including exact full
    selection, Open focus, eligibility and prior intent count. Require the
-   original selection and eligibility on the first real held press, unchanged
-   intents through both press and physical release, then exactly one Open Chat
-   from a fresh press/release. Synthetic focus releases cannot rearm either key.
+   original selection and full eligibility (including the new live-painted Open
+   mapping after the current focus lifecycle) before the first real held press
+   and before/after each true repeat. Require its `paint_effect` to preserve
+   valid live mapping, readiness, no gesture and unchanged intents. If the first
+   repeat=false event arrives before live readiness, keep its full dispatch and
+   effect-time trace but mark that first-press acceptance unverified: an inactive
+   frame cannot prove suppression. Keep intents unchanged through physical
+   release; wait for its actual `paint_effect` and a settled subsequent live
+   frame with no action/gesture before beginning the fresh key phase. Then
+   exactly one Open Chat must follow a fresh press/release, not a delayed held
+   release. Synthetic focus releases cannot rearm either key.
    Also release while away and require the first fresh key after refocus to work.
 3. Press Open, replace that row's source, then release at its old location:
    no intent and no replacement selection. Repeat using policy revision and

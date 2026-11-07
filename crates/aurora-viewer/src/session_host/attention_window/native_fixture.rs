@@ -69,6 +69,7 @@ struct Fixture {
     blocked: bool,
     modifiers: ModifiersState,
     events: Vec<Value>,
+    awaiting_activation_paint: Vec<usize>,
     intents: Vec<Value>,
     pending_preferences: Option<(u64, Preferences)>,
     preference_ticket: u64,
@@ -114,13 +115,14 @@ impl Fixture {
             let widget = window.context.data(|data| data.get_temp::<egui::Id>(id.with("widget")));
             widget.is_some() && widget == window.context.memory(|memory| memory.focused())
         });
-        let ui = self.body.native_fixture_status();
+        let ui = self.body.native_fixture_status(&self.model, &self.snapshot.attention_preferences);
         json!({"selected": selected, "selected_row": selected_row, "selected_valid": selected_valid, "open_focused": open_focused,
             "native_window_focused": focused, "blocked": self.blocked, "ui": ui,
             "modifiers_none": self.modifiers.is_empty(),
             "prior_focus_losses": self.focus_losses, "prior_intents": self.intents.len(),
             "eligible": focused && open_focused && selected_valid && !self.blocked
                 && self.snapshot.attention_preferences.writable && !self.snapshot.stopped && ui["save"].is_null()
+                && ui["open_ready"] == true
                 && ui["ime_composing"] == false && self.modifiers.is_empty()
                 && window.is_some_and(|window| !egui::Popup::is_any_open(&window.context))})
     }
@@ -192,7 +194,8 @@ impl Fixture {
             "display": std::env::var("DISPLAY").unwrap(), "xauthority": std::env::var("XAUTHORITY").unwrap(),
             "owner": self.owner.as_ref().map(|window| json!({"window": window_id(window), "title": format!("{} owner", self.title)})),
             "attention": attention, "selected": self.model.selected(), "rows": rows,
-            "preferences": self.snapshot.attention_preferences.preferences, "ui": self.body.native_fixture_status(),
+            "preferences": self.snapshot.attention_preferences.preferences,
+            "ui": self.body.native_fixture_status(&self.model, &self.snapshot.attention_preferences),
             "blocked": self.blocked, "events": self.events, "intents": self.intents, "native_reads": reads,
             "focus_losses": self.focus_losses, "closes": self.closes, "reopens": self.reopens, "finished": self.finished,
             "preference_io": false, "host_controller": false, "authentication_acceptance": false,
@@ -336,6 +339,11 @@ impl ApplicationHandler for Fixture {
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
         self.sync();
         let is_attention = self.attention.as_ref().is_some_and(|window| window.id() == id);
+        let activation = is_attention
+            && matches!(&event, WindowEvent::KeyboardInput { event, .. }
+            if matches!(event.logical_key, Key::Named(NamedKey::Enter | NamedKey::Space)));
+        let paint_before = matches!(event, WindowEvent::RedrawRequested).then(|| self.observation());
+        let prior_frame = self.attention.as_ref().and_then(|window| window.last_frame);
         let data = match &event {
             WindowEvent::KeyboardInput { event, is_synthetic, .. } => Some(json!({"kind": "key",
                 "key": format!("{:?}", event.logical_key), "state": format!("{:?}", event.state),
@@ -365,6 +373,9 @@ impl ApplicationHandler for Fixture {
                 .event(event_loop, &event, &mut self.model, &mut self.body, &self.snapshot, self.blocked)
                 .unwrap();
             if close {
+                for index in std::mem::take(&mut self.awaiting_activation_paint) {
+                    self.events[index]["paint_effect"] = json!({"cancelled": "surface_closed"});
+                }
                 self.attention = None;
                 self.closes += 1;
             }
@@ -376,9 +387,23 @@ impl ApplicationHandler for Fixture {
         }
         if let Some(data) = data {
             assert!(self.events.len() < 512);
+            let index = self.events.len();
             self.events
                 .push(json!({"phase": self.phase, "attention": is_attention, "event": data,
                 "after": self.observation()}));
+            if activation {
+                self.awaiting_activation_paint.push(index);
+            }
+        }
+        if is_attention && paint_before.is_some() && self.attention.as_ref().and_then(|window| window.last_frame) != prior_frame {
+            let after = self.observation();
+            let window = self.attention.as_ref().unwrap();
+            let frame = window.context.cumulative_frame_nr();
+            let native_window = window_id(&window.surface.window);
+            for index in std::mem::take(&mut self.awaiting_activation_paint) {
+                self.events[index]["paint_effect"] = json!({"frame": frame, "before": paint_before,
+                    "after": after, "phase": self.phase, "window": native_window});
+            }
         }
     }
 
@@ -439,6 +464,7 @@ fn attention_native_os_fixture() {
         blocked: true,
         modifiers: ModifiersState::empty(),
         events: Vec::new(),
+        awaiting_activation_paint: Vec::new(),
         intents: Vec::new(),
         pending_preferences: None,
         preference_ticket: 0,
