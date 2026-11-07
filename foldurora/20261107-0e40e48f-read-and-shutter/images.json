@@ -1,0 +1,58 @@
+[
+  {
+    "file": "native-shutter-before.png",
+    "sha256": "3d534664b758db7dfccc2830d321c87e818d09293d8bfc5480e5a7970deedb7d",
+    "source_commit": "0e40e48f631b1b4fdd0d677013e07b83a4f5fc61",
+    "scope": "native Linux/software-Vulkan offline demo",
+    "unchanged_original": true
+  },
+  {
+    "file": "native-shutter-after.png",
+    "sha256": "6444065d3cb2f78d7f9c196bba34ab8080e076cab3629610fb02e339c51b7d76",
+    "source_commit": "0e40e48f631b1b4fdd0d677013e07b83a4f5fc61",
+    "scope": "native Linux/software-Vulkan offline demo",
+    "unchanged_original": true
+  },
+  {
+    "file": "native-free-camera-off.png",
+    "sha256": "3d083f7a1aa348c762e74594830ae7e75fa3f40d866b57023c8140888319783f",
+    "source_commit": "0e40e48f631b1b4fdd0d677013e07b83a4f5fc61",
+    "scope": "native Linux/software-Vulkan offline demo",
+    "unchanged_original": true
+  },
+  {
+    "file": "native-quit-confirmation.png",
+    "sha256": "4d13a7e043f17b2c6966686ff16336679267537fa9459c317c71186e627d893b",
+    "source_commit": "0e40e48f631b1b4fdd0d677013e07b83a4f5fc61",
+    "scope": "native Linux/software-Vulkan offline demo",
+    "unchanged_original": true
+  },
+  {
+    "file": "cpu-en-read-pending.png",
+    "sha256": "d00201c8253444fc3c67b401f43e9933574ba7d8480f5a2959cd31b6dd3b1385",
+    "source_commit": "0e40e48f631b1b4fdd0d677013e07b83a4f5fc61",
+    "scope": "synthetic production CPU body fixture",
+    "unchanged_original": true
+  },
+  {
+    "file": "cpu-fr-narrow-read-stale.png",
+    "sha256": "631ac6d2ac1bf40842d023e42f5c3f191b1c48746d0d72c1b9eb23a7dff4e05d",
+    "source_commit": "0e40e48f631b1b4fdd0d677013e07b83a4f5fc61",
+    "scope": "synthetic production CPU body fixture",
+    "unchanged_original": true
+  },
+  {
+    "file": "cpu-ja-narrow-read-uncertain.png",
+    "sha256": "290b5d7f735923a90e677e42353318275a31bfc251e59d1bffb04a3d26220b3f",
+    "source_commit": "0e40e48f631b1b4fdd0d677013e07b83a4f5fc61",
+    "scope": "synthetic production CPU body fixture",
+    "unchanged_original": true
+  },
+  {
+    "file": "cpu-ja-narrow-policy-reopened.png",
+    "sha256": "cac5f520dafa942c65ac92a7d400268df727bbb8bb64054f4e939e906a82bddc",
+    "source_commit": "0e40e48f631b1b4fdd0d677013e07b83a4f5fc61",
+    "scope": "synthetic production CPU body fixture",
+    "unchanged_original": true
+  }
+]
