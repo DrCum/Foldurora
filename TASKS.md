@@ -1,5 +1,13 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Pure local Inventory archive model (2026-11-07; no issue): test-only closed
+  versioned codec (2048 UUIDs/128KiB), actual source/eligibility/RLVa checks and
+  exact old-context edit/publication intents; missing defaults differ from bad
+  loads, save failures retain published flags, and counters fail closed. Thirteen
+  actual-helper/codec/model regressions are authored/unrun. Projection, private
+  IO, real menus and Folder Jump visibility integration remain separate required
+  stages; this prerequisite alone enables no archive behavior.
+
 - 🔧 Local Inventory archive prerequisite, shared origin (2026-11-07; no issue):
   World now owns one pure actual-request digest/ambiguity state, captured before
   Net submission, cleared before failure retry and consumed once on LoggedIn.

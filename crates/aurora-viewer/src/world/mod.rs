@@ -47,6 +47,8 @@ pub mod hud_lock;
 pub mod hud_scale;
 mod im_announce;
 pub mod inventory;
+#[cfg(test)]
+pub(crate) mod inventory_archive;
 pub mod inventory_offers;
 pub mod land;
 pub mod land_buy;
