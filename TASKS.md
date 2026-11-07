@@ -4,7 +4,9 @@
   first-member folders share the original ordered landmarks across menu, row and
   grid. Separate bounded account/profile/grid metadata uses original submitted
   login provenance, exact stale-editor checks, IO-only atomic publication and a
-  nonblocking cross-process lock with revision/content CAS. Fifteen model/IO and
+  nonblocking cross-process lock with revision/content CAS. Two process-wide
+  worker slots cover actual canceled-worker exit; busy new sources retry without
+  thread/channel allocation or GUI waits. Eighteen model/IO and
   six real-egui/projection cases are authored/unrun; root-owned execution and
   independent source review remain required. Inventory and old order IO remain
   unchanged; no simulator write or new network operation is added.

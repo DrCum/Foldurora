@@ -138,6 +138,9 @@ pub(crate) fn fixture() -> Fixture {
     std::fs::create_dir_all(&root).unwrap();
     let source = scope("https://grid.example.invalid/login");
     let mut favorites = Favorites::default();
+    // Same admission/owner/poll path, isolated capacity so the ordinary
+    // parallel test suite cannot make unrelated fixture loads starve.
+    favorites.group_workers = WorkerPool::isolated(MAX_WORKERS);
     favorites.capture_login_grid(&request("https://grid.example.invalid/login"));
     let grid = favorites.take_login_grid().unwrap();
     assert!(grid == source.grid);
@@ -326,6 +329,7 @@ fn favorite_group_os_lock_is_nonblocking_and_foreign_publication_cas_preserves_n
     let mut f = fixture();
     f.save(10, "A");
     let mut other = Favorites::default();
+    other.group_workers = f.favorites.group_workers.clone();
     other.bind_groups(Some(f.source), f.root.clone());
     let deadline = Instant::now() + Duration::from_secs(5);
     while other.group_status() == GroupStatus::Loading {
@@ -505,4 +509,116 @@ fn favorite_group_one_pending_save_rejects_second_edit_and_consumes_old_tickets(
     );
     f.save(11, "Fresh editor");
     assert_eq!(f.name(11), Some("Fresh editor"));
+}
+
+#[test]
+fn favorite_group_default_replacement_models_share_the_process_worker_pool() {
+    let original = Favorites::default();
+    assert_eq!(original.group_workers.0.limit, 2);
+    for _ in 0..256 {
+        let replacement = Favorites::default();
+        assert!(Arc::ptr_eq(&original.group_workers.0, &replacement.group_workers.0));
+        assert!(replacement.groups.is_none());
+    }
+}
+
+#[test]
+fn favorite_group_blocked_worker_resets_bound_real_starts_until_actual_exit_then_retry_current_source() {
+    let mut f = fixture();
+    f.save(10, "Published original source");
+    let original_path = f.path();
+    let original_bytes = std::fs::read(&original_path).unwrap();
+    let pool = f.favorites.group_workers.clone();
+    assert_eq!(pool.0.starts.load(Ordering::Acquire), 1);
+    let first_alive = f.favorites.groups.as_ref().unwrap().owner.as_ref().unwrap().alive.clone();
+    let io = IO_OWNER.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let ticket = f.ticket(10);
+    f.favorites
+        .assign_group(ticket, f.account, f.session, &f.inventory, "Never publish canceled work")
+        .unwrap();
+    assert_eq!(f.name(10), Some("Published original source"));
+    let mut next = scope("https://replacement.example.invalid/login");
+    f.favorites.bind_groups(Some(next), f.root.clone());
+    let second_alive = f.favorites.groups.as_ref().unwrap().owner.as_ref().unwrap().alive.clone();
+    // Both admitted OS workers are unable to finish while IO_OWNER is held.
+    // Logical cancel/source replacement must not refund either actual slot.
+    assert_eq!(pool.0.used.load(Ordering::Acquire), 2);
+    for session in 1000..1512 {
+        next.session = Uuid::from_u128(session);
+        if session % 2 == 0 {
+            f.favorites = Favorites {
+                group_workers: pool.clone(),
+                ..Default::default()
+            };
+        }
+        f.favorites.bind_groups(Some(next), f.root.clone());
+        f.favorites.list(&f.inventory); // Production try-only retry while busy.
+        let current = f.favorites.groups.as_ref().unwrap();
+        assert_eq!(current.scope, next);
+        assert!(current.owner.is_none() && current.rows.is_empty() && current.pending.is_none());
+        assert_eq!(f.favorites.group_status(), GroupStatus::Loading);
+        assert!(
+            f.favorites
+                .group_name(f.account, next.session, &f.inventory, Uuid::from_u128(10))
+                .is_none()
+        );
+        assert!(
+            f.favorites
+                .group_ticket(f.account, next.session, &f.inventory, Uuid::from_u128(10))
+                .is_none()
+        );
+        assert_eq!(pool.0.starts.load(Ordering::Acquire), 2);
+        assert_eq!(pool.0.used.load(Ordering::Acquire), 2);
+        assert_eq!(pool.0.peak.load(Ordering::Acquire), 2);
+    }
+    assert!(!first_alive.load(Ordering::Acquire) && !second_alive.load(Ordering::Acquire));
+    drop(io);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while pool.0.used.load(Ordering::Acquire) != 0 {
+        assert!(Instant::now() < deadline, "canceled OS workers did not exit");
+        std::thread::yield_now();
+    }
+    f.source = next;
+    f.session = next.session;
+    f.settle(); // Current pending source alone may now acquire/retry once.
+    assert_eq!(f.favorites.group_status(), GroupStatus::Ready);
+    assert_eq!(pool.0.starts.load(Ordering::Acquire), 3);
+    assert_eq!(pool.0.used.load(Ordering::Acquire), 1);
+    assert_eq!(pool.0.peak.load(Ordering::Acquire), 2);
+    assert!(f.name(10).is_none());
+    assert!(
+        f.favorites
+            .group_ticket(f.account, f.session, &f.inventory, Uuid::from_u128(10))
+            .is_some()
+    );
+    assert!(!f.path().exists());
+    assert_eq!(std::fs::read(original_path).unwrap(), original_bytes);
+    f.favorites.bind_groups(None, f.root.clone());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while pool.0.used.load(Ordering::Acquire) != 0 {
+        assert!(Instant::now() < deadline);
+        std::thread::yield_now();
+    }
+    assert_eq!(f.favorites.group_status(), GroupStatus::Unavailable);
+}
+
+#[test]
+fn favorite_group_worker_admission_rolls_back_unstarted_closure_and_unwind() {
+    let pool = WorkerPool::isolated(1);
+    let permit = pool.admit().unwrap();
+    assert!(pool.admit().is_none());
+    // A spawn failure drops the same owned closure without running it.
+    let unstarted = move || drop(permit);
+    drop(unstarted);
+    assert_eq!(pool.0.used.load(Ordering::Acquire), 0);
+    let permit = pool.admit().unwrap();
+    assert!(
+        std::panic::catch_unwind(move || {
+            let _permit = permit;
+            panic!("synthetic worker unwind");
+        })
+        .is_err()
+    );
+    assert_eq!(pool.0.used.load(Ordering::Acquire), 0);
+    assert!(pool.admit().is_some());
 }

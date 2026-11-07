@@ -10,8 +10,8 @@ use std::collections::BTreeMap;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::{
-    Arc, Mutex,
-    atomic::{AtomicBool, AtomicU64, Ordering},
+    Arc, Mutex, OnceLock,
+    atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
 };
 use uuid::Uuid;
 
@@ -22,6 +22,69 @@ static NEXT_INSTANCE: AtomicU64 = AtomicU64::new(1);
 // IO threads only. A new owner's load cannot overtake a prior owner's atomic
 // publication. Revocation skips old work that has not entered publication yet.
 static IO_OWNER: Mutex<()> = Mutex::new(());
+
+// Bound real worker lifetimes, including canceled workers stuck in OS IO or
+// waiting for IO_OWNER. All ordinary Favorites instances share this pool, so
+// replacing the entire App/World model cannot mint fresh worker capacity.
+const MAX_WORKERS: usize = 2;
+static WORKERS: OnceLock<WorkerPool> = OnceLock::new();
+#[derive(Clone)]
+pub(super) struct WorkerPool(Arc<WorkerSlots>);
+struct WorkerSlots {
+    limit: usize,
+    used: AtomicUsize,
+    #[cfg(test)]
+    starts: AtomicUsize,
+    #[cfg(test)]
+    peak: AtomicUsize,
+}
+impl Default for WorkerPool {
+    fn default() -> Self {
+        WORKERS
+            .get_or_init(|| {
+                Self(Arc::new(WorkerSlots {
+                    limit: MAX_WORKERS,
+                    used: AtomicUsize::new(0),
+                    #[cfg(test)]
+                    starts: AtomicUsize::new(0),
+                    #[cfg(test)]
+                    peak: AtomicUsize::new(0),
+                }))
+            })
+            .clone()
+    }
+}
+impl WorkerPool {
+    #[cfg(test)]
+    fn isolated(limit: usize) -> Self {
+        Self(Arc::new(WorkerSlots {
+            limit,
+            used: AtomicUsize::new(0),
+            #[cfg(test)]
+            starts: AtomicUsize::new(0),
+            #[cfg(test)]
+            peak: AtomicUsize::new(0),
+        }))
+    }
+    fn admit(&self) -> Option<WorkerPermit> {
+        let used = self
+            .0
+            .used
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |used| (used < self.0.limit).then(|| used + 1))
+            .ok()?;
+        #[cfg(test)]
+        self.0.peak.fetch_max(used + 1, Ordering::Relaxed);
+        #[cfg(not(test))]
+        let _ = used;
+        Some(WorkerPermit(self.0.clone()))
+    }
+}
+struct WorkerPermit(Arc<WorkerSlots>);
+impl Drop for WorkerPermit {
+    fn drop(&mut self) {
+        self.0.used.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct LoginGrid([u8; 32]);
@@ -353,12 +416,18 @@ struct Owner {
     alive: Arc<AtomicBool>,
 }
 impl Owner {
-    fn start(path: PathBuf, scope: GroupScope) -> io::Result<Self> {
+    fn start(path: &Path, scope: GroupScope, workers: &WorkerPool) -> io::Result<Option<Self>> {
+        // Admission precedes even channel allocation. Logical cancellation
+        // never refunds it; only the actual worker's RAII exit does.
+        let Some(permit) = workers.admit() else { return Ok(None) };
+        let path = path.to_owned();
         let (requests, incoming) = crossbeam_channel::bounded::<Save>(1);
         let (outgoing, replies) = crossbeam_channel::bounded(1);
         let alive = Arc::new(AtomicBool::new(true));
         let worker_alive = alive.clone();
-        std::thread::Builder::new().name("aurora-favorite-names".into()).spawn(move || {
+        #[cfg(test)]
+        workers.0.starts.fetch_add(1, Ordering::Relaxed);
+        let run = move || {
             let loaded = {
                 let _owner = IO_OWNER.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 if !worker_alive.load(Ordering::Acquire) {
@@ -390,8 +459,17 @@ impl Owner {
                     return;
                 }
             }
+            // Make this an owning FnOnce: its captured channels and IO state
+            // retire before the surrounding worker permit on every exit.
+            drop((path, incoming, outgoing, worker_alive));
+        };
+        std::thread::Builder::new().name("aurora-favorite-names".into()).spawn(move || {
+            let _permit = permit;
+            // FnOnce owns the worker's channels/path/IO state; those drop
+            // before the outer permit, including an unwinding IO failure.
+            run();
         })?;
-        Ok(Self { requests, replies, alive })
+        Ok(Some(Self { requests, replies, alive }))
     }
 }
 impl Drop for Owner {
@@ -407,6 +485,8 @@ struct Pending {
 pub(super) struct Groups {
     instance: u64,
     scope: GroupScope,
+    path: PathBuf,
+    workers: WorkerPool,
     owner: Option<Owner>,
     rows: Assignments,
     publication: u64,
@@ -415,15 +495,18 @@ pub(super) struct Groups {
     status: GroupStatus,
 }
 impl Groups {
-    pub fn open(scope: GroupScope, directory: PathBuf) -> Result<Self, GroupError> {
+    pub fn open(scope: GroupScope, directory: PathBuf, workers: WorkerPool) -> Result<Self, GroupError> {
         let instance = NEXT_INSTANCE
             .try_update(Ordering::AcqRel, Ordering::Acquire, |next| next.checked_add(1))
             .map_err(|_| GroupError::Exhausted)?;
-        let owner = Owner::start(scope.path(&directory), scope).map_err(|_| GroupError::Unavailable)?;
+        let path = scope.path(&directory);
+        let owner = Owner::start(&path, scope, &workers).map_err(|_| GroupError::Unavailable)?;
         Ok(Self {
             instance,
             scope,
-            owner: Some(owner),
+            path,
+            workers,
+            owner,
             rows: Assignments::new(),
             publication: 0,
             pending: None,
@@ -432,6 +515,12 @@ impl Groups {
         })
     }
     pub fn poll(&mut self) {
+        if self.owner.is_none() && self.status == GroupStatus::Loading {
+            match Owner::start(&self.path, self.scope, &self.workers) {
+                Ok(owner) => self.owner = owner,
+                Err(_) => self.status = GroupStatus::LoadFailed,
+            }
+        }
         let Some(owner) = &self.owner else { return };
         match owner.replies.try_recv() {
             Ok(Reply::Loaded(Ok(rows))) if self.status == GroupStatus::Loading => {

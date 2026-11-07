@@ -46,6 +46,7 @@ impl Drop for Storage {
 #[derive(Default)]
 pub struct Favorites {
     groups: Option<groups::Groups>,
+    group_workers: groups::WorkerPool,
     group_start_status: GroupStatus,
     pending_login_grid: groups::PendingLoginGrid,
     /// Sort index of each favourite (LLFavoritesOrderStorage::mSortIndexes).
@@ -83,7 +84,7 @@ impl Favorites {
         self.groups = None;
         self.group_start_status = GroupStatus::Unavailable;
         if let Some(scope) = scope {
-            match groups::Groups::open(scope, directory) {
+            match groups::Groups::open(scope, directory, self.group_workers.clone()) {
                 Ok(groups) => self.groups = Some(groups),
                 Err(_) => self.group_start_status = GroupStatus::LoadFailed,
             }
