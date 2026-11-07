@@ -1,10 +1,12 @@
 # Aurora Viewer — task tracking
 
 - 🔧 Selective upstream catch-up (human request, 2026-11-07; no issue): apply
-  fifteen reviewed upstream commits individually with `-x` to frozen photo/
+  sixteen reviewed upstream commits individually with `-x` to frozen photo/
   branding base `f5ae21d5`, from upstream snapshot `576dd54a`. Production
-  patches applied without conflict; four tracking-only conflicts preserve the
-  fork sections and incoming changes. The upstream hover-default change is
+  patches applied without conflict; five tracking-only conflicts preserve the
+  fork sections and incoming changes. The masked-HUD follow-up became source-
+  clean after UI-image refinement; final combined validation remains required.
+  The upstream hover-default change is
   intentional; the imported permissions guidance identifies unavailable future
   helpers explicitly. Source/dependency review and diff checks passed; compiled
   checks, normal build, native and human grid acceptance remain pending.

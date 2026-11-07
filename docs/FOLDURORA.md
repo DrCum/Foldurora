@@ -2,7 +2,9 @@
 
 ## Selective upstream catch-up — 7 November 2026 UTC
 
-Branch `feat/foldurora-upstream-integration` includes author checkpoint
+Author branch `sync/upstream-hud-alpha-20261107` follows exact pushed candidate
+`8750450f0161e03fe6ef48194aa58b28d49a2cb9` on
+`feat/foldurora-upstream-integration`. That candidate includes author checkpoint
 `sync/upstream-safe-20261107`, starting from frozen photo/branding source
 `f5ae21d535da3a338bace51ffb03af7beeb040c6`. The upstream snapshot is
 [`576dd54a707677bf5b93dd696142cc17fbdef270`](https://github.com/Aurora-Viewer/Aurora-Viewer/commit/576dd54a707677bf5b93dd696142cc17fbdef270),
@@ -13,10 +15,11 @@ remains `c6e52d1ffe06`; the shared ancestor is `ae2fd1016ec8`.
 The upstream side has 58 commits after that ancestor. Seventeen were already
 imported, including photo-roll source `6ff95fb6dc9d` as `ff23f303e29c` (all six
 per-file changes match without diff context, although its full-context patch ID
-differs). This batch adds fifteen complete upstream commits individually with
-`-x`, in the order below, leaving 26 for the explicit follow-up plan. The first
+differs). This batch adds sixteen complete upstream commits individually with
+`-x`, in the order below, leaving 25 for the explicit follow-up plan. The first
 thirteen retain upstream order; two bounded additions follow them without
-rewriting those commits. This is a
+rewriting those commits, followed by one dependency-unblocked masked-HUD fix.
+This is a
 selective integration, not a merge of the whole upstream branch.
 The sections below retain earlier snapshots; this table and remaining-work plan
 supersede their older candidate/deferral status.
@@ -38,9 +41,10 @@ supersede their older candidate/deferral status.
 | `576dd54a7076` | `7426f56b62ad` | Outfit faux-bold text uses the scaled row origin |
 | `c6e52d1ffe06` | `1936ec42d178` | Inventory hover master preference, intentionally off by default |
 | `05180f17a58b` | `b3d4512ecb2d` | Creators' permissions guidance, followed by the explicit fork qualification |
+| `07ff8662d325` | `4ef11364915a` | Restore masked-HUD mip alpha monotonically and regenerate affected coverage-cache entries |
 
 All production and non-tracking-document patches applied without conflict,
-including as a complete sequence against the exact base. Four `TASKS.md`
+including as a complete sequence against the exact base. Five `TASKS.md`
 conflicts retained the fork's sections and the upstream patch's changed entries;
 unchanged context about unimported media consent/uninstall was not introduced.
 No production source was manually resolved or partially extracted. The existing
@@ -52,6 +56,14 @@ cards require opting in. The existing thumbnail preference remains, gated by
 that master switch. The permissions-guidance commit is preserved intact with
 `-x`; the following fork note in `AGENTS.md` distinguishes available helpers from
 the five deferred API targets. It does not assume those implementations exist.
+
+The masked-HUD patch was re-screened on exact `8750450f` after the UI-image/cache
+refinement import removed its former production-source conflict. Only tracking
+text required reconciliation. Alpha coverage can now increase mip alpha but
+never reduce it; old coverage code 3 entries regenerate as code 4. Cache
+`VERSION=5`, pick-mask planes and profile IO remain unchanged. Included tests and
+the existing `mask-cutoff`/`mask-cutoff-zoom` demo modes require validation on
+the final combined source; this follow-up does not inherit its parent's checks.
 
 Source/dependency review and `git diff --check` passed at the author checkpoint.
 Compiled checks and runtime evidence belong to the exact candidate's manifest
@@ -66,20 +78,19 @@ completion. Keep the frozen base and earlier test packages unchanged.
 
 ### Remaining upstream integration plan
 
-These 26 commits are deliberately outside this batch. A clean text patch alone
+These 25 commits are deliberately outside this batch. A clean text patch alone
 does not establish compatible behavior or complete dependencies.
 
 | Group | Commits | Concrete integration work |
 | --- | --- | --- |
 | Picking and selection | `c6ffeeb705aa`, `5e65df245f52`, `7851d13e61b3`, `037a71b4d351` | The own-avatar correction can stand alone. Integrate alpha click-through with its corrective invisible/Mask-face follow-up, preserving fork ray/epoch guards; reconcile selection tests and verify HUD/worn/world plus offset/fitted/photo coordinates. |
 | Cache/rights and texture operations | `026651a845eb` → `316e5e067499` → `1ae9a375f069` → `3ce55eba155e` | Preserve profile-before-key initialization and private stores. Validate UUID-name migration, distinct worker keys, restart, sealed/plain demo sources and texture permissions. Replace the explicit pending-target qualification in `AGENTS.md` only when those APIs exist. |
-| Selected object-contents copy | `54df367c7019` | No identified dependency on the cache/rights batch; reconcile tracking docs separately and retain source-rights, selected-item, no-copy, worn-item and approval regressions. |
+| Selected object-contents copy | `54df367c7019` | No identified dependency on the cache/rights batch. On `8750450f`, production source is text-clean; the non-tracking conflict is only `ARCHITECTURE.md`, alongside `TASKS.md`. Reconcile those documents and retain source-rights, selected-item, no-copy, worn-item and approval regressions. |
 | Browser native file pickers | `ae10170eb635` | Add owned-modal/source visibility and host-park handling; validate browser replacement/close and switching with a pending picker. |
-| Masked HUD mip alpha | `07ff8662d325` | Independent of the picking chain. Reconcile cache/test context after UI-image refinement while preserving fork pick-mask planes; test old alpha codes and HUD cutoff/zoom. |
 | Media consent and camera migration | `db6209901611` → `275e3808b951` | Report the actually shown World media-consent Modal to host blocking without deadlocking inactive workers. Validate per-profile consent and deliberate camera-default migration; README follows working runtime support. |
 | Runtime updates | `e37ac4180630` | Resolve published-fork release-feed identity and multi-worker installation ownership; test loopback/stale-generation/notice/contended-install behavior. Development gating does not settle published behavior. |
 | GPU startup | `e1e44ed74bce` | Extend the imported adapter fix with the XR constructor argument while retaining the fork viewport argument, worker startup ordering and recovery recreation. |
-| GPU budget, recovery and peer pause | `38bab7286b56`, `f7d31f563e95`, `eb875bc9f55c` | Preserve host display invalidation, fresh surfaces, proactive pause/hysteresis and isolated registries; assess defaults and shared-device memory behavior together. |
+| GPU budget, recovery and peer pause | `38bab7286b56`, `f7d31f563e95`, `eb875bc9f55c` | `38bab728` is now text-clean, but changes GPU-budget behavior and still needs a dedicated behavioral/memory validation plan. Preserve host display invalidation, fresh surfaces, proactive pause/hysteresis and isolated registries; assess defaults and shared-device memory behavior together. |
 | Async logging | `4a613cd3e6e3` | Preserve checked durable controller startup/shutdown and sink-error propagation; ordinary queued-write drain is not a checked HostLog barrier. |
 | FSR | `f114ef820877` → `bb4d4fc7f49c` → `1d0118d479ad` | Reconcile native canvas, bounded world, scaled rendering and photo outputs without weakening device/surface fences. Add FSR documentation only after the feature works. |
 | Reflection probes | `a44ef04e1796` | Substantial CPU/WGSL ABI, culling and scan changes raise default slots from 32 to 256. Validate memory/quality, constrained GPUs, photo outputs and inactive-worker packets in a dedicated renderer batch. |
