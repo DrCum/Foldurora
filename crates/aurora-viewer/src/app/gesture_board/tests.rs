@@ -830,3 +830,41 @@ fn board_app_unreadable_store_retires_already_issued_ready_before_any_later_refr
     assert!(f.actor.pending.is_empty());
     assert!(f.actor.runtime.pending(target.item()).is_none());
 }
+
+#[test]
+fn board_app_edit_original_empty_invalid_name_and_duplicate_bytes_never_become_user_edit_errors() {
+    let f = facts();
+    let data = Catalogue::empty(f.agent, f.grid)
+        .unwrap()
+        .apply(Change::Create {
+            id: BoardId::new(),
+            name: "Prior valid board".into(),
+        })
+        .unwrap();
+    let mut name = serde_json::to_value(&data).unwrap();
+    name["boards"][0]["name"] = "".into();
+    let mut duplicate = serde_json::to_value(&data).unwrap();
+    let same = duplicate["boards"][0].clone();
+    duplicate["boards"].as_array_mut().unwrap().push(same);
+    let cases = [
+        (Vec::new(), model::Error::Limit),
+        (serde_json::to_vec(&name).unwrap(), model::Error::Name),
+        (serde_json::to_vec(&duplicate).unwrap(), model::Error::Duplicate),
+    ];
+    for (bytes, expected) in cases {
+        let unchanged = bytes.clone();
+        let error = store::decode(Some(&bytes), f).unwrap_err();
+        assert_eq!(error, store::Error::Original(expected));
+        let mut actor = actor();
+        actor.snapshot = Some(store::Snapshot::memory(data.clone()));
+        actor.loaded = true;
+        actor.store_failure(error, false);
+        assert!(actor.snapshot.is_none());
+        assert!(actor.loaded);
+        assert_eq!(bytes, unchanged);
+    }
+    let mut actor = actor();
+    actor.snapshot = Some(store::Snapshot::memory(data.clone()));
+    actor.store_failure(store::Error::Model(model::Error::Name), false);
+    assert_eq!(*actor.snapshot.as_ref().unwrap().data, data);
+}

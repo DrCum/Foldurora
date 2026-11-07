@@ -30,11 +30,11 @@ fn board_store_actual_decode_never_reinterprets_unknown_or_wrong_identity_as_mis
     let unknown = serde_json::to_vec(&unknown).unwrap();
     assert!(matches!(
         decode(Some(&unknown), facts),
-        Err(Error::Model(model::Error::Unsupported))
+        Err(Error::Original(model::Error::Unsupported))
     ));
     let mut other = facts;
     other.agent = Uuid::from_u128(9);
-    assert!(matches!(decode(Some(&bytes), other), Err(Error::Model(model::Error::Identity))));
+    assert!(matches!(decode(Some(&bytes), other), Err(Error::Original(model::Error::Identity))));
     other = facts;
     other.grid = GridKey::from_bytes([9; 32]).unwrap();
     assert!(decode(Some(&bytes), other).is_err());

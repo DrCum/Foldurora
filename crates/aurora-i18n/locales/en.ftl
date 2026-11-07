@@ -13516,3 +13516,4 @@ board-kind-gesture = Gesture
 board-name-placeholder = Enter board name
 board-name-invalid = Use a short, nonempty name without surrounding spaces or control characters.
 board-limit = Maximum 16 boards and 1,024 tiles per board.
+board-store-identity = This board file belongs to another account or grid and is preserved.

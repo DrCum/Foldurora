@@ -13512,3 +13512,4 @@ board-kind-gesture = Geste
 board-name-placeholder = Saisissez le nom du tableau
 board-name-invalid = Utilisez un nom court, non vide, sans espaces autour ni caractères de contrôle.
 board-limit = Maximum : 16 tableaux et 1 024 éléments par tableau.
+board-store-identity = Ce fichier appartient à un autre compte ou une autre grille et est conservé.

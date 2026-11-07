@@ -40,6 +40,7 @@ pub(crate) enum Error {
     Cancelled,
     Conflict,
     Invalid,
+    Original(model::Error),
     Model(model::Error),
 }
 pub(crate) struct Request {
@@ -163,12 +164,12 @@ fn perform(r: &Request) -> Result<Snapshot, Error> {
     })
 }
 
-fn decode(original: Option<&[u8]>, facts: Facts) -> Result<Catalogue, Error> {
+pub(crate) fn decode(original: Option<&[u8]>, facts: Facts) -> Result<Catalogue, Error> {
     match original {
         Some(bytes) => Catalogue::decode(bytes, facts.agent, facts.grid),
         None => Catalogue::empty(facts.agent, facts.grid),
     }
-    .map_err(Error::Model)
+    .map_err(Error::Original)
 }
 fn prepare(current: &Catalogue, original: Option<&[u8]>, expected: Option<&[u8]>, change: &Change) -> Result<(Catalogue, Vec<u8>), Error> {
     if expected != original {
