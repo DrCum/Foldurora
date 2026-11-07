@@ -90,6 +90,17 @@ pub struct Submitted<R> {
     pub waited: Duration,
 }
 
+/// A try-only hand-off that did not accept the job. Both variants return the
+/// original ownership, so journals/uploads can be restored without cloning.
+/// This is queue ownership only; it grants no render or presentation authority.
+#[derive(Debug, PartialEq, Eq)]
+pub enum TrySubmitError<J> {
+    /// A queued/running job or contended state lock; retry on a later tick.
+    Busy(J),
+    /// The worker left or its owner closed; the job was never handed over.
+    WorkerGone(J),
+}
+
 pub struct Owner<J, R>(Arc<Shared<J, R>>);
 
 impl<J, R> Owner<J, R> {
@@ -129,24 +140,44 @@ impl<J, R> Owner<J, R> {
     /// Hand over only when the worker is already free. Neither a busy job nor
     /// a contended state lock makes the caller wait; retry on a later tick.
     /// The previous result is returned exactly as with [`Self::submit`].
+    /// Rejected jobs are dropped; use [`Self::try_submit_owned`] to recover them.
     pub fn try_submit(&self, job: J) -> Result<Option<Submitted<R>>, WorkerGone> {
+        match self.try_submit_owned(job) {
+            Ok(submitted) => Ok(Some(submitted)),
+            Err(TrySubmitError::Busy(job)) => {
+                drop(job);
+                Ok(None)
+            }
+            Err(TrySubmitError::WorkerGone(job)) => {
+                drop(job);
+                Err(WorkerGone)
+            }
+        }
+    }
+
+    /// Try the same rendezvous without losing a rejected job. Busy includes
+    /// lock contention; failure includes an already closed owner. Neither path
+    /// consumes the previous result or changes the accepted job. Only success
+    /// transfers `job` and returns the previous output, each exactly once.
+    /// The caller owns restoring unsubmitted journals/uploads in original order.
+    pub fn try_submit_owned(&self, job: J) -> Result<Submitted<R>, TrySubmitError<J>> {
         let Some(mut s) = self.0.state.try_lock() else {
-            return Ok(None);
+            return Err(TrySubmitError::Busy(job));
         };
         if s.worker_gone || s.closed {
-            return Err(WorkerGone);
+            return Err(TrySubmitError::WorkerGone(job));
         }
         if s.busy || s.job.is_some() {
-            return Ok(None);
+            return Err(TrySubmitError::Busy(job));
         }
         let previous = s.result.take();
         s.job = Some(job);
         s.handed = Some(Instant::now());
         self.0.to_worker.notify_one();
-        Ok(Some(Submitted {
+        Ok(Submitted {
             previous,
             waited: Duration::ZERO,
-        }))
+        })
     }
 
     /// Wait for the job handed over to be done; its result unless already
@@ -550,6 +581,196 @@ mod tests {
         drop(worker);
         assert_eq!(owner.try_submit(1), Err(WorkerGone));
         assert_eq!(owner.try_take_ready(), Err(WorkerGone));
+    }
+
+    #[derive(Debug)]
+    struct OwnedJob {
+        id: usize,
+        writes: Vec<u8>,
+        uploads: Vec<u8>,
+        drops: Arc<[AtomicUsize; 5]>,
+    }
+    impl OwnedJob {
+        fn new(id: usize, drops: &Arc<[AtomicUsize; 5]>) -> Self {
+            Self {
+                id,
+                writes: vec![3, 1, id as u8],
+                uploads: vec![8, id as u8, 5],
+                drops: drops.clone(),
+            }
+        }
+        fn allocation(&self) -> (*const u8, *const u8) {
+            (self.writes.as_ptr(), self.uploads.as_ptr())
+        }
+        fn unchanged(&self, allocation: (*const u8, *const u8)) {
+            assert_eq!(self.allocation(), allocation, "owned buffers were not cloned/replaced");
+            assert_eq!(self.writes, [3, 1, self.id as u8]);
+            assert_eq!(self.uploads, [8, self.id as u8, 5]);
+            assert_eq!(self.drops[self.id].load(Ordering::SeqCst), 0);
+        }
+    }
+    impl Drop for OwnedJob {
+        fn drop(&mut self) {
+            self.drops[self.id].fetch_add(1, Ordering::SeqCst);
+        }
+    }
+    fn drop_counts() -> Arc<[AtomicUsize; 5]> {
+        Arc::new(std::array::from_fn(|_| AtomicUsize::new(0)))
+    }
+    fn busy_job(error: TrySubmitError<OwnedJob>) -> OwnedJob {
+        match error {
+            TrySubmitError::Busy(job) => job,
+            TrySubmitError::WorkerGone(_) => panic!("live owner rejected with worker failure"),
+        }
+    }
+
+    #[test]
+    fn recoverable_try_submit_preserves_job_when_queued_running_or_lock_contended() {
+        let drops = drop_counts();
+        let (owner, worker) = handoff::<OwnedJob, u8>();
+        let first = owner.try_submit_owned(OwnedJob::new(0, &drops)).unwrap();
+        assert!(first.previous.is_none());
+        assert_eq!(first.waited, Duration::ZERO);
+        let candidate = OwnedJob::new(1, &drops);
+        let allocation = candidate.allocation();
+        let candidate = busy_job(owner.try_submit_owned(candidate).unwrap_err());
+        candidate.unchanged(allocation);
+        let (in_hand, _) = worker.next().unwrap();
+        assert_eq!(in_hand.id, 0, "busy retry cannot replace the queued job");
+        let candidate = busy_job(owner.try_submit_owned(candidate).unwrap_err());
+        candidate.unchanged(allocation);
+        worker.complete(23);
+        drop(in_hand);
+        let state = owner.0.state.lock();
+        let candidate = busy_job(owner.try_submit_owned(candidate).unwrap_err());
+        candidate.unchanged(allocation);
+        assert_eq!(state.result, Some(23), "lock contention cannot consume the previous output");
+        drop(state);
+        let accepted = owner.try_submit_owned(candidate).unwrap();
+        assert_eq!(accepted.previous, Some(23));
+        assert_eq!(accepted.waited, Duration::ZERO);
+        let (recovered, _) = worker.next().unwrap();
+        recovered.unchanged(allocation);
+        assert_eq!(recovered.id, 1);
+        worker.complete(42);
+        drop(recovered);
+        assert_eq!(owner.try_take_ready(), Ok(Some(42)));
+        assert_eq!(owner.try_take_ready(), Ok(None));
+        assert_eq!(drops[0].load(Ordering::SeqCst), 1);
+        assert_eq!(drops[1].load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn recoverable_try_submit_returns_job_after_worker_failure_or_owner_close() {
+        for close_owner in [false, true] {
+            let drops = drop_counts();
+            let (owner, worker) = handoff::<OwnedJob, u8>();
+            owner.try_submit_owned(OwnedJob::new(0, &drops)).unwrap();
+            let candidate = OwnedJob::new(1, &drops);
+            let allocation = candidate.allocation();
+            let worker = if close_owner {
+                owner.close();
+                Some(worker)
+            } else {
+                drop(worker);
+                None
+            };
+            assert_eq!(drops[0].load(Ordering::SeqCst), 1, "accepted queued job retires once");
+            let returned = match owner.try_submit_owned(candidate).unwrap_err() {
+                TrySubmitError::WorkerGone(job) => job,
+                TrySubmitError::Busy(_) => panic!("stopped owner cannot accept a later retry"),
+            };
+            returned.unchanged(allocation);
+            drop(owner);
+            if let Some(worker) = worker {
+                assert!(worker.next().is_none());
+                drop(worker);
+            }
+            returned.unchanged(allocation);
+            drop(returned);
+            assert_eq!(
+                drops[1].load(Ordering::SeqCst),
+                1,
+                "rejected job remains caller-owned past shutdown"
+            );
+        }
+    }
+
+    #[test]
+    fn recoverable_try_submit_transfers_jobs_and_previous_outputs_exactly_once() {
+        let drops = drop_counts();
+        let (owner, worker) = handoff::<OwnedJob, OwnedJob>();
+        owner.try_submit_owned(OwnedJob::new(0, &drops)).unwrap();
+        let (first, _) = worker.next().unwrap();
+        worker.complete(first);
+        let mut second = owner.try_submit_owned(OwnedJob::new(1, &drops)).unwrap();
+        assert_eq!(second.waited, Duration::ZERO);
+        let previous = second.previous.take().expect("previous job output");
+        assert_eq!(previous.id, 0);
+        assert!(second.previous.take().is_none());
+        assert!(owner.try_take_ready().unwrap().is_none());
+        drop(previous);
+        assert_eq!(drops[0].load(Ordering::SeqCst), 1);
+        let (second, _) = worker.next().unwrap();
+        worker.complete(second);
+        let output = owner.try_take_ready().unwrap().expect("second output");
+        assert_eq!(output.id, 1);
+        assert!(owner.try_take_ready().unwrap().is_none(), "output cannot be consumed twice");
+        drop(output);
+        assert_eq!(drops[1].load(Ordering::SeqCst), 1);
+        owner.try_submit_owned(OwnedJob::new(2, &drops)).unwrap();
+        let (in_hand, _) = worker.next().unwrap();
+        owner.close();
+        assert_eq!(
+            drops[2].load(Ordering::SeqCst),
+            0,
+            "shutdown cannot drop a running worker's ownership"
+        );
+        worker.complete(in_hand);
+        let unsubmitted = OwnedJob::new(3, &drops);
+        let allocation = unsubmitted.allocation();
+        let returned = match owner.try_submit_owned(unsubmitted).unwrap_err() {
+            TrySubmitError::WorkerGone(job) => job,
+            TrySubmitError::Busy(_) => panic!("closed owner cannot accept another job"),
+        };
+        returned.unchanged(allocation);
+        assert_eq!(
+            owner.0.state.lock().result.as_ref().unwrap().id,
+            2,
+            "failed submission preserves pending output"
+        );
+        assert!(matches!(owner.try_take_ready(), Err(WorkerGone)));
+        drop(owner);
+        assert_eq!(
+            drops[2].load(Ordering::SeqCst),
+            0,
+            "pending output stays owned until worker retirement"
+        );
+        assert!(worker.next().is_none());
+        drop(worker);
+        assert_eq!(drops[2].load(Ordering::SeqCst), 1);
+        returned.unchanged(allocation);
+        drop(returned);
+        assert_eq!(drops[3].load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn legacy_try_submit_drops_rejected_jobs_and_preserves_outcomes() {
+        let drops = drop_counts();
+        let (owner, worker) = handoff::<OwnedJob, u8>();
+        assert!(owner.try_submit(OwnedJob::new(0, &drops)).unwrap().is_some());
+        assert!(owner.try_submit(OwnedJob::new(1, &drops)).unwrap().is_none());
+        assert_eq!(drops[1].load(Ordering::SeqCst), 1);
+        let state = owner.0.state.lock();
+        assert!(owner.try_submit(OwnedJob::new(2, &drops)).unwrap().is_none());
+        assert_eq!(drops[2].load(Ordering::SeqCst), 1);
+        drop(state);
+        owner.close();
+        assert!(matches!(owner.try_submit(OwnedJob::new(3, &drops)), Err(WorkerGone)));
+        assert_eq!(drops[3].load(Ordering::SeqCst), 1);
+        drop(worker);
+        assert!(matches!(owner.try_submit(OwnedJob::new(4, &drops)), Err(WorkerGone)));
+        assert!(drops.iter().all(|count| count.load(Ordering::SeqCst) == 1));
     }
 
     #[test]

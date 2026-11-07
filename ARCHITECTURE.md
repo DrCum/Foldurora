@@ -263,6 +263,16 @@ work. Renderer hooks and CPU-only native observations are integrated as source
 prerequisites; authenticated service/image delivery and compiled/native
 validation remain separate. They do not enable parked world rendering.
 
+`render_thread::Owner::try_submit_owned` is a generic ownership prerequisite:
+its Busy and WorkerGone errors return the intact rejected job, including any
+owned journals/uploads. Only acceptance transfers the job and takes a previous
+result. It uses the existing try-only state lock and rendezvous; the existing
+`try_submit` wrapper preserves its drop-on-rejection outcomes. No caller, world
+job, producer, presentation proof, queue depth or native/render permission is
+changed. Future callers must restore unsubmitted buffers in their original order;
+this API does not restore or replay accepted work. Four fake-owner/drop-counter
+regressions are authored and unrun; no inactive rendering is enabled.
+
 The source-only `viewport_capture_gpu` integration shares that single queue
 between the renderer frontend and render owner through nonblocking state access
 and an atomic revocation generation. Explicit requests attach only to an

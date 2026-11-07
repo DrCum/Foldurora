@@ -1,5 +1,16 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Recoverable render-owner handoff prerequisite (2026-11-07; no issue):
+  `render_thread::Owner::try_submit_owned` returns the original rejected job on
+  Busy or worker/owner shutdown; accepted work and its previous output transfer
+  once. The existing try_submit signature and drop-on-rejection behavior remain
+  a wrapper. Four fake-owner/drop-counter tests cover queued/running/contention,
+  failure/close, previous-result ownership and compatibility; authored and unrun.
+  No existing caller, world producer, FrameProof, render authority, queue depth
+  or inactive rendering path changes. Future journals/uploads restoration stays
+  caller-owned, before any later authorized submission. Source review pending;
+  no Cargo/native/GPU execution or runtime acceptance is claimed.
+
 - 🔧 Disabled monitor foundations integration (2026-11-07; no issue): combine
   reviewed renderer publication/physical-retention guards, CPU-only native policy
   observations, checked optional bootstrap/schema and owned sender prerequisites,
