@@ -169,21 +169,34 @@ fn chat_broker_review_duplicate_incarnations_in_one_batch_are_rejected_before_wa
 #[test]
 fn chat_broker_review_busy_queue_is_terminal_and_cannot_open_when_room_returns() {
     let (mut peer, mut worker, request) = setup();
-    let packet = ChatPacket {
-        version: VERSION,
-        source: source(),
-        sequence: 1,
-        reply_to: 0,
-        message: ChatMessage::Command(ChatCommand::Poll { after_event: 0 }),
-    };
     let mut count = 0;
-    while peer.io.as_mut().unwrap().queue(&packet).is_ok() {
-        count += 1;
-        assert!(count <= 16);
+    loop {
+        let packet = ChatPacket {
+            version: VERSION,
+            source: source(),
+            sequence: peer.sent + 1,
+            reply_to: 0,
+            message: ChatMessage::Command(ChatCommand::Poll { after_event: 0 }),
+        };
+        match peer.io.as_mut().unwrap().queue(&packet) {
+            Ok(()) => {
+                // Match the ordinary producer: only admitted packets advance
+                // both its high-water and the authenticated socket sequence.
+                peer.sent = packet.sequence;
+                count += 1;
+                assert!(count <= 16);
+            }
+            Err(error) => {
+                assert_eq!(error, LaneError::Busy, "fill capacity, not an invalid sequence");
+                break;
+            }
+        }
     }
+    assert!(count > 0);
+    let admitted_before_review = peer.sent;
     assert_eq!(peer.admit_review(request, Instant::now()), Err(HostError::Busy));
     assert!(peer.review_pending.is_none());
-    assert_eq!(peer.sent, 0);
+    assert_eq!(peer.sent, admitted_before_review, "a refused Review emits no packet");
     let drained = commands(&mut peer, &mut worker, count);
     assert!(
         drained
