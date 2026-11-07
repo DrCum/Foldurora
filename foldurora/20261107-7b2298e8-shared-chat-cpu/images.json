@@ -1,0 +1,42 @@
+[
+  {
+    "file": "en-normal-01-selected-identity.png",
+    "sha256": "95664187bbb46c35fbac352038652ed7ce1e269f82dcd83db3c1901963fdce97",
+    "language": "en",
+    "source_commit": "7b2298e808e0be8af1df46c540f87b4e9fccea7a",
+    "fixture": "shared_chat_cpu_visual_fixture",
+    "unchanged_original": true
+  },
+  {
+    "file": "en-normal-02-five-duplicate-labels.png",
+    "sha256": "596b284da1a86bfbf2b6373a53cf320887026906ab9702e1f72dede8c0e22a73",
+    "language": "en",
+    "source_commit": "7b2298e808e0be8af1df46c540f87b4e9fccea7a",
+    "fixture": "shared_chat_cpu_visual_fixture",
+    "unchanged_original": true
+  },
+  {
+    "file": "en-narrow-150pct-01-selected-identity.png",
+    "sha256": "1a553453aaa977fd87feba408a1fc59647481cb85d593a63cf7bac0541c24d5b",
+    "language": "en",
+    "source_commit": "7b2298e808e0be8af1df46c540f87b4e9fccea7a",
+    "fixture": "shared_chat_cpu_visual_fixture",
+    "unchanged_original": true
+  },
+  {
+    "file": "fr-narrow-150pct-02-five-duplicate-labels.png",
+    "sha256": "1cb4b711fb70814f9247e5d56bbc51fe39aed6e448ff0300ab5204acd9514c0d",
+    "language": "fr",
+    "source_commit": "7b2298e808e0be8af1df46c540f87b4e9fccea7a",
+    "fixture": "shared_chat_cpu_visual_fixture",
+    "unchanged_original": true
+  },
+  {
+    "file": "ja-narrow-150pct-04-policy-reopened.png",
+    "sha256": "ccea3ec2853b687ecc7117a3fc01d013398a9b63930de5de8890abd6dbf9a9e8",
+    "language": "ja",
+    "source_commit": "7b2298e808e0be8af1df46c540f87b4e9fccea7a",
+    "fixture": "shared_chat_cpu_visual_fixture",
+    "unchanged_original": true
+  }
+]
