@@ -154,7 +154,8 @@ follow it; both are handled. A real release clears the fence, and absence from
 the next focus snapshot permits a key released outside to send on its first
 fresh press. Repeated focus notices, IME and navigation cannot rearm held Enter;
 Shift+Enter's normal multiline repeats remain available. No native key query or
-protocol change is involved. Compiled and fixed native validation remain pending.
+protocol change is involved. Runtime checkpoints and the separate native/platform
+acceptance limits are recorded in `TASKS.md` and the coordination ledger.
 
 The test-only `session_host/chat_ui/visual.rs` drives that same popout body with
 real egui input and paints through `crash::software::Painter`, as

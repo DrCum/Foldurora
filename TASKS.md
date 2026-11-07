@@ -2,8 +2,11 @@
 
 - 🔧 Native Shared Chat CPU input fixture (2026-11-07): isolated Linux ignored
   test using actual ChatWindow/egui-winit input with synthetic snapshots and
-  recorded intents only. Source preparation does not validate OS input; root
-  compilation, an owned native run and exact driver assertions remain pending.
+  recorded intents only. Runtime checkpoint `b54b2c28` compiled and verified
+  held-Enter/refocus suppression, fresh Enter, multiline/Ctrl+Enter and source
+  draft retention in an owned X11 CPU window. A later conversation-selection
+  stage failed; Read and Close/reopen stages were not reached. Full native
+  acceptance remains pending; synthetic intents establish no World/grid action.
 
 - 🔧 Shared Chat native Enter release fence (2026-11-07; task
   `native-enter-release-guard`; no issue): an isolated Linux CPU-window case
@@ -11,10 +14,15 @@
   across focus loss/return. Winit's first real X11 event after refocus can have
   repeat=false. Observe native focus snapshots before egui-winit; synthetic
   releases cannot rearm held Enter, while a released-outside key can send on its
-  next fresh press. Preserve Shift+Enter multiline and Ctrl+Enter. Eight pure
-  regression cases are authored against the old stateless boundary; root
-  compilation and unchanged-fixture negative/fixed native proof remain pending.
-  Frozen `0e40e48f` Windows CI does not establish this Linux input behavior.
+  next fresh press. Preserve Shift+Enter multiline and Ctrl+Enter. Seven new
+  assertions failed against compiled old behavior; all eight final pure cases
+  pass. Runtime checkpoint `b54b2c28` passed all 143 required checks: full Linux
+  totals were 7,959 passed, one inherited terrain GPU precision failure and 52
+  ignored. The unchanged native driver verified no Send for the first held
+  repeat=false press or four fully eligible true repeats; real release/fresh
+  Enter sent once. Its downstream conversation-selection failure is tracked
+  separately above. Windows/native/human acceptance remains pending for the
+  new candidate; frozen `0e40e48f` predates the guard.
 
 - 🔧 Native unread and explicit Shared Chat read (2026-11-07; no issue):
   isolated follow-up to the frozen Shared Chat candidate. Separate chat V2

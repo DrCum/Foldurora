@@ -111,8 +111,13 @@ that first press. Both must leave intents unchanged with the same selected
 source's editor focused/enabled, a nonempty valid canonical draft,
 available/current Send permission, explicitly no Pending Send and Shift up.
 Require zero earlier intents before checking the first held press. Each native
-Enter observation must retain the selected row, full captured ChatKey and exact
-predicates alongside `repeat_observation`; a counter alone is insufficient.
+true-repeat observation retains the selected row, full captured ChatKey and
+exact predicates in `repeat_observation`; a counter alone is insufficient.
+The current fixture attaches that full observation only to `repeat=true` events.
+For the earlier repeat=false press, retain its complete native trace and settled
+pre/post state without claiming a per-event predicate snapshot that was not
+recorded. Released-away and dropping-Shift native cases below require separate
+coverage; the frozen driver does not add them to its existing sequence.
 A synthetic focus-loss release cannot rearm Send. Physical release/fresh Enter
 must Send exactly once. Also release Enter while away, return without an Enter
 snapshot press, and require the next fresh Enter to work without a second tap.
