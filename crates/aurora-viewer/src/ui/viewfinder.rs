@@ -992,9 +992,10 @@ impl Viewfinder {
             }
         }
 
-        // the histogram
+        // Leave the dock's 66-point column, its 20-point edge margin and
+        // a 20-point gap clear, including when a short dock reaches the top.
         let h = Rect::from_min_size(
-            Pos2::new(screen.right() - GAP - 150.0, screen.top() + 52.0 + extra),
+            Pos2::new(screen.right() - 106.0 - 150.0, screen.top() + 52.0 + extra),
             Vec2::new(150.0, 62.0),
         );
         back.rect_filled(h, ctx.global_style().visuals.window_corner_radius, p.navy.gamma_multiply(0.45));

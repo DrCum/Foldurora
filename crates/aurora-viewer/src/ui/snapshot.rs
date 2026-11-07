@@ -2248,10 +2248,10 @@ mod tests {
 
     #[test]
     fn actual_viewfinder_header_leaves_the_guide_control_clickable() {
-        for width in [960, 2048] {
+        for (width, height) in [(960, 1080), (2048, 1080), (1920, 1000)] {
             for restricted in [false, true] {
                 let mut f = ViewportPhotoFixture::new_at_scale(false, 1.0, 1.0);
-                f.native_size = (width, 1080);
+                f.native_size = (width, height);
                 f.viewport.restrict_ui = restricted;
                 f.viewport.left = 50.0;
                 f.viewport.right = 0.0;
@@ -2261,9 +2261,28 @@ mod tests {
                 f.settings.viewfinder.display = crate::snapshot::viewfinder::Display::Full;
                 f.viewfinder.hinted = true;
                 f.frames(5);
+                let shapes = f.show(Vec::new());
+                let p = crate::theme::Theme::default().palette();
+                let histogram = shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Rect(rect)
+                            if rect.rect.size() == Vec2::new(150.0, 62.0) && rect.fill == p.navy.gamma_multiply(0.45) =>
+                        {
+                            Some(rect.rect)
+                        }
+                        _ => None,
+                    })
+                    .expect("painted viewfinder histogram");
                 let area = |name| f.ctx.memory(|m| m.area_rect(egui::Id::unique(name))).expect("actual header area");
                 let guide = area("vf_top_left");
                 let header = area("vf_top_right");
+                let dock = area("vf_dock");
+                assert!(
+                    histogram.right() + 12.0 <= dock.left(),
+                    "dock covers histogram: {dock:?} over {histogram:?}"
+                );
+                assert!(f.control_bounds().contains_rect(histogram));
                 let before = f.settings.guide;
                 f.click(guide.center());
                 assert_ne!(f.settings.guide, before, "header intercepts the actual guide button");
