@@ -47,6 +47,13 @@ pub(super) struct SendDraft {
     draft_stamp: (u64, u64, u64),
 }
 
+#[cfg(test)]
+impl SendDraft {
+    pub(super) fn captured_policy(&self) -> NativeChatPolicy {
+        self.native_policy
+    }
+}
+
 /// One source-owned rollback checkpoint, never a second surface composer.
 /// egui puts preedit candidates in TextEdit text/Undo before an IME Commit.
 /// Keep the committed baseline until the owning view commits or loses focus.
@@ -745,7 +752,7 @@ impl ChatUi {
                 .get_mut(&self.view.conversation)
                 .map(|draft| std::mem::take(&mut draft.editor))
                 .unwrap_or_default();
-            let canonical_cursor = previous_editor.cursor.clone();
+            let canonical_cursor = previous_editor.cursor;
             let draft_revision = self.drafts.get(&self.view.conversation).map_or(0, |draft| draft.revision);
             if let Some(reading) = self.view.reading.get(&self.view.conversation)
                 && reading.draft_revision == draft_revision
@@ -873,7 +880,7 @@ impl ChatUi {
                         let baseline: String = text.chars().enumerate().filter_map(|(index, ch)|
                             (!(range.start.0..range.end.0).contains(&index)).then_some(ch)).collect();
                         let caret = egui::text::CCursorRange::one(egui::text::CCursor::new(range.start.0));
-                        let mut cursor = canonical_cursor.clone();
+                        let mut cursor = canonical_cursor;
                         cursor.set_char_range(Some(caret));
                         let mut undoer = draft.composition.take().map_or_else(|| previous_undo.clone(), |composition| composition.undoer);
                         undoer.feed_state(ui.input(|input| input.time), &(caret, baseline.clone()));
@@ -885,7 +892,7 @@ impl ChatUi {
                         owner: self.surface,
                         view_incarnation: self.view.incarnation,
                         text: previous.clone(),
-                        cursor: canonical_cursor.clone(),
+                        cursor: canonical_cursor,
                         undoer: previous_undo.clone(),
                     });
                 }

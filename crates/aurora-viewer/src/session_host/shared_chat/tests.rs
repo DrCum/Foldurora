@@ -1288,7 +1288,7 @@ fn shared_chat_late_admission_cannot_cross_exact_source_reauthentication_or_clea
         frames.type_text(1, old.text.as_str());
         let new = frames.click(1, "host_chat_send_rect").unwrap();
         assert_eq!(new.key, old.key);
-        assert_eq!(new.native_policy, old.native_policy);
+        assert_eq!(new.captured_policy(), old.captured_policy());
         assert_eq!(new.text, old.text);
         frames.model.queued(&old, 90);
         frames.model.queue_failed(&old, HostError::Busy);

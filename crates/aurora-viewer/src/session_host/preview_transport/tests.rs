@@ -197,7 +197,7 @@ impl Harness {
             })
             .unwrap();
         let mut raw = vec![0; self.stamp.geometry().payload_bytes()];
-        for (index, pixel) in raw.chunks_exact_mut(4).enumerate() {
+        for (index, pixel) in raw.as_chunks_mut::<4>().0.iter_mut().enumerate() {
             pixel.copy_from_slice(&color(index));
         }
         self.worker
@@ -461,7 +461,7 @@ fn preview_stream_fragmented_read_write_matrix_roundtrips_exact_opaque_pixels_an
                     .0
                     .iter()
                     .enumerate()
-                    .all(|(index, pixel)| pixel == color(index))
+                    .all(|(index, pixel)| *pixel == color(index))
             );
             assert_eq!(harness.budget.used(), harness.stamp.geometry().payload_bytes());
             drop(pixels);
@@ -711,7 +711,7 @@ fn reject_authenticated_capture_without_cache_replacement(corruption: CorruptCap
             .0
             .iter()
             .enumerate()
-            .all(|(index, pixel)| pixel == color(index))
+            .all(|(index, pixel)| *pixel == color(index))
     );
 
     // A rejected native sequence/claim cannot advance the model's accepted

@@ -694,7 +694,7 @@ mod tests {
     }
     fn fake_pixels(shared: &Shared, frame: &FrameCapture) -> CapturePixels {
         let mut pixels = shared.budget.pixels(frame.request.layout()).unwrap();
-        for pixel in pixels.bytes_mut().chunks_exact_mut(4) {
+        for pixel in pixels.bytes_mut().as_chunks_mut::<4>().0.iter_mut() {
             pixel.copy_from_slice(&[23, 47, 91, 255]);
         }
         pixels.finish().unwrap()
@@ -762,7 +762,7 @@ mod tests {
         callback.complete(true);
         let foreign = CaptureBudget::new(WORKER_CAPTURE_BYTES).unwrap();
         let mut allocation = foreign.pixels(frame.request.layout()).unwrap();
-        for pixel in allocation.bytes_mut().chunks_exact_mut(4) {
+        for pixel in allocation.bytes_mut().as_chunks_mut::<4>().0.iter_mut() {
             pixel[3] = 255;
         }
         assert!(matches!(
@@ -987,7 +987,7 @@ mod tests {
         assert!(layout.padded_row_bytes() > layout.row_bytes());
         let mut source = vec![0xCC; layout.staging_bytes()];
         for (row_index, row) in source.chunks_exact_mut(layout.padded_row_bytes() as usize).enumerate() {
-            for pixel in row[..layout.row_bytes() as usize].chunks_exact_mut(4) {
+            for pixel in row[..layout.row_bytes() as usize].as_chunks_mut::<4>().0.iter_mut() {
                 pixel.copy_from_slice(&[row_index as u8, 19, 73, 255]);
             }
         }

@@ -663,7 +663,7 @@ mod tests {
     }
     fn pixels(budget: &CaptureBudget, layout: CaptureLayout) -> CapturePixels {
         let mut allocation = budget.pixels(layout).unwrap();
-        for pixel in allocation.bytes_mut().chunks_exact_mut(4) {
+        for pixel in allocation.bytes_mut().as_chunks_mut::<4>().0.iter_mut() {
             pixel.copy_from_slice(&[19, 31, 57, 255]);
         }
         allocation.finish().unwrap()
