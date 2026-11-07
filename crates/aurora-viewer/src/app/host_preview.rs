@@ -350,7 +350,10 @@ impl App {
             let gfx = gfx?;
             self.host_session.as_ref()?.preview_authority(&gfx.window, &gfx.renderer)
         });
-        let boundary = gfx.and_then(|gfx| gfx.renderer.viewport_capture_boundary().ok());
+        // Retention observes the actual physical boundary independently of
+        // capture-only XR/support exclusion. A requested XR/photo capture stop
+        // cannot masquerade as source/device/surface loss and erase history.
+        let boundary = gfx.and_then(|gfx| gfx.renderer.viewport_capture_physical_boundary());
         let physical = gfx
             .and_then(|gfx| gfx.renderer.viewport_capture_retention_guard())
             .zip(boundary)
@@ -886,7 +889,7 @@ mod tests {
         use aurora_session::preview_image::{ImageError, PreviewStamp};
         let world = world();
         let now = Instant::now();
-        for case in 0..5 {
+        for case in 0..6 {
             let (mut native, mut images, budget, historical, geometry) = admitted_history(&world, now);
             let before = native.policy.unwrap();
             let late_claim = images.request(1, 1, geometry, 20).unwrap();
@@ -905,6 +908,12 @@ mod tests {
                     input.capture_generation += 1;
                 }
                 4 => input.authority.as_mut().unwrap().activation += 1,
+                5 => {
+                    // XR wanted/engaged rejects capture authority while the
+                    // readonly desktop physical witness remains unchanged.
+                    input.authority = None;
+                    input.capture_ready = false;
+                }
                 _ => unreachable!(),
             }
             native.sync(input, now + Duration::from_millis(21));

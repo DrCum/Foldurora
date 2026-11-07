@@ -186,7 +186,9 @@ its last acknowledged activation watermark. Surface epochs come from the actual
 checked renderer boundary; a same-witness backward epoch is unavailable even
 across a temporary missing observation. A replacement physical witness advances
 the native render generation before its actual surface may reset. Before any
-boundary is known, no valid surface epoch is invented. The composed SourceImages tests
+boundary is known, no valid surface epoch is invented. The readonly physical
+boundary is distinct from the strict XR-gated capture query, so a capture-only XR
+request does not falsely invalidate admitted history. The composed SourceImages tests
 cover admitted-history retention and late-completion rejection at this seam.
 Borrowed-out Gfx is passed explicitly, and
 WorkerBridge is restored before observation. Production remembered-view demand
