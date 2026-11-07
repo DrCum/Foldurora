@@ -13,6 +13,7 @@ mod chat_ui;
 mod chat_window;
 mod native;
 pub(crate) mod profile;
+mod review;
 mod shared_chat;
 pub(crate) mod slots;
 mod software;

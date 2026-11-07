@@ -6,8 +6,9 @@
 //! PID nor a window handle can authorize a command.
 
 pub(crate) use super::chat_broker::HostChatSnapshot;
+use super::review::{self, Grant as ReviewGrant, Status as ReviewStatus};
 use super::slots::{Registry, SlotId, SlotLabel, SlotSummary};
-use aurora_session::chat::{ChatKey, ChatSource, ChatText, MarkReadRequest};
+use aurora_session::chat::{ChatKey, ChatSource, ChatText, MarkReadRequest, ReviewCapture};
 use aurora_session::{
     AccountKey, Binding, Command, Coordinator, Effect, Envelope, Event, GridKey, HostId, HostNotice, HostedViewport, InstallationId,
     MAX_WORKERS, Message, PROTOCOL_VERSION, Phase, SessionId, SessionIdentity, WorkerId, WorkerIdentity, WorkerStatus,
@@ -67,6 +68,7 @@ pub(crate) struct HostSnapshot {
     pub active_viewport: Option<HostedViewport>,
     pub completed_request: u64,
     pub chat: Vec<Arc<HostChatSnapshot>>,
+    pub review_operations: Vec<review::Operation>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -93,6 +95,8 @@ enum HostIntent {
     Park,
     Detach(WorkerId),
     ChatRead(MarkReadRequest),
+    ReviewConversation(ReviewCapture, HostedViewport),
+    CancelReview(u64),
     ChatSend {
         key: ChatKey,
         policy_revision: u64,
@@ -103,7 +107,14 @@ enum HostIntent {
 impl HostIntent {
     fn controls_presentation(&self) -> bool {
         match self {
-            Self::ChatSend { .. } | Self::ChatRead(_) | Self::RenameSlot(_, _) | Self::SaveAttentionPreferences(_) => false,
+            // Review reports its own body-free outcome. Its local failures
+            // cannot cover an acknowledged world or clear a control error.
+            Self::ChatSend { .. }
+            | Self::ChatRead(_)
+            | Self::ReviewConversation(_, _)
+            | Self::CancelReview(_)
+            | Self::RenameSlot(_, _)
+            | Self::SaveAttentionPreferences(_) => false,
             Self::Open(_, _) | Self::Activate(_, _) | Self::Viewport(_) | Self::Park | Self::Detach(_) => true,
         }
     }
@@ -397,6 +408,37 @@ impl HostController {
         }
         // The broker assigns the operation ticket after FIFO admission.
         self.send(HostIntent::ChatRead(request))
+    }
+
+    /// Explicit native UI action. Shell closes its presentation gate on the
+    /// returned FIFO ticket, just as for Activate; completion lives separately
+    /// in review_operations, never in completed_request or active WorkerId.
+    pub fn review_conversation(&self, target: ReviewCapture, viewport: HostedViewport) -> Result<u64, HostError> {
+        if !cfg!(windows) || viewport.validate().is_err() {
+            return Err(HostError::Unsupported);
+        }
+        let snapshot = self.snapshot();
+        let bound = snapshot.workers.iter().any(|worker| {
+            worker.binding == target.key.source.binding()
+                && worker.reachable
+                && worker
+                    .status
+                    .as_ref()
+                    .is_some_and(|status| status.phase == Phase::Online && !status.blocked && status.native_window != 0)
+        });
+        if !bound || !snapshot.chat.iter().any(|chat| chat.permits_review(target)) {
+            return Err(HostError::Unavailable);
+        }
+        self.send(HostIntent::ReviewConversation(target, viewport))
+    }
+
+    /// Cancels only this captured operation. Once native admission happened,
+    /// cancellation means query-only uncertainty, not a promise to undo UI.
+    pub fn cancel_review(&self, request: u64) -> Result<u64, HostError> {
+        if request == 0 {
+            return Err(HostError::Unavailable);
+        }
+        self.send(HostIntent::CancelReview(request))
     }
 
     fn send(&self, intent: HostIntent) -> Result<u64, HostError> {
@@ -967,6 +1009,38 @@ struct ActiveViewport {
     activation: u64,
 }
 
+fn exact_review_grant(
+    active: Option<ActiveViewport>,
+    worker: Option<WorkerId>,
+    viewport: Option<HostedViewport>,
+    busy: bool,
+    current_binding: Option<Binding>,
+    granted: Option<(Binding, u64)>,
+) -> Option<ReviewGrant> {
+    let active = active?;
+    (!busy
+        && worker == Some(active.worker)
+        && current_binding == Some(active.binding)
+        && viewport == Some(active.viewport)
+        && active.activation != 0
+        && granted == Some((active.binding, active.activation)))
+    .then_some(ReviewGrant {
+        binding: active.binding,
+        activation: active.activation,
+        viewport: active.viewport,
+    })
+}
+
+fn review_activation(effects: &[Effect]) -> Option<u64> {
+    effects.iter().find_map(|effect| match effect {
+        Effect::Send(Envelope {
+            message: Message::Command(Command::Revoke { activation } | Command::Prepare { activation, .. }),
+            ..
+        }) if *activation != 0 => Some(*activation),
+        _ => None,
+    })
+}
+
 struct Broker {
     registry: Registry,
     registry_error: Option<String>,
@@ -985,13 +1059,153 @@ struct Broker {
     error: Option<String>,
     completed_request: u64,
     chat_listener: Option<super::chat_transport::Listener>,
+    reviews: review::Transactions,
 }
 
 impl Broker {
+    fn accepted_viewport(&self, worker: WorkerId) -> Option<ActiveViewport> {
+        let child = self.children.iter().find(|child| child.config.identity.worker == worker)?;
+        let (binding, activation, viewport) = child.prepared?;
+        let viewport = viewport?;
+        (binding == child.binding && child.granted == Some((binding, activation)) && self.viewport == Some(viewport)).then_some(
+            ActiveViewport {
+                worker,
+                binding,
+                viewport,
+                activation,
+            },
+        )
+    }
+
+    fn review_child(&self, target: ReviewCapture) -> Option<usize> {
+        let source = target.key.source;
+        let live = self.coordinator.workers().any(|entry| {
+            entry.live
+                && entry.binding == source.binding()
+                && entry.status.phase == Phase::Online
+                && !entry.status.blocked
+                && entry.status.native_window != 0
+        });
+        if !live {
+            return None;
+        }
+        self.children.iter().position(|child| {
+            child.config.identity == source.worker
+                && child.config.lease_epoch == source.lease_epoch
+                && child.binding == source.binding()
+                && !child.detached
+                && !child.exited
+                && child.last_seen.is_some_and(|seen| seen.elapsed() <= REACHABLE)
+        })
+    }
+
+    fn review_grant(&self, target: ReviewCapture) -> Option<ReviewGrant> {
+        let child = &self.children[self.review_child(target)?];
+        exact_review_grant(
+            self.active_viewport,
+            self.coordinator.active(),
+            self.viewport,
+            self.coordinator.busy(),
+            Some(child.binding),
+            child.granted,
+        )
+    }
+
+    fn begin_review(&mut self, target: ReviewCapture, viewport: HostedViewport, ticket: u64, now: u64) -> anyhow::Result<()> {
+        if !self.reviews.begin(target, ticket, viewport, now) {
+            return Ok(());
+        }
+        if self.coordinator.busy() || !self.opens.is_empty() || self.park_requested || self.viewport_dirty {
+            self.reviews.interrupt(ReviewStatus::Busy);
+            return Ok(());
+        }
+        let Some(index) = self
+            .review_child(target)
+            .filter(|index| self.children[*index].chat.review_allowed(target))
+        else {
+            self.reviews.interrupt(ReviewStatus::Unavailable);
+            return Ok(());
+        };
+        for child in &mut self.children {
+            child.chat.watch_review(None);
+        }
+        self.children[index].chat.watch_review(Some(target));
+        let effects = match self.coordinator.activate(target.key.source.worker.worker, Some(viewport), now) {
+            Ok(effects) => effects,
+            Err(error) => {
+                self.reviews.interrupt(if error == aurora_session::Error::Busy {
+                    ReviewStatus::Busy
+                } else {
+                    ReviewStatus::Unavailable
+                });
+                return Ok(());
+            }
+        };
+        if effects.is_empty() {
+            // Coordinator's same-active shortcut is not itself a grant proof.
+            // Require the retained exact native placement and accepted child
+            // Granted receipt without issuing an extra GPU transaction.
+            if let Some(grant) = self.review_grant(target).filter(|grant| grant.viewport == viewport) {
+                self.reviews.expect_activation(grant.activation);
+                self.reviews.granted(grant);
+            } else {
+                self.reviews.interrupt(ReviewStatus::Unavailable);
+            }
+        } else if let Some(activation) = review_activation(&effects) {
+            self.reviews.expect_activation(activation);
+        } else {
+            self.reviews.interrupt(ReviewStatus::Unavailable);
+        }
+        self.viewport = Some(viewport);
+        self.viewport_dirty = false;
+        self.effects(effects)?;
+        Ok(())
+    }
+
+    fn poll_review(&mut self, now: u64) {
+        let Some(target) = self.reviews.target() else { return };
+        let index = self.review_child(target);
+        let current = index.is_some_and(|index| {
+            let peer = &self.children[index].chat;
+            if self.reviews.waiting() {
+                peer.watched_review_current(target)
+            } else {
+                peer.review_allowed(target)
+            }
+        });
+        self.reviews.tick(now, current);
+        if !current {
+            self.reviews.interrupt(ReviewStatus::Unavailable);
+        }
+        if self.reviews.waiting() {
+            let Some(grant) = self.review_grant(target) else { return };
+            let Some(request) = self.reviews.dispatch(grant) else { return };
+            let Some(index) = index else { return };
+            match self.children[index].chat.admit_review(request, Instant::now()) {
+                Ok(()) => self.reviews.queued(request),
+                Err(error) => self.reviews.interrupt(if error == HostError::Busy {
+                    ReviewStatus::Busy
+                } else {
+                    ReviewStatus::Unavailable
+                }),
+            }
+        }
+        if let Some(request) = self.reviews.full_request() {
+            let delivery = index.and_then(|index| self.children[index].chat.review_delivery(request));
+            self.reviews.delivery(delivery);
+        }
+    }
+
     fn effects(&mut self, effects: Vec<Effect>) -> io::Result<()> {
         for effect in effects {
             match effect {
                 Effect::Send(envelope) => {
+                    if let Message::Command(
+                        Command::Revoke { activation } | Command::Prepare { activation, .. } | Command::Grant { activation },
+                    ) = &envelope.message
+                    {
+                        self.reviews.control_activation(*activation);
+                    }
                     let worker = envelope.binding.worker.worker;
                     let child = self
                         .children
@@ -1012,6 +1226,7 @@ impl Broker {
                         }
                         Message::Command(Command::Grant { .. }) => self.pending = Some(worker),
                         Message::Command(Command::Detach) => {
+                            self.reviews.interrupt(ReviewStatus::Unavailable);
                             child.chat.set_control(None, false);
                             child.granted = None;
                             if self.active_viewport.is_some_and(|active| active.worker == worker) {
@@ -1022,26 +1237,28 @@ impl Broker {
                     }
                     child.outbox.enqueue(envelope)?;
                 }
-                Effect::Notice(HostNotice::Switched(worker) | HostNotice::RolledBack(worker)) => {
+                Effect::Notice(HostNotice::Switched(worker)) => {
                     self.error = None;
                     self.pending = None;
-                    self.active_viewport = self
-                        .children
-                        .iter()
-                        .find(|child| child.config.identity.worker == worker)
-                        .and_then(|child| {
-                            let (binding, activation, viewport) = child.prepared?;
-                            let viewport = viewport?;
-                            (binding == child.binding && child.granted == Some((binding, activation)) && self.viewport == Some(viewport))
-                                .then_some(ActiveViewport {
-                                    worker,
-                                    binding,
-                                    viewport,
-                                    activation,
-                                })
+                    self.active_viewport = self.accepted_viewport(worker);
+                    if let Some(active) = self.active_viewport {
+                        self.reviews.granted(ReviewGrant {
+                            binding: active.binding,
+                            activation: active.activation,
+                            viewport: active.viewport,
                         });
+                    } else {
+                        self.reviews.interrupt(ReviewStatus::Unavailable);
+                    }
+                }
+                Effect::Notice(HostNotice::RolledBack(worker)) => {
+                    self.reviews.interrupt(ReviewStatus::Cancelled);
+                    self.error = None;
+                    self.pending = None;
+                    self.active_viewport = self.accepted_viewport(worker);
                 }
                 Effect::Notice(HostNotice::Parked(worker)) => {
+                    self.reviews.interrupt(ReviewStatus::Cancelled);
                     self.error = None;
                     self.pending = None;
                     self.active_viewport = None;
@@ -1050,6 +1267,7 @@ impl Broker {
                     }
                 }
                 Effect::Notice(HostNotice::Failed | HostNotice::Detached | HostNotice::Expired(_) | HostNotice::Blocked(_)) => {
+                    self.reviews.interrupt(ReviewStatus::Unavailable);
                     self.pending = None;
                     self.active_viewport = None;
                     self.opens.clear();
@@ -1060,6 +1278,12 @@ impl Broker {
     }
 
     fn intent(&mut self, intent: HostIntent, ticket: u64, now: u64) -> anyhow::Result<()> {
+        if matches!(
+            intent,
+            HostIntent::Open(_, _) | HostIntent::Activate(_, _) | HostIntent::Viewport(_) | HostIntent::Park | HostIntent::Detach(_)
+        ) {
+            self.reviews.interrupt(ReviewStatus::Cancelled);
+        }
         match intent {
             HostIntent::Open(account, requested) => {
                 if self.opens.len() >= MAX_QUEUE {
@@ -1085,6 +1309,10 @@ impl Broker {
             HostIntent::SaveAttentionPreferences(preferences) => {
                 self.registry.save_attention_preferences(ticket, preferences);
             }
+            HostIntent::ReviewConversation(target, viewport) => {
+                self.begin_review(target, viewport, ticket, now)?;
+            }
+            HostIntent::CancelReview(request) => self.reviews.cancel(request),
             HostIntent::Activate(worker, viewport) => {
                 let effects = self.coordinator.activate(worker, Some(viewport), now)?;
                 self.viewport = Some(viewport);
@@ -1205,6 +1433,7 @@ impl Broker {
         let effects = self.coordinator.tick(now);
         self.effects(effects)?;
         self.poll_chat();
+        self.poll_review(now);
         Ok(())
     }
 
@@ -1387,6 +1616,7 @@ impl Broker {
     }
 
     fn fail_closed(&mut self, error: &dyn std::fmt::Display) {
+        self.reviews.interrupt(ReviewStatus::Unavailable);
         self.error = Some(error.to_string());
         self.active_viewport = None;
         self.opens.clear();
@@ -1465,6 +1695,7 @@ impl Broker {
             active_viewport,
             completed_request: self.completed_request,
             chat: self.children.iter().filter_map(|child| child.chat.snapshot()).collect(),
+            review_operations: self.reviews.operations(),
         }
     }
 }
@@ -1512,6 +1743,7 @@ fn host_loop(
         pending: None,
         error: None,
         completed_request: 0,
+        reviews: review::Transactions::default(),
         chat_listener: match super::chat_transport::Listener::bind() {
             Ok(listener) => Some(listener),
             Err(_) => {
@@ -1533,6 +1765,7 @@ fn host_loop(
         let now = began.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
         broker.coordinator.set_workspace_foreground(foreground.load(Ordering::Acquire));
         if stop.load(Ordering::Acquire) && closing.is_none() {
+            broker.reviews.interrupt(ReviewStatus::Cancelled);
             closing = Some(Instant::now() + CLOSE_WAIT);
             broker.opens.clear();
             let effects = broker.coordinator.detach_all();
@@ -1693,6 +1926,9 @@ fn reap_children(receiver: Receiver<Child>) {
 }
 
 #[cfg(test)]
+mod review_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1777,6 +2013,7 @@ mod tests {
             error: None,
             completed_request: 0,
             chat_listener: None,
+            reviews: review::Transactions::default(),
         };
         let slot = SlotId::try_from(1).unwrap();
         broker.intent(HostIntent::Open(None, Some(slot)), 1, 0).unwrap();

@@ -2,6 +2,7 @@
 //! exact current control bindings/leases precede every receive high-water update.
 
 use super::chat_transport::{HostIo, LaneError};
+use super::review::{self, Delivery, Status};
 use super::transport::HostError;
 use aurora_session::WorkerIdentity;
 use aurora_session::chat::{
@@ -9,6 +10,7 @@ use aurora_session::chat::{
     ConversationInfo, MAX_RECEIPTS, SendOutcome, SendReceipt, SendRequest, VERSION,
 };
 use aurora_session::chat::{MAX_READ_RECEIPTS, MarkReadRequest, ReadMetadata, ReadOutcome, ReadReceiptQuery};
+use aurora_session::chat::{MAX_REVIEW_RECEIPTS, ReviewCapture, ReviewConversationRequest, ReviewReceiptQuery};
 use std::collections::{BTreeMap, VecDeque};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,11 +31,24 @@ struct PendingRead {
     query_at: Instant,
 }
 
+struct PendingReview {
+    request: ReviewConversationRequest,
+    since: Instant,
+    query_at: Instant,
+    queries: u8,
+}
+
+struct ReviewRecord {
+    request: ReviewConversationRequest,
+    status: Status,
+}
+
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const POLL: Duration = Duration::from_millis(500);
 const RECEIPT_WAIT: Duration = Duration::from_secs(5);
+const REVIEW_QUERY_LIMIT: u8 = 10;
 
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct HostChatSnapshot {
@@ -46,6 +61,22 @@ pub(crate) struct HostChatSnapshot {
     pub reads: BTreeMap<Conversation, ReadMetadata>,
     pub read_operations: Vec<ReadOperation>,
     pub gap: bool,
+}
+
+impl HostChatSnapshot {
+    pub fn permits_review(&self, target: ReviewCapture) -> bool {
+        review::current_target(
+            target,
+            Some(self.source),
+            self.live,
+            self.authenticated,
+            self.conversations
+                .iter()
+                .find(|info| info.policy.key == target.key)
+                .map(|info| info.policy),
+            self.reads.get(&target.key.conversation).copied(),
+        )
+    }
 }
 
 struct Pending {
@@ -66,6 +97,10 @@ pub(crate) struct Peer {
     reads: BTreeMap<Conversation, ReadMetadata>,
     read_operations: VecDeque<ReadOperation>,
     read_pending: Option<PendingRead>,
+    review_operations: VecDeque<ReviewRecord>,
+    review_pending: Option<PendingReview>,
+    review_high_water: u64,
+    review_watch: Option<(ReviewCapture, bool)>,
     pending: Option<Pending>,
     received: u64,
     sent: u64,
@@ -89,6 +124,10 @@ impl Peer {
             reads: BTreeMap::new(),
             read_operations: VecDeque::new(),
             read_pending: None,
+            review_operations: VecDeque::new(),
+            review_pending: None,
+            review_high_water: 0,
+            review_watch: None,
             pending: None,
             received: 0,
             sent: 0,
@@ -120,11 +159,17 @@ impl Peer {
             .is_some_and(|(previous, next)| previous != next && next.session.generation <= previous.session.generation)
         {
             self.disconnect();
+            self.review_pending = None;
+            self.review_operations.clear();
+            self.review_watch = None;
             self.live = false;
             self.publish();
             return;
         }
         if source.is_none() || !live {
+            self.review_watch = None;
+            self.review_pending = None;
+            self.review_operations.clear();
             self.read_pending = None;
             self.read_operations.clear();
             self.reads.clear();
@@ -143,6 +188,9 @@ impl Peer {
             self.receipts.clear();
             self.read_operations.clear();
             self.read_pending = None;
+            self.review_pending = None;
+            self.review_operations.clear();
+            self.review_watch = None;
             self.after_event = 0;
             self.gap = false;
             // Socket and source changes never reset producer/receiver numbers.
@@ -187,11 +235,17 @@ impl Peer {
     }
 
     fn disconnect(&mut self) {
+        if let Some((_, valid)) = &mut self.review_watch {
+            *valid = false;
+        }
         self.uncertain();
         self.reads.clear();
         if let Some(pending) = &self.read_pending {
             let request = pending.request;
             self.update_read_status(request, ReadStatus::Uncertain);
+        }
+        if let Some(pending) = &self.review_pending {
+            self.update_review_status(pending.request, Status::Uncertain);
         }
         self.io = None;
         self.conversations.clear();
@@ -389,8 +443,128 @@ impl Peer {
         expired
     }
 
-    /// No Send is retried here. Polls recover immutable receipts/history only.
+    pub fn review_allowed(&self, target: ReviewCapture) -> bool {
+        review::current_target(
+            target,
+            self.source,
+            self.live,
+            self.io.is_some(),
+            self.conversations.get(&target.key.conversation).map(|info| info.policy),
+            self.reads.get(&target.key.conversation).copied(),
+        )
+    }
+
+    pub fn watch_review(&mut self, target: Option<ReviewCapture>) {
+        self.review_watch = target.map(|target| (target, self.review_allowed(target)));
+    }
+
+    pub fn watched_review_current(&self, target: ReviewCapture) -> bool {
+        self.review_watch == Some((target, true)) && self.review_allowed(target)
+    }
+
+    pub(super) fn review_delivery(&self, request: ReviewConversationRequest) -> Option<Delivery> {
+        let record = self.review_operations.iter().find(|record| record.request == request)?;
+        Some(Delivery {
+            request,
+            status: record.status,
+            recovering: self.review_pending.as_ref().is_some_and(|pending| pending.request == request),
+        })
+    }
+
+    fn update_review_status(&mut self, request: ReviewConversationRequest, status: Status) {
+        if let Some(record) = self.review_operations.iter_mut().find(|record| record.request == request) {
+            record.status = status;
+        }
+    }
+
+    /// One immediate bounded admission only. Busy never creates a delayed open;
+    /// reconnects and receipt recovery never call this method on an old ticket.
+    pub fn admit_review(&mut self, request: ReviewConversationRequest, now: Instant) -> Result<(), HostError> {
+        if request.validate().is_err() || request.request <= self.review_high_water {
+            return Err(HostError::Unavailable);
+        }
+        // Even a refused local admission is terminal for its original ticket.
+        // Channel room appearing later cannot turn Busy into a delayed open.
+        self.review_high_water = request.request;
+        if self.review_pending.is_some() {
+            return Err(HostError::Busy);
+        }
+        if !self.review_allowed(request.target) {
+            return Err(HostError::Unavailable);
+        }
+        let sequence = self.sent.checked_add(1).ok_or(HostError::Unavailable)?;
+        let packet = ChatPacket {
+            version: VERSION,
+            source: request.target.key.source,
+            sequence,
+            reply_to: 0,
+            message: ChatMessage::Command(ChatCommand::ReviewConversation(request)),
+        };
+        self.io.as_mut().ok_or(HostError::Unavailable)?.queue(&packet).map_err(|error| {
+            if error == LaneError::Busy {
+                HostError::Busy
+            } else {
+                HostError::Unavailable
+            }
+        })?;
+        self.sent = sequence;
+        if self.review_operations.len() == MAX_REVIEW_RECEIPTS {
+            self.review_operations.pop_front();
+        }
+        self.review_operations.push_back(ReviewRecord {
+            request,
+            status: Status::Dispatched,
+        });
+        self.review_pending = Some(PendingReview {
+            request,
+            since: now,
+            query_at: now + POLL,
+            queries: 0,
+        });
+        self.review_watch = None;
+        Ok(())
+    }
+
+    fn expire_review(&mut self, now: Instant) {
+        if let Some(pending) = &self.review_pending
+            && now.saturating_duration_since(pending.since) >= RECEIPT_WAIT
+        {
+            self.update_review_status(pending.request, Status::Uncertain);
+            self.review_pending = None;
+        }
+    }
+
+    fn poll_review_receipt(&mut self, now: Instant) {
+        self.expire_review(now);
+        let Some(pending) = &self.review_pending else { return };
+        if now < pending.query_at || pending.queries >= REVIEW_QUERY_LIMIT || !self.review_allowed(pending.request.target) {
+            return;
+        }
+        let request = pending.request;
+        if let Some(pending) = &mut self.review_pending {
+            pending.queries += 1;
+            pending.query_at = now + POLL;
+        }
+        if let (Some(sequence), Some(io)) = (self.sent.checked_add(1), self.io.as_mut()) {
+            let packet = ChatPacket {
+                version: VERSION,
+                source: request.target.key.source,
+                sequence,
+                reply_to: 0,
+                message: ChatMessage::Command(ChatCommand::QueryReviewReceipt(ReviewReceiptQuery {
+                    key: request.target.key,
+                    request: request.request,
+                })),
+            };
+            if io.queue(&packet).is_ok() {
+                self.sent = sequence;
+            }
+        }
+    }
+
+    /// No Send or Review is retried. Polls recover immutable receipts/history.
     pub fn poll(&mut self, now: Instant) {
+        self.expire_review(now);
         if !self.live {
             return;
         }
@@ -438,6 +612,7 @@ impl Peer {
             }
         }
         changed |= self.poll_read_receipt(now);
+        self.poll_review_receipt(now);
         if changed {
             self.publish();
         }
@@ -520,6 +695,30 @@ impl Peer {
                     self.read_pending = None;
                 }
             }
+            ChatEvent::ReviewReceipt(reply) => {
+                let record = self
+                    .review_operations
+                    .iter()
+                    .find(|record| record.request.target.key == reply.query.key && record.request.request == reply.query.request)
+                    .ok_or(ChatError::UnknownReceipt)?;
+                let request = record.request;
+                reply.validate_for(request)?;
+                if !self.review_allowed(request.target) {
+                    return Err(ChatError::Denied);
+                }
+                let status = reply
+                    .receipt
+                    .map_or(Status::Uncertain, |receipt| Status::Completed(receipt.outcome));
+                if matches!(record.status, Status::Completed(_)) {
+                    if record.status != status {
+                        return Err(ChatError::FinalReceipt);
+                    }
+                } else if !self.review_pending.as_ref().is_some_and(|pending| pending.request == request) {
+                    return Err(ChatError::UnknownReceipt);
+                }
+                self.update_review_status(request, status);
+                self.review_pending = None;
+            }
             ChatEvent::Line(line) => {
                 let policy = self.conversations.get(&line.key.conversation).ok_or(ChatError::Unavailable)?.policy;
                 self.history.as_mut().ok_or(ChatError::Unavailable)?.push(line.clone(), policy)?;
@@ -564,6 +763,13 @@ impl Peer {
                 self.history = ChatHistory::new(packet.source).ok();
                 self.uncertain();
             }
+        }
+        // Latch a temporary loss within a batch of incoming packets: a later
+        // policy/epoch restoration cannot rescue a pre-dispatch old gesture.
+        if let Some((target, true)) = self.review_watch
+            && !self.review_allowed(target)
+        {
+            self.review_watch = Some((target, false));
         }
         // A wrong/stale source, policy or receipt cannot poison this number.
         self.received = packet.sequence;
@@ -611,6 +817,9 @@ impl Peer {
         }
     }
 }
+
+#[cfg(test)]
+mod review_tests;
 
 #[cfg(test)]
 mod tests {
