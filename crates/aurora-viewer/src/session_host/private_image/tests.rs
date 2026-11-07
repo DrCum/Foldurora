@@ -216,6 +216,9 @@ struct FakeSurface {
     trace: Rc<RefCell<Trace>>,
     painter: crate::crash::software::Painter,
     fail: bool,
+    minimized: bool,
+    panic_size: bool,
+    panic_paint: bool,
 }
 impl FakeSurface {
     fn new(budget: UiPixelBudget, trace: Rc<RefCell<Trace>>) -> Self {
@@ -226,11 +229,19 @@ impl FakeSurface {
             trace,
             painter: Default::default(),
             fail: false,
+            minimized: false,
+            panic_size: false,
+            panic_paint: false,
         }
     }
 }
 impl OwnedSurface for FakeSurface {
+    type PresentContext = ();
+    fn minimized(&self) -> bool {
+        self.minimized
+    }
     fn size(&self) -> [u32; 2] {
+        assert!(!self.panic_size, "synthetic size panic");
         self.size
     }
     fn input(&mut self) -> RawInput {
@@ -245,6 +256,7 @@ impl OwnedSurface for FakeSurface {
     }
     fn paint(
         &mut self,
+        _presentation: &Self::PresentContext,
         context: &Context,
         mut output: FullOutput,
         size: [u32; 2],
@@ -264,6 +276,10 @@ impl OwnedSurface for FakeSurface {
             let replacement = vec![0; count];
             self.trace.borrow_mut().events.push("allocate");
             self.pixels = replacement;
+        }
+        if self.panic_paint {
+            output.textures_delta.clear();
+            panic!("synthetic paint panic after replacement allocation");
         }
         let primitives = context.tessellate(output.shapes, output.pixels_per_point);
         assert!(self.painter.paint_with_private(
@@ -308,20 +324,20 @@ fn private_cpu_surface_charges_physical_resize_overlap_and_keeps_minimized_bitma
     let mut owner = PrivateSoftwareSurface::new(FakeSurface::new(budget.clone(), trace.clone()), slot(&budget));
     let (context, frame) = frame(&mut owner.slot);
     owner
-        .present(&context, frame, &mut || true, &mut |_, raw| flush(&trace, raw))
+        .present(&(), &context, frame, &mut || true, &mut |_, raw| flush(&trace, raw))
         .unwrap();
     assert_eq!(budget.used(), 16 + 4 * 4 * 4);
     assert_eq!(trace.borrow().last_uniform_color, Some(0xff0000));
     owner.native.as_mut().unwrap().size = [8, 8]; // physical DPI/native resize, not source image dimensions
     let (context, frame) = frame(&mut owner.slot);
     owner
-        .present(&context, frame, &mut || true, &mut |_, raw| flush(&trace, raw))
+        .present(&(), &context, frame, &mut || true, &mut |_, raw| flush(&trace, raw))
         .unwrap();
     assert_eq!(budget.used(), 16 + 8 * 8 * 4);
     owner.native.as_mut().unwrap().size = [0, 0];
     let (context, frame) = frame(&mut owner.slot);
     owner
-        .present(&context, frame, &mut || true, &mut |_, raw| flush(&trace, raw))
+        .present(&(), &context, frame, &mut || true, &mut |_, raw| flush(&trace, raw))
         .unwrap();
     assert_eq!(budget.used(), 8 * 8 * 4, "minimized DIB still physically exists");
     assert!(owner.slot.begin_frame().is_err(), "restore needs a fresh safe owner");
@@ -345,7 +361,7 @@ fn private_cpu_surface_stale_frame_cannot_draw_or_close_newer_image_and_failures
         );
         owner.slot.stage(1, image(&budget, [0, 255, 0, 255])).unwrap();
         assert_eq!(
-            owner.present(&context, old, &mut || true, &mut |_, raw| flush(&trace, raw)),
+            owner.present(&(), &context, old, &mut || true, &mut |_, raw| flush(&trace, raw)),
             Err(Error::Stale)
         );
         assert!(trace.borrow().events.is_empty());
@@ -355,7 +371,7 @@ fn private_cpu_surface_stale_frame_cannot_draw_or_close_newer_image_and_failures
         );
         let (context, frame) = frame(&mut owner.slot);
         owner
-            .present(&context, frame, &mut || true, &mut |_, raw| flush(&trace, raw))
+            .present(&(), &context, frame, &mut || true, &mut |_, raw| flush(&trace, raw))
             .unwrap();
         assert_eq!(trace.borrow().last_uniform_color, Some(0x00ff00));
         owner.native.as_mut().unwrap().fail = !final_denial;
@@ -365,6 +381,7 @@ fn private_cpu_surface_stale_frame_cannot_draw_or_close_newer_image_and_failures
         let (context, frame) = frame(&mut owner.slot);
         let mut checks = 0;
         let result = owner.present(
+            &(),
             &context,
             frame,
             &mut || {
@@ -397,13 +414,13 @@ fn private_cpu_surface_budget_exhaustion_refuses_resize_without_unaccounted_bitm
     let mut owner = PrivateSoftwareSurface::new(FakeSurface::new(budget.clone(), trace.clone()), slot(&budget));
     let (context, frame) = frame(&mut owner.slot);
     owner
-        .present(&context, frame, &mut || true, &mut |_, raw| flush(&trace, raw))
+        .present(&(), &context, frame, &mut || true, &mut |_, raw| flush(&trace, raw))
         .unwrap();
     let held = budget.reserve(UI_PIXEL_BYTES - budget.used() - 64).unwrap();
     owner.native.as_mut().unwrap().size = [8, 8];
     let (context, frame) = frame(&mut owner.slot);
     assert_eq!(
-        owner.present(&context, frame, &mut || true, &mut |_, raw| flush(&trace, raw)),
+        owner.present(&(), &context, frame, &mut || true, &mut |_, raw| flush(&trace, raw)),
         Err(Error::Capacity)
     );
     assert_eq!(trace.borrow().events.iter().filter(|event| **event == "allocate").count(), 1);
@@ -414,10 +431,119 @@ fn private_cpu_surface_budget_exhaustion_refuses_resize_without_unaccounted_bitm
     assert!(surface::bitmap_bytes([u32::MAX, 1]).is_err());
 }
 
+#[test]
+fn private_cpu_surface_unwind_retires_retained_owner_and_keeps_bitmap_credits_through_drop() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    for failure in ["size", "paint", "admission_before", "admission_after", "flush"] {
+        let budget = UiPixelBudget::new();
+        let trace = Rc::new(RefCell::new(Trace::default()));
+        let mut owner = PrivateSoftwareSurface::new(FakeSurface::new(budget.clone(), trace.clone()), slot(&budget));
+        let (context, first) = frame(&mut owner.slot);
+        owner
+            .present(&(), &context, first, &mut || true, &mut |_, raw| flush(&trace, raw))
+            .unwrap();
+        assert_eq!(budget.used(), 16 + 64);
+        if failure == "flush" {
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                owner.retire(&mut |_, raw| {
+                    flush(&trace, raw);
+                    panic!("synthetic flush panic");
+                });
+            }));
+            assert!(result.is_err());
+        } else {
+            owner.native.as_mut().unwrap().size = [8, 8];
+            owner.native.as_mut().unwrap().panic_size = failure == "size";
+            owner.native.as_mut().unwrap().panic_paint = failure == "paint";
+            let (context, mut next) = frame(&mut owner.slot);
+            // A pending ordinary upload must not cause a second panic while
+            // the original permission/native failure is being unwound.
+            next.output.textures_delta.push(
+                TextureId::Managed(999),
+                egui::epaint::ImageDelta::full(ColorImage::filled([1, 1], Color32::WHITE), egui::TextureOptions::LINEAR),
+            );
+            let mut checks = 0;
+            let result = catch_unwind(AssertUnwindSafe(|| {
+                let _ = owner.present(
+                    &(),
+                    &context,
+                    next,
+                    &mut || {
+                        checks += 1;
+                        assert!(
+                            !(failure == "admission_before" && checks == 1 || failure == "admission_after" && checks == 2),
+                            "synthetic admission panic"
+                        );
+                        true
+                    },
+                    &mut |_, raw| flush(&trace, raw),
+                );
+            }));
+            let panic = result.expect_err("private native/permission panic must propagate");
+            let message = panic
+                .downcast_ref::<&str>()
+                .copied()
+                .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+                .unwrap();
+            assert!(message.contains(match failure {
+                "size" => "synthetic size panic",
+                "paint" => "synthetic paint panic",
+                _ => "synthetic admission panic",
+            }));
+        }
+        assert!(owner.native.is_none(), "outer catch retains owner, never native pixels");
+        assert!(owner.slot.begin_frame().is_err());
+        let overlap = matches!(failure, "paint" | "admission_after");
+        assert_eq!(
+            trace.borrow().observed,
+            [if overlap { 64 + 256 } else { 64 }],
+            "old/new byte leases survive actual native bitmap drop"
+        );
+        assert!(trace.borrow().events.ends_with(&["hide", "input", "flush", "drop"]));
+        assert_eq!(trace.borrow().events.iter().filter(|event| **event == "present").count(), 1);
+        assert_eq!(budget.used(), 0);
+        drop(owner);
+        assert_eq!(trace.borrow().events.iter().filter(|event| **event == "drop").count(), 1);
+    }
+}
+
+#[test]
+fn private_cpu_minimized_nonzero_client_size_never_queries_size_allocates_or_presents() {
+    let budget = UiPixelBudget::new();
+    let trace = Rc::new(RefCell::new(Trace::default()));
+    let mut owner = PrivateSoftwareSurface::new(FakeSurface::new(budget.clone(), trace.clone()), slot(&budget));
+    let (context, first) = frame(&mut owner.slot);
+    owner
+        .present(&(), &context, first, &mut || true, &mut |_, raw| flush(&trace, raw))
+        .unwrap();
+    let native = owner.native.as_mut().unwrap();
+    native.minimized = true;
+    native.size = [8, 8];
+    native.panic_size = true; // IsIconic must win over even a nonzero client rect.
+    let (context, next) = frame(&mut owner.slot);
+    assert_eq!(
+        owner
+            .present(&(), &context, next, &mut || true, &mut |_, raw| flush(&trace, raw))
+            .unwrap(),
+        Duration::from_millis(250)
+    );
+    assert!(owner.native.is_some());
+    assert!(owner.slot.begin_frame().is_err());
+    assert_eq!(budget.used(), 64, "minimized physical DIB remains charged");
+    assert_eq!(trace.borrow().events.iter().filter(|event| **event == "allocate").count(), 1);
+    assert_eq!(trace.borrow().events.iter().filter(|event| **event == "present").count(), 1);
+    owner.retire(&mut |_, raw| flush(&trace, raw));
+    assert_eq!(trace.borrow().observed, [64]);
+    assert_eq!(budget.used(), 0);
+}
+
 #[cfg(windows)]
 #[test]
 fn private_cpu_windows_adapter_is_explicitly_owned_and_dormant() {
     // Compile the real adapter/hook on Windows without creating a native window.
+    fn assert_owned<T: 'static>() {}
+    assert_owned::<surface::WindowsSurface>();
+    assert_owned::<PrivateSoftwareSurface<surface::WindowsSurface>>();
     let constructor = surface::WindowsSurface::owned_tool;
     let _ = constructor;
 }

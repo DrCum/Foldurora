@@ -156,6 +156,10 @@ impl SoftwareWindow {
             .viewport_output
             .get(&egui::ViewportId::ROOT)
             .map_or(Duration::MAX, |viewport| viewport.repaint_delay);
+        anyhow::ensure!(
+            self.window.is_minimized() == Some(false),
+            "private surface is minimized or unavailable"
+        );
         let size = self.window.inner_size();
         let (Some(width), Some(height)) = (NonZeroU32::new(size.width), NonZeroU32::new(size.height)) else {
             anyhow::bail!("private surface became zero-sized");

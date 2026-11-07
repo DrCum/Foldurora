@@ -8,11 +8,14 @@ use egui::{ColorImage, Context, FullOutput, RawInput, TextureId};
 use std::time::Duration;
 
 pub(super) trait OwnedSurface {
+    type PresentContext: ?Sized;
+    fn minimized(&self) -> bool;
     fn size(&self) -> [u32; 2];
     fn input(&mut self) -> RawInput;
     fn hide(&mut self);
     fn paint(
         &mut self,
+        presentation: &Self::PresentContext,
         context: &Context,
         output: FullOutput,
         size: [u32; 2],
@@ -26,6 +29,21 @@ pub(super) struct PrivateSoftwareSurface<S: OwnedSurface> {
     pub(super) slot: PrivateImageSlot,
     budget: UiPixelBudget,
     bitmap: Option<([u32; 2], UiPixelCredit)>,
+    replacement: Option<([u32; 2], UiPixelCredit)>,
+}
+
+// Field destruction order is deliberate: the actual native bitmap is destroyed
+// before either physical reservation, including if hide/input/flush unwinds.
+struct Retiring<S> {
+    native: Option<S>,
+    _bitmap: Option<([u32; 2], UiPixelCredit)>,
+    _replacement: Option<([u32; 2], UiPixelCredit)>,
+}
+struct PendingOutput(FullOutput);
+impl Drop for PendingOutput {
+    fn drop(&mut self) {
+        self.0.textures_delta.clear();
+    }
 }
 impl<S: OwnedSurface> PrivateSoftwareSurface<S> {
     pub(super) fn new(native: S, slot: PrivateImageSlot) -> Self {
@@ -35,27 +53,59 @@ impl<S: OwnedSurface> PrivateSoftwareSurface<S> {
             slot,
             budget,
             bitmap: None,
+            replacement: None,
+        }
+    }
+    fn take_retiring(&mut self) -> Retiring<S> {
+        Retiring {
+            native: self.native.take(),
+            _bitmap: self.bitmap.take(),
+            _replacement: self.replacement.take(),
         }
     }
     pub(super) fn retire(&mut self, flush: &mut dyn FnMut(&Context, RawInput)) {
+        let mut retiring = self.take_retiring();
         self.slot.retire();
-        if let Some(mut native) = self.native.take() {
+        if let Some(native) = &mut retiring.native {
+            native.hide();
             // The parent validates old captured chat authority and applies only
             // delivered old-focused edits in Closing mode, never Send/Read.
-            native.hide();
             flush(&self.slot.context, native.input());
-            drop(native); // Actual Surface/DIB before its physical byte credit.
         }
-        self.bitmap = None;
+        // Retiring also enforces this order if any callback above panics.
+        drop(retiring);
     }
     pub(super) fn present(
         &mut self,
+        presentation: &S::PresentContext,
         context: &Context,
         frame: PrivateFrame,
         current: &mut dyn FnMut() -> bool,
         flush: &mut dyn FnMut(&Context, RawInput),
     ) -> Result<Duration, Error> {
-        let (ticket, mut output) = frame.into_parts();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.present_inner(presentation, context, frame, current, flush)
+        }));
+        match result {
+            Ok(result) => result,
+            Err(panic) => {
+                // No conversion to an ordinary error: the original failure is
+                // resumed after removing all native/pixel ownership from self.
+                self.retire(flush);
+                std::panic::resume_unwind(panic)
+            }
+        }
+    }
+    fn present_inner(
+        &mut self,
+        presentation: &S::PresentContext,
+        context: &Context,
+        frame: PrivateFrame,
+        current: &mut dyn FnMut() -> bool,
+        flush: &mut dyn FnMut(&Context, RawInput),
+    ) -> Result<Duration, Error> {
+        let (ticket, output) = frame.into_parts();
+        let mut output = PendingOutput(output);
         // Old callbacks/output cannot tear down an unrelated current surface.
         if !self.slot.accepts(context, &ticket) {
             // Rejected first-pass geometry must not lose its font upload while
@@ -65,26 +115,26 @@ impl<S: OwnedSurface> PrivateSoftwareSurface<S> {
                 && ticket.context == self.slot.context
                 && self.native.is_some()
                 && self.slot.binding != 0
-                && self.slot.check_delta(&output.textures_delta).is_ok()
+                && self.slot.check_delta(&output.0.textures_delta).is_ok()
             {
-                self.slot.pending_ui.append(std::mem::take(&mut output.textures_delta));
+                self.slot.pending_ui.append(std::mem::take(&mut output.0.textures_delta));
             }
-            output.textures_delta.clear();
+            output.0.textures_delta.clear();
             return Err(Error::Stale);
         }
-        if let Err(error) = self.slot.validate_frame(context, &ticket, &output.textures_delta, current) {
-            output.textures_delta.clear();
+        if let Err(error) = self.slot.validate_frame(context, &ticket, &output.0.textures_delta, current) {
+            output.0.textures_delta.clear();
             self.retire(flush);
             return Err(error);
         }
         self.slot.consume(context, ticket)?;
         let Some(native) = &mut self.native else {
-            output.textures_delta.clear();
+            output.0.textures_delta.clear();
             return Err(Error::Surface);
         };
-        let size = native.size();
+        let size = if native.minimized() { [0, 0] } else { native.size() };
         if size.contains(&0) {
-            output.textures_delta.clear();
+            output.0.textures_delta.clear();
             self.slot.retire();
             native.hide();
             flush(&self.slot.context, native.input());
@@ -92,33 +142,39 @@ impl<S: OwnedSurface> PrivateSoftwareSurface<S> {
             // Restoration requires retiring/recreating this private owner.
             return Ok(Duration::from_millis(250));
         }
-        let replacement = if self.bitmap.as_ref().is_some_and(|(old, _)| *old == size) {
+        self.replacement = if self.bitmap.as_ref().is_some_and(|(old, _)| *old == size) {
             None
         } else {
             let bytes = bitmap_bytes(size);
             match bytes.and_then(|bytes| self.budget.reserve(bytes)) {
                 Ok(credit) => Some((size, credit)),
                 Err(error) => {
-                    output.textures_delta.clear();
+                    output.0.textures_delta.clear();
                     self.retire(flush);
                     return Err(error);
                 }
             }
         };
-        self.slot.pending_ui.append(std::mem::take(&mut output.textures_delta));
-        output.textures_delta = std::mem::take(&mut self.slot.pending_ui);
-        let result = native.paint(context, output, size, self.slot.borrowed(), current);
+        self.slot.pending_ui.append(std::mem::take(&mut output.0.textures_delta));
+        output.0.textures_delta = std::mem::take(&mut self.slot.pending_ui);
+        let result = native.paint(
+            presentation,
+            context,
+            std::mem::take(&mut output.0),
+            size,
+            self.slot.borrowed(),
+            current,
+        );
         match result {
             Ok(delay) => {
-                if let Some(replacement) = replacement {
+                if let Some(replacement) = self.replacement.take() {
                     self.bitmap = Some(replacement);
                 }
                 Ok(delay)
             }
             Err(error) => {
-                // replacement credit remains live until after native is dropped.
+                // Both owner-held reservations survive until native Drop.
                 self.retire(flush);
-                drop(replacement);
                 Err(error)
             }
         }
@@ -126,12 +182,12 @@ impl<S: OwnedSurface> PrivateSoftwareSurface<S> {
 }
 impl<S: OwnedSurface> Drop for PrivateSoftwareSurface<S> {
     fn drop(&mut self) {
+        let mut retiring = self.take_retiring();
         self.slot.retire();
-        if let Some(mut native) = self.native.take() {
+        if let Some(native) = &mut retiring.native {
             native.hide();
-            drop(native);
         }
-        self.bitmap = None;
+        drop(retiring);
     }
 }
 pub(super) fn bitmap_bytes(size: [u32; 2]) -> Result<usize, Error> {
@@ -148,15 +204,14 @@ pub(super) fn bitmap_bytes(size: [u32; 2]) -> Result<usize, Error> {
 // This adapter owns SoftwareWindow; it never exposes its Arc<Window>. The module
 // is cfg(test), and construction is not wired to Shell or any image endpoint.
 #[cfg(windows)]
-pub(super) struct WindowsSurface<'a> {
+pub(super) struct WindowsSurface {
     native: super::super::software::SoftwareWindow,
-    event_loop: &'a winit::event_loop::ActiveEventLoop,
     background: Color32,
 }
 #[cfg(windows)]
-impl<'a> WindowsSurface<'a> {
+impl WindowsSurface {
     pub(super) fn owned_tool(
-        event_loop: &'a winit::event_loop::ActiveEventLoop,
+        event_loop: &winit::event_loop::ActiveEventLoop,
         context: &Context,
         owner: &winit::window::Window,
     ) -> anyhow::Result<Self> {
@@ -169,13 +224,16 @@ impl<'a> WindowsSurface<'a> {
                 [380.0, 290.0],
                 [280.0, 120.0],
             )?,
-            event_loop,
             background: Color32::BLACK,
         })
     }
 }
 #[cfg(windows)]
-impl OwnedSurface for WindowsSurface<'_> {
+impl OwnedSurface for WindowsSurface {
+    type PresentContext = winit::event_loop::ActiveEventLoop;
+    fn minimized(&self) -> bool {
+        self.native.window.is_minimized() != Some(false)
+    }
     fn size(&self) -> [u32; 2] {
         let size = self.native.window.inner_size();
         [size.width, size.height]
@@ -188,6 +246,7 @@ impl OwnedSurface for WindowsSurface<'_> {
     }
     fn paint(
         &mut self,
+        presentation: &Self::PresentContext,
         context: &Context,
         output: FullOutput,
         size: [u32; 2],
@@ -195,7 +254,7 @@ impl OwnedSurface for WindowsSurface<'_> {
         current: &mut dyn FnMut() -> bool,
     ) -> Result<Duration, Error> {
         self.native
-            .present_private(self.event_loop, context, output, self.background, size, private, current)
+            .present_private(presentation, context, output, self.background, size, private, current)
             .map_err(|_| Error::Surface)
     }
 }

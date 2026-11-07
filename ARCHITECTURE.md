@@ -12,6 +12,11 @@ credits release, and requires recreation before a different source can show.
 Fonts, allocator metadata and compositor storage are outside this private payload
 bound. No Shell monitor, image endpoint, renderer or native producer is enabled;
 authored CPU/lifecycle tests and Windows adapter remain unrun.
+The dormant native adapter owns no callback-scoped ActiveEventLoop borrow; each
+presentation supplies it separately. Actual minimized state takes precedence
+over nonzero client dimensions. Size/permission/paint panics trigger private
+retirement and resume unwinding; a retirement guard destroys native DIB storage
+before old/new bitmap credits, including if the parent edit-flush panics.
 
 Foldurora application branding is embedded from `assets/branding/foldurora-*`.
 `cli::with_desktop_id` supplies a small cached RGBA icon to CPU and initial GPU

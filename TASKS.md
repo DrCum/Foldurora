@@ -10,6 +10,10 @@
   zero-size storage and injected errors; they are authored and unrun. New owner
   registration remains cfg(test)-only; no monitor UI/endpoint/native producer is
   enabled. Windows hide/recreate, DPI and physical allocation acceptance is later.
+  Source follow-ups cover size/permission/paint unwinds, old/new credit retention,
+  minimized nonzero dimensions and an owned native adapter with per-call event-loop
+  context. Fake panic/minimize tests are authored and unrun; no Windows execution
+  or compositor erasure result is inferred.
 
 - 🔧 Recoverable render-owner handoff prerequisite (2026-11-07; no issue):
   `render_thread::Owner::try_submit_owned` returns the original rejected job on
