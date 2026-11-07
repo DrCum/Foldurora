@@ -2020,6 +2020,77 @@ mod tests {
     }
 
     #[test]
+    fn actual_viewfinder_current_native_pointer_blocks_scene_before_the_next_ui_frame() {
+        use crate::snapshot::viewfinder::{Display, OnScreen};
+        for (native_scale, zoom) in [(1.0, 1.0), (1.25, 1.2)] {
+            for restricted in [false, true] {
+                let mut f = ViewportPhotoFixture::new_at_scale(false, native_scale, zoom);
+                f.viewport.left = 50.0;
+                f.viewport.right = 0.0;
+                f.viewport.top = 0.0;
+                f.viewport.bottom = 0.0;
+                f.viewport.restrict_ui = restricted;
+                f.scene = PhotoScene::Viewfinder;
+                f.settings.viewfinder.display = Display::Full;
+                f.settings.viewfinder.controls = OnScreen::Always;
+                f.viewfinder.hinted = true;
+                f.fov = crate::snapshot::fov_of_focal(50.0);
+                f.frames(5);
+                for name in ["vf_top_left", "vf_ring"] {
+                    let scene = f.bounds().center();
+                    f.show(vec![egui::Event::PointerMoved(scene)]);
+                    f.frames(2);
+                    assert!(
+                        !widgets::pointer_over_ui(&f.ctx, scene),
+                        "ordinary scene input must remain available"
+                    );
+                    let rect = f
+                        .ctx
+                        .memory(|m| m.area_rect(egui::Id::unique(name)))
+                        .expect("actual viewfinder control");
+                    let position = if name == "vf_ring" {
+                        Pos2::new(rect.right() - 16.0, rect.bottom() - 23.0)
+                    } else {
+                        rect.center()
+                    };
+                    assert_eq!(
+                        f.ctx.layer_id_at(position),
+                        Some(egui::LayerId::new(egui::Order::Foreground, egui::Id::unique(name))),
+                        "current native position must hit the actual interactive control"
+                    );
+                    assert!(!f.ctx.is_pointer_over_egui(), "egui still has the preceding scene position");
+                    assert!(!f.ctx.egui_wants_pointer_input(), "no preceding UI press owns capture");
+                    // A native move and press can both arrive before egui's
+                    // next frame. Test the event position without advancing it.
+                    assert!(widgets::pointer_over_ui(&f.ctx, position), "{name} leaks its press into the scene");
+                    let guide = f.settings.guide;
+                    let fov = f.fov;
+                    f.show(vec![
+                        egui::Event::PointerMoved(position),
+                        egui::Event::PointerButton {
+                            pos: position,
+                            button: egui::PointerButton::Primary,
+                            pressed: true,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ]);
+                    f.show(vec![egui::Event::PointerButton {
+                        pos: position,
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        modifiers: egui::Modifiers::NONE,
+                    }]);
+                    if name == "vf_ring" {
+                        assert!(f.fov < fov, "the real focal + button must still take the click");
+                    } else {
+                        assert_ne!(f.settings.guide, guide, "the real guide button must still take the click");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn actual_viewfinder_dock_leaves_scene_wheel_input_and_ring_buttons_available() {
         use crate::snapshot::viewfinder::{Display, OnScreen};
         for (native_scale, zoom) in [(1.0, 1.0), (1.25, 1.2), (2.0, 1.0)] {
