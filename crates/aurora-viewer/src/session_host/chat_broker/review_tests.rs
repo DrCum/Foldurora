@@ -143,6 +143,30 @@ fn chat_broker_review_watch_latches_epoch_or_socket_loss_even_if_restored_before
 }
 
 #[test]
+fn chat_broker_review_duplicate_incarnations_in_one_batch_are_rejected_before_watch_or_high_water() {
+    let (mut peer, _worker, request) = setup();
+    peer.watch_review(Some(request.target));
+    let mut replaced = row();
+    replaced.read.as_mut().unwrap().observed.epoch += 1;
+    let malformed = event(&peer, 1000, ChatEvent::ReadBatch(vec![replaced.clone(), row()]));
+    assert_eq!(peer.observe(&malformed), Err(ChatError::Invalid));
+    assert_eq!(peer.received, 1, "duplicate-key batch fails before receive high-water changes");
+    assert!(peer.review_allowed(request.target));
+    assert!(
+        peer.watched_review_current(request.target),
+        "rejected wire data cannot mutate the captured authority"
+    );
+    assert_eq!(peer.sent, 0);
+
+    // A valid replacement in its own accepted packet does retire the capture;
+    // restoring old metadata afterwards cannot revive that human gesture.
+    peer.observe(&event(&peer, 2, ChatEvent::ReadBatch(vec![replaced]))).unwrap();
+    peer.observe(&event(&peer, 3, ChatEvent::ReadBatch(vec![row()]))).unwrap();
+    assert!(peer.review_allowed(request.target));
+    assert!(!peer.watched_review_current(request.target));
+}
+
+#[test]
 fn chat_broker_review_busy_queue_is_terminal_and_cannot_open_when_room_returns() {
     let (mut peer, mut worker, request) = setup();
     let packet = ChatPacket {
