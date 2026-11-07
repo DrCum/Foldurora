@@ -19,6 +19,13 @@
   unchanged. Existing actual-mutex contention coverage is reused; all test
   names, attributes and assertions remain. This source correction is author
   unrun; independent review and Root-owned execution remain required.
+- 🔧 Pure local Inventory archive model (2026-11-07; no issue): test-only closed
+  versioned codec (2048 UUIDs/128KiB), actual source/eligibility/RLVa checks and
+  exact old-context edit/publication intents; missing defaults differ from bad
+  loads, save failures retain published flags, and counters fail closed. Thirteen
+  actual-helper/codec/model regressions are authored/unrun. Projection, private
+  IO, real menus and Folder Jump visibility integration remain separate required
+  stages; this prerequisite alone enables no archive behavior.
 
 - 🔧 Local Inventory archive prerequisite, shared origin (2026-11-07; no issue):
   World now owns one pure actual-request digest/ambiguity state, captured before
