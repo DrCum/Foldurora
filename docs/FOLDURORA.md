@@ -1,8 +1,9 @@
 # Foldurora workspace and character preview
 
-## Selective upstream catch-up — 7 November 2026
+## Selective upstream catch-up — 7 November 2026 UTC
 
-Branch `sync/upstream-safe-20261107` starts from frozen photo/branding source
+Branch `feat/foldurora-upstream-integration` includes author checkpoint
+`sync/upstream-safe-20261107`, starting from frozen photo/branding source
 `f5ae21d535da3a338bace51ffb03af7beeb040c6`. The upstream snapshot is
 [`576dd54a707677bf5b93dd696142cc17fbdef270`](https://github.com/Aurora-Viewer/Aurora-Viewer/commit/576dd54a707677bf5b93dd696142cc17fbdef270),
 fetched from `Aurora-Viewer/Aurora-Viewer` main into
@@ -52,11 +53,12 @@ that master switch. The permissions-guidance commit is preserved intact with
 `-x`; the following fork note in `AGENTS.md` distinguishes available helpers from
 the five deferred API targets. It does not assume those implementations exist.
 
-Source/dependency review and `git diff --check` passed. No Cargo command, binary
-build or runtime test was run on this branch. Imported task descriptions retain
-historical **upstream** tests and human observations; they do not establish new
-Foldurora checks or grid acceptance. The lead must validate the exact integrated
-source, including login/consent reset, same-source images, rights/Favorites/sort,
+Source/dependency review and `git diff --check` passed at the author checkpoint.
+Compiled checks and runtime evidence belong to the exact candidate's manifest
+and the coordination ledger. Imported task descriptions retain historical
+**upstream** tests and human observations; they do not establish new Foldurora
+checks or grid acceptance. Validation of this integrated source includes
+login/consent reset, same-source images, rights/Favorites/sort,
 teleport-history IO, mesh retry, adapter-retry plans and photo isolation. Affected
 AMD/NVIDIA hardware and human grid behavior remain unverified. The history
 writer's 500 ms shutdown bound preserves atomic files, not guaranteed latest-save
