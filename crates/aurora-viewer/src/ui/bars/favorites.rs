@@ -16,6 +16,7 @@ use crate::theme::Palette;
 use crate::ui::icons::Icons;
 use crate::ui::menu;
 use crate::ui::places::drag::{self, PlaceDrag as Dragged};
+use crate::world::favorites::{GroupEditTicket, GroupStatus};
 use egui::{Color32, FontId, Id, Pos2, Rect, Sense, Vec2};
 use glam::DVec3;
 use uuid::Uuid;
@@ -26,6 +27,8 @@ pub struct Favorite {
     pub item: Uuid,
     pub asset: Uuid,
     pub name: String,
+    pub group: Option<String>,
+    pub group_ticket: Option<GroupEditTicket>,
     /// The region, once the landmark and the map know it.
     pub region: String,
     /// "PG", "Mature", "Adult" or "" (unknown), as `bars::maturity_name`.
@@ -49,6 +52,7 @@ pub struct View {
     pub folded: bool,
     /// The Favorites folder is not read yet.
     pub loading: bool,
+    pub group_status: GroupStatus,
 }
 
 /// What a click in the favourites asks for.
@@ -63,6 +67,10 @@ pub enum FavAction {
     Move(Uuid, usize),
     /// "Add this place to favourites" (the star's own action).
     AddHere,
+    AssignGroup {
+        ticket: GroupEditTicket,
+        name: String,
+    },
     /// Places › Favorites.
     OpenPlaces,
     Access(FavoritesAccess),
@@ -99,14 +107,191 @@ pub fn take_shown(ctx: &egui::Context) -> bool {
     ctx.data_mut(|d| d.remove_temp::<bool>(shown_id())).unwrap_or(false)
 }
 
-/// The favourites whose name or region holds `filter`.
-fn filtered<'a>(view: &'a View, filter: &str) -> Vec<(usize, &'a Favorite)> {
-    let f = filter.trim().to_lowercase();
-    view.list
-        .iter()
-        .enumerate()
-        .filter(|(_, fav)| f.is_empty() || fav.name.to_lowercase().contains(&f) || fav.region.to_lowercase().contains(&f))
+/// A presentation entry, preserving the first member's ORIGINAL flat rank.
+/// A folder is never a replacement landmark/action identity.
+enum Entry<'a> {
+    Item(usize, &'a Favorite),
+    Folder {
+        rank: usize,
+        name: &'a str,
+        members: Vec<(usize, &'a Favorite)>,
+    },
+}
+impl<'a> Entry<'a> {
+    fn rank(&self) -> usize {
+        match self {
+            Self::Item(rank, _) | Self::Folder { rank, .. } => *rank,
+        }
+    }
+    fn first(&self) -> &'a Favorite {
+        match self {
+            Self::Item(_, favorite) => favorite,
+            Self::Folder { members, .. } => members[0].1,
+        }
+    }
+    fn label(&self) -> &str {
+        match self {
+            Self::Item(_, favorite) => &favorite.name,
+            Self::Folder { name, .. } => name,
+        }
+    }
+}
+fn grouped_entries<'a>(view: &'a View, filter: &str) -> Vec<Entry<'a>> {
+    let mut entries: Vec<Entry<'a>> = Vec::new();
+    let mut positions: std::collections::HashMap<&'a str, usize> = std::collections::HashMap::new();
+    for (rank, favorite) in view.list.iter().enumerate() {
+        if let Some(name) = favorite.group.as_deref().filter(|name| !name.is_empty()) {
+            if let Some(index) = positions.get(name).copied() {
+                if let Entry::Folder { members, .. } = &mut entries[index] {
+                    members.push((rank, favorite));
+                }
+            } else {
+                positions.insert(name, entries.len());
+                entries.push(Entry::Folder {
+                    rank,
+                    name,
+                    members: vec![(rank, favorite)],
+                });
+            }
+        } else {
+            entries.push(Entry::Item(rank, favorite));
+        }
+    }
+    let filter = filter.trim().to_lowercase();
+    if filter.is_empty() {
+        return entries;
+    }
+    let matches = |favorite: &Favorite| favorite.name.to_lowercase().contains(&filter) || favorite.region.to_lowercase().contains(&filter);
+    entries
+        .into_iter()
+        .filter_map(|entry| match entry {
+            Entry::Item(rank, favorite) => matches(favorite).then_some(Entry::Item(rank, favorite)),
+            Entry::Folder { rank, name, mut members } => {
+                if !name.to_lowercase().contains(&filter) {
+                    members.retain(|(_, favorite)| matches(favorite));
+                }
+                (!members.is_empty()).then_some(Entry::Folder { rank, name, members })
+            }
+        })
         .collect()
+}
+
+#[derive(Clone)]
+struct GroupEditor {
+    owner: Id,
+    ticket: Option<GroupEditTicket>,
+    text: String,
+    stale: bool,
+}
+fn group_editor(
+    ui: &mut egui::Ui,
+    p: &Palette,
+    favorite: &Favorite,
+    owner: Id,
+    editor: &mut Option<GroupEditor>,
+    out: &mut Option<FavAction>,
+) {
+    if editor.as_ref().is_none_or(|editor| editor.owner != owner) {
+        *editor = Some(GroupEditor {
+            owner,
+            text: favorite.group_ticket.as_ref().map_or("", GroupEditTicket::previous).to_owned(),
+            ticket: favorite.group_ticket.clone(),
+            stale: false,
+        });
+    }
+    if let Some(editor) = editor.as_mut()
+        && editor.ticket.is_some()
+        && editor.ticket.as_ref() != favorite.group_ticket.as_ref()
+    {
+        editor.ticket = None;
+        editor.text.clear();
+        editor.stale = true; // Never adopt another source/base into an old editor.
+    }
+    if editor.as_ref().is_some_and(|editor| editor.stale) {
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(aurora_i18n::tr!("favorites-folder-stale"))
+                    .small()
+                    .color(p.muted),
+            )
+            .wrap(),
+        );
+    }
+    let current = editor.as_ref().is_some_and(|editor| {
+        editor
+            .ticket
+            .as_ref()
+            .is_some_and(|ticket| favorite.group_ticket.as_ref() == Some(ticket))
+    });
+    menu::submenu(
+        ui,
+        p,
+        "folder-filled",
+        aurora_i18n::tr!("favorites-folder-set"),
+        editor.as_ref().is_some_and(|editor| editor.ticket.is_some()),
+        |ui| {
+            let Some(editor) = editor else { return };
+            ui.set_min_width(240.0);
+            ui.push_id(
+                ("favorite_group_name", editor.ticket.as_ref().map(GroupEditTicket::namespace)),
+                |ui| {
+                    ui.add_enabled_ui(current, |ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut editor.text)
+                                .id(Id::unique((
+                                    "favorite_group_input",
+                                    editor.ticket.as_ref().map(GroupEditTicket::namespace),
+                                )))
+                                .char_limit(64)
+                                .desired_width(230.0),
+                        );
+                    });
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(if current {
+                                aurora_i18n::tr!("favorites-folder-hint")
+                            } else {
+                                aurora_i18n::tr!("favorites-folder-stale")
+                            })
+                            .small()
+                            .color(p.muted),
+                        )
+                        .wrap(),
+                    );
+                    ui.horizontal(|ui| {
+                        if ui
+                            .add_enabled(current, egui::Button::new(aurora_i18n::tr!("common-apply")))
+                            .clicked()
+                            && let Some(ticket) = &editor.ticket
+                        {
+                            *out = Some(FavAction::AssignGroup {
+                                ticket: ticket.clone(),
+                                name: editor.text.clone(),
+                            });
+                            ui.close();
+                        }
+                        if ui.button(aurora_i18n::tr!("common-cancel")).clicked() {
+                            ui.close();
+                        }
+                    });
+                },
+            );
+        },
+    );
+}
+fn group_status_key(status: GroupStatus) -> Option<&'static str> {
+    Some(match status {
+        GroupStatus::Loading => "favorites-folder-loading",
+        GroupStatus::Saving => "favorites-folder-saving",
+        GroupStatus::LoadFailed => "favorites-folder-load-failed",
+        GroupStatus::SaveFailed => "favorites-folder-save-failed",
+        _ => return None,
+    })
+}
+fn group_status(ui: &mut egui::Ui, p: &Palette, status: GroupStatus) {
+    if let Some(key) = group_status_key(status) {
+        ui.add(egui::Label::new(egui::RichText::new(aurora_i18n::text(key)).small().color(p.muted)).wrap());
+    }
 }
 
 /// A favourite's picture: its thumbnail, or the landmark's pin on the
@@ -164,7 +349,10 @@ fn cut(ui: &egui::Ui, text: &str, font: FontId, color: Color32, width: f32) -> s
 
 /// Firestorm's favourites menu (menu_favorites.xml) on a favourite.
 fn fav_menu(resp: &egui::Response, p: &Palette, fav: &Favorite, out: &mut Option<FavAction>) {
-    menu::context_menu(resp, p, |ui| {
+    let editor_id = Id::unique("favorite_folder_editor");
+    let mut editor = resp.ctx.data(|data| data.get_temp::<GroupEditor>(editor_id));
+    let open = menu::context_menu(resp, p, |ui| {
+        group_editor(ui, p, fav, resp.id, &mut editor, out);
         if menu::item(ui, p, "location-filled", aurora_i18n::tr!("common-teleport-3")) {
             *out = Some(FavAction::Teleport(fav.asset));
         }
@@ -185,6 +373,15 @@ fn fav_menu(resp: &egui::Response, p: &Palette, fav: &Favorite, out: &mut Option
         menu::separator(ui, p);
         menu::todo(ui, p, "pencil-filled", aurora_i18n::tr!("common-rename"));
         menu::todo(ui, p, "trash-filled", aurora_i18n::tr!("common-delete"));
+    });
+    resp.ctx.data_mut(|data| {
+        if open {
+            if let Some(editor) = editor {
+                data.insert_temp(editor_id, editor);
+            }
+        } else if editor.as_ref().is_some_and(|editor| editor.owner == resp.id) {
+            data.remove_temp::<GroupEditor>(editor_id);
+        }
     });
 }
 
@@ -337,7 +534,7 @@ fn paint_drop(ui: &egui::Ui, p: &Palette, rects: &[Rect], rank: usize, vertical:
 
 /// While a favourite is dragged over `zone`: the marker, and its new rank
 /// once dropped.
-fn drop_on(ui: &egui::Ui, p: &Palette, zone: Rect, rects: &[(usize, Rect)], vertical: bool) -> Option<FavAction> {
+fn drop_on(ui: &egui::Ui, p: &Palette, zone: Rect, rects: &[(usize, Rect)], vertical: bool, end_rank: usize) -> Option<FavAction> {
     let dragged = egui::DragAndDrop::payload::<Dragged>(ui.ctx())?.favorite?;
     let pointer = ui.ctx().pointer_interact_pos()?;
     if !ui.rect_contains_pointer(zone) {
@@ -347,7 +544,9 @@ fn drop_on(ui: &egui::Ui, p: &Palette, zone: Rect, rects: &[(usize, Rect)], vert
     let local = drop_rank(&only, if vertical { pointer.y } else { pointer.x }, vertical);
     paint_drop(ui, p, &only, local, vertical);
     // the rank in the whole list (a filter may hide some)
-    let rank = rects.get(local).map_or_else(|| rects.last().map_or(0, |(i, _)| i + 1), |(i, _)| *i);
+    // A folder can contain later flat ranks than the last presentation entry.
+    // Its end is the original list's end, not last-first-member + 1.
+    let rank = rects.get(local).map_or(end_rank, |(i, _)| *i);
     if ui.input(|i| i.pointer.any_released()) {
         egui::DragAndDrop::clear_payload(ui.ctx());
         return Some(FavAction::Move(dragged, rank));
@@ -461,6 +660,70 @@ fn menu_row(
     rect
 }
 
+#[allow(clippy::too_many_arguments)]
+fn folder_contents(
+    ui: &mut egui::Ui,
+    p: &Palette,
+    icons: &Icons,
+    members: &[(usize, &Favorite)],
+    added: Option<Uuid>,
+    can_drop: bool,
+    out: &mut Option<FavAction>,
+) {
+    ui.set_width(378.0);
+    let shown = egui::ScrollArea::vertical()
+        .max_height(MENU_ROWS as f32 * (ROW_H + ROW_GAP))
+        .show(ui, |ui| {
+            let dragging = egui::DragAndDrop::has_payload_of_type::<Dragged>(ui.ctx());
+            members
+                .iter()
+                .map(|(rank, favorite)| {
+                    let rect = menu_row(ui, p, icons, favorite, added == Some(favorite.item), dragging, out);
+                    (*rank, rect)
+                })
+                .collect::<Vec<_>>()
+        });
+    if can_drop
+        && let Some(action) = drop_on(
+            ui,
+            p,
+            shown.inner_rect,
+            &shown.inner,
+            true,
+            members.last().map_or(0, |(rank, _)| rank + 1),
+        )
+    {
+        *out = Some(action);
+    }
+}
+#[allow(clippy::too_many_arguments)]
+fn folder_submenu(
+    ui: &mut egui::Ui,
+    p: &Palette,
+    icons: &Icons,
+    name: &str,
+    members: &[(usize, &Favorite)],
+    added: Option<Uuid>,
+    can_drop: bool,
+    out: &mut Option<FavAction>,
+) {
+    menu::submenu(ui, p, "folder-filled", name, true, |ui| {
+        folder_contents(ui, p, icons, members, added, can_drop, out)
+    });
+}
+fn folder_popup(
+    resp: &egui::Response,
+    p: &Palette,
+    icons: &Icons,
+    members: &[(usize, &Favorite)],
+    added: Option<Uuid>,
+    out: &mut Option<FavAction>,
+) {
+    menu::dropdown_placed(resp, p, egui::PopupCloseBehavior::CloseOnClickOutside, None, |ui| {
+        folder_contents(ui, p, icons, members, added, true, out)
+    });
+}
+
 /// The favourites menu (F1, and the row's "more"): header, filter, the
 /// list (eight rows, then it scrolls), "Add this place", Places and the
 /// choice of where the favourites live.
@@ -480,7 +743,7 @@ pub fn menu_body(ui: &mut egui::Ui, p: &Palette, icons: &Icons, view: &View, out
             crate::ui::widgets::pills::search_box(ui, p, &mut filter, aurora_i18n::tr!("favorites-filter"), w);
         });
         ui.add_space(6.0);
-        let rows = filtered(view, &filter);
+        let rows = grouped_entries(view, &filter);
         let height = (rows.len().clamp(1, MENU_ROWS)) as f32 * (ROW_H + ROW_GAP);
         let dragging = egui::DragAndDrop::has_payload_of_type::<Dragged>(ui.ctx());
         let mut rects = Vec::with_capacity(rows.len());
@@ -497,20 +760,28 @@ pub fn menu_body(ui: &mut egui::Ui, p: &Palette, icons: &Icons, view: &View, out
                             .color(p.muted),
                     );
                 }
-                for (i, fav) in &rows {
-                    let r = menu_row(ui, p, icons, fav, view.added == Some(fav.item), dragging, out);
-                    rects.push((*i, r));
+                for entry in &rows {
+                    let rect = match entry {
+                        Entry::Item(_, fav) => menu_row(ui, p, icons, fav, view.added == Some(fav.item), dragging, out),
+                        Entry::Folder { name, members, .. } => {
+                            let start = ui.cursor().min;
+                            folder_submenu(ui, p, icons, name, members, view.added, filter.trim().is_empty(), out);
+                            Rect::from_min_max(start, egui::pos2(ui.max_rect().right(), ui.cursor().top()))
+                        }
+                    };
+                    rects.push((entry.rank(), rect));
                 }
                 demo_target(ui.ctx(), "row", &rects);
             });
         // the drop is only meaningful on the whole list
         if filter.trim().is_empty()
-            && let Some(a) = drop_on(ui, p, shown.inner_rect, &rects, true)
+            && let Some(a) = drop_on(ui, p, shown.inner_rect, &rects, true, view.list.len())
         {
             *out = Some(a);
         }
         ui.ctx().data_mut(|d| d.insert_temp(filter_id, filter));
     }
+    group_status(ui, p, view.group_status);
     menu::separator(ui, p);
     if !view.list.is_empty() || view.loading {
         let add = aurora_i18n::tr!("favorites-add-here");
@@ -563,10 +834,10 @@ pub const ROW_HEIGHT: f32 = 34.0;
 const PILL_H: f32 = 26.0;
 const PILL_THUMB: f32 = 16.0;
 
-fn pill_width(ui: &egui::Ui, fav: &Favorite) -> f32 {
+fn pill_width(ui: &egui::Ui, label: &str) -> f32 {
     let w = ui
         .painter()
-        .layout_no_wrap(fav.name.clone(), FontId::proportional(12.0), Color32::PLACEHOLDER)
+        .layout_no_wrap(label.to_owned(), FontId::proportional(12.0), Color32::PLACEHOLDER)
         .size()
         .x;
     5.0 + PILL_THUMB + 6.0 + w.ceil() + 9.0
@@ -642,17 +913,34 @@ pub fn row(ctx: &egui::Context, p: &Palette, icons: &Icons, view: &View, under: 
                     .x
                 + 6.0
         };
-        let end = fold.left() - GAP;
-        let widths: Vec<f32> = view.list.iter().map(|f| pill_width(ui, f)).collect();
+        let end = if let Some(key) = group_status_key(view.group_status) {
+            let slot = fold.translate(Vec2::new(-SLOT - GAP, 0.0));
+            let failed = matches!(view.group_status, GroupStatus::LoadFailed | GroupStatus::SaveFailed);
+            paint_icon(
+                ui,
+                icons,
+                if failed { "alert-triangle-filled" } else { "hourglass-filled" },
+                slot,
+                16.0,
+                if failed { p.warn } else { p.muted },
+            );
+            ui.interact(slot, Id::unique("favorites_folder_status"), Sense::hover())
+                .on_hover_text(aurora_i18n::text(key));
+            slot.left() - GAP
+        } else {
+            fold.left() - GAP
+        };
+        let entries = grouped_entries(view, "");
+        let widths: Vec<f32> = entries.iter().map(|entry| pill_width(ui, entry.label())).collect();
         let total: f32 = widths.iter().sum::<f32>() + GAP * widths.len().saturating_sub(1) as f32;
         let fits = if x + total <= end {
-            view.list.len()
+            entries.len()
         } else {
             let mut n = 0;
             let mut used = 0.0;
             while n < widths.len() {
                 let next = used + widths[n] + if n > 0 { GAP } else { 0.0 };
-                if x + next + GAP + more_w(view.list.len() - n - 1) > end {
+                if x + next + GAP + more_w(entries.len() - n - 1) > end {
                     break;
                 }
                 used = next;
@@ -662,11 +950,28 @@ pub fn row(ctx: &egui::Context, p: &Palette, icons: &Icons, view: &View, under: 
         };
         let dragging = egui::DragAndDrop::has_payload_of_type::<Dragged>(ui.ctx());
         let mut rects = Vec::with_capacity(fits);
-        for (i, fav) in view.list.iter().take(fits).enumerate() {
+        for (i, entry) in entries.iter().take(fits).enumerate() {
+            let fav = entry.first();
             let pill = Rect::from_min_size(Pos2::new(x, cy - PILL_H / 2.0), Vec2::new(widths[i], PILL_H));
             x = pill.right() + GAP;
-            rects.push((i, pill));
-            let resp = ui.interact(pill, Id::unique(("bars_favorites_pill", fav.item)), Sense::click_and_drag());
+            rects.push((entry.rank(), pill));
+            let id = match entry {
+                Entry::Item(..) => Id::unique(("bars_favorites_pill", fav.item)),
+                Entry::Folder { name, .. } => Id::unique((
+                    "bars_favorites_folder_pill",
+                    name,
+                    fav.group_ticket.as_ref().map(GroupEditTicket::namespace),
+                )),
+            };
+            let resp = ui.interact(
+                pill,
+                id,
+                if matches!(entry, Entry::Item(..)) {
+                    Sense::click_and_drag()
+                } else {
+                    Sense::click()
+                },
+            );
             let moving = egui::DragAndDrop::payload::<Dragged>(ui.ctx()).is_some_and(|d| d.target.item() == Some(fav.item));
             let hot = !dragging && resp.hovered();
             slot_face(ui, p, pill, hot, false);
@@ -674,9 +979,20 @@ pub fn row(ctx: &egui::Context, p: &Palette, icons: &Icons, view: &View, under: 
             let t = Rect::from_min_size(Pos2::new(pill.left() + 5.0, cy - PILL_THUMB / 2.0), Vec2::splat(PILL_THUMB));
             let mut faded = ui.new_child(egui::UiBuilder::new().max_rect(pill));
             faded.multiply_opacity(alpha);
-            thumb(&faded, p, icons, t, fav, crate::ui::widgets::inner_radius(ui.visuals()));
-            let name = faded.painter().layout_no_wrap(fav.name.clone(), FontId::proportional(12.0), p.ink);
+            if matches!(entry, Entry::Item(..)) {
+                thumb(&faded, p, icons, t, fav, crate::ui::widgets::inner_radius(ui.visuals()));
+            } else {
+                paint_icon(&faded, icons, "folder-filled", t, PILL_THUMB, p.violet_light);
+            }
+            let name = faded
+                .painter()
+                .layout_no_wrap(entry.label().to_owned(), FontId::proportional(12.0), p.ink);
             crate::ui::widgets::paint_ink_left(faded.painter(), name, Pos2::new(t.right() + 6.0, cy), p.ink);
+            if let Entry::Folder { members, .. } = entry {
+                folder_popup(&resp, p, icons, members, view.added, &mut out);
+                resp.on_hover_text(entry.label());
+                continue;
+            }
             if resp.drag_started() {
                 drag_source(&resp, fav);
             }
@@ -703,8 +1019,8 @@ pub fn row(ctx: &egui::Context, p: &Palette, icons: &Icons, view: &View, under: 
                 out = Some(FavAction::Teleport(fav.asset));
             }
         }
-        if fits < view.list.len() {
-            let n = view.list.len() - fits;
+        if fits < entries.len() {
+            let n = entries.len() - fits;
             let more = Rect::from_min_size(Pos2::new(x, cy - PILL_H / 2.0), Vec2::new(more_w(n), PILL_H));
             let resp = ui.interact(more, Id::unique("bars_favorites_more"), Sense::click());
             let open = egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&resp));
@@ -727,7 +1043,7 @@ pub fn row(ctx: &egui::Context, p: &Palette, icons: &Icons, view: &View, under: 
             );
         }
         let zone = Rect::from_min_max(rect.min, Pos2::new(end, rect.bottom()));
-        if let Some(a) = drop_on(ui, p, zone, &rects, false) {
+        if let Some(a) = drop_on(ui, p, zone, &rects, false, entries.get(fits).map_or(view.list.len(), Entry::rank)) {
             out = Some(a);
         }
     });
@@ -737,6 +1053,7 @@ pub fn row(ctx: &egui::Context, p: &Palette, icons: &Icons, view: &View, under: 
 /// The right-click menu of the row and of its tab.
 fn row_menu(resp: &egui::Response, p: &Palette, view: &View, out: &mut Option<FavAction>) {
     menu::context_menu(resp, p, |ui| {
+        group_status(ui, p, view.group_status);
         let (icon, label, fold) = if view.folded {
             ("layout-navbar-expand-filled", aurora_i18n::tr!("favorites-row-unfold"), false)
         } else {
@@ -764,10 +1081,11 @@ pub fn grid_body(ui: &mut egui::Ui, p: &Palette, icons: &Icons, view: &View, out
     } else {
         ui.set_width(530.0 - 12.0);
         header(ui, p, icons, view.list.len());
-        let lines = view.list.len().div_ceil(COLS).max(1);
+        let entries = grouped_entries(view, "");
+        let lines = entries.len().div_ceil(COLS).max(1);
         let height = lines.min(4) as f32 * (TILE.y + 4.0);
         let dragging = egui::DragAndDrop::has_payload_of_type::<Dragged>(ui.ctx());
-        let mut rects = Vec::with_capacity(view.list.len());
+        let mut rects = Vec::with_capacity(entries.len());
         let shown = egui::ScrollArea::vertical()
             .id_salt("bars_favorites_grid")
             .max_height(height)
@@ -780,33 +1098,65 @@ pub fn grid_body(ui: &mut egui::Ui, p: &Palette, icons: &Icons, view: &View, out
                     Sense::hover(),
                 );
                 let _ = area_rect;
-                for (i, fav) in view.list.iter().enumerate() {
+                for (i, entry) in entries.iter().enumerate() {
+                    let fav = entry.first();
                     let (col, line) = (i % COLS, i / COLS);
                     let tile = Rect::from_min_size(
                         Pos2::new(left + col as f32 * (TILE.x + 4.0), top + line as f32 * (TILE.y + 4.0)),
                         TILE,
                     );
-                    rects.push((i, tile));
-                    let resp = ui.interact(tile, Id::unique(("bars_favorites_tile", fav.item)), Sense::click_and_drag());
+                    rects.push((entry.rank(), tile));
+                    let id = match entry {
+                        Entry::Item(..) => Id::unique(("bars_favorites_tile", fav.item)),
+                        Entry::Folder { name, .. } => Id::unique((
+                            "bars_favorites_folder_tile",
+                            name,
+                            fav.group_ticket.as_ref().map(GroupEditTicket::namespace),
+                        )),
+                    };
+                    let resp = ui.interact(
+                        tile,
+                        id,
+                        if matches!(entry, Entry::Item(..)) {
+                            Sense::click_and_drag()
+                        } else {
+                            Sense::click()
+                        },
+                    );
                     let hot = !dragging && resp.hovered();
                     let radius = ui.visuals().window_corner_radius;
                     if hot {
                         ui.painter().rect_filled(tile, radius, p.raised);
                     }
                     let picture = Rect::from_min_size(tile.min + Vec2::splat(4.0), Vec2::new(TILE.x - 8.0, 62.0));
-                    thumb(ui, p, icons, picture, fav, radius);
-                    badge(
-                        ui,
-                        p,
-                        Rect::from_min_size(Pos2::new(picture.right() - 4.0 - 15.0, picture.top() + 4.0), Vec2::splat(15.0)),
-                        fav.rating,
-                    );
-                    let name = cut(ui, &fav.name, semibold(ui, 12.0), p.ink, picture.width());
+                    if matches!(entry, Entry::Item(..)) {
+                        thumb(ui, p, icons, picture, fav, radius);
+                    } else {
+                        paint_icon(ui, icons, "folder-filled", picture, 32.0, p.violet_light);
+                    }
+                    if matches!(entry, Entry::Item(..)) {
+                        badge(
+                            ui,
+                            p,
+                            Rect::from_min_size(Pos2::new(picture.right() - 4.0 - 15.0, picture.top() + 4.0), Vec2::splat(15.0)),
+                            fav.rating,
+                        );
+                    }
+                    let name = cut(ui, entry.label(), semibold(ui, 12.0), p.ink, picture.width());
                     let nh = name.size().y;
                     ui.painter().galley(Pos2::new(picture.left(), picture.bottom() + 5.0), name, p.ink);
-                    let region = cut(ui, &fav.region, FontId::proportional(11.0), p.muted, picture.width());
+                    let detail = match entry {
+                        Entry::Item(..) => fav.region.clone(),
+                        Entry::Folder { members, .. } => aurora_i18n::tr!("favorites-folder-count", n = members.len() as i64).to_owned(),
+                    };
+                    let region = cut(ui, &detail, FontId::proportional(11.0), p.muted, picture.width());
                     ui.painter()
                         .galley(Pos2::new(picture.left(), picture.bottom() + 5.0 + nh), region, p.muted);
+                    if let Entry::Folder { members, .. } = entry {
+                        folder_popup(&resp, p, icons, members, view.added, out);
+                        resp.on_hover_text(entry.label());
+                        continue;
+                    }
                     if resp.drag_started() {
                         drag_source(&resp, fav);
                     }
@@ -818,10 +1168,11 @@ pub fn grid_body(ui: &mut egui::Ui, p: &Palette, icons: &Icons, view: &View, out
                 }
             });
         demo_target(ui.ctx(), "tile", &rects);
-        if let Some(a) = drop_on(ui, p, shown.inner_rect, &rects, false) {
+        if let Some(a) = drop_on(ui, p, shown.inner_rect, &rects, false, view.list.len()) {
             *out = Some(a);
         }
     }
+    group_status(ui, p, view.group_status);
     menu::separator(ui, p);
     if menu::item(ui, p, "map-pin-filled", aurora_i18n::tr!("ui-bars-open-favorites")) {
         *out = Some(FavAction::OpenPlaces);
@@ -942,6 +1293,8 @@ mod tests {
             item: Uuid::new_v4(),
             asset: Uuid::nil(),
             name: name.into(),
+            group: None,
+            group_ticket: None,
             region: region.into(),
             rating: "",
             global: None,
@@ -952,9 +1305,13 @@ mod tests {
             list: vec![fav("Plage des Lucioles", "Aurora Démo"), fav("Club Néon", "Pulsar")],
             ..View::default()
         };
-        assert_eq!(filtered(&view, "").len(), 2);
-        assert_eq!(filtered(&view, "pulsar")[0].0, 1);
-        assert_eq!(filtered(&view, " PLAGE ")[0].0, 0);
-        assert!(filtered(&view, "zzz").is_empty());
+        assert_eq!(grouped_entries(&view, "").len(), 2);
+        assert_eq!(grouped_entries(&view, "pulsar")[0].rank(), 1);
+        assert_eq!(grouped_entries(&view, " PLAGE ")[0].rank(), 0);
+        assert!(grouped_entries(&view, "zzz").is_empty());
     }
 }
+
+#[cfg(test)]
+#[path = "favorites_group_tests.rs"]
+mod group_tests;

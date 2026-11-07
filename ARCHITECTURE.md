@@ -75,6 +75,16 @@ unrun and separately reviewed before the eventual production promotion.
 Uncertain settings display the last confirmed preference without claiming the
 native change failed or that the previous native configuration is still in use.
 
+Named landmark Favorite menus are local display metadata in
+`world/favorites/groups.rs`, separate from the existing order file and Inventory.
+An actual submitted login URI digest is consumed once with the accepted account
+and session; missing or ambiguous provenance disables grouping. A bounded IO
+owner loads a strict account/grid document and publishes only after a cooperative
+nonblocking OS lock plus revision/content comparison. Source/model/item/previous
+assignment tickets, one pending save and canceled owner publication keep stale
+editors from retargeting. All three Favorites layouts share the first-member
+projection and original landmark actions; no remote Inventory operation is added.
+
 The disabled CPU/body integration preserves the reviewed private surface and
 Monitor body atoms on the existing disabled monitor foundations. Production
 Shell routing and launch/demand defaults are unchanged; new modules remain

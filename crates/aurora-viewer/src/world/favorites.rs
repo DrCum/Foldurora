@@ -18,6 +18,9 @@ use std::path::PathBuf;
 use std::thread::JoinHandle;
 use uuid::Uuid;
 
+mod groups;
+pub use groups::{GroupEditTicket, GroupError, GroupScope, GroupStatus, LoginGrid};
+
 pub const FILE: &str = "favorites_order.json";
 /// FT_FAVORITE.
 pub const FOLDER_FAVORITES: i32 = 23;
@@ -42,6 +45,9 @@ impl Drop for Storage {
 
 #[derive(Default)]
 pub struct Favorites {
+    groups: Option<groups::Groups>,
+    group_start_status: GroupStatus,
+    pending_login_grid: groups::PendingLoginGrid,
     /// Sort index of each favourite (LLFavoritesOrderStorage::mSortIndexes).
     order: HashMap<Uuid, i32>,
     storage: Option<Storage>,
@@ -59,6 +65,53 @@ pub struct Favorites {
 }
 
 impl Favorites {
+    /// Capture only the immutable URI digest from the ACTUAL request about to
+    /// be submitted. No credential or raw URI is copied into Favorite metadata.
+    pub fn capture_login_grid(&mut self, request: &aurora_net::LoginRequest) {
+        self.pending_login_grid.submitted(request);
+    }
+    pub fn cancel_login_grid(&mut self) {
+        self.pending_login_grid.failed();
+    }
+    pub fn take_login_grid(&mut self) -> Option<LoginGrid> {
+        self.pending_login_grid.completed()
+    }
+
+    /// A missing/ambiguous login attempt never falls back to mutable settings.
+    /// The old order format/path/worker remains independent and unchanged.
+    pub fn bind_groups(&mut self, scope: Option<GroupScope>, directory: PathBuf) {
+        self.groups = None;
+        self.group_start_status = GroupStatus::Unavailable;
+        if let Some(scope) = scope {
+            match groups::Groups::open(scope, directory) {
+                Ok(groups) => self.groups = Some(groups),
+                Err(_) => self.group_start_status = GroupStatus::LoadFailed,
+            }
+        }
+    }
+    pub fn group_status(&self) -> GroupStatus {
+        self.groups.as_ref().map_or(self.group_start_status, groups::Groups::status)
+    }
+    pub fn group_name(&self, account: Uuid, session: Uuid, inventory: &Inventory, item: Uuid) -> Option<&str> {
+        self.groups.as_ref()?.name_for(account, session, inventory, item)
+    }
+    pub fn group_ticket(&self, account: Uuid, session: Uuid, inventory: &Inventory, item: Uuid) -> Option<GroupEditTicket> {
+        self.groups.as_ref()?.ticket(account, session, inventory, item)
+    }
+    pub fn assign_group(
+        &mut self,
+        ticket: GroupEditTicket,
+        account: Uuid,
+        session: Uuid,
+        inventory: &Inventory,
+        name: &str,
+    ) -> Result<(), GroupError> {
+        self.groups
+            .as_mut()
+            .ok_or(GroupError::Unavailable)?
+            .assign(ticket, account, session, inventory, name)
+    }
+
     /// The account's order, read off the frame thread; the demo keeps it in
     /// memory (Default).
     pub fn load(path: PathBuf) -> Self {
@@ -114,6 +167,9 @@ impl Favorites {
     /// folder (its sub-folders too, as LLInventoryModel::collectDescendentsIf).
     /// Numbers them again when one has no index yet (a new favourite).
     pub fn list(&mut self, inv: &Inventory) -> &[Uuid] {
+        if let Some(groups) = &mut self.groups {
+            groups.poll();
+        }
         if let Some(storage) = &self.storage
             && let Ok(order) = storage.loaded.try_recv()
         {
@@ -369,3 +425,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 }
+
+#[cfg(test)]
+pub(crate) use groups::tests::{Fixture as GroupFixture, fixture as group_fixture};

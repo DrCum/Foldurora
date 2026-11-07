@@ -13514,3 +13514,17 @@ workspaces-cancel = Cancel preview
 workspaces-previous = Previous
 workspaces-retry = Retry
 workspaces-delete-confirm = Delete this saved workspace? The current arrangement stays.
+
+# Local named menus for existing landmark Favorites.
+favorites-folder-set = Set favorites folder…
+favorites-folder-hint = Groups this landmark in Favorites only. Leave blank to return it to the bar.
+favorites-folder-stale = This Favorite changed. Close this menu and open it again.
+favorites-folder-loading = Loading Favorite folders…
+favorites-folder-saving = Saving Favorite folder…
+favorites-folder-load-failed = Favorite folders could not be loaded. Existing settings were kept.
+favorites-folder-save-failed = The folder name could not be saved. Reopen the menu to try again.
+favorites-folder-change-unavailable = This Favorite or its settings changed. Open its menu again before trying.
+favorites-folder-count = { $n ->
+    [one] { $n } landmark
+   *[other] { $n } landmarks
+}

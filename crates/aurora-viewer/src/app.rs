@@ -2970,6 +2970,7 @@ impl App {
         self.login_form.error = None;
         self.login_progress = Some((aurora_i18n::tr!("app-connecting").into(), 0.05));
         self.settings.save();
+        self.world.favorites.capture_login_grid(&req);
         self.net.send(NetCommand::Login(Box::new(req)));
     }
 
@@ -3680,6 +3681,7 @@ impl App {
                 bad_credentials,
                 previous_session,
             } => {
+                self.world.favorites.cancel_login_grid();
                 // A refused login spends its code, whatever the reason: the next
                 // attempt sends none, so the server can ask for a new one
                 // (LLLoginInstance::constructAuthParams starts with an empty
@@ -3764,10 +3766,17 @@ impl App {
                     )
                 };
                 self.load_region_titles(l.agent_id);
+                let favorite_grid = self.world.favorites.take_login_grid();
                 self.world.favorites = if self.demo {
                     Default::default()
                 } else {
-                    crate::world::favorites::Favorites::load(crate::settings::account_dir(&l.agent_id).join(crate::world::favorites::FILE))
+                    let directory = crate::settings::account_dir(&l.agent_id);
+                    let mut favorites = crate::world::favorites::Favorites::load(directory.join(crate::world::favorites::FILE));
+                    favorites.bind_groups(
+                        favorite_grid.and_then(|grid| crate::world::favorites::GroupScope::new(l.agent_id, l.session_id, grid)),
+                        directory,
+                    );
+                    favorites
                 };
                 // the saved smart searches of the inventory; the demo keeps
                 // them in memory
@@ -13994,6 +14003,28 @@ impl App {
             }
             FavAction::Edit(item) => self.landmark_star(ui::bars::StarAction::Edit(item)),
             FavAction::Move(item, rank) => self.world.favorites.rearrange(&self.world.inventory, item, rank),
+            FavAction::AssignGroup { ticket, name } => {
+                let account = self.world.agent_id;
+                let session = self
+                    .world
+                    .login
+                    .as_ref()
+                    .filter(|login| login.agent_id == account)
+                    .map_or(uuid::Uuid::nil(), |login| login.session_id);
+                if self
+                    .world
+                    .favorites
+                    .assign_group(ticket, account, session, &self.world.inventory, &name)
+                    .is_err()
+                {
+                    self.world.notifications.push(
+                        crate::world::notifications::Kind::Alert,
+                        aurora_i18n::tr!("common-favorites"),
+                        aurora_i18n::tr!("favorites-folder-change-unavailable"),
+                        crate::world::notifications::Data::None,
+                    );
+                }
+            }
             FavAction::AddHere => self.landmark_star(ui::bars::StarAction::AddFavorite),
             FavAction::OpenPlaces => self.open_places_favorites(),
             FavAction::Access(access) => {
@@ -14084,6 +14115,13 @@ impl App {
             self.world.inventory.request(f);
         }
         let ids = self.world.favorites.list(&self.world.inventory).to_vec();
+        let account = self.world.agent_id;
+        let session = self
+            .world
+            .login
+            .as_ref()
+            .filter(|login| login.agent_id == account)
+            .map_or(uuid::Uuid::nil(), |login| login.session_id);
         let mut list = Vec::with_capacity(ids.len());
         let now = std::time::Instant::now();
         for id in ids {
@@ -14132,6 +14170,12 @@ impl App {
                 item: id,
                 asset,
                 name,
+                group: self
+                    .world
+                    .favorites
+                    .group_name(account, session, &self.world.inventory, id)
+                    .map(str::to_owned),
+                group_ticket: self.world.favorites.group_ticket(account, session, &self.world.inventory, id),
                 region: sim.as_ref().map(|s| s.0.clone()).unwrap_or_default(),
                 rating: sim.as_ref().map_or("", |s| ui::bars::maturity_name(s.1)),
                 global,
@@ -14166,6 +14210,7 @@ impl App {
                 self.settings.favorites_row_folded
             },
             loading: state != Some(FetchState::Fetched),
+            group_status: self.world.favorites.group_status(),
         }
     }
 

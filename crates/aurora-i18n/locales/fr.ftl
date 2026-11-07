@@ -13510,3 +13510,17 @@ workspaces-cancel = Annuler l’aperçu
 workspaces-previous = Précédent
 workspaces-retry = Réessayer
 workspaces-delete-confirm = Supprimer cet espace de travail enregistré ? La disposition actuelle est conservée.
+
+# Local named menus for existing landmark Favorites.
+favorites-folder-set = Définir le dossier des favoris…
+favorites-folder-hint = Regroupe ce repère uniquement dans les favoris. Laissez vide pour le remettre dans la barre.
+favorites-folder-stale = Ce favori a changé. Fermez ce menu et rouvrez-le.
+favorites-folder-loading = Chargement des dossiers de favoris…
+favorites-folder-saving = Enregistrement du dossier de favoris…
+favorites-folder-load-failed = Les dossiers de favoris n’ont pas pu être chargés. Les réglages existants ont été conservés.
+favorites-folder-save-failed = Le nom du dossier n’a pas pu être enregistré. Rouvrez le menu pour réessayer.
+favorites-folder-change-unavailable = Ce favori ou ses réglages ont changé. Rouvrez son menu avant de réessayer.
+favorites-folder-count = { $n ->
+    [one] { $n } repère
+   *[other] { $n } repères
+}
