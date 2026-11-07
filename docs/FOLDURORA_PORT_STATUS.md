@@ -164,6 +164,10 @@ no live inactive producer, production image endpoint or full monitor parity is
 established by these receipts. Earlier source-only fixture/driver checkpoints
 remain distinct from the compiled 2d test ELF and driver identified above.
 
+The [Review 024 Windows acceptance handoff](#review-024-windows-acceptance-handoff)
+below is a prepared recipe for the eventual exact package; no human result or
+handoff delivery is implied.
+
 Human/platform follow-up for the exact eventual package:
 
 - Confirm the bell/drawer entry, exact profile/account/grid/conversation labels,
@@ -181,6 +185,84 @@ Human/platform follow-up for the exact eventual package:
 - The user reported that camera behavior is now as expected, without stating
   the exact tested commit. Keep that report without attributing it to this
   package or declaring full camera, GPU/device-loss or port parity acceptance.
+
+## Review 024 Windows acceptance handoff
+
+Prepared recipe only; Windows/human acceptance is pending. No test request is
+being sent by this document. Continue other work while human testing is unavailable.
+
+Candidate source: `024ff943ac6feeef092fd83f906dc48e04a2dcbe`;
+tree `8a7a34df39586866c5a53b1aab3fbf01981957f9`;
+branch `feat/attention-review-integration`;
+[Windows run 42396161551](https://github.com/DrCum/Foldurora/actions/runs/42396161551).
+The final 024 artifact ID, package version and ZIP/executable SHA-256 values are
+**pending verification**; do not substitute another build's values.
+
+The separate MVP at `15d33e6c9225bb476f224df02446e3d8c8c94c8d` has
+[verified artifact 13583034550](https://github.com/DrCum/Foldurora/actions/runs/42390650825/artifacts/13583034550),
+version `0.9.3-beta.20261106.1+207.g15d33e6c9`. It has no native Review;
+its green checks do not validate 024. Keep that baseline and all **14 prior local
+artifacts and their source heads** intact. Add a separate 024 folder/worktree.
+
+The builder may use the 024 CI artifact once verified, or a cached local build
+from that exact commit with its own recorded checks/version/hashes. Do not mix
+controller and worker executables: both must come from the same 024 package.
+No installation, profile migration/deletion, merge or release is part of this handoff.
+For a local build, record source/tree and the resulting executable hash:
+
+```powershell
+git rev-parse HEAD 'HEAD^{tree}'
+Get-FileHash ./aurora-viewer.exe -Algorithm SHA256
+```
+
+Offline agents may inspect only their owned temporary installation, processes
+and windows. They must not enter credentials, open real profiles or log in to a
+grid. Positive Review needs a **human-managed logged-in worker with an existing
+resident IM**. The human handles login and real-session interaction. Start the
+matching controller with `--session-host`; keep its owned workspace in front.
+
+Perform these eight checks in both UI styles where available:
+
+1. **Exact target and foreground.** Select a character and its existing IM in
+   Attention, then click **Review in viewer** once. Only that character becomes
+   active and that captured conversation opens after the handoff completes.
+   Opening requires the matching workspace to be foreground. If it is rejected
+   as not in front, returning focus must not replay it; changing the selected
+   row while waiting must not replace the captured target.
+2. **Normal native reading.** The opened native conversation keeps its usual
+   read-on-draw behavior, so unread counts may change normally. Review must not
+   issue a separate host **Mark conversation read** action. Passive host
+   navigation and **Dismiss reminder** must not queue an explicit Read or
+   activate a World; native read-on-draw remains normal.
+3. **No accidental Send.** Hold Enter/Space, leave IME text uncommitted, and
+   switch or Review. Held/repeated keys, old IME commits and queued clicks/keys
+   must not send into the new composer. Release and start a fresh gesture before
+   any intentional Send; nothing should be replayed automatically.
+4. **Drafts and Undo.** Keep different unsent drafts for two characters and
+   conversations. Navigate and close/reopen Shared Chat or its existing popout.
+   Each draft and Undo history stays with its own source/conversation; Review
+   must not send, overwrite or clear another draft.
+5. **Honest Cancel.** Try **Cancel review** while waiting for activation, then
+   separately after **Review requested**. A cancellation confirmed before
+   dispatch should stop it. After dispatch, Cancel cannot promise prevention or
+   undo a conversation already opened; uncertainty must stay explicit.
+   Failed/uncertain requests must not repeat, and an old Cancel must not affect
+   a later Review.
+6. **Stale source or permission.** If the captured source closes/relogs, becomes
+   unavailable or loses permission while Review is pending, its old target must
+   fail closed. No other character, replacement IM or default row may be used.
+7. **Window lifecycle.** Minimize/restore, move/resize, change monitor/DPI and
+   close/reopen Attention and the controller as appropriate. Check alignment,
+   foreground/status accuracy and held-input release; no hidden Review or stale
+   action should run on restore. Preserve unrelated windows and profiles.
+8. **Original GPU report.** Separately repeat the original standalone-switching
+   workload on the affected GPU/driver when the human can do so. Record any
+   device loss and the exact build. A Review pass does not establish that the
+   original NVIDIA RTX 3060 device-loss report is fixed.
+
+Record the exact source, displayed version, package/executable hashes and
+pass/fail per check for later acceptance. Retain only body-free statuses or
+sanitized captures; do not collect credentials, private chat or full raw logs.
 
 ## Previous frozen native Enter guard candidate
 
