@@ -216,7 +216,7 @@ impl Attention {
             // can_mark_read is native mutation capacity, not permission to
             // display unread or navigate. can_send is equally independent.
             row.read.unread > 0
-                && preferences.include_slots[usize::from(u8::from(row.slot))]
+                && preferences.includes(row.slot)
                 && match row.key.conversation {
                     Conversation::Nearby => preferences.nearby,
                     Conversation::Direct(_) => preferences.direct,
