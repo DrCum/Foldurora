@@ -67,18 +67,18 @@ fn publish_if(path: &Path, bytes: &[u8], durable: bool, still: impl FnOnce() -> 
 /// with the folder. NTFS journals the rename, and Windows does not open a
 /// folder as a file to flush it. A failure leaves at worst the old file.
 #[cfg(unix)]
-fn sync_dir(dir: &Path) {
+pub(crate) fn sync_dir(dir: &Path) {
     if let Ok(dir) = std::fs::File::open(dir) {
         let _ = dir.sync_all();
     }
 }
 
 #[cfg(not(unix))]
-fn sync_dir(_: &Path) {}
+pub(crate) fn sync_dir(_: &Path) {}
 
 /// `rename`, retried a few times (1 + 2 + 4 + 8 + 16 ms at most) while it is
 /// only refused for an access conflict; any other error is returned at once.
-fn rename_retrying(from: &Path, to: &Path) -> std::io::Result<()> {
+pub(crate) fn rename_retrying(from: &Path, to: &Path) -> std::io::Result<()> {
     let mut attempt = 0;
     loop {
         match std::fs::rename(from, to) {

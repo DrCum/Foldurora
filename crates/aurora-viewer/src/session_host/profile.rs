@@ -275,6 +275,102 @@ fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::PermissionDenied, message)
 }
 
+/// Native named layouts use the already selected character profile, including
+/// standalone viewers. No DTO supplies a directory and no catalogue is copied.
+pub(crate) struct WorkspaceDirectory {
+    path: PathBuf,
+}
+impl WorkspaceDirectory {
+    pub(crate) fn select(account: Uuid, grid: &str) -> io::Result<Self> {
+        if account.is_nil() || !crate::characters::valid_id(grid) {
+            return Err(invalid("invalid workspace identity"));
+        }
+        let config = crate::settings::config_dir();
+        if !config.is_absolute() {
+            return Err(invalid("workspace profile must be absolute"));
+        }
+        let root = config.join("named-workspaces");
+        let relative = PathBuf::from(account.to_string()).join(grid);
+        Ok(Self { path: root.join(relative) })
+    }
+    fn checked(&self) -> io::Result<()> {
+        let grid = self.path.parent().ok_or_else(|| invalid("invalid workspace parent"))?;
+        let root = grid.parent().ok_or_else(|| invalid("invalid workspace root"))?;
+        ordinary_directories(root.parent().ok_or_else(|| invalid("invalid config root"))?)?;
+        for p in [root, grid, self.path.as_path()] {
+            plain_directory(p)?;
+            platform::validate_directory(p)?;
+        }
+        Ok(())
+    }
+    pub(crate) fn lock(&self) -> io::Result<File> {
+        let account = self.path.parent().ok_or_else(|| invalid("invalid workspace parent"))?;
+        let root = account.parent().ok_or_else(|| invalid("invalid workspace root"))?;
+        ordinary_directories(root.parent().ok_or_else(|| invalid("invalid config root"))?)?;
+        platform::private_directory(root)?;
+        platform::private_directory(account)?;
+        platform::private_directory(&self.path)?;
+        self.checked()?;
+        lock_private(&self.path.join("store.lock"))
+    }
+    pub(crate) fn read(&self, limit: usize) -> io::Result<Option<Vec<u8>>> {
+        use std::io::Read;
+        self.checked()?;
+        let path = self.path.join("named-v1.json");
+        match std::fs::symlink_metadata(&path) {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e),
+            Ok(m) if !m.is_file() || m.file_type().is_symlink() || platform::is_reparse(&m) => {
+                return Err(invalid("workspace file is not plain"));
+            }
+            Ok(_) => {}
+        }
+        let mut o = std::fs::OpenOptions::new();
+        o.read(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            o.custom_flags(libc::O_NOFOLLOW);
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            o.custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT);
+        }
+        let f = o.open(&path)?;
+        let m = f.metadata()?;
+        if !m.is_file() || platform::is_reparse(&m) {
+            return Err(invalid("workspace file is not plain"));
+        }
+        platform::validate_file(&path, &m)?;
+        let mut b = Vec::new();
+        f.take((limit + 1) as u64).read_to_end(&mut b)?;
+        if b.len() > limit {
+            return Err(invalid("workspace file too large"));
+        }
+        Ok(Some(b))
+    }
+    /// Caller holds store.lock and has checked the original file revision.
+    pub(crate) fn publish(&self, bytes: &[u8]) -> io::Result<()> {
+        use std::io::Write;
+        self.checked()?;
+        let temp = self.path.join(format!(".workspace-{}.tmp", Uuid::new_v4()));
+        let result = (|| {
+            let mut f = create_private_file(&temp)?;
+            f.write_all(bytes)?;
+            f.sync_all()?;
+            drop(f);
+            crate::atomic_file::rename_retrying(&temp, &self.path.join("named-v1.json"))?;
+            crate::atomic_file::sync_dir(&self.path);
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = std::fs::remove_file(temp);
+        }
+        result
+    }
+}
+
 #[cfg(unix)]
 mod platform {
     use super::*;
