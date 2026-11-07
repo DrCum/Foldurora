@@ -126,63 +126,58 @@ impl HostUi {
                                 if worker.status.as_ref().is_some_and(|status| status.keyboard_focused) {
                                     ui.label(RichText::new(aurora_i18n::tr!("host-keyboard-focus")).small().color(p.teal));
                                 }
-                                ui.horizontal_wrapped(|ui| {
-                                    let ready = can_activate(snapshot, worker, native_ready, hosted, closing);
-                                    let activate = ui
-                                        .add_enabled_ui(ready, |ui| {
-                                            widgets::action_button(
-                                                ui,
-                                                p,
-                                                "arrows-exchange",
-                                                aurora_i18n::tr!("host-activate"),
-                                                ActionKind::Flat,
-                                                vec2(0.0, 28.0),
-                                            )
-                                        })
-                                        .inner;
-                                    #[cfg(test)]
-                                    ctx.data_mut(|data| data.insert_temp(Id::unique(("host_activate", id)), activate.rect));
-                                    if activate.clicked() {
-                                        action = Some(Action::Activate(id));
-                                    }
-                                    if let Some(source) = chat_source(snapshot, worker) {
-                                        let response = ui
-                                            .push_id(("host_chat", source.lease_epoch), |ui| {
-                                                widgets::action_button_if(
-                                                    ui,
-                                                    p,
-                                                    "messages-filled",
-                                                    aurora_i18n::tr!("host-chat-open"),
-                                                    ActionKind::Flat,
-                                                    vec2(0.0, 28.0),
-                                                    !closing && !snapshot.stopped,
-                                                )
-                                            })
-                                            .inner;
+                                let source = chat_source(snapshot, worker);
+                                // Scope the whole row by its current chat lease. Individual child
+                                // scopes hide button widths from the parent's wrapping layout.
+                                ui.push_id(("host_actions", source.map(|source| source.lease_epoch)), |ui| {
+                                    ui.horizontal_wrapped(|ui| {
+                                        let ready = can_activate(snapshot, worker, native_ready, hosted, closing);
+                                        let activate = widgets::action_button_if(
+                                            ui,
+                                            p,
+                                            "arrows-exchange",
+                                            aurora_i18n::tr!("host-activate"),
+                                            ActionKind::Flat,
+                                            vec2(0.0, 28.0),
+                                            ready,
+                                        );
                                         #[cfg(test)]
-                                        ctx.data_mut(|data| data.insert_temp(Id::unique(("host_chat_open", id)), response.rect));
-                                        if response.clicked() {
-                                            action = Some(Action::OpenChat(source));
+                                        ctx.data_mut(|data| data.insert_temp(Id::unique(("host_activate", id)), activate.rect));
+                                        if activate.clicked() {
+                                            action = Some(Action::Activate(id));
                                         }
-                                    }
-                                    let detach = ui
-                                        .add_enabled_ui(!closing && !snapshot.stopped, |ui| {
-                                            widgets::action_button(
+                                        if let Some(source) = source {
+                                            let response = widgets::action_button_if(
                                                 ui,
                                                 p,
-                                                "external-link",
-                                                aurora_i18n::tr!("host-detach"),
+                                                "messages-filled",
+                                                aurora_i18n::tr!("host-chat-open"),
                                                 ActionKind::Flat,
                                                 vec2(0.0, 28.0),
-                                            )
-                                        })
-                                        .inner
+                                                !closing && !snapshot.stopped,
+                                            );
+                                            #[cfg(test)]
+                                            ctx.data_mut(|data| data.insert_temp(Id::unique(("host_chat_open", id)), response.rect));
+                                            if response.clicked() {
+                                                action = Some(Action::OpenChat(source));
+                                            }
+                                        }
+                                        let detach = widgets::action_button_if(
+                                            ui,
+                                            p,
+                                            "external-link",
+                                            aurora_i18n::tr!("host-detach"),
+                                            ActionKind::Flat,
+                                            vec2(0.0, 28.0),
+                                            !closing && !snapshot.stopped,
+                                        )
                                         .on_hover_text(aurora_i18n::tr!("host-detach-help"));
-                                    #[cfg(test)]
-                                    ctx.data_mut(|data| data.insert_temp(Id::unique(("host_detach", id)), detach.rect));
-                                    if detach.clicked() {
-                                        action = Some(Action::Detach(id));
-                                    }
+                                        #[cfg(test)]
+                                        ctx.data_mut(|data| data.insert_temp(Id::unique(("host_detach", id)), detach.rect));
+                                        if detach.clicked() {
+                                            action = Some(Action::Detach(id));
+                                        }
+                                    });
                                 });
                                 ui.add_space(12.0);
                             });
