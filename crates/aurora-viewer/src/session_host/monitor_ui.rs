@@ -341,7 +341,14 @@ impl MonitorUi {
                     "host-monitor-options",
                 ]
                 .into_iter()
-                .map(|key| wrapped_height(ui, aurora_i18n::text(key), (width - 16.0).max(1.0), egui::TextStyle::Button) + 12.0)
+                .map(|key| {
+                    wrapped_height(
+                        ui,
+                        aurora_i18n::text(key),
+                        (width - 2.0 * ui.spacing().button_padding.x).max(1.0),
+                        egui::TextStyle::Button,
+                    ) + 2.0 * ui.spacing().button_padding.y
+                })
                 .fold(26.0_f32, f32::max);
                 let mut footer = wrapped_height(ui, &caption, ui.available_width(), egui::TextStyle::Body) + toolbar_height;
                 let mut rows = 3;
