@@ -6,7 +6,7 @@ name: Windows test build
 # retain that result for the human who will test it.
 on:
   push:
-    branches: [feat/overnight-integration, feat/workspace-followup, fix/character-gpu-coexistence, feat/viewport-ui-integration, feat/session-host-integration, feat/session-host-chat-integration, fix/viewport-toolbars-integration, build/windows-integration-20261106, fix/host-move-and-dropdowns, feat/persistent-profiles-and-chat, fix/profile-popup-bounds, feat/compact-host-integration, feat/foldurora-photo-branding, feat/foldurora-upstream-integration, fix/camera-controls-integration]
+    branches: [feat/overnight-integration, feat/workspace-followup, fix/character-gpu-coexistence, feat/viewport-ui-integration, feat/session-host-integration, feat/session-host-chat-integration, fix/viewport-toolbars-integration, build/windows-integration-20261106, fix/host-move-and-dropdowns, feat/persistent-profiles-and-chat, fix/profile-popup-bounds, feat/compact-host-integration, feat/foldurora-photo-branding, feat/foldurora-upstream-integration, fix/camera-controls-integration, feat/shared-chat-integration]
   workflow_dispatch:
 
 permissions:
@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   windows:
-    if: github.ref == 'refs/heads/feat/overnight-integration' || github.ref == 'refs/heads/feat/workspace-followup' || github.ref == 'refs/heads/fix/character-gpu-coexistence' || github.ref == 'refs/heads/feat/viewport-ui-integration' || github.ref == 'refs/heads/feat/session-host-integration' || github.ref == 'refs/heads/feat/session-host-chat-integration' || github.ref == 'refs/heads/fix/viewport-toolbars-integration' || github.ref == 'refs/heads/build/windows-integration-20261106' || github.ref == 'refs/heads/fix/host-move-and-dropdowns' || github.ref == 'refs/heads/feat/persistent-profiles-and-chat' || github.ref == 'refs/heads/fix/profile-popup-bounds' || github.ref == 'refs/heads/feat/compact-host-integration' || github.ref == 'refs/heads/feat/foldurora-photo-branding' || github.ref == 'refs/heads/feat/foldurora-upstream-integration' || github.ref == 'refs/heads/fix/camera-controls-integration'
+    if: github.ref == 'refs/heads/feat/overnight-integration' || github.ref == 'refs/heads/feat/workspace-followup' || github.ref == 'refs/heads/fix/character-gpu-coexistence' || github.ref == 'refs/heads/feat/viewport-ui-integration' || github.ref == 'refs/heads/feat/session-host-integration' || github.ref == 'refs/heads/feat/session-host-chat-integration' || github.ref == 'refs/heads/fix/viewport-toolbars-integration' || github.ref == 'refs/heads/build/windows-integration-20261106' || github.ref == 'refs/heads/fix/host-move-and-dropdowns' || github.ref == 'refs/heads/feat/persistent-profiles-and-chat' || github.ref == 'refs/heads/fix/profile-popup-bounds' || github.ref == 'refs/heads/feat/compact-host-integration' || github.ref == 'refs/heads/feat/foldurora-photo-branding' || github.ref == 'refs/heads/feat/foldurora-upstream-integration' || github.ref == 'refs/heads/fix/camera-controls-integration' || github.ref == 'refs/heads/feat/shared-chat-integration'
     runs-on: windows-latest
     timeout-minutes: 90
     defaults:

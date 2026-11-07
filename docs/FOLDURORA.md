@@ -1,5 +1,45 @@
 # Foldurora workspace and character preview
 
+## Shared Chat integration candidate
+
+The `feat/shared-chat-integration` branch applies the first Shared Chat surface
+on frozen camera source `6a3009f2`, retaining all of that candidate's camera
+production changes. The separate author checkpoint `e6b27e4e` was based on
+`388b299c` and does not itself contain the camera corrections. Use the exact
+combined commit and version from its own package manifest. Source review and
+diff checks pass; combined compilation, tests, CPU captures and native acceptance
+remain pending. Earlier camera/upstream receipts do not establish these results.
+
+In controller mode, a character's **Chat** action opens or focuses one shared
+CPU window and explicitly selects that character as sender. Its selector shows
+the profile and actual account/grid identity. Choosing a character/conversation
+neither activates its world nor marks messages read. A source that disappears
+stays unavailable until explicitly changed; it never silently chooses another
+sender. Only already supported Nearby and existing resident IM conversations
+can send, under their current native permissions.
+
+Each exact source owns its drafts, Undo and receipts independently of the
+window. Closing/reopening, world switching, ordering or renamed labels must not
+move text to another character. Policy/authentication/session loss purges affected
+state even while closed. Admission and late receipts update their captured
+source; uncertain messages are never replayed. Enter sends from the freshly
+focused composer; Shift+Enter adds a line. IME composition, held keys/buttons,
+navigation and Close cannot turn into a send to a different target. Closing
+retains proven delivered edits before its navigation/focus boundary.
+
+Native acceptance: with human-managed logins, open Chat from two different
+characters and confirm the same window changes its explicit Send as selection.
+Type distinct drafts in each character and in Nearby/an existing IM, switch and
+reopen, then send one controlled test from each source. Switching the active
+world must leave the chosen sender unchanged. Check duplicate/renamed labels,
+minimized/closed drafts, source disconnection, Enter/Shift+Enter, IME, and a rapid
+source switch/Close. Only the human logs in or tests on a grid. Offline synthetic
+CPU captures and actual-egui tests are separate automated evidence.
+
+Friends/New IM creation, groups/conferences, native unread/read acknowledgment,
+Attention and render monitors remain subsequent stages. The native protocol is
+unchanged by this first shared surface. See [the host guide](SESSION_HOST.md).
+
 ## Photo viewfinder interaction follow-up
 
 The `fix/camera-controls-integration` candidate follows frozen `388b299c`; it is
