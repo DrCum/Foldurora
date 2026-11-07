@@ -1721,6 +1721,16 @@ impl Renderer {
         self.viewport_capture.as_ref()?.retention_guard()
     }
 
+    /// Actual physical surface facts, including while capture-only XR, park or
+    /// photo gates are closed. No capture/source/native authority is granted.
+    /// This never acquires the capture queue or queries/polls a GPU object.
+    pub fn viewport_capture_physical_boundary(&self) -> Option<crate::viewport_capture::CaptureBoundary> {
+        if self.failed || self.lost.get() {
+            return None;
+        }
+        self.viewport_capture.as_ref()?.physical_boundary(self.surface_epoch, self.size)
+    }
+
     /// One exact result's original bounded publication lease, with no renderer,
     /// queue or GPU ownership retained by its IO consumer.
     pub fn viewport_capture_guard(

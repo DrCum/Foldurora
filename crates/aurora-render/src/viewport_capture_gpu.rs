@@ -162,6 +162,12 @@ impl Shared {
         CaptureRetentionGuard::new(self.instance, self.device, self.physical.clone(), self.lost.clone())
     }
 
+    pub fn physical_boundary(&self, surface: u64, size: (u32, u32)) -> Option<CaptureBoundary> {
+        let guard = self.retention_guard()?;
+        let boundary = self.boundary(surface, size).ok()?;
+        guard.current().then_some(boundary)
+    }
+
     pub fn publication_guard(&self, result: &CapturedViewport) -> Option<CapturePublicationGuard> {
         let state = self.lock().ok()?;
         let generation = state.generation;
@@ -978,6 +984,42 @@ mod tests {
         assert!(!retained.current());
         assert!(shared.retention_guard().is_none());
         drop(locked);
+    }
+
+    #[test]
+    fn viewport_guard_physical_boundary_survives_capture_only_revocation_and_keeps_actual_surface() {
+        let shared = shared();
+        let retained = shared.retention_guard().unwrap();
+        let boundary = shared.physical_boundary(9, (640, 360)).unwrap();
+        assert_eq!(boundary.device_epoch(), retained.device_epoch());
+        assert_eq!(boundary.surface_epoch(), 9, "never synthesize an initial surface epoch");
+        let locked = shared.state.try_lock().unwrap();
+        shared.invalidate(); // Same capture-only path used for XR/park/stop.
+        assert!(retained.current());
+        assert_eq!(shared.physical_boundary(9, (640, 360)), Some(boundary));
+        shared.invalidate_physical();
+        assert!(!retained.current());
+        assert!(shared.retention_guard().unwrap().generation() > retained.generation());
+        assert_eq!(
+            shared.physical_boundary(9, (640, 360)),
+            Some(boundary),
+            "new physical generation may keep the actual numeric surface; native render epoch handles the replacement"
+        );
+        drop(locked);
+    }
+
+    #[test]
+    fn viewport_guard_physical_boundary_requires_current_owner_and_checked_actual_geometry() {
+        let shared = shared();
+        assert!(shared.physical_boundary(0, (640, 360)).is_none());
+        assert!(shared.physical_boundary(9, (0, 360)).is_none());
+        assert!(shared.physical_boundary(9, (640, 0)).is_none());
+        shared.lost.store(true, Ordering::Release);
+        assert!(shared.physical_boundary(9, (640, 360)).is_none());
+        let replacement = Shared::with_budget((640, 360), CaptureBudget::new(WORKER_CAPTURE_BYTES).unwrap()).unwrap();
+        assert_ne!(replacement.physical_boundary(1, (640, 360)).unwrap().device_epoch(), shared.device);
+        replacement.retire_owner();
+        assert!(replacement.physical_boundary(1, (640, 360)).is_none());
     }
 
     #[test]
