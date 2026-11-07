@@ -296,6 +296,19 @@ impl Frames {
             json!({"key": key, "rect": rect_json(rect)})
         })
         .collect();
+        let mut manager_actions = Vec::new();
+        if self.host.management_open {
+            for worker in &snapshot.workers {
+                for key in ["host_activate", "host_chat_open", "host_detach"] {
+                    let rect = self.rect(Id::unique((key, worker.binding.worker.worker)));
+                    assert!(
+                        rect.left() >= canvas.left() - tolerance && rect.right() <= self.world.left() + tolerance,
+                        "translated {key} must wrap inside management, not clip behind the world: {rect:?}"
+                    );
+                    manager_actions.push(json!({"key": key, "binding": worker.binding, "rect": rect_json(rect)}));
+                }
+            }
+        }
         let popup = self
             .context
             .data(|data| data.get_temp::<Id>(Id::unique("host_slot_popup_area")))
@@ -342,6 +355,7 @@ impl Frames {
             "canvas": rect_json(canvas), "world": rect_json(self.world), "management_open": self.host.management_open,
             "modal_open": self.host.modal_open(), "hosted_worker": self.hosted, "selected_worker": self.host.selected,
             "selected_slot": self.host.selected_slot, "controls": controls, "tabs": tabs,
+            "manager_actions": manager_actions,
             "tabs_clip": rect_json(self.rect(Id::unique("host_tabs_clip"))),
             "profile_popup_outer": popup.map(rect_json), "modal_outer": modal.map(rect_json), "painted_text": self.painted_text,
         });
