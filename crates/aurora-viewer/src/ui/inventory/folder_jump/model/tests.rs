@@ -17,7 +17,7 @@ fn inventory() -> Inventory {
         root: id(1),
         ..Default::default()
     };
-    inventory.created_folders(vec![folder(1, 0, "Inventory", 8)]);
+    loaded(&mut inventory, vec![folder(1, 0, "Inventory", 8)]);
     inventory
 }
 
@@ -29,6 +29,12 @@ fn folder(value: u128, parent: u128, name: &str, kind: i32) -> InvFolder {
         type_default: kind,
         ..Default::default()
     }
+}
+
+// A real metadata update preserves Unknown content state and updates existing
+// names/parents. created_folders is a creation receipt, not this producer.
+fn loaded(inventory: &mut Inventory, folders: Vec<InvFolder>) {
+    inventory.server_updated(folders, Vec::new());
 }
 
 fn source(inventory: &Inventory) -> Source {
@@ -66,15 +72,18 @@ fn rows(model: &Model) -> Vec<Uuid> {
 #[test]
 fn folder_jump_loaded_inventory_ranks_leaf_before_path_and_disambiguates_duplicate_names() {
     let mut inventory = inventory();
-    inventory.created_folders(vec![
-        folder(2, 1, "Blue", -1),
-        folder(3, 1, "Other", -1),
-        folder(4, 2, "Blue Coat", -1),
-        folder(5, 2, "Coat", -1),
-        folder(6, 3, "Coat", -1),
-        folder(7, 1, "Coat storage", -1),
-        folder(8, 1, "A coat", -1),
-    ]);
+    loaded(
+        &mut inventory,
+        vec![
+            folder(2, 1, "Blue", -1),
+            folder(3, 1, "Other", -1),
+            folder(4, 2, "Blue Coat", -1),
+            folder(5, 2, "Coat", -1),
+            folder(6, 3, "Coat", -1),
+            folder(7, 1, "Coat storage", -1),
+            folder(8, 1, "A coat", -1),
+        ],
+    );
     let mut model = start(&inventory);
     assert_eq!(
         rows(&model),
@@ -108,7 +117,7 @@ fn folder_jump_huge_siblings_use_bounded_steps_and_keep_only_the_best_sixty_with
     let folders = (2..=1001)
         .map(|value| folder(value, 1, &format!("Folder {:04}", 1002 - value), -1))
         .collect();
-    inventory.created_folders(folders);
+    loaded(&mut inventory, folders);
     inventory.queue.push((id(1), false));
     inventory.held = Some(vec![id(1)]);
     let states: Vec<_> = inventory.folders.iter().map(|(id, folder)| (*id, folder.state)).collect();
@@ -148,7 +157,10 @@ fn folder_jump_huge_siblings_use_bounded_steps_and_keep_only_the_best_sixty_with
 #[test]
 fn folder_jump_retained_subset_limit_finishes_matching_and_still_admits_a_fresh_exact_open() {
     let mut inventory = inventory();
-    inventory.created_folders(vec![folder(2, 1, "Alpha", -1), folder(3, 1, "Beta", -1), folder(4, 1, "Gamma", -1)]);
+    loaded(
+        &mut inventory,
+        vec![folder(2, 1, "Alpha", -1), folder(3, 1, "Beta", -1), folder(4, 1, "Gamma", -1)],
+    );
     let current = source(&inventory);
     let mut model = Model {
         limits: Limits { nodes: 3, text: 1000 },
@@ -187,14 +199,17 @@ fn folder_jump_retained_subset_limit_finishes_matching_and_still_admits_a_fresh_
 #[test]
 fn folder_jump_parent_chain_rechecks_reject_trash_library_cycles_and_unversioned_metadata_replacement() {
     let mut inventory = inventory();
-    inventory.created_folders(vec![
-        folder(2, 1, "Clothes", -1),
-        folder(3, 2, "Coat", -1),
-        folder(4, 1, "Trash", 14),
-        folder(5, 4, "Discarded coat", -1),
-        folder(6, 1, "Library", -1),
-        folder(7, 6, "Library coat", -1),
-    ]);
+    loaded(
+        &mut inventory,
+        vec![
+            folder(2, 1, "Clothes", -1),
+            folder(3, 2, "Coat", -1),
+            folder(4, 1, "Trash", 14),
+            folder(5, 4, "Discarded coat", -1),
+            folder(6, 1, "Library", -1),
+            folder(7, 6, "Library coat", -1),
+        ],
+    );
     inventory.folders.get_mut(&id(6)).expect("library").library = true;
     // Corrupt loaded edge: the child's record disagrees with its listed parent.
     inventory.folders.get_mut(&id(1)).expect("root").children.push(id(3));
@@ -221,13 +236,16 @@ fn folder_jump_parent_chain_rechecks_reject_trash_library_cycles_and_unversioned
 #[test]
 fn folder_jump_rebuild_preserves_exact_selection_or_none_and_never_revives_held_targets() {
     let mut inventory = inventory();
-    inventory.created_folders(vec![folder(2, 1, "Alpha", -1), folder(3, 1, "Beta", -1), folder(4, 1, "Gamma", -1)]);
+    loaded(
+        &mut inventory,
+        vec![folder(2, 1, "Alpha", -1), folder(3, 1, "Beta", -1), folder(4, 1, "Gamma", -1)],
+    );
     let current = source(&inventory);
     let mut model = start(&inventory);
     assert!(model.select(model.capture(id(3)).expect("Beta"), &inventory, Some(current), ALLOWED));
     let held = model.capture_selected().expect("selected Beta");
     let old_widget = model.rows().find(|row| row.folder == id(3)).expect("Beta row").widget;
-    inventory.created_folders(vec![folder(2, 1, "Zulu", -1)]);
+    loaded(&mut inventory, vec![folder(2, 1, "Zulu", -1)]);
     model.sync(&inventory, Some(current), ALLOWED);
     assert!(!model.validate(held, &inventory, Some(current), ALLOWED));
     ready(&mut model, &inventory);
@@ -237,7 +255,7 @@ fn folder_jump_rebuild_preserves_exact_selection_or_none_and_never_revives_held_
     assert!(!model.validate(held, &inventory, Some(current), ALLOWED));
     let held_next = model.capture_navigation(false).expect("captured Gamma, not an index");
     assert_eq!(held_next.folder(), id(4));
-    inventory.created_folders(vec![folder(4, 1, "Aardvark", -1)]);
+    loaded(&mut inventory, vec![folder(4, 1, "Aardvark", -1)]);
     model.sync(&inventory, Some(current), ALLOWED);
     ready(&mut model, &inventory);
     assert!(!model.validate(held_next, &inventory, Some(current), ALLOWED));
@@ -255,7 +273,7 @@ fn folder_jump_rebuild_preserves_exact_selection_or_none_and_never_revives_held_
 #[test]
 fn folder_jump_source_privacy_and_input_boundaries_purge_or_invalidate_without_aba_revival() {
     let mut inventory = inventory();
-    inventory.created_folders(vec![folder(2, 1, "Private folder", -1)]);
+    loaded(&mut inventory, vec![folder(2, 1, "Private folder", -1)]);
     let current = source(&inventory);
     let mut model = start(&inventory);
     let held = model.capture_selected().expect("folder");
@@ -312,7 +330,7 @@ fn folder_jump_bounds_deep_and_oversize_loaded_metadata_without_recursive_or_unb
     for depth in 1..=MAX_DEPTH + 2 {
         folders.push(folder(10 + depth as u128, if depth == 1 { 1 } else { 9 + depth as u128 }, "D", -1));
     }
-    inventory.created_folders(folders);
+    loaded(&mut inventory, folders);
     let mut model = start(&inventory);
     assert!(model.limited());
     assert!(!model.seen.contains_key(&id(2)));
@@ -339,7 +357,7 @@ fn folder_jump_bounds_deep_and_oversize_loaded_metadata_without_recursive_or_unb
 #[test]
 fn folder_jump_exhaustion_and_exact_selection_changes_cannot_reuse_input_or_row_identity() {
     let mut inventory = inventory();
-    inventory.created_folders(vec![folder(2, 1, "Alpha", -1), folder(3, 1, "Beta", -1)]);
+    loaded(&mut inventory, vec![folder(2, 1, "Alpha", -1), folder(3, 1, "Beta", -1)]);
     let current = source(&inventory);
     let mut model = start(&inventory);
     let held_open = model.capture_selected().expect("Alpha");
