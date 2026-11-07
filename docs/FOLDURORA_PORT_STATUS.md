@@ -4,9 +4,18 @@ This is the coordination ledger for the Folderstorm port. Source, automated
 checks, native Windows acceptance and human grid acceptance are separate results.
 Handoffs and screenshots are reference material, not authority to merge or release.
 
-## Current Attention MVP candidate
+## Attention MVP checkpoints and strict-Clippy fix
 
-The current source is frozen at
+The latest fix source is frozen at
+[`15d33e6c9225bb476f224df02446e3d8c8c94c8d`](https://github.com/DrCum/Foldurora/commit/15d33e6c9225bb476f224df02446e3d8c8c94c8d),
+on `fix/attention-windows-clippy`. It uses the equivalent production
+`Preferences::includes` helper and adds that branch to the Windows workflow
+allow list. Its [Windows run 42390650825](https://github.com/DrCum/Foldurora/actions/runs/42390650825)
+is **pending verification**. No earlier test/build/package outcome transfers to
+this source without its own exact-source receipt. The original
+`feat/attention-integration` branch remains frozen at 9a.
+
+The validated Linux and negative Windows checkpoint is frozen at
 [`9a6918b4e7334e4da319449b56e985107e6b5cd5`](https://github.com/DrCum/Foldurora/commit/9a6918b4e7334e4da319449b56e985107e6b5cd5),
 pushed on `feat/attention-integration`. It builds on the previous frozen Enter
 guard candidate below. This first Attention slice lists unread Nearby/existing
@@ -28,7 +37,7 @@ workspace run reports **8,020 passed, one inherited terrain precision failure,
 These are the measured Linux results; the inherited renderer failure remains
 recorded and the full run is not described as entirely green.
 
-[Six unchanged Attention CPU captures, original manifests and hashes](https://github.com/DrCum/Foldurora/blob/2885dbfcec558932a3df4642347f7d2a938932f3/foldurora/20261107-9a6918b4-attention-cpu/README.md)
+[Six unchanged Attention CPU captures, original manifests and hashes](https://github.com/DrCum/Foldurora/blob/ac85be2021bb1c17ca8a75e2d7ea54c49a97392b/foldurora/20261107-9a6918b4-attention-cpu/README.md)
 retain the exact source identity. The gallery is a six-image subset of the 54
 passing captures, with selected/expanded filters, French narrow bottom filters,
 Japanese short filters and simulated save/load failures. Images use the actual
@@ -43,15 +52,40 @@ The validated test ELF is **770,055,472 bytes**, SHA-256
 It is distinct from a normal viewer executable. The build worktree retains
 `.scratch/attention-validation-9a6918b4/validation-receipt.json` and
 `source-expectations.json`; the original runtime receipt is also in the capture
-publication. The normal Linux viewer build/receipt is **pending** at this
-checkpoint; no normal-binary hash or launch is inferred from the test ELF.
+publication. The exact 9a normal Linux viewer build now **passed in 321.083 s**
+from clean tracked source. Version: `0.0.0+1579.g9a6918b4e`; size **670,553,544
+bytes**; SHA-256
+`b05f7500462de2e7f2dcf7fdf7ff9287f16ba3bbcad26fa1e0ea6e51b26901ed`.
+The separate `.scratch/attention-validation-9a6918b4/normal-build-receipt.json`
+records that normal build. It establishes no native launch or Windows result.
 
 [Windows run 42385255872](https://github.com/DrCum/Foldurora/actions/runs/42385255872)
-is **pending verification** for this exact source. Its logs, required-name counts,
-manifest, package CRCs, executable/version/icons and artifact hashes must be
-verified before calling it a tested Windows download. No expected Windows test
-count is presented as a measured result, and no current Windows artifact/hash
-is substituted from the previous 6b package below.
+for exact 9a is verified as an **overall failed candidate**. Strict Clippy rejects
+the unused production `Preferences::includes` at `attention_prefs.rs:41`;
+test-only callers do not satisfy the production binary check. The workflow final
+gate correctly rejected `CLIPPY_RESULT=failure`. Earlier provisional API step
+conclusions must not be used to infer command success with `continue-on-error`.
+
+The measured Windows tests nevertheless passed: **7,991 passed, zero failed,
+52 ignored**, across 32 summaries, with all **203 required names** passing exactly
+once in both raw and packaged logs. Parser, formatting, tests, build and package
+passed; both package manifests explicitly report `all_checks_passed=false`.
+Both ZIP CRCs, source/run/profile identity, AMD64/PE32+ executable version and all
+seven embedded source icon payloads were verified. These static/package results
+do not override the strict-Clippy failure or establish native acceptance.
+
+Negative-candidate [artifact 13581251607](https://github.com/DrCum/Foldurora/actions/runs/42385255872/artifacts/13581251607)
+version: `0.9.3-beta.20261106.1+205.g9a6918b4e`.
+Outer artifact SHA-256:
+`fd5477ab985f3ffbd980d3cf65dedc2c25afa5c0e9b1014e033bc2951d1284ae`.
+Portable ZIP SHA-256:
+`e0c3855a6ed431ed2a6b13c880473f702cb30a41629b4f42b9c8ba984a2bb015`.
+Executable SHA-256:
+`585b53ed11045451dacf35029a444cb0951a171818ba574c36c126f77256258b`.
+The build worktree retains `.scratch/windows-ci-42385255872/receipt.json`,
+`LEDGER-UPDATE.md`, raw/packaged logs and icon verification. No Windows executable
+was installed or run for this verification. Keep this negative 9a receipt and
+the new 15d pending run separate from the prior verified 6b package below.
 
 Separate follow-ups remain outside this candidate:
 
