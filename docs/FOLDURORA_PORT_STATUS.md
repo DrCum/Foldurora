@@ -4,7 +4,72 @@ This is the coordination ledger for the Folderstorm port. Source, automated
 checks, native Windows acceptance and human grid acceptance are separate results.
 Handoffs and screenshots are reference material, not authority to merge or release.
 
-## Active camera and Shared Chat validation
+## Current native Enter guard candidate
+
+The next test source is frozen at
+[`6b512b1a`](https://github.com/DrCum/Foldurora/commit/6b512b1aa44102c871579a8a69211c12e0c87f89)
+on `fix/shared-chat-enter-integration`. Its
+[Windows run 42359207310](https://github.com/DrCum/Foldurora/actions/runs/42359207310)
+has passed parsing, formatting and strict Clippy; full tests, portable build and
+artifact verification are still pending. The source-derived Windows expectation
+is 7,931 passed, zero failed, 51 ignored and 143 required names; it is not a
+measured Windows result yet. No PR, main merge or release has occurred.
+
+The native guard observes held Enter and focus snapshots before egui-winit
+discards synthetic key presses. Synthetic releases cannot rearm Send, including
+X11's first real held press after refocus reporting repeat=false. It preserves
+fresh release/Enter, Shift+Enter multiline and Ctrl+Enter. Seven new assertions
+failed against compiled old behavior; all eight final guard tests pass. The
+full Linux runtime checkpoint `b54b2c28` measured **7,959 passed, one inherited
+terrain GPU precision failure, 52 ignored**, with all **143 required names**
+passing once. Final `6b512b1a` differs only in workflow/documentation; its runtime
+source blobs are identical. Exact-source formatting, Linux Clippy with the
+existing platform dead-code qualification and normal dev build passed. The
+normal build took 338.894 seconds, from clean source, and reports
+`0.0.0+1567.g6b512b1aa`, SHA-256
+`ef61dd32a4bb2bbe831b2c241b0c3b568fe10226244bdc1572bd54f1982afc9c`.
+An independent immutable executable freeze is retained.
+
+The unchanged native CPU driver independently reproduced the old held-key
+Send and then verified the fixed guard with no held intent, four eligible true
+repeats before any Send, and one Send after real release/fresh Enter. That fixed
+case failed later at a conversation-menu click whose live row bounds were not
+retained. No production navigation defect was established. The fixture can
+publish sizing-pass rectangles; the driver had sampled a row only once.
+
+A separately reviewed driver revision changes only exact conversation-row
+geometry acquisition, stability checks, pre-edge rechecks and original captures.
+With the same fixed `b54b2c28` test ELF and all original text/intent/Enter criteria,
+its full scripted native Linux CPU case **passed 15 assertions**, exactly **three
+synthetic Send intents and one Read intent**. It exercised held/fresh Enter,
+Shift/Ctrl, source/conversation drafts, captured Read, native CloseRequested/
+reopen retention and held-Read source replacement. Three eligible true repeats
+preceded physical release in the final trace; the earlier held screenshot/state
+contains two. Checked test and wrapper both exited **0** after **64.407 seconds**;
+no forced stop or live owned process/display remains. The terminated Xvfb zombie
+awaits PID1 reaping. The popup was visibly above its selector in this new case;
+that does not reconstruct the old failed click's press-time placement.
+
+[Five unchanged native CPU captures and hashes](https://github.com/DrCum/Foldurora/blob/5ab5d407e7735af206b05685bc064bb81945ab7b/foldurora/20261107-b54b2c28-native-chat-input/README.md)
+retain the actual source identity: `0.0.0+1565.gb54b2c28f`, test ELF SHA-256
+`dd07fca80a79a0fff67c140a86af704974e7ab2f7072b6f99fe2e4af4246e77e`,
+driver `068eb588` importing frozen `b85909b1`. These are real X11/CPU-window inputs
+with synthetic policies and typed intents, not viewer authentication, real chat
+IPC/World admission, message delivery, native unread mutation or grid acceptance.
+The controlled RejectedNative statuses visible in captures are fixture receipts.
+Windows, physical GPU, real IME, window-manager minimize/caption-button, released-
+away/refocus and dropping-Shift native cases remain separate checks. The original
+NVIDIA device-loss report remains unresolved. Attention and monitors follow this
+foundation in the user's chosen order.
+
+The build worktree retains `native-enter-unit-negative-receipt.json`,
+`native-enter-fixed-workspace-receipt.json`,
+`native-enter-final-clippy-receipt.json` and
+`native-enter-final-normal-binary-receipt.json` under `.scratch`. The fixture
+worktree retains the negative and partial cases plus
+`.scratch/native-os-driver/batch-p7oevWRn/VALIDATION-B54B-STABLE-ROWS-NATIVE-CPU-RECEIPT.json`.
+
+## Earlier camera and Shared Chat checkpoints
 
 The verified Shared Chat Windows download is
 [`1ef87bf6`, artifact 13566087312](https://github.com/DrCum/Foldurora/actions/runs/42348714309/artifacts/13566087312).
@@ -198,9 +263,10 @@ The failing fixture source is test-only `57184a5f` (equivalent to author `58d473
 on product `0e40e48f`). Its fresh-case evidence is retained under
 `/workspace/work/shared-chat-native-os-fixture/.scratch/native-os-driver/batch-loJEJB0j`,
 including the indexed Enter/focus trace, driver Return inputs and
-`FAILED-57184-NATIVE-CPU-RECEIPT.json`. A native Enter release-guard follow-up is
-being developed from frozen `0e40e48f`, with the fixture/driver unchanged for
-negative-to-fixed proof. Windows-specific input, IME, native World behavior and
+`FAILED-57184-NATIVE-CPU-RECEIPT.json`. The later native Enter release-guard
+candidate and the unchanged-driver narrow negative/fixed comparison are recorded
+above. The subsequent full scripted case uses only the separately documented
+driver geometry revision. Windows-specific input, IME, native World behavior and
 human-managed grid acceptance remain separate. Attention and monitors follow
 this foundation.
 
