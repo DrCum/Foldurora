@@ -205,6 +205,16 @@ pub(super) struct ChildPreview {
     witness: EpochFence,
     image_witness: EpochFence,
 }
+/// The actual owned Child receipt joined to its accepted Coordinator entry.
+/// Kept private so a UI DTO cannot be promoted to a source proof.
+struct ChildReceipt<'a> {
+    config: &'a WorkerConfig,
+    binding: Binding,
+    received: u64,
+    last_seen: Option<Instant>,
+    entry: Option<&'a aurora_session::RosterEntry>,
+    owned: bool,
+}
 impl ChildPreview {
     pub(super) fn new() -> Self {
         Self {
@@ -223,17 +233,9 @@ impl ChildPreview {
     }
     /// Called only after the real Coordinator has accepted each envelope. The
     /// same helper is exercised with actual Coordinator receipts in tests.
-    fn observe(
-        &mut self,
-        config: &WorkerConfig,
-        binding: Binding,
-        received: u64,
-        last_seen: Option<Instant>,
-        entry: Option<&aurora_session::RosterEntry>,
-        owned: bool,
-        now: Instant,
-    ) -> Option<AcceptedPreviewSource> {
-        let view = self.observe_view(config, binding, received, last_seen, entry, owned, now)?;
+    fn observe(&mut self, receipt: ChildReceipt<'_>, now: Instant) -> Option<AcceptedPreviewSource> {
+        let config = receipt.config;
+        let view = self.observe_view(receipt, now)?;
         if config.preview.as_ref().is_none_or(|bootstrap| bootstrap.port == 0) {
             self.image_witness.revoke();
             return None;
@@ -246,16 +248,15 @@ impl ChildPreview {
             witness: self.image_witness.clone(),
         })
     }
-    fn observe_view(
-        &mut self,
-        config: &WorkerConfig,
-        binding: Binding,
-        received: u64,
-        last_seen: Option<Instant>,
-        entry: Option<&aurora_session::RosterEntry>,
-        owned: bool,
-        now: Instant,
-    ) -> Option<AcceptedViewSource> {
+    fn observe_view(&mut self, receipt: ChildReceipt<'_>, now: Instant) -> Option<AcceptedViewSource> {
+        let ChildReceipt {
+            config,
+            binding,
+            received,
+            last_seen,
+            entry,
+            owned,
+        } = receipt;
         let accepted = (|| {
             let entry = entry?;
             let session = binding.session?;
@@ -315,12 +316,14 @@ impl Broker {
                     .workers()
                     .find(|entry| entry.binding.worker == child.config.identity);
                 child.preview.observe_view(
-                    &child.config,
-                    child.binding,
-                    child.received,
-                    child.last_seen,
-                    entry,
-                    !child.detached && !child.exited,
+                    ChildReceipt {
+                        config: &child.config,
+                        binding: child.binding,
+                        received: child.received,
+                        last_seen: child.last_seen,
+                        entry,
+                        owned: !child.detached && !child.exited,
+                    },
                     now,
                 )
             })
@@ -335,12 +338,14 @@ impl Broker {
                     .workers()
                     .find(|entry| entry.binding.worker == child.config.identity);
                 child.preview.observe(
-                    &child.config,
-                    child.binding,
-                    child.received,
-                    child.last_seen,
-                    entry,
-                    !child.detached && !child.exited,
+                    ChildReceipt {
+                        config: &child.config,
+                        binding: child.binding,
+                        received: child.received,
+                        last_seen: child.last_seen,
+                        entry,
+                        owned: !child.detached && !child.exited,
+                    },
                     now,
                 )
             })

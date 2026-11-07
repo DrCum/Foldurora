@@ -286,6 +286,11 @@ impl Ledger {
     pub fn uncertain(&self, source: PreviewSource) -> bool {
         self.entries.iter().any(|entry| entry.worker == source.worker() && entry.uncertain)
     }
+    pub fn pending_native(&self, source: PreviewSource) -> bool {
+        self.entries
+            .iter()
+            .any(|entry| entry.worker == source.worker() && entry.pending.as_ref().is_some_and(|pending| pending.queued))
+    }
     /// At most one globally paced source; no accumulated tokens or catch-up.
     pub fn due(&mut self, eligible: &[ConnectionToken], now: Instant) -> Option<Accepted> {
         if self.next_global.is_some_and(|next| now < next) || eligible.is_empty() {

@@ -305,7 +305,7 @@ impl Store {
             let observed = set.sources().iter().find(|observed| observed.domain().source() == entry.source);
             let source = control.images.iter().find(|source| source.source() == entry.source);
             let visible = self.views.iter().any(|view| view.source == entry.source && view.visible);
-            let Some((observed, source)) = observed.zip(source) else {
+            let Some((observed, _source)) = observed.zip(source) else {
                 entry.retire(&mut self.garbage);
                 entry.status = if source.is_none() {
                     ImageStatus::Unsupported

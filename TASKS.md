@@ -3635,3 +3635,13 @@ Open-source technologies that could set Aurora apart (human request of 2026-10-1
   capability. Factory remains closed; source review and final regression inventory
   are ongoing, all authored tests UNRUN. Root compiler/lint/runtime and actual
   Windows/human acceptance remain separate; no endpoint or product enablement.
+
+  - Host source follow-up: 33 authored UNRUN protocol/model/ownership regressions
+    now include exact lower native ACK versus duplicate aggregate reuse, actual
+    Store image-cache retirement on terminal IO loss, Busy view-only stripping,
+    exact Unavailable/latest Layout fences, producer-invariant retirement,
+    listener Starting/Ready/failure, and exact Exchange terminal correlations.
+    Private accepted-receipt argument aggregation and two compiler-reported
+    bindings are corrected. Queued native settings timeout stays Uncertain.
+    The shared recoverable-admit seam and UI ViewReads follow-up are explicit
+    combined dependencies. No source-clear or runtime/product claim is made here.

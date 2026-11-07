@@ -76,23 +76,27 @@ impl AcceptedControl {
     }
     pub(in crate::session_host) fn source(&mut self) -> Option<AcceptedPreviewSource> {
         self.child.observe(
-            &self.config,
-            self.binding,
-            self.received,
-            self.seen,
-            self.coordinator.workers().next(),
-            true,
+            ChildReceipt {
+                config: &self.config,
+                binding: self.binding,
+                received: self.received,
+                last_seen: self.seen,
+                entry: self.coordinator.workers().next(),
+                owned: true,
+            },
             Instant::now(),
         )
     }
     pub(in crate::session_host) fn view(&mut self) -> Option<AcceptedViewSource> {
         self.child.observe_view(
-            &self.config,
-            self.binding,
-            self.received,
-            self.seen,
-            self.coordinator.workers().next(),
-            true,
+            ChildReceipt {
+                config: &self.config,
+                binding: self.binding,
+                received: self.received,
+                last_seen: self.seen,
+                entry: self.coordinator.workers().next(),
+                owned: true,
+            },
             Instant::now(),
         )
     }

@@ -5215,3 +5215,12 @@ ordinary launch. There is no guessed endpoint, transient bootstrap omission or
 forced worker restart. Root owns production module/capability promotion. This
 API-complete source checkpoint is uncompiled and unapproved for product use;
 independent source review, focused regressions and combined root checks remain.
+
+The Host follow-up retains the API checkpoint and adds focused source regressions
+for sole-view native lowering versus unchanged duplicate-source aggregates,
+terminal cache/credit retirement with stable Chat and uncertain reservations,
+stripped Busy reads, full-claim Unavailable and current-Layout cancellation,
+producer-origin disagreement, bounded listener startup, and exact immutable
+Exchange receipts. A queued native setting which outlives its owner wait becomes
+Uncertain, preserving its reservation. All 33 Host regressions are authored UNRUN;
+independent source review and root compilation/runtime checks remain separate.

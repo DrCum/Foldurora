@@ -406,7 +406,39 @@ impl Owned {
         self.apply(&set).unwrap();
         self.peer.heartbeat = true;
     }
-    fn prepared_frame(&mut self, sequence: u64) -> Arc<PreparedImage> {
+    fn settings(&mut self, request: u64, descriptor: ViewDescriptor, desired: Options) {
+        self.runtime.queue(
+            request,
+            RequestKind::Settings {
+                view: descriptor.view,
+                namespace: descriptor.namespace,
+                ticket: Box::new(descriptor.ticket),
+                base: State {
+                    accepted: descriptor.options,
+                    ..State::default()
+                },
+                desired,
+            },
+            self.reader.reserve().unwrap(),
+        );
+        self.runtime.poll(&[]);
+    }
+    fn acknowledge_demand(&mut self) -> aurora_session::preview_wire::DemandReceipt {
+        let receipt = self.peer.demand();
+        until(|| {
+            let _ = self.peer.pump();
+            self.channel
+                .try_observations()
+                .ok()?
+                .sources()
+                .iter()
+                .any(|source| source.accepted_demand() == Some(&receipt))
+                .then_some(())
+        });
+        self.runtime.poll(&[]);
+        receipt
+    }
+    fn pending_claim(&mut self) -> CaptureClaim {
         let proof = self.control.capture(&self.runtime, self.reader.0.frontdoor.clone()).unwrap();
         let set = self.channel.try_observations().unwrap();
         self.apply(&set).unwrap();
@@ -449,6 +481,9 @@ impl Owned {
             })
         });
         assert_eq!(received, claim);
+        claim
+    }
+    fn send_frame(&mut self, claim: CaptureClaim, sequence: u64) -> aurora_render::viewport_capture::CaptureBudget {
         let budget = aurora_render::viewport_capture::CaptureBudget::new(7 * 1024 * 1024).unwrap();
         let boundary = aurora_render::viewport_capture::CaptureBoundary::new(1, 1, (640, 360)).unwrap();
         let mut queue = aurora_render::viewport_capture::CaptureQueue::new(boundary, budget.clone()).unwrap();
@@ -477,11 +512,16 @@ impl Owned {
             .pair
             .queue_captured_fixture(stamp, frame, Arc::new(std::sync::atomic::AtomicBool::new(true)))
             .unwrap();
+        budget
+    }
+    fn prepared_frame(&mut self, sequence: u64) -> Arc<PreparedImage> {
+        let claim = self.pending_claim();
+        let budget = self.send_frame(claim, sequence);
         let prepared = until(|| {
             let _ = self.peer.pump();
             self.runtime.poll(&[]);
             let read = self.reader.try_read(self.descriptor.view, self.descriptor.namespace).ok()?;
-            read.prepared().filter(|image| image.admitted().stamp() == stamp).cloned()
+            read.prepared().filter(|image| image.admitted().stamp().claim() == claim).cloned()
         });
         assert_eq!(budget.used(), 0, "moved sender capture credit retired after actual IO completion");
         prepared
@@ -720,4 +760,404 @@ fn preview_host_old_pair_refresh_refuses_original_native_policy_expiry_without_a
     assert!(read.view_current());
     assert!(read.refresh_prepared(&old).is_none());
     assert!(!old.current());
+}
+
+#[test]
+fn preview_host_busy_view_cache_strips_prepared_pixels_receipts_and_backend_authority() {
+    use crate::session_host::monitor_reads::ViewReads;
+    let mut owned = Owned::new();
+    owned.capture_ready();
+    let prepared = owned.prepared_frame(1);
+    let read = owned.reader.try_read(owned.descriptor.view, owned.descriptor.namespace).unwrap();
+    assert!(read.image_current());
+    let mut cache = ViewReads::default();
+    cache.remember(&read);
+    let locked = owned.reader.0.store.lock().unwrap();
+    assert!(matches!(
+        owned.reader.try_read(owned.descriptor.view, owned.descriptor.namespace),
+        Err(PreviewError::Busy)
+    ));
+    let body = cache.fallback(owned.descriptor.view, owned.descriptor.namespace).unwrap();
+    assert!(body.view_current());
+    assert!(!body.commands_current());
+    assert!(!body.image_current());
+    assert!(body.prepared().is_none());
+    assert!(body.image_guard.is_none());
+    assert!(body.refresh_prepared(&prepared).is_none());
+    assert!(body.settings_receipts().is_empty());
+    assert!(body.exchange_receipts().is_empty());
+    drop(locked);
+    assert!(prepared.current(), "contention is not privacy or history revocation");
+    cache.clear();
+    assert!(cache.fallback(owned.descriptor.view, owned.descriptor.namespace).is_none());
+}
+
+#[test]
+fn preview_host_terminal_image_channel_purges_owned_cache_but_keeps_canonical_view_and_uncertain_reservation() {
+    let mut owned = Owned::new();
+    owned.capture_ready();
+    let old = owned.prepared_frame(1);
+    let budget = owned.channel.image_budget();
+    let held = owned.reader.0.store.lock().unwrap().ledger.held();
+    assert!(held > 0);
+    assert!(budget.used() > 0);
+    owned.channel.stop();
+    until(|| owned.channel.ended().then_some(()));
+    owned.runtime.poll(&[]);
+    {
+        let store = owned.reader.0.store.lock().unwrap();
+        let entry = store.entries.iter().find(|entry| entry.source == owned.descriptor.source).unwrap();
+        assert!(entry.model.is_none());
+        assert!(entry.raw.is_none());
+        assert!(entry.prepared.is_none());
+        assert!(entry.pending.is_none());
+        assert!(store.garbage.is_empty(), "retired payloads were moved out of the lock");
+        assert!(store.ledger.uncertain(owned.descriptor.source));
+        assert_eq!(store.ledger.held(), held, "image failure is not verified native release");
+    }
+    let read = owned.reader.try_read(owned.descriptor.view, owned.descriptor.namespace).unwrap();
+    assert!(read.view_current());
+    assert!(!read.image_current());
+    assert!(!old.current());
+    assert!(read.refresh_prepared(&old).is_none());
+    assert!(
+        budget.used() > 0,
+        "held old allocation remains credited until its final owner drops"
+    );
+    drop(old);
+    until(|| (budget.used() == 0).then_some(()));
+}
+
+#[test]
+fn preview_host_exact_unavailable_and_new_layout_cancel_only_pending_capture_and_reject_late_old_pixels() {
+    use aurora_session::preview_wire::Unavailable;
+    let mut owned = Owned::new();
+    owned.capture_ready();
+    let old = owned.prepared_frame(1);
+    let old_claim = old.admitted().stamp().claim();
+    let pending = owned.pending_claim();
+    owned
+        .peer
+        .pair
+        .queue_metadata(Metadata::Unavailable {
+            claim: old_claim,
+            reason: Unavailable::Busy,
+        })
+        .unwrap();
+    until(|| {
+        let _ = owned.peer.pump();
+        owned
+            .channel
+            .try_observations()
+            .ok()?
+            .sources()
+            .first()?
+            .observation()
+            .unavailable
+            .filter(|(claim, _)| *claim == old_claim)
+    });
+    owned.runtime.poll(&[]);
+    assert_eq!(owned.reader.0.store.lock().unwrap().entries[0].pending, Some(pending));
+    owned
+        .peer
+        .pair
+        .queue_metadata(Metadata::Unavailable {
+            claim: pending,
+            reason: Unavailable::Unsupported,
+        })
+        .unwrap();
+    until(|| {
+        let _ = owned.peer.pump();
+        owned
+            .channel
+            .try_observations()
+            .ok()?
+            .sources()
+            .first()?
+            .observation()
+            .unavailable
+            .filter(|(claim, _)| *claim == pending)
+    });
+    owned.runtime.poll(&[]);
+    assert!(owned.reader.0.store.lock().unwrap().entries[0].pending.is_none());
+    assert!(old.admitted().current(owned.reader.0.now()));
+    let late = owned.pending_claim();
+    let changed = aurora_session::preview_image::PreviewLayout::new(
+        owned.descriptor.source,
+        late.epochs(),
+        late.activation(),
+        late.demand(),
+        1,
+        [640, 360],
+        [0, 0, 320, 360],
+    )
+    .unwrap();
+    owned
+        .peer
+        .pair
+        .queue_metadata(Metadata::Layout {
+            connection: owned.peer.connection,
+            layout: changed,
+        })
+        .unwrap();
+    let set = until(|| {
+        let _ = owned.peer.pump();
+        let set = owned.channel.try_observations().ok()?;
+        (set.sources().first()?.layout()?.layout() == changed).then_some(set)
+    });
+    owned.apply(&set).unwrap();
+    assert!(owned.reader.0.store.lock().unwrap().entries[0].pending.is_none());
+    let raw_budget = owned.channel.image_budget();
+    let retained_bytes = raw_budget.used();
+    let capture_budget = owned.send_frame(late, 2);
+    // Keep the production consumer idle until real authenticated receive has
+    // reserved the second frame. This cannot pass merely because send finished.
+    until(|| {
+        let _ = owned.peer.pump();
+        (raw_budget.used() > retained_bytes && capture_budget.used() == 0).then_some(())
+    });
+    until(|| {
+        owned.runtime.poll(&[]);
+        (raw_budget.used() == retained_bytes).then_some(())
+    });
+    {
+        let store = owned.reader.0.store.lock().unwrap();
+        let entry = &store.entries[0];
+        assert!(entry.pending.is_none());
+        assert_eq!(entry.prepared.as_ref().unwrap().admitted.stamp().claim(), old_claim);
+        assert!(store.garbage.is_empty());
+    }
+    let read = owned.reader.try_read(owned.descriptor.view, owned.descriptor.namespace).unwrap();
+    let refreshed = read.refresh_prepared(&old).unwrap();
+    assert!(refreshed.same_payload(&old));
+    assert_eq!(refreshed.admitted().stamp().claim(), old_claim);
+}
+
+#[test]
+fn preview_host_sole_view_lowering_waits_exact_native_receipt_before_options_and_reservation_change() {
+    use aurora_session::PreviewRate;
+    let mut owned = Owned::new();
+    owned.capture_ready();
+    let large = Options {
+        size: PreviewSize::Large,
+        rate: PreviewRate::Five,
+    };
+    owned.settings(2, owned.descriptor, large);
+    assert!(owned.reader.try_status().unwrap().settings_receipts().is_empty());
+    let accepted = owned.acknowledge_demand();
+    {
+        let store = owned.reader.0.store.lock().unwrap();
+        assert_eq!(store.views[0].options, large);
+        assert_eq!(store.ledger.held(), 10);
+        assert!(matches!(store.settings_done.back().unwrap().outcome,
+            SettingsOutcome::Accepted { options, effective, demand, .. }
+                if options == large && effective == large && demand == accepted.demand));
+    }
+    owned.descriptor.options = large;
+    let before = owned.reader.try_read(owned.descriptor.view, owned.descriptor.namespace).unwrap();
+    let request = (before.generation(), before.request());
+    owned.settings(3, owned.descriptor, Options::default());
+    {
+        let store = owned.reader.0.store.lock().unwrap();
+        assert_eq!(store.views[0].options, large, "old larger receipt cannot acknowledge lowering");
+        assert!(store.settings.iter().any(|pending| pending.receipt.request == 3));
+        assert!(!store.settings_done.iter().any(|receipt| receipt.request == 3));
+        assert_eq!(store.ledger.held(), 10, "native old rate remains reserved");
+    }
+    let lowered = owned.acknowledge_demand();
+    assert!(lowered.demand > accepted.demand);
+    let store = owned.reader.0.store.lock().unwrap();
+    assert_eq!(store.views[0].options, Options::default());
+    assert_eq!(store.ledger.held(), 2);
+    assert!(matches!(store.settings_done.back().unwrap().outcome,
+        SettingsOutcome::Accepted { options, effective, demand, .. }
+            if options == Options::default() && effective == Options::default() && demand == lowered.demand));
+    drop(store);
+    assert_eq!(
+        {
+            let read = owned.reader.try_read(owned.descriptor.view, owned.descriptor.namespace).unwrap();
+            (read.generation(), read.request())
+        },
+        request,
+        "options ACK preserves full-view generation/request"
+    );
+}
+
+#[test]
+fn preview_host_duplicate_view_cached_settings_ack_requires_unchanged_exact_source_aggregate() {
+    use aurora_session::PreviewRate;
+    let mut owned = Owned::new();
+    owned.capture_ready();
+    let large = Options {
+        size: PreviewSize::Large,
+        rate: PreviewRate::Five,
+    };
+    owned.settings(2, owned.descriptor, large);
+    let accepted = owned.acknowledge_demand();
+    owned.descriptor.options = large;
+    owned.model.open_cycler(0).unwrap();
+    let second = ViewDescriptor {
+        view: View::Cycling,
+        namespace: ViewNamespace::fresh().unwrap(),
+        ticket: owned.model.capture_view(View::Cycling).unwrap(),
+        options: large,
+        ..owned.descriptor
+    };
+    let generation = owned.reader.0.frontdoor.views_intent().unwrap();
+    owned.runtime.queue(
+        3,
+        RequestKind::Views {
+            generation,
+            views: vec![owned.descriptor, second],
+        },
+        owned.reader.reserve().unwrap(),
+    );
+    owned.runtime.poll(&[]);
+    owned.settings(4, owned.descriptor, Options::default());
+    let store = owned.reader.0.store.lock().unwrap();
+    assert!(store.settings.is_empty());
+    let receipt = store.settings_done.iter().find(|receipt| receipt.request == 4).unwrap();
+    assert!(
+        matches!(receipt.outcome, SettingsOutcome::Accepted { options, effective, demand, .. }
+        if options == Options::default() && effective == large && demand == accepted.demand)
+    );
+    assert_eq!(
+        store.views.iter().find(|view| view.view == owned.descriptor.view).unwrap().options,
+        Options::default()
+    );
+    assert_eq!(store.views.iter().find(|view| view.view == second.view).unwrap().options, large);
+    assert_eq!(store.ledger.held(), 10);
+    assert!(
+        !store.ledger.pending_native(owned.descriptor.source),
+        "unchanged aggregate queues no new native mutation"
+    );
+}
+
+#[test]
+fn preview_host_current_origin_disagreement_closes_image_domain_while_old_origin_is_only_stale() {
+    let mut owned = Owned::new();
+    owned.capture_ready();
+    let old = owned.prepared_frame(1);
+    let previous = owned.channel.try_observations().unwrap().sources()[0].policy().unwrap().origin();
+    let heartbeat = owned.publish(owned.policy(1, true));
+    owned.apply(&heartbeat).unwrap();
+    let current = heartbeat.sources()[0].policy().unwrap().origin();
+    assert!(current.serial() > previous.serial());
+    assert_eq!(receipt_order(current, previous, false), Err(ReceiptFailure::Stale));
+    assert_eq!(receipt_order(current, current, true), Ok(()));
+    // Sealed IO cannot manufacture changed content under one origin. Exercise
+    // the defensive producer-invariant classification separately, then use the
+    // actual same-domain retirement effect on a real owned admitted payload.
+    assert_eq!(receipt_order(current, current, false), Err(ReceiptFailure::Invariant));
+    let garbage = {
+        let mut store = owned.reader.0.store.lock().unwrap();
+        let Store { entries, garbage, .. } = &mut *store;
+        entries[0].break_domain(garbage);
+        assert!(entries[0].broken_domain);
+        assert!(entries[0].model.is_none());
+        assert!(entries[0].raw.is_none());
+        assert!(entries[0].prepared.is_none());
+        store.drain_garbage()
+    };
+    drop(garbage);
+    assert!(!old.current());
+    let next = owned.publish(owned.policy(1, true));
+    owned.apply(&next).unwrap();
+    {
+        let store = owned.reader.0.store.lock().unwrap();
+        assert!(store.entries[0].broken_domain);
+        assert!(
+            store.entries[0].model.is_none(),
+            "same domain cannot renew a broken producer identity"
+        );
+    }
+    let read = owned.reader.try_read(owned.descriptor.view, owned.descriptor.namespace).unwrap();
+    assert!(read.view_current());
+    assert!(!read.image_current());
+    assert!(read.refresh_prepared(&old).is_none());
+}
+
+#[test]
+fn preview_host_exchange_receipt_requires_exact_accepted_grant_and_preserves_immutable_terminal_outcome() {
+    let mut owned = Owned::new();
+    let exchange = owned
+        .model
+        .begin_exchange(owned.model.capture(owned.descriptor.view).unwrap())
+        .unwrap()
+        .unwrap();
+    let viewport = HostedViewport {
+        host_window: 42,
+        rect: aurora_session::PhysicalRect {
+            x: 0,
+            y: 0,
+            width: 640,
+            height: 360,
+        },
+    };
+    owned.runtime.queue(
+        2,
+        RequestKind::Exchange {
+            namespace: owned.descriptor.namespace,
+            exchange: Box::new(exchange),
+            viewport,
+        },
+        owned.reader.reserve().unwrap(),
+    );
+    assert!(owned.runtime.exchange_waiting());
+    assert_eq!(
+        owned.runtime.take_exchange_start(),
+        Some((2, owned.descriptor.namespace, exchange, viewport))
+    );
+    // This fixture drives the real Coordinator/WorkerGuard synthetic control
+    // protocol. It proves correlation, not actual OS parenting/foreground.
+    let activation = owned.control.activate(viewport);
+    let source = owned.control.view().unwrap();
+    owned.runtime.exchange_started(activation);
+    owned.runtime.exchange_granted(&source, activation + 1, viewport, false);
+    let mut wrong_viewport = viewport;
+    wrong_viewport.rect.width -= 1;
+    owned.runtime.exchange_granted(&source, activation, wrong_viewport, false);
+    owned.runtime.exchange_granted(&source, activation, viewport, true);
+    owned.runtime.poll(&[]);
+    assert!(owned.runtime.exchange_waiting());
+    assert!(owned.reader.try_status().unwrap().exchange_receipts().is_empty());
+    owned.runtime.exchange_granted(&source, activation, viewport, false);
+    owned.runtime.poll(&[]);
+    let status = owned.reader.try_status().unwrap();
+    let receipt = *status.exchange_receipts().last().unwrap();
+    assert_eq!(receipt.request, 2);
+    assert_eq!(receipt.namespace, owned.descriptor.namespace);
+    assert_eq!(receipt.exchange, exchange);
+    assert_eq!(receipt.outcome, ExchangeOutcome::Succeeded { activation, viewport });
+    owned.runtime.exchange_lost();
+    owned.runtime.exchange_rejected();
+    owned.runtime.external_intent();
+    owned.runtime.exchange_granted(&source, activation, wrong_viewport, false);
+    owned.runtime.poll(&[]);
+    assert_eq!(owned.reader.try_status().unwrap().exchange_receipts(), &[receipt]);
+    assert!(!owned.runtime.exchange_waiting());
+
+    owned.model.finish_exchange(exchange, false).unwrap();
+    let cancelled = owned
+        .model
+        .begin_exchange(owned.model.capture(owned.descriptor.view).unwrap())
+        .unwrap()
+        .unwrap();
+    owned.runtime.queue(
+        3,
+        RequestKind::Exchange {
+            namespace: owned.descriptor.namespace,
+            exchange: Box::new(cancelled),
+            viewport,
+        },
+        owned.reader.reserve().unwrap(),
+    );
+    owned.runtime.external_intent();
+    assert!(owned.runtime.take_exchange_start().is_none());
+    owned.runtime.poll(&[]);
+    let status = owned.reader.try_status().unwrap();
+    let receipt = status.exchange_receipts().last().unwrap();
+    assert_eq!(receipt.request, 3);
+    assert_eq!(receipt.exchange, cancelled);
+    assert_eq!(receipt.outcome, ExchangeOutcome::Cancelled);
 }

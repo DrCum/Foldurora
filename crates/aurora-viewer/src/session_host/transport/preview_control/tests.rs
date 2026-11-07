@@ -51,13 +51,33 @@ fn preview_broker_source_proof_requires_real_accepted_full_binding_and_original_
     let now = Instant::now();
     assert!(
         child
-            .observe(&config, envelope.binding, 0, None, coordinator.workers().next(), true, now)
+            .observe(
+                ChildReceipt {
+                    config: &config,
+                    binding: envelope.binding,
+                    received: 0,
+                    last_seen: None,
+                    entry: coordinator.workers().next(),
+                    owned: true
+                },
+                now
+            )
             .is_none(),
         "startup allowance cannot authorize an image source"
     );
     coordinator.observe(&envelope, 1).unwrap();
     let proof = child
-        .observe(&config, envelope.binding, 1, Some(now), coordinator.workers().next(), true, now)
+        .observe(
+            ChildReceipt {
+                config: &config,
+                binding: envelope.binding,
+                received: 1,
+                last_seen: Some(now),
+                entry: coordinator.workers().next(),
+                owned: true,
+            },
+            now,
+        )
         .unwrap();
     assert_eq!(proof.source().worker(), config.identity);
     assert_eq!(proof.source().session(), envelope.binding.session.unwrap());
@@ -70,12 +90,14 @@ fn preview_broker_source_proof_requires_real_accepted_full_binding_and_original_
     assert!(coordinator.observe(&envelope, 2).is_err());
     let copied = child
         .observe(
-            &config,
-            envelope.binding,
-            1,
-            Some(now),
-            coordinator.workers().next(),
-            true,
+            ChildReceipt {
+                config: &config,
+                binding: envelope.binding,
+                received: 1,
+                last_seen: Some(now),
+                entry: coordinator.workers().next(),
+                owned: true,
+            },
             now + HEARTBEAT,
         )
         .unwrap();
@@ -84,12 +106,14 @@ fn preview_broker_source_proof_requires_real_accepted_full_binding_and_original_
     assert!(
         child
             .observe(
-                &config,
-                envelope.binding,
-                1,
-                Some(now),
-                coordinator.workers().next(),
-                true,
+                ChildReceipt {
+                    config: &config,
+                    binding: envelope.binding,
+                    received: 1,
+                    last_seen: Some(now),
+                    entry: coordinator.workers().next(),
+                    owned: true
+                },
                 now + REACHABLE
             )
             .is_none()
@@ -99,12 +123,14 @@ fn preview_broker_source_proof_requires_real_accepted_full_binding_and_original_
     coordinator.observe(&status(&config, 2), 3).unwrap();
     let renewed = child
         .observe(
-            &config,
-            envelope.binding,
-            2,
-            Some(new_receipt),
-            coordinator.workers().next(),
-            true,
+            ChildReceipt {
+                config: &config,
+                binding: envelope.binding,
+                received: 2,
+                last_seen: Some(new_receipt),
+                entry: coordinator.workers().next(),
+                owned: true,
+            },
             new_receipt,
         )
         .unwrap();
@@ -123,7 +149,17 @@ fn preview_broker_source_proof_rejects_config_session_grid_account_and_optional_
         let mut child = ChildPreview::new();
         let now = Instant::now();
         let old = child
-            .observe(&config, envelope.binding, 1, Some(now), coordinator.workers().next(), true, now)
+            .observe(
+                ChildReceipt {
+                    config: &config,
+                    binding: envelope.binding,
+                    received: 1,
+                    last_seen: Some(now),
+                    entry: coordinator.workers().next(),
+                    owned: true,
+                },
+                now,
+            )
             .unwrap();
         let mut binding = envelope.binding;
         let mut owned = true;
@@ -142,7 +178,17 @@ fn preview_broker_source_proof_rejects_config_session_grid_account_and_optional_
         }
         assert!(
             child
-                .observe(&config, binding, 1, seen, coordinator.workers().next(), owned, now)
+                .observe(
+                    ChildReceipt {
+                        config: &config,
+                        binding,
+                        received: 1,
+                        last_seen: seen,
+                        entry: coordinator.workers().next(),
+                        owned
+                    },
+                    now
+                )
                 .is_none(),
             "refusal {refusal}"
         );
@@ -161,12 +207,32 @@ fn preview_broker_none_bootstrap_keeps_exact_view_control_without_minting_image_
     let now = Instant::now();
     let mut child = ChildPreview::new();
     let view = child
-        .observe_view(&config, envelope.binding, 1, Some(now), coordinator.workers().next(), true, now)
+        .observe_view(
+            ChildReceipt {
+                config: &config,
+                binding: envelope.binding,
+                received: 1,
+                last_seen: Some(now),
+                entry: coordinator.workers().next(),
+                owned: true,
+            },
+            now,
+        )
         .unwrap();
     assert!(view.current(now));
     assert!(
         child
-            .observe(&config, envelope.binding, 1, Some(now), coordinator.workers().next(), true, now)
+            .observe(
+                ChildReceipt {
+                    config: &config,
+                    binding: envelope.binding,
+                    received: 1,
+                    last_seen: Some(now),
+                    entry: coordinator.workers().next(),
+                    owned: true
+                },
+                now
+            )
             .is_none()
     );
     assert!(view.current(now), "missing optional images never removes canonical view identity");

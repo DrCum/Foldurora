@@ -54,6 +54,23 @@ pub(in crate::session_host) enum BootstrapAdmission {
     Ready(PreviewBootstrap),
     Absent,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StartupState {
+    Pending,
+    Ready(u16),
+    Failed,
+}
+fn startup_state(port: Option<u16>, ended: bool, elapsed: Duration) -> StartupState {
+    if ended {
+        StartupState::Failed
+    } else if let Some(port) = port {
+        StartupState::Ready(port)
+    } else if elapsed >= Duration::from_secs(2) {
+        StartupState::Failed
+    } else {
+        StartupState::Pending
+    }
+}
 pub(in crate::session_host) struct BrokerProjection {
     reader: PreviewReader,
     channel: Option<Arc<HostChannel>>,
@@ -99,12 +116,17 @@ impl BrokerProjection {
         let Some(channel) = &self.channel else {
             return BootstrapAdmission::Absent;
         };
-        if channel.ended() || self.startup.is_some_and(|at| at.elapsed() >= Duration::from_secs(2)) && channel.port().is_none() {
-            self.fail_images();
-            return BootstrapAdmission::Absent;
-        }
-        let Some(port) = channel.port() else {
-            return BootstrapAdmission::Pending;
+        let port = match startup_state(
+            channel.port(),
+            channel.ended(),
+            self.startup.map_or(Duration::ZERO, |at| at.elapsed()),
+        ) {
+            StartupState::Pending => return BootstrapAdmission::Pending,
+            StartupState::Failed => {
+                self.fail_images();
+                return BootstrapAdmission::Absent;
+            }
+            StartupState::Ready(port) => port,
         };
         match PreviewSecret::random() {
             Ok(key) => BootstrapAdmission::Ready(PreviewBootstrap { port, key }),
@@ -368,7 +390,7 @@ impl BrokerProjection {
         }
         let control = self.reader.0.try_control().ok()?.clone();
         let mut locked = self.reader.0.try_store().ok()?;
-        let mut store = &mut *locked;
+        let store = &mut *locked;
         if store.apply_control(&control).is_err() {
             return None;
         }
@@ -618,6 +640,10 @@ impl BrokerProjection {
             while at < store.settings.len() {
                 if store.settings[at].began.elapsed() >= Duration::from_secs(2) {
                     let mut pending = store.settings.swap_remove(at);
+                    let source = pending.receipt.ticket.source().preview();
+                    if store.ledger.pending_native(source) {
+                        store.ledger.lost(source.worker());
+                    }
                     pending.receipt.outcome = if store.ledger.uncertain(pending.receipt.ticket.source().preview()) {
                         SettingsOutcome::Uncertain
                     } else {
@@ -929,5 +955,27 @@ fn resolve_settings(store: &mut Store, metadata: Option<&VersionedObservationSet
         } else {
             at += 1;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preview_host_starting_listener_defers_launch_until_actual_ready_or_bounded_image_only_failure() {
+        assert_eq!(startup_state(None, false, Duration::ZERO), StartupState::Pending);
+        assert_eq!(startup_state(None, false, Duration::from_millis(1999)), StartupState::Pending);
+        assert_eq!(
+            startup_state(Some(32123), false, Duration::from_millis(1999)),
+            StartupState::Ready(32123)
+        );
+        assert_eq!(
+            startup_state(Some(32123), false, Duration::from_secs(3)),
+            StartupState::Ready(32123)
+        );
+        assert_eq!(startup_state(None, false, Duration::from_secs(2)), StartupState::Failed);
+        assert_eq!(startup_state(Some(32123), true, Duration::ZERO), StartupState::Failed);
+        assert_eq!(startup_state(None, true, Duration::ZERO), StartupState::Failed);
     }
 }
