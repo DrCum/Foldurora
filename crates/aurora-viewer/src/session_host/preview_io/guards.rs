@@ -19,7 +19,7 @@ impl EpochFence {
     pub fn revoke(&self) {
         self.0.store(0, Ordering::Release);
     }
-    pub(super) fn current(&self) -> bool {
+    pub(crate) fn current(&self) -> bool {
         self.0.load(Ordering::Acquire) == 1
     }
 }
@@ -186,6 +186,7 @@ pub(crate) struct IoSourceGuard {
     pub retention: EpochFence,
     pub emergency: Arc<std::sync::atomic::AtomicBool>,
     pub native: Option<SourceRetentionGuard>,
+    pub policy_expires: Option<Instant>,
 }
 impl IoSourceGuard {
     pub fn current(&self) -> bool {
@@ -193,6 +194,7 @@ impl IoSourceGuard {
         self.control.current(now)
             && self.retention.current()
             && !self.emergency.load(Ordering::Acquire)
+            && self.policy_expires.is_none_or(|end| end > now)
             && self.native.as_ref().is_none_or(|guard| guard.current(now))
     }
 }

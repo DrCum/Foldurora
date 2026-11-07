@@ -12,6 +12,8 @@ struct Pending {
     io: HostPending,
     scope: Option<Scope>,
     registration: u64,
+    control_witness: Option<EpochFence>,
+    policy: Option<PreviewPolicy>,
 }
 enum Suspension {
     AwaitStop(Instant),
@@ -123,13 +125,13 @@ impl Source {
         }
         Ok(())
     }
-    fn suspended(&mut self, now: Instant, tick: &mut TickBudget, max_bytes: usize) -> Result<(), Error> {
+    fn suspended(&mut self, _now: Instant, tick: &mut TickBudget, max_bytes: usize) -> Result<(), Error> {
         let Some(suspension) = &self.suspension else { return Ok(()) };
         let began = match suspension {
             Suspension::AwaitStop(t) => *t,
             Suspension::AwaitEof { began, .. } => *began,
         };
-        if now.saturating_duration_since(began) >= DEADLINE {
+        if Instant::now().saturating_duration_since(began) >= DEADLINE {
             return Err(Error::Expired);
         }
         let Some(stream) = self.pixels.as_mut() else {
@@ -138,6 +140,9 @@ impl Source {
         let (mut bytes, mut operations) = tick.external(max_bytes.min(64 * 1024), 16);
         let mut buffer = [0; 4096];
         while bytes > 0 && operations > 0 {
+            if Instant::now().saturating_duration_since(began) >= DEADLINE {
+                return Err(Error::Expired);
+            }
             operations -= 1;
             // Before the authenticated Stop, consuming old pixel bytes could
             // hide an ambiguous EOF. Peek only; zero is always an early fault.
@@ -149,6 +154,9 @@ impl Source {
                     stream.read(&mut buffer[..length])
                 }
             };
+            if Instant::now().saturating_duration_since(began) >= DEADLINE {
+                return Err(Error::Expired);
+            }
             match result {
                 Ok(0) => {
                     if let Suspension::AwaitEof { ack_sequence, .. } = suspension {
@@ -192,6 +200,7 @@ impl Source {
             retention: self.observation.retention.clone(),
             emergency: self.observation.emergency.clone(),
             native: None,
+            policy_expires: self.observation.policy_received_at.and_then(|at| at.checked_add(DEADLINE)),
         })?;
         for packet in self.pair.poll_roles::<TcpStream>(&mut self.metadata, None, clock, tick)? {
             if let Received::Metadata(m) = packet {
@@ -203,6 +212,13 @@ impl Source {
         Ok(())
     }
     fn pixel_poll(&mut self, now: Instant, clock: u64, tick: &mut TickBudget, max_bytes: usize) -> Result<(), Error> {
+        self.pair.set_source_guard(super::guards::IoSourceGuard {
+            control: self.permit.control.clone(),
+            retention: self.observation.retention.clone(),
+            emergency: self.observation.emergency.clone(),
+            native: None,
+            policy_expires: self.observation.policy_received_at.and_then(|at| at.checked_add(DEADLINE)),
+        })?;
         if self.suspension.is_some() {
             return self.suspended(now, tick, max_bytes);
         }
@@ -292,6 +308,7 @@ pub(super) fn run(installation: InstallationId, host: HostId, shared: Arc<Shared
         let now = Instant::now();
         let clock = shared.clock(now);
         if shared.emergency.load(Ordering::Acquire) {
+            let consumed = shared.retirement_epoch.load(Ordering::Acquire);
             for s in &mut sources {
                 fail(s, &shared);
             }
@@ -303,16 +320,19 @@ pub(super) fn run(installation: InstallationId, host: HostId, shared: Arc<Shared
             if shared.publication_failed.swap(false, Ordering::AcqRel) {
                 m.permits.clear();
             }
-            shared.emergency.store(false, Ordering::Release);
+            shared.retired(consumed);
         }
         let (permits, commands) = {
             let mut m = shared.mailbox.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             (m.permits.clone(), m.commands.drain(..).collect::<Vec<_>>())
         };
         sources.retain_mut(|s| {
-            let current = permits
-                .iter()
-                .find(|p| p.source == s.permit.source && p.registration == s.permit.registration && p.current(now));
+            let current = permits.iter().find(|p| {
+                p.source == s.permit.source
+                    && p.registration == s.permit.registration
+                    && p.control.witness.same(&s.permit.control.witness)
+                    && p.current(now)
+            });
             if let Some(current) = current.filter(|_| s.permit.current(now)) {
                 s.permit = current.clone();
                 true
@@ -405,6 +425,8 @@ pub(super) fn run(installation: InstallationId, host: HostId, shared: Arc<Shared
                         io: HostPending::new(stream, now),
                         scope: None,
                         registration: 0,
+                        control_witness: None,
+                        policy: None,
                     });
                 }
                 Err(e) if e.kind() == ErrorKind::WouldBlock => break,
@@ -424,13 +446,16 @@ pub(super) fn run(installation: InstallationId, host: HostId, shared: Arc<Shared
                 let scope = auth.scope();
                 let permit = {
                     let m = shared.mailbox.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                    if shared.emergency.load(Ordering::Acquire) {
+                    if shared.emergency.load(Ordering::Acquire) || !p.io.fresh() {
                         None
                     } else {
                         m.permits
                             .iter()
                             .find(|permit| {
-                                permit.source == scope.source && permit.registration == p.registration && permit.current(Instant::now())
+                                permit.source == scope.source
+                                    && permit.registration == p.registration
+                                    && p.control_witness.as_ref().is_some_and(|old| old.same(&permit.control.witness))
+                                    && permit.current(Instant::now())
                             })
                             .cloned()
                     }
@@ -483,21 +508,53 @@ pub(super) fn run(installation: InstallationId, host: HostId, shared: Arc<Shared
                     .iter_mut()
                     .find(|s| s.permit.source == scope.source && s.observation.token.connection == scope.connection)
                 {
-                    if s.pixels.is_none() && s.suspension.is_none() && s.pair.attach_pixels(auth).is_ok() {
-                        s.pixels = Some(p.io.stream);
-                        s.last_pixel = scope.role_epoch;
-                        s.capture = EpochFence::new();
-                        s.observation.capture = s.capture.clone();
-                        s.observation.token.pixel_epoch = scope.role_epoch;
-                        s.observation.status = Status::Pixels;
+                    let current = s.observation.policy;
+                    let continuous = p
+                        .policy
+                        .zip(current)
+                        .is_some_and(|(old, new)| old.epochs() == new.epochs() && new.access().retain_last_active);
+                    let retiring = p.policy != current || current.is_none_or(|p| !p.access().capture_active);
+                    if continuous && s.pixels.is_none() && s.suspension.is_none() {
+                        let attached = if retiring {
+                            s.pair.attach_retiring(auth)
+                        } else {
+                            s.pair.attach_pixels(auth)
+                        };
+                        if attached.is_ok() {
+                            s.pixels = Some(p.io.stream);
+                            s.last_pixel = scope.role_epoch;
+                            s.capture = EpochFence::new();
+                            s.observation.capture = s.capture.clone();
+                            s.observation.token.pixel_epoch = scope.role_epoch;
+                            if retiring {
+                                s.capture.revoke();
+                                s.pair.suspend_pixels();
+                                s.suspension = Some(Suspension::AwaitStop(Instant::now()));
+                                s.observation.status = Status::CaptureStopped;
+                            } else {
+                                s.observation.status = Status::Pixels;
+                            }
+                        }
                     }
                 }
                 continue;
             }
             if let Some(hello) = pending[index].io.hello() {
-                let permit = permits
-                    .iter()
-                    .find(|p| p.source.worker() == hello.identity() && p.source.lease_epoch() == hello.lease_epoch() && p.current(now));
+                let permit = {
+                    let m = shared.mailbox.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    if shared.emergency.load(Ordering::Acquire) || !pending[index].io.fresh() {
+                        None
+                    } else {
+                        m.permits
+                            .iter()
+                            .find(|p| {
+                                p.source.worker() == hello.identity()
+                                    && p.source.lease_epoch() == hello.lease_epoch()
+                                    && p.current(Instant::now())
+                            })
+                            .cloned()
+                    }
+                };
                 let Some(permit) = permit else {
                     pending.swap_remove(index);
                     continue;
@@ -526,10 +583,13 @@ pub(super) fn run(installation: InstallationId, host: HostId, shared: Arc<Shared
                         lane: Lane::Metadata,
                     }
                 } else {
-                    let Some(s) = sources
-                        .iter_mut()
-                        .find(|s| s.permit.source == permit.source && s.observation.token.connection == hello.connection())
-                    else {
+                    let Some(s) = sources.iter_mut().find(|s| {
+                        s.permit.source == permit.source
+                            && s.permit.registration == permit.registration
+                            && s.permit.control.witness.same(&permit.control.witness)
+                            && s.observation.retention.current()
+                            && s.observation.token.connection == hello.connection()
+                    }) else {
                         pending.swap_remove(index);
                         continue;
                     };
@@ -553,6 +613,15 @@ pub(super) fn run(installation: InstallationId, host: HostId, shared: Arc<Shared
                 let p = &mut pending[index];
                 p.scope = Some(scope);
                 p.registration = permit.registration;
+                p.control_witness = Some(permit.control.witness.clone());
+                p.policy = if scope.lane == Lane::Pixels {
+                    sources
+                        .iter()
+                        .find(|s| s.permit.source == scope.source && s.observation.token.connection == scope.connection)
+                        .and_then(|s| s.observation.policy)
+                } else {
+                    None
+                };
                 if p.io.challenge(scope, permit.secret.clone(), permit.registration, clock).is_err() {
                     pending.swap_remove(index);
                     continue;

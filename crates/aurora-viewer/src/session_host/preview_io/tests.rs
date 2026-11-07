@@ -643,3 +643,60 @@ fn preview_io_owned_loopback_pixel_callback_discards_result_when_source_revokes_
     });
     assert!(result.is_none());
 }
+
+#[test]
+fn preview_io_owned_loopback_old_handoff_and_history_reject_same_source_replacement_control_witness() {
+    let io = Owned::new(true);
+    let (mut model, handoff, _) = io.capture(PreviewSize::Small);
+    let replacement = control(io.control.source);
+    assert!(
+        handoff
+            .admit(&mut model, &replacement, io.host.shared.clock(Instant::now()))
+            .is_err()
+    );
+    let (mut model, handoff, _) = io.capture(PreviewSize::Small);
+    let image = handoff
+        .admit(&mut model, &io.control, io.host.shared.clock(Instant::now()))
+        .unwrap();
+    assert!(
+        image
+            .with_pixels(&replacement, io.host.shared.clock(Instant::now()), |_| ())
+            .is_none()
+    );
+    assert!(
+        image
+            .with_pixels(&io.control, io.host.shared.clock(Instant::now()), |_| ())
+            .is_some()
+    );
+}
+#[test]
+fn preview_io_owned_loopback_park_after_host_pixel_accept_before_worker_finish_preserves_history() {
+    let mut io = Owned::new(true);
+    let old = io.ready();
+    let (mut model, handoff, _) = io.capture(PreviewSize::Small);
+    let image = handoff
+        .admit(&mut model, &io.control, io.host.shared.clock(Instant::now()))
+        .unwrap();
+    io.park();
+    until(|| io.observation(Status::CaptureStopped));
+    io.worker.shared.hold_pixel_accept.store(true, Ordering::Release);
+    io.restore();
+    let registered = until(|| {
+        io.observation(Status::Pixels)
+            .filter(|o| o.token.pixel_epoch() > old.token.pixel_epoch())
+    });
+    assert!(io.worker.connection().unwrap().pixel_epoch() < registered.token.pixel_epoch());
+    io.park();
+    io.worker.shared.hold_pixel_accept.store(false, Ordering::Release);
+    io.worker.shared.wake.notify_one();
+    until(|| {
+        io.observation(Status::CaptureStopped)
+            .filter(|o| o.token.pixel_epoch() == registered.token.pixel_epoch())
+    });
+    assert!(!io.worker.frame_available());
+    assert!(
+        image
+            .with_pixels(&io.control, io.host.shared.clock(Instant::now()), |_| ())
+            .is_some()
+    );
+}

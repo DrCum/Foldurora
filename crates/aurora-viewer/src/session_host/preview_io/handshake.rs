@@ -73,6 +73,9 @@ impl HostPending {
             permit_revision: 0,
         }
     }
+    pub fn fresh(&self) -> bool {
+        Instant::now().checked_duration_since(self.began).is_some_and(|age| age < DEADLINE)
+    }
     pub fn hello(&self) -> Option<Hello> {
         if let HostStage::Await(hello) = self.stage {
             Some(hello)
@@ -131,6 +134,9 @@ impl HostPending {
                 }
                 HostStage::Accept { mut buffer, auth } => {
                     if buffer.poll(&mut self.stream, true, &mut operations)? {
+                        if !self.fresh() {
+                            return Err(Error::Expired);
+                        }
                         return Ok(Some(*auth));
                     }
                     HostStage::Accept { buffer, auth }
@@ -167,6 +173,13 @@ pub(super) struct WorkerPending {
     stage: WorkerStage,
 }
 impl WorkerPending {
+    pub fn fresh(&self) -> bool {
+        Instant::now().checked_duration_since(self.began).is_some_and(|age| age < DEADLINE)
+    }
+    #[cfg(test)]
+    pub fn waiting_accept(&self) -> bool {
+        matches!(self.stage, WorkerStage::Accept { .. })
+    }
     pub fn new(
         port: u16,
         source: PreviewSource,
@@ -251,7 +264,11 @@ impl WorkerPending {
                 }
                 WorkerStage::Accept { mut buffer, mut auth } => {
                     if buffer.poll(&mut self.stream, false, &mut operations)? {
-                        return auth.finish(buffer.input(), clock).map(Some);
+                        let accepted = auth.finish(buffer.input(), clock)?;
+                        if !self.fresh() {
+                            return Err(Error::Expired);
+                        }
+                        return Ok(Some(accepted));
                     }
                     WorkerStage::Accept { buffer, auth }
                 }
@@ -391,5 +408,65 @@ mod tests {
             assert_eq!(reader.position, 0);
             assert_eq!(operations, 3);
         }
+    }
+}
+
+#[cfg(test)]
+mod deadline_tests {
+    use super::*;
+    use std::net::{Ipv4Addr, TcpListener};
+    fn auth() -> (Authenticated, WorkerHandshake, Vec<u8>) {
+        let source = super::super::tests::source(1);
+        let scope = Scope {
+            source,
+            connection: 8,
+            role_epoch: 1,
+            lane: Lane::Metadata,
+        };
+        let key = PreviewSecret::synthetic([7; 32]).unwrap();
+        let mut host = HostHandshake::new(scope, key.clone(), 0).unwrap();
+        let mut worker = WorkerHandshake::new(scope, key, 0).unwrap();
+        let proof = worker.answer(host.challenge().as_slice(), 1).unwrap();
+        let (ack, host) = host.accept(proof.as_slice(), 2).unwrap();
+        (host, worker, ack.as_slice().to_vec())
+    }
+    #[test]
+    fn preview_io_valid_auth_cannot_finish_after_actual_deadline_with_stale_loop_time() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (server, _) = listener.accept().unwrap();
+        server.set_nonblocking(true).unwrap();
+        let (accepted, _, ack) = auth();
+        let began = Instant::now() - Duration::from_secs(2);
+        let mut host = HostPending::new(server, began);
+        host.stage = HostStage::Accept {
+            buffer: Buffer::write(&ack),
+            auth: Box::new(accepted),
+        };
+        assert!(matches!(host.poll(began, 3), Err(Error::Expired)));
+        // Use another pair to prove the worker's fully valid host proof cannot
+        // turn an old loop timestamp into a fresh role either.
+        let mut server = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (worker_stream, _) = listener.accept().unwrap();
+        worker_stream.set_nonblocking(true).unwrap();
+        let (_, worker, ack) = auth();
+        server.write_all(&ack).unwrap();
+        let source = super::super::tests::source(1);
+        let mut pending = WorkerPending {
+            stream: worker_stream,
+            began,
+            source,
+            secret: PreviewSecret::synthetic([7; 32]).unwrap(),
+            lane: Lane::Metadata,
+            connection: 0,
+            minimum_epoch: 0,
+            stage: WorkerStage::Accept {
+                buffer: Buffer::read(ACCEPT),
+                auth: Box::new(worker),
+            },
+        };
+        assert!(matches!(pending.poll(began, 3), Err(Error::Expired)));
+        let mut discard = [0; 96];
+        let _ = client.read(&mut discard);
     }
 }

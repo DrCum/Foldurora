@@ -10,6 +10,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicU64, Ordering},
 };
+use std::time::{Duration, Instant};
 
 const SOURCE_BYTES: usize = 64 * 1024;
 const TOTAL_BYTES: usize = 256 * 1024;
@@ -197,6 +198,8 @@ struct Outgoing {
     finish: Option<[u8; TAG_BYTES]>,
     position: usize,
     began: Option<u64>,
+    local_began: Option<Instant>,
+    live: bool,
 }
 enum OutgoingPixels {
     Owned(UnadmittedPixels),
@@ -235,6 +238,8 @@ impl Outgoing {
             finish: None,
             position: 0,
             began: None,
+            local_began: None,
+            live: false,
         }
     }
     fn write(&mut self, io: &mut impl Write, keys: &Keys, now: u64, allowance: &mut Allowance<'_>) -> Result<bool, Error> {
@@ -247,6 +252,13 @@ impl Outgoing {
         {
             return Err(Error::Expired);
         }
+        if self
+            .local_began
+            .is_some_and(|began| began.elapsed() >= Duration::from_millis(PARTIAL_MILLIS))
+        {
+            return Err(Error::Expired);
+        }
+        let call_began = Instant::now();
         let header = self.header.encode();
         let metadata = self.metadata.as_slice();
         let pixel_start = HEADER_BYTES + metadata.len() + TAG_BYTES;
@@ -271,6 +283,15 @@ impl Outgoing {
             Ok(0) => Err(Error::Closed),
             Ok(count) => {
                 self.began.get_or_insert(now);
+                if self.live {
+                    self.local_began.get_or_insert(call_began);
+                }
+                if self
+                    .local_began
+                    .is_some_and(|began| began.elapsed() >= Duration::from_millis(PARTIAL_MILLIS))
+                {
+                    return Err(Error::Expired);
+                }
                 if self.position >= pixel_start && self.position < pixel_end {
                     self.body.as_mut().ok_or(Error::Invalid)?.update(&part[start..start + count]);
                 }
@@ -293,6 +314,8 @@ struct Incoming {
     finish: [u8; TAG_BYTES],
     position: usize,
     began: Option<u64>,
+    local_began: Option<Instant>,
+    live: bool,
     decoded: Option<Metadata>,
     pixels: Option<UnadmittedPixels>,
     body: Option<hmac::Context>,
@@ -307,6 +330,8 @@ impl Incoming {
             finish: [0; TAG_BYTES],
             position: 0,
             began: None,
+            local_began: None,
+            live: false,
             decoded: None,
             pixels: None,
             body: None,
@@ -327,6 +352,13 @@ impl Incoming {
         {
             return Err(Error::Expired);
         }
+        if self
+            .local_began
+            .is_some_and(|began| began.elapsed() >= Duration::from_millis(PARTIAL_MILLIS))
+        {
+            return Err(Error::Expired);
+        }
+        let call_began = Instant::now();
         let metadata_len = self.header.map_or(0, Header::metadata_bytes);
         let pixel_start = HEADER_BYTES + metadata_len + TAG_BYTES;
         let pixel_end = pixel_start + self.header.map_or(0, Header::pixel_bytes);
@@ -347,6 +379,15 @@ impl Incoming {
             Ok(0) => return Err(Error::Closed),
             Ok(count) => {
                 self.began.get_or_insert(now);
+                if self.live {
+                    self.local_began.get_or_insert(call_began);
+                }
+                if self
+                    .local_began
+                    .is_some_and(|began| began.elapsed() >= Duration::from_millis(PARTIAL_MILLIS))
+                {
+                    return Err(Error::Expired);
+                }
                 if self.position >= pixel_start && self.position < pixel_end {
                     let chunk = &part[start..start + count];
                     if chunk
@@ -504,6 +545,7 @@ impl Endpoint {
                 return Err(Error::Expired);
             }
             if read {
+                self.incoming.live = source_guard.is_some();
                 match self.incoming.read(io, &self.auth, budget, self.received, now, allowance) {
                     Ok(Some(packet)) => {
                         self.received = self.incoming.header.ok_or(Error::Invalid)?.sequence();
@@ -520,6 +562,7 @@ impl Endpoint {
             }
             if write && allowance.operation(&mut operations) {
                 if let Some(frame) = self.outgoing.front_mut() {
+                    frame.live = source_guard.is_some();
                     match frame.write(io, &self.auth.send, now, allowance) {
                         Ok(true) => {
                             self.flushed = frame.header.sequence();
@@ -738,6 +781,16 @@ impl Pair {
     ) -> Result<(), Error> {
         self.queue_captured_body(stamp, CapturedBody::fixture(stamp, frame, current)?)
     }
+    #[cfg(test)]
+    pub(crate) fn queue_captured_fixture_gate(
+        &mut self,
+        stamp: PreviewStamp,
+        frame: aurora_render::viewport_capture::CapturedViewport,
+        current: Arc<std::sync::atomic::AtomicBool>,
+        gate: super::super::preview_io::EpochFence,
+    ) -> Result<(), Error> {
+        self.queue_captured_body(stamp, CapturedBody::fixture_gate(stamp, frame, current, gate)?)
+    }
     pub fn worker(metadata: Authenticated, pixels: Authenticated) -> Result<Self, Error> {
         if metadata.side != Side::Worker {
             return Err(Error::Direction);
@@ -745,6 +798,14 @@ impl Pair {
         Self::from_roles(metadata, pixels, None)
     }
     pub fn attach_pixels(&mut self, auth: Authenticated) -> Result<(), Error> {
+        self.attach_role(auth, false)
+    }
+    /// Complete an already-started authenticated role solely to retire it via
+    /// exact stop/ACK. This creates no capture or frame-admission permission.
+    pub fn attach_retiring(&mut self, auth: Authenticated) -> Result<(), Error> {
+        self.attach_role(auth, true)
+    }
+    fn attach_role(&mut self, auth: Authenticated, retiring: bool) -> Result<(), Error> {
         if self.metadata.closed
             || !auth.scope.valid()
             || auth.scope.lane != Lane::Pixels
@@ -757,7 +818,11 @@ impl Pair {
         if self.pixels.is_some() {
             return Err(Error::Busy);
         }
-        if auth.scope.role_epoch <= self.pixel_epoch || self.policy.is_none_or(|p| !p.access().capture_active) {
+        if auth.scope.role_epoch <= self.pixel_epoch
+            || self
+                .policy
+                .is_none_or(|p| !p.access().retain_last_active || (!retiring && !p.access().capture_active))
+        {
             return Err(Error::Sequence);
         }
         self.pixel_epoch = auth.scope.role_epoch;
@@ -892,5 +957,61 @@ impl Pair {
 impl Drop for Pair {
     fn drop(&mut self) {
         self.close();
+    }
+}
+
+#[cfg(test)]
+mod service_deadline_tests {
+    use super::super::tests::{scope, scoped_sessions};
+    use super::*;
+    struct Probe(usize);
+    impl Read for Probe {
+        fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+            self.0 += 1;
+            Err(io::ErrorKind::WouldBlock.into())
+        }
+    }
+    impl Write for Probe {
+        fn write(&mut self, b: &[u8]) -> io::Result<usize> {
+            self.0 += 1;
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    #[test]
+    fn preview_io_partial_frame_actual_deadline_precedes_io_even_when_loop_clock_is_stale() {
+        let (host, worker) = scoped_sessions(scope(Lane::Metadata));
+        let metadata = Metadata::Stop {
+            source: scope(Lane::Metadata).source,
+            connection: 8,
+            demand: 1,
+        };
+        let bytes = wire::encode_metadata(metadata).unwrap();
+        let header = Header::new(Lane::Metadata, wire::Direction::HostToWorker, 8, 1, 1, bytes.as_slice().len(), 0).unwrap();
+        let mut outgoing = Outgoing::new(header, bytes, None, &host.send);
+        outgoing.live = true;
+        outgoing.began = Some(0);
+        outgoing.local_began = Some(Instant::now() - Duration::from_secs(2));
+        let mut incoming = Incoming::new();
+        incoming.live = true;
+        incoming.began = Some(0);
+        incoming.local_began = Some(Instant::now() - Duration::from_secs(2));
+        let mut probe = Probe(0);
+        let mut tick = TickBudget::new();
+        let mut allowance = Allowance {
+            tick: &mut tick,
+            bytes: 64 * 1024,
+        };
+        assert!(matches!(
+            outgoing.write(&mut probe, &host.send, 0, &mut allowance),
+            Err(Error::Expired)
+        ));
+        assert!(matches!(
+            incoming.read(&mut probe, &worker, None, 0, 0, &mut allowance),
+            Err(Error::Expired)
+        ));
+        assert_eq!(probe.0, 0);
     }
 }

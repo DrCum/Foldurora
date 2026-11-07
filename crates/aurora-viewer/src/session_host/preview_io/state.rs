@@ -81,6 +81,7 @@ pub(super) struct WorkerMailbox {
     pub commands: VecDeque<ReceivedCommand>,
     pub outcomes: VecDeque<Outcome>,
     pub token: Option<ConnectionToken>,
+    pub capture_gate: Option<EpochFence>,
     pub revision: u64,
 }
 impl WorkerMailbox {
@@ -94,6 +95,7 @@ impl WorkerMailbox {
             commands: VecDeque::with_capacity(QUEUE),
             outcomes: VecDeque::with_capacity(QUEUE),
             token: None,
+            capture_gate: None,
             revision: 1,
         }
     }
@@ -107,6 +109,9 @@ impl WorkerMailbox {
         self.commands.clear();
         self.outcomes.clear();
         self.token = None;
+        if let Some(gate) = self.capture_gate.take() {
+            gate.revoke();
+        }
         if self.revision == 0 {
             self.source = None;
         }
@@ -177,6 +182,7 @@ impl FrameHandoff {
             || !self.retention.current()
             || !self.capture.current()
             || !self.original_capture.current(self.pixels.claim(), Instant::now())
+            || !control.witness.same(&self.original_capture.control.witness)
             || control.source != self.token.source
             || !control.current(Instant::now())
         {
@@ -189,6 +195,7 @@ impl FrameHandoff {
             retention: self.retention,
             emergency: self.emergency,
             clock_anchor: (now, Instant::now()),
+            source_control: self.original_capture.control.witness.clone(),
         })
     }
 }
@@ -201,11 +208,13 @@ pub(crate) struct RetainedFrame {
     retention: EpochFence,
     emergency: Arc<AtomicBool>,
     clock_anchor: (u64, Instant),
+    source_control: EpochFence,
 }
 impl RetainedFrame {
     fn current(&self, control: &ControlGuard, now: u64) -> Option<u64> {
         if self.emergency.load(Ordering::Acquire)
             || !self.retention.current()
+            || !control.witness.same(&self.source_control)
             || control.source != self.token.source
             || !control.current(Instant::now())
             || now < self.clock_anchor.0

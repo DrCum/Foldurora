@@ -35,11 +35,15 @@ pub(super) struct Shared<T> {
     pub wake: Condvar,
     pub emergency: Arc<AtomicBool>,
     pub capture_stop: AtomicBool,
+    pub retirement_epoch: AtomicU64,
+    pub capture_epoch: AtomicU64,
     pub frame_busy: AtomicBool,
     #[cfg(test)]
     pub stall_pixels: AtomicBool,
     #[cfg(test)]
     pub break_before_ack: AtomicBool,
+    #[cfg(test)]
+    pub hold_pixel_accept: AtomicBool,
     pub publication_failed: AtomicBool,
     pub stop: AtomicBool,
     pub ended: AtomicBool,
@@ -59,11 +63,15 @@ impl<T> Shared<T> {
             wake: Condvar::new(),
             emergency: Arc::new(AtomicBool::new(false)),
             capture_stop: AtomicBool::new(false),
+            retirement_epoch: AtomicU64::new(0),
+            capture_epoch: AtomicU64::new(0),
             frame_busy: AtomicBool::new(false),
             #[cfg(test)]
             stall_pixels: AtomicBool::new(false),
             #[cfg(test)]
             break_before_ack: AtomicBool::new(false),
+            #[cfg(test)]
+            hold_pixel_accept: AtomicBool::new(false),
             publication_failed: AtomicBool::new(false),
             stop: AtomicBool::new(false),
             ended: AtomicBool::new(false),
@@ -71,10 +79,42 @@ impl<T> Shared<T> {
             clock: Instant::now(),
         }
     }
-    pub fn fail(&self) {
-        self.publication_failed.store(true, Ordering::Release);
+    fn advance(&self, counter: &AtomicU64) {
+        if counter
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |epoch| epoch.checked_add(1))
+            .is_err()
+        {
+            self.stop.store(true, Ordering::Release);
+            self.emergency.store(true, Ordering::Release);
+        }
+    }
+    pub fn retire(&self) {
+        self.advance(&self.retirement_epoch);
         self.emergency.store(true, Ordering::Release);
         self.wake.notify_one();
+    }
+    pub fn capture_revoked(&self) {
+        self.advance(&self.capture_epoch);
+        self.capture_stop.store(true, Ordering::Release);
+        self.wake.notify_one();
+    }
+    /// Old source/socket gates have already been permanently revoked before
+    /// clearing this hint. A racing publisher's newer barrier must stay pending.
+    pub fn retired(&self, consumed: u64) {
+        self.emergency.store(false, Ordering::Release);
+        if self.retirement_epoch.load(Ordering::Acquire) != consumed || self.stop.load(Ordering::Acquire) {
+            self.emergency.store(true, Ordering::Release);
+        }
+    }
+    pub fn capture_consumed(&self, consumed: u64) {
+        self.capture_stop.store(false, Ordering::Release);
+        if self.capture_epoch.load(Ordering::Acquire) != consumed || self.stop.load(Ordering::Acquire) {
+            self.capture_stop.store(true, Ordering::Release);
+        }
+    }
+    pub fn fail(&self) {
+        self.publication_failed.store(true, Ordering::Release);
+        self.retire();
     }
     pub fn clock(&self, now: Instant) -> u64 {
         now.saturating_duration_since(self.clock).as_millis().min(u128::from(u64::MAX)) as u64
@@ -167,12 +207,16 @@ impl HostChannel {
             self.shared.fail();
             return Err(Error::Busy);
         };
+        let previous = mailbox.permits.clone();
         for update in &mut mailbox.updates {
-            if !permits
-                .iter()
-                .any(|p| p.source == update.observation.token.source && p.current(now))
-            {
+            let old = previous.iter().find(|p| p.source == update.observation.token.source);
+            if !permits.iter().any(|new| {
+                new.source == update.observation.token.source
+                    && new.current(now)
+                    && old.is_some_and(|old| old.registration == new.registration && old.control.witness.same(&new.control.witness))
+            }) {
                 update.observation.retention.revoke();
+                update.observation.capture.revoke();
                 update.frame = None;
             }
         }
@@ -306,8 +350,13 @@ impl WorkerChannel {
             return Err(Error::Busy);
         };
         let source = source.filter(|s| m.accepts(s.control.source) && s.control.current(Instant::now()));
-        if m.source.as_ref().map(|s| s.control.source) != source.as_ref().map(|s| s.control.source) {
-            self.shared.emergency.store(true, Ordering::Release);
+        let same = match (&m.source, &source) {
+            (Some(old), Some(new)) => old.control.source == new.control.source && old.control.witness.same(&new.control.witness),
+            (None, None) => true,
+            _ => false,
+        };
+        if !same {
+            self.shared.retire();
             m.reset();
         }
         m.source = source;
@@ -335,7 +384,7 @@ impl WorkerChannel {
         }
         if let Some(old) = &m.state {
             if old.policy.source() != state.policy.source() || old.policy.epochs() != state.policy.epochs() {
-                self.shared.emergency.store(true, Ordering::Release);
+                self.shared.retire();
             } else if old.policy.access().activation != state.policy.access().activation
                 || (old.policy.access().capture_active && !state.policy.access().capture_active)
                 || old
@@ -343,7 +392,10 @@ impl WorkerChannel {
                     .as_ref()
                     .is_some_and(|c| state.capture.as_ref().is_none_or(|n| !c.same(n)))
             {
-                self.shared.capture_stop.store(true, Ordering::Release);
+                if let Some(gate) = &m.capture_gate {
+                    gate.revoke();
+                }
+                self.shared.capture_revoked();
                 m.frame = None;
             }
         }
@@ -353,7 +405,17 @@ impl WorkerChannel {
         Ok(())
     }
     pub fn frame_available(&self) -> bool {
-        !self.shared.frame_busy.load(Ordering::Acquire) && self.connection().is_some_and(|t| t.pixel_epoch > 0)
+        if self.shared.frame_busy.load(Ordering::Acquire)
+            || self.shared.emergency.load(Ordering::Acquire)
+            || self.shared.capture_stop.load(Ordering::Acquire)
+            || self.shared.stop.load(Ordering::Acquire)
+        {
+            return false;
+        }
+        let Ok(m) = self.shared.mailbox.try_lock() else { return false };
+        m.token.is_some_and(|t| t.pixel_epoch > 0)
+            && m.capture_gate.as_ref().is_some_and(|g| g.current())
+            && m.state.as_ref().is_some_and(|s| s.capture_current(Instant::now()))
     }
     pub fn connection(&self) -> Option<ConnectionToken> {
         if self.shared.emergency.load(Ordering::Acquire) {
@@ -393,7 +455,9 @@ impl WorkerChannel {
         let Ok(mut m) = self.shared.mailbox.try_lock() else {
             return Err(Error::Busy);
         };
-        if m.token != Some(guard.token)
+        if m.capture_gate.as_ref().is_none_or(|gate| !gate.current())
+            || self.shared.capture_stop.load(Ordering::Acquire)
+            || m.token != Some(guard.token)
             || !guard.accepts(stamp, &frame, Instant::now())
             || m.state
                 .as_ref()
@@ -427,7 +491,9 @@ impl WorkerChannel {
         let Ok(mut m) = self.shared.mailbox.try_lock() else {
             return Err(Error::Busy);
         };
-        if m.token != Some(token)
+        if m.capture_gate.as_ref().is_none_or(|gate| !gate.current())
+            || self.shared.capture_stop.load(Ordering::Acquire)
+            || m.token != Some(token)
             || stamp.claim().source() != token.source
             || stamp.claim().connection() != token.connection
             || m.state
@@ -523,6 +589,7 @@ mod tests {
             let mut m = shared.mailbox.lock().unwrap();
             m.source = Some(SourceLease { control: c.clone() });
             m.state = Some(state(c, Some(EpochFence::new())));
+            m.capture_gate = Some(EpochFence::new());
             m.token = Some(ConnectionToken {
                 source: s,
                 connection: 1,
@@ -531,6 +598,182 @@ mod tests {
             });
         }
         WorkerChannel { shared }
+    }
+    #[test]
+    fn preview_io_new_revocation_cannot_be_lost_while_consuming_an_older_barrier() {
+        let channel = worker();
+        let shared = &channel.shared;
+        shared.retire();
+        let old = shared.retirement_epoch.load(Ordering::Acquire);
+        shared.retire();
+        shared.retired(old);
+        assert!(shared.emergency.load(Ordering::Acquire));
+        let current = shared.retirement_epoch.load(Ordering::Acquire);
+        shared.retired(current);
+        assert!(!shared.emergency.load(Ordering::Acquire));
+        shared.capture_revoked();
+        let old = shared.capture_epoch.load(Ordering::Acquire);
+        shared.capture_revoked();
+        shared.capture_consumed(old);
+        assert!(shared.capture_stop.load(Ordering::Acquire));
+        shared.capture_consumed(shared.capture_epoch.load(Ordering::Acquire));
+        assert!(!shared.capture_stop.load(Ordering::Acquire));
+    }
+    #[test]
+    fn preview_io_barrier_counter_exhaustion_stops_instead_of_reusing_an_epoch() {
+        for capture in [false, true] {
+            let channel = worker();
+            let shared = &channel.shared;
+            if capture {
+                shared.capture_epoch.store(u64::MAX, Ordering::Release);
+                shared.capture_revoked();
+            } else {
+                shared.retirement_epoch.store(u64::MAX, Ordering::Release);
+                shared.retire();
+            }
+            assert!(shared.stop.load(Ordering::Acquire));
+            shared.retired(u64::MAX);
+            assert!(shared.emergency.load(Ordering::Acquire));
+        }
+    }
+    #[test]
+    fn preview_io_same_source_registration_or_control_witness_replacement_revokes_held_fences_synchronously() {
+        for changed in 0..3 {
+            let source = source(1);
+            let control = control(source);
+            let shared = Arc::new(Shared::new(HostMailbox::new()));
+            let channel = HostChannel {
+                shared: shared.clone(),
+                installation: source.worker().installation,
+                host: source.worker().host,
+                budget: host_budget(),
+            };
+            let original = HostPermit {
+                source,
+                secret: PreviewSecret::synthetic([7; 32]).unwrap(),
+                control: control.clone(),
+                registration: 1,
+            };
+            channel.publish_permits(&[original.clone()]).unwrap();
+            let observed = Observation {
+                token: ConnectionToken {
+                    source,
+                    connection: 1,
+                    pixel_epoch: 1,
+                    incarnation: shared.incarnation,
+                },
+                policy: None,
+                policy_received_at: None,
+                layout: None,
+                status: Status::Metadata,
+                stopped_demand: None,
+                unavailable: None,
+                retention: EpochFence::new(),
+                capture: EpochFence::new(),
+                emergency: shared.emergency.clone(),
+            };
+            shared.mailbox.lock().unwrap().updates.push(SourceUpdate {
+                observation: observed.clone(),
+                frame: None,
+            });
+            let mut replacement = original;
+            match changed {
+                0 => replacement.registration = 2,
+                1 => replacement.control.witness = EpochFence::new(),
+                _ => replacement.control.expires_at += Duration::from_millis(100),
+            };
+            channel.publish_permits(&[replacement]).unwrap();
+            assert_eq!(observed.current(), changed == 2);
+            assert_eq!(observed.capture.current(), changed == 2);
+            assert!(control.witness.current(), "caller did not revoke the old source witness");
+        }
+    }
+    #[test]
+    fn preview_io_worker_same_source_new_control_witness_resets_old_token_and_transport_gate() {
+        let channel = worker();
+        let (old, gate) = {
+            let m = channel.shared.mailbox.lock().unwrap();
+            (m.source.as_ref().unwrap().control.clone(), m.capture_gate.clone().unwrap())
+        };
+        let new = control(old.source);
+        channel.set_source(Some(SourceLease { control: new })).unwrap();
+        assert!(old.current(Instant::now()));
+        assert!(!gate.current());
+        assert!(channel.connection().is_none());
+        assert!(channel.shared.mailbox.lock().unwrap().state.is_none());
+        assert!(channel.shared.emergency.load(Ordering::Acquire));
+    }
+    #[test]
+    fn preview_io_capture_setter_revokes_partial_writer_before_io_tick_even_after_allowed_coalesces() {
+        use std::io::{Read, Write};
+        struct Probe {
+            bytes: usize,
+            maximum: usize,
+        }
+        impl Read for Probe {
+            fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+                Err(io::ErrorKind::WouldBlock.into())
+            }
+        }
+        impl Write for Probe {
+            fn write(&mut self, b: &[u8]) -> io::Result<usize> {
+                let n = b.len().min(self.maximum);
+                self.bytes += n;
+                Ok(n)
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let channel = worker();
+        let (control, gate, policy) = {
+            let m = channel.shared.mailbox.lock().unwrap();
+            (
+                m.source.as_ref().unwrap().control.clone(),
+                m.capture_gate.clone().unwrap(),
+                m.state.as_ref().unwrap().policy,
+            )
+        };
+        let auth = |lane| {
+            let scope = Scope {
+                source: source(1),
+                connection: 1,
+                role_epoch: 1,
+                lane,
+            };
+            let key = PreviewSecret::synthetic([7; 32]).unwrap();
+            let mut h = lane::HostHandshake::new(scope, key.clone(), 0).unwrap();
+            let mut w = lane::WorkerHandshake::new(scope, key, 0).unwrap();
+            let proof = w.answer(h.challenge().as_slice(), 1).unwrap();
+            let (ack, _) = h.accept(proof.as_slice(), 2).unwrap();
+            w.finish(ack.as_slice(), 3).unwrap()
+        };
+        let mut pair = Pair::worker(auth(Lane::Metadata), auth(Lane::Pixels)).unwrap();
+        pair.queue_metadata(Metadata::Policy { connection: 1, policy }).unwrap();
+        let claim = claim();
+        let geometry = claim.geometry();
+        let (frame, budget) = super::super::tests::frame(PreviewSize::Small);
+        pair.queue_captured_fixture_gate(
+            PreviewStamp::new(claim, 1, 1, 1, geometry).unwrap(),
+            frame,
+            Arc::new(AtomicBool::new(true)),
+            gate.clone(),
+        )
+        .unwrap();
+        let mut metadata = Probe { bytes: 0, maximum: 4096 };
+        let mut pixels = Probe { bytes: 0, maximum: 17 };
+        pair.poll(&mut metadata, &mut pixels, 10, &mut TickBudget::new()).unwrap();
+        assert!(pixels.bytes > 0 && budget.used() > 0);
+        let sent = pixels.bytes;
+        channel.publish_state(state(control.clone(), None)).unwrap();
+        channel.publish_state(state(control, Some(EpochFence::new()))).unwrap();
+        assert!(!gate.current());
+        assert!(matches!(
+            pair.poll(&mut metadata, &mut pixels, 11, &mut TickBudget::new()),
+            Err(Error::CaptureRevoked)
+        ));
+        assert_eq!(pixels.bytes, sent);
+        assert_eq!(budget.used(), 0);
     }
     #[test]
     fn preview_io_mailbox_contention_fails_closed_and_stop_never_waits_for_held_state() {
@@ -717,6 +960,7 @@ mod resource_tests {
             m.source = Some(SourceLease { control: control.clone() });
             m.state = Some(super::super::tests::state(control, Some(EpochFence::new())));
             m.token = Some(token);
+            m.capture_gate = Some(EpochFence::new());
             for demand in 1..=QUEUE as u64 {
                 m.commands.push_back(ReceivedCommand {
                     token,

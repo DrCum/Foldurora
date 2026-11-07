@@ -12,6 +12,7 @@ enum Publication {
     Fixture {
         token: CaptureToken,
         current: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        gate: Option<super::super::preview_io::EpochFence>,
     },
 }
 pub(super) struct CapturedBody {
@@ -52,6 +53,12 @@ impl CapturedBody {
         Self::checked(stamp, frame, Publication::Native(guard))
     }
     pub fn check(&self) -> Result<(), Error> {
+        #[cfg(test)]
+        if let Publication::Fixture { gate: Some(gate), .. } = &self.publication {
+            if !gate.current() {
+                return Err(Error::CaptureRevoked);
+            }
+        }
         if let Publication::Native(guard) = &self.publication {
             return guard.transport_check();
         }
@@ -62,7 +69,7 @@ impl CapturedBody {
             Publication::Native(guard) => guard.current(std::time::Instant::now()),
             Publication::Renderer(guard) => guard.current() && guard.token() == self.frame.request().token(),
             #[cfg(test)]
-            Publication::Fixture { token, current } => {
+            Publication::Fixture { token, current, .. } => {
                 *token == self.frame.request().token() && current.load(std::sync::atomic::Ordering::Acquire)
             }
         }
@@ -77,6 +84,32 @@ impl CapturedBody {
         current: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> Result<Self, Error> {
         let token = frame.request().token();
-        Self::checked(stamp, frame, Publication::Fixture { token, current })
+        Self::checked(
+            stamp,
+            frame,
+            Publication::Fixture {
+                token,
+                current,
+                gate: None,
+            },
+        )
+    }
+    #[cfg(test)]
+    pub(super) fn fixture_gate(
+        stamp: PreviewStamp,
+        frame: CapturedViewport,
+        current: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        gate: super::super::preview_io::EpochFence,
+    ) -> Result<Self, Error> {
+        let token = frame.request().token();
+        Self::checked(
+            stamp,
+            frame,
+            Publication::Fixture {
+                token,
+                current,
+                gate: Some(gate),
+            },
+        )
     }
 }

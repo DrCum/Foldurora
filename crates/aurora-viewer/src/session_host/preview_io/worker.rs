@@ -13,12 +13,15 @@ struct Stopping {
     stop: u64,
     pixel_epoch: u64,
     began: Instant,
+    barrier: u64,
 }
 struct Connected {
     pair: Pair,
     metadata: TcpStream,
     pixels: Option<TcpStream>,
     pending: Option<WorkerPending>,
+    pending_capture: Option<EpochFence>,
+    source_control: EpochFence,
     token: ConnectionToken,
     stopping: Option<Stopping>,
     next_stop: u64,
@@ -38,10 +41,9 @@ impl Drop for Connected {
     }
 }
 impl Connected {
-    fn begin_stop(&mut self, policy: PreviewPolicy, now: Instant) -> Result<(), Error> {
+    fn begin_stop(&mut self, policy: PreviewPolicy, now: Instant, barrier: u64) -> Result<(), Error> {
         self.capture_gate.revoke();
         self.pair.suspend_pixels();
-        self.pending = None;
         if let Some(scope) = self.capture_scope.take() {
             self.fenced_capture = Some(scope);
         }
@@ -71,6 +73,7 @@ impl Connected {
             stop,
             pixel_epoch: self.token.pixel_epoch,
             began: now,
+            barrier,
         });
         Ok(())
     }
@@ -86,6 +89,7 @@ impl Connected {
         if !state.current(now) {
             return Err(Error::Expired);
         }
+        let capture_barrier = shared.capture_epoch.load(Ordering::Acquire);
         let capture = state.capture_current(now)
             && !shared.capture_stop.load(Ordering::Acquire)
             && state
@@ -93,18 +97,18 @@ impl Connected {
                 .as_ref()
                 .is_some_and(|scope| self.fenced_capture.as_ref().is_none_or(|old| !old.same(scope)));
         if !capture {
-            self.begin_stop(state.policy, now)?;
+            self.begin_stop(state.policy, now, capture_barrier)?;
         }
         if self.pixels.is_none() && self.stopping.is_none() {
-            shared.capture_stop.store(false, Ordering::Release);
+            shared.capture_consumed(capture_barrier);
         }
-        if capture {
+        if capture && self.pending.is_none() {
             self.capture_scope = state.capture.clone();
         }
         if self
             .stopping
             .as_ref()
-            .is_some_and(|s| now.saturating_duration_since(s.began) >= DEADLINE)
+            .is_some_and(|s| Instant::now().saturating_duration_since(s.began) >= DEADLINE)
         {
             return Err(Error::Expired);
         }
@@ -139,6 +143,7 @@ impl Connected {
             self.sent_layout = state.layout;
         }
         if capture && self.stopping.is_none() && self.pixels.is_none() && self.pending.is_none() {
+            self.pending_capture = state.capture.clone();
             self.pending = Some(WorkerPending::new(
                 port,
                 self.token.source,
@@ -150,14 +155,55 @@ impl Connected {
             )?);
         }
         if let Some(pending) = &mut self.pending {
-            if let Some(auth) = pending.poll(now, clock)? {
-                let epoch = auth.scope().role_epoch;
+            if !pending.fresh() {
+                return Err(Error::Expired);
+            }
+            #[cfg(test)]
+            let held = shared.hold_pixel_accept.load(Ordering::Acquire) && pending.waiting_accept();
+            #[cfg(not(test))]
+            let held = false;
+            if !held && let Some(auth) = pending.poll(now, clock)? {
+                if !pending.fresh() {
+                    return Err(Error::Expired);
+                }
+                let scope = auth.scope();
+                let mut mailbox = shared.mailbox.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                let fresh = Instant::now();
+                if shared.emergency.load(Ordering::Acquire)
+                    || shared.stop.load(Ordering::Acquire)
+                    || mailbox.token != Some(self.token)
+                    || !domain_current(&mailbox, self.token.source, &self.source_control, fresh)
+                {
+                    return Err(Error::Expired);
+                }
+                let current = mailbox.state.as_ref().ok_or(Error::Expired)?;
+                let retiring = !current.capture_current(fresh)
+                    || shared.capture_stop.load(Ordering::Acquire)
+                    || self
+                        .pending_capture
+                        .as_ref()
+                        .is_none_or(|old| current.capture.as_ref().is_none_or(|new| !old.same(new)));
+                let current_policy = current.policy;
+                if retiring {
+                    self.pair.attach_retiring(auth)?;
+                } else {
+                    self.pair.attach_pixels(auth)?;
+                }
                 let pending = self.pending.take().ok_or(Error::Sequence)?;
-                self.pair.attach_pixels(auth)?;
+                self.pending_capture = None;
                 self.pixels = Some(pending.stream);
-                self.token.pixel_epoch = epoch;
+                self.token.pixel_epoch = scope.role_epoch;
                 self.capture_gate = EpochFence::new();
-                shared.mailbox.lock().unwrap_or_else(std::sync::PoisonError::into_inner).token = Some(self.token);
+                if retiring {
+                    self.capture_gate.revoke();
+                    self.pair.suspend_pixels();
+                }
+                mailbox.token = Some(self.token);
+                mailbox.capture_gate = Some(self.capture_gate.clone());
+                drop(mailbox);
+                if retiring {
+                    self.begin_stop(current_policy, Instant::now(), shared.capture_epoch.load(Ordering::Acquire))?;
+                }
             }
         }
         let (frame, outcomes) = {
@@ -178,12 +224,15 @@ impl Connected {
                     stamp,
                     frame,
                     current,
-                } if capture && self.stopping.is_none() && token == self.token => self.pair.queue_captured_fixture(stamp, frame, current),
+                } if capture && self.stopping.is_none() && token == self.token => {
+                    self.pair
+                        .queue_captured_fixture_gate(stamp, frame, current, self.capture_gate.clone())
+                }
                 _ => Ok(()),
             };
             match sent {
                 Ok(()) | Err(Error::Busy) => {}
-                Err(Error::CaptureRevoked) => self.begin_stop(policy, now)?,
+                Err(Error::CaptureRevoked) => self.begin_stop(policy, now, shared.capture_epoch.load(Ordering::Acquire))?,
                 Err(e) => return Err(e),
             }
         }
@@ -208,6 +257,7 @@ impl Connected {
             retention: self.retention_gate.clone(),
             emergency: shared.emergency.clone(),
             native: Some(state.retention.clone()),
+            policy_expires: Some(state.retention.native_deadline()),
         })?;
         let mut tick = TickBudget::new();
         let _auth = tick.external(1024, 8);
@@ -225,7 +275,7 @@ impl Connected {
         let packets = match self.pair.poll_roles(&mut self.metadata, pixels, clock, &mut tick) {
             Ok(p) => p,
             Err(Error::CaptureRevoked) => {
-                self.begin_stop(policy, now)?;
+                self.begin_stop(policy, now, shared.capture_epoch.load(Ordering::Acquire))?;
                 Vec::new()
             }
             Err(e) => return Err(e),
@@ -259,14 +309,18 @@ impl Connected {
                     if pixel_epoch != pending.pixel_epoch || stop != pending.stop {
                         return Err(Error::Binding);
                     }
+                    if pending.began.elapsed() >= DEADLINE {
+                        return Err(Error::Expired);
+                    }
                     // Single closer: no physical pixel close precedes this exact
                     // authenticated ACK. Native handoff never waited for it.
                     if let Some(stream) = self.pixels.take() {
                         let _ = stream.shutdown(Shutdown::Both);
                     }
+                    let consumed = pending.barrier;
                     self.last_ack = Some((pixel_epoch, stop));
                     self.stopping = None;
-                    shared.capture_stop.store(false, Ordering::Release);
+                    shared.capture_consumed(consumed);
                 }
                 Metadata::Demand { demand, size, rate, .. } => {
                     self.command(PreviewCommand::RememberActive { demand, size, rate }, now, shared)?
@@ -278,8 +332,8 @@ impl Connected {
                     self.command(PreviewCommand::Capture(Box::new(claim)), now, shared)?;
                 }
                 Metadata::Stop { demand, .. } => {
-                    shared.capture_stop.store(true, Ordering::Release);
-                    self.begin_stop(policy, now)?;
+                    shared.capture_revoked();
+                    self.begin_stop(policy, now, shared.capture_epoch.load(Ordering::Acquire))?;
                     self.command(PreviewCommand::Stop { demand }, now, shared)?;
                 }
                 _ => return Err(Error::Direction),
@@ -324,6 +378,17 @@ impl Connected {
     }
 }
 
+fn domain_current(mailbox: &WorkerMailbox, source: PreviewSource, witness: &EpochFence, now: Instant) -> bool {
+    mailbox
+        .source
+        .as_ref()
+        .is_some_and(|lease| lease.control.source == source && lease.control.witness.same(witness) && lease.control.current(now))
+        && mailbox
+            .state
+            .as_ref()
+            .is_some_and(|state| state.policy.source() == source && state.retention.control.witness.same(witness) && state.current(now))
+}
+
 pub(super) fn run(bootstrap: PreviewBootstrap, shared: Arc<Shared<WorkerMailbox>>) {
     struct End(Arc<Shared<WorkerMailbox>>);
     impl Drop for End {
@@ -345,6 +410,8 @@ pub(super) fn run(bootstrap: PreviewBootstrap, shared: Arc<Shared<WorkerMailbox>
         let now = Instant::now();
         let clock = shared.clock(now);
         if shared.emergency.load(Ordering::Acquire) {
+            let consumed = shared.retirement_epoch.load(Ordering::Acquire);
+            let capture_consumed = shared.capture_epoch.load(Ordering::Acquire);
             connected = None;
             pending = None;
             shared.frame_busy.store(false, Ordering::Release);
@@ -353,11 +420,14 @@ pub(super) fn run(bootstrap: PreviewBootstrap, shared: Arc<Shared<WorkerMailbox>
             m.commands.clear();
             m.outcomes.clear();
             m.token = None;
+            if let Some(gate) = m.capture_gate.take() {
+                gate.revoke();
+            }
             if shared.publication_failed.swap(false, Ordering::AcqRel) {
                 m.state = None;
             }
-            shared.emergency.store(false, Ordering::Release);
-            shared.capture_stop.store(false, Ordering::Release);
+            shared.retired(consumed);
+            shared.capture_consumed(capture_consumed);
         }
         let (source, state, current) = {
             let m = shared.mailbox.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -379,11 +449,14 @@ pub(super) fn run(bootstrap: PreviewBootstrap, shared: Arc<Shared<WorkerMailbox>
             m.commands.clear();
             m.outcomes.clear();
             m.token = None;
+            if let Some(gate) = m.capture_gate.take() {
+                gate.revoke();
+            }
             drop(m);
             shared.wait();
             continue;
         }
-        let (Some(source), Some(state)) = (source, state) else { continue };
+        let Some(source) = source else { continue };
         if connected.is_none() && pending.is_none() && now >= retry {
             retry = now + DEADLINE;
             pending = WorkerPending::new(
@@ -403,34 +476,52 @@ pub(super) fn run(bootstrap: PreviewBootstrap, shared: Arc<Shared<WorkerMailbox>
                 Ok(Some(accepted)) => {
                     let scope = accepted.scope();
                     let Some(auth) = pending.take() else { continue };
-                    match Pair::metadata(accepted, None) {
-                        Ok(pair) => {
-                            let token = ConnectionToken {
-                                source: scope.source,
-                                connection: scope.connection,
-                                pixel_epoch: 0,
-                                incarnation: shared.incarnation,
-                            };
-                            connected = Some(Connected {
-                                pair,
-                                metadata: auth.stream,
-                                pixels: None,
-                                pending: None,
-                                token,
-                                stopping: None,
-                                next_stop: 1,
-                                last_ack: None,
-                                heartbeat: now - HEARTBEAT,
-                                sent_policy: None,
-                                sent_layout: None,
-                                capture_scope: None,
-                                fenced_capture: None,
-                                capture_gate: EpochFence::new(),
-                                retention_gate: EpochFence::new(),
-                            });
-                            shared.mailbox.lock().unwrap_or_else(std::sync::PoisonError::into_inner).token = Some(token);
+                    if !auth.fresh() {
+                        failed = true;
+                    } else {
+                        match Pair::metadata(accepted, None) {
+                            Ok(pair) => {
+                                let mut mailbox = shared.mailbox.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                                let current_now = Instant::now();
+                                if shared.emergency.load(Ordering::Acquire)
+                                    || shared.stop.load(Ordering::Acquire)
+                                    || mailbox.revision != current
+                                    || !domain_current(&mailbox, scope.source, &source.control.witness, current_now)
+                                    || !auth.fresh()
+                                {
+                                    failed = true;
+                                } else {
+                                    let token = ConnectionToken {
+                                        source: scope.source,
+                                        connection: scope.connection,
+                                        pixel_epoch: 0,
+                                        incarnation: shared.incarnation,
+                                    };
+                                    connected = Some(Connected {
+                                        pair,
+                                        metadata: auth.stream,
+                                        pixels: None,
+                                        pending: None,
+                                        pending_capture: None,
+                                        source_control: source.control.witness.clone(),
+                                        token,
+                                        stopping: None,
+                                        next_stop: 1,
+                                        last_ack: None,
+                                        heartbeat: now - HEARTBEAT,
+                                        sent_policy: None,
+                                        sent_layout: None,
+                                        capture_scope: None,
+                                        fenced_capture: None,
+                                        capture_gate: EpochFence::new(),
+                                        retention_gate: EpochFence::new(),
+                                    });
+                                    mailbox.token = Some(token);
+                                    mailbox.capture_gate = connected.as_ref().map(|c| c.capture_gate.clone());
+                                }
+                            }
+                            Err(_) => failed = true,
                         }
-                        Err(_) => failed = true,
                     }
                 }
                 Ok(None) => {}
@@ -438,14 +529,32 @@ pub(super) fn run(bootstrap: PreviewBootstrap, shared: Arc<Shared<WorkerMailbox>
             }
         }
         if let Some(connection) = &mut connected {
-            if shared.capture_stop.load(Ordering::Acquire) && connection.begin_stop(state.policy, now).is_err() {
-                failed = true;
-            }
-            if !failed
-                && connection
-                    .poll(&state, bootstrap.port, &bootstrap.key, now, clock, &shared)
-                    .is_err()
-            {
+            let latest = {
+                let m = shared.mailbox.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                if !shared.emergency.load(Ordering::Acquire)
+                    && domain_current(&m, connection.token.source, &connection.source_control, Instant::now())
+                {
+                    m.state.clone()
+                } else {
+                    None
+                }
+            };
+            if let Some(latest) = latest {
+                if !failed
+                    && connection
+                        .poll(
+                            &latest,
+                            bootstrap.port,
+                            &bootstrap.key,
+                            Instant::now(),
+                            shared.clock(Instant::now()),
+                            &shared,
+                        )
+                        .is_err()
+                {
+                    failed = true;
+                }
+            } else {
                 failed = true;
             }
         }
@@ -459,6 +568,9 @@ pub(super) fn run(bootstrap: PreviewBootstrap, shared: Arc<Shared<WorkerMailbox>
             m.commands.clear();
             m.outcomes.clear();
             m.token = None;
+            if let Some(gate) = m.capture_gate.take() {
+                gate.revoke();
+            }
         }
         shared.wait();
     }
