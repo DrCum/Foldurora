@@ -47,7 +47,6 @@ struct Save {
 impl State {
     /// Board cache work may join a current native load but never rewrite its
     /// open/play/activation intent or replace a different in-flight asset.
-    #[cfg(test)]
     pub(super) fn can_board_cache(&self, target: crate::world::inventory::actions::PlaybackItem) -> bool {
         if target.kind() != crate::world::inventory::actions::PlaybackKind::Gesture {
             return false;
@@ -56,6 +55,10 @@ impl State {
             return false;
         }
         self.pending.contains_key(&target.item()) || self.pending.len() < 32
+    }
+
+    pub(super) fn board_cache_failed(&self, target: crate::world::inventory::actions::PlaybackItem) -> bool {
+        self.failed.contains(&(target.item(), target.asset()))
     }
 
     fn queue_load(&mut self, item: Uuid, asset: Uuid, open: bool, play: bool, active: Option<bool>, inform: bool) {
@@ -270,7 +273,15 @@ impl App {
         }
     }
 
-    fn gesture_preview(&mut self, id: Uuid, definition: Gesture, key: Option<u8>) {
+    pub(super) fn board_cache_request(&mut self, target: crate::world::inventory::actions::PlaybackItem) -> bool {
+        if !self.gesture_state.can_board_cache(target) {
+            return false;
+        }
+        self.gesture_request(target.item(), false, false, None, false);
+        true
+    }
+
+    pub(super) fn gesture_prefetch(&mut self, definition: &Gesture) {
         for step in &definition.steps {
             match step {
                 Step::Animation { asset, flags, .. } if flags & ANIM_STOP == 0 && !asset.is_nil() => {
@@ -280,11 +291,15 @@ impl App {
                 _ => {}
             }
         }
+    }
+
+    fn gesture_preview(&mut self, id: Uuid, definition: Gesture, key: Option<u8>) {
+        self.gesture_prefetch(&definition);
         self.gesture_state.manager.play(id, definition, key);
         self.tick_gestures();
     }
 
-    fn tick_gestures(&mut self) {
+    pub(super) fn tick_gestures(&mut self) {
         if !self.gesture_state.manager.has_playing() {
             return;
         }
@@ -320,7 +335,7 @@ impl App {
         });
     }
 
-    fn gesture_effects(&mut self, effects: Vec<Effect>) {
+    pub(super) fn gesture_effects(&mut self, effects: Vec<Effect>) {
         for effect in effects {
             match effect {
                 Effect::Animation(anim, start) => {
@@ -356,6 +371,7 @@ impl App {
 
     pub(super) fn gesture_action(&mut self, action: Action) {
         match action {
+            Action::Boards => crate::ui::widgets::open_floater(&self.egui_ctx, "gesture_boards", &mut self.panels.gesture_board),
             Action::Open(id) => self.gesture_request(id, true, false, None, false),
             Action::Play(id) => {
                 if self.gesture_state.manager.is_playing(id) {
@@ -1000,7 +1016,9 @@ impl App {
             }
         }
         // the list of the chat bar is shown alone
-        self.panels.gestures = !std::env::var("AURORA_DEMO_GESTURES").is_ok_and(|v| v.starts_with("communicate") || v == "list");
+        self.panels.gesture_board = std::env::var("AURORA_DEMO_GESTURES").is_ok_and(|v| v == "board");
+        self.panels.gestures =
+            !self.panels.gesture_board && !std::env::var("AURORA_DEMO_GESTURES").is_ok_and(|v| v.starts_with("communicate") || v == "list");
         if std::env::var("AURORA_DEMO_GESTURES").is_ok_and(|v| matches!(v.as_str(), "editor" | "numpad")) {
             self.gesture_action(Action::Open(item));
         }

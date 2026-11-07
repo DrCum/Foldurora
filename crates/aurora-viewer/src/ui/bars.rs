@@ -845,6 +845,14 @@ fn main_menus(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &StatusIn
         if menu::item_keys(ui, p, "hand-move", aurora_i18n::tr!("gesture-title"), &gestures) {
             super::widgets::toggle_floater(ui.ctx(), "gestures", &mut panels.gestures);
         }
+        flip_window(
+            ui,
+            p,
+            "layout-grid",
+            aurora_i18n::tr!("board-title"),
+            "gesture_boards",
+            &mut panels.gesture_board,
+        );
         for (tab, icon, label) in [
             (1, "users", aurora_i18n::tr!("common-friends")),
             (0, "radar-filled", aurora_i18n::tr!("common-nearby-people")),
@@ -1446,6 +1454,14 @@ fn contents_menu(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, action: &m
     if menu::item_keys(ui, p, "hand-move", aurora_i18n::tr!("gesture-title"), &gestures) {
         super::widgets::toggle_floater(ui.ctx(), "gestures", &mut panels.gestures);
     }
+    flip_window(
+        ui,
+        p,
+        "layout-grid",
+        aurora_i18n::tr!("board-title"),
+        "gesture_boards",
+        &mut panels.gesture_board,
+    );
     menu::separator(ui, p);
     if marketplace && menu::item(ui, p, "chart-candle-filled", aurora_i18n::tr!("ui-bars-market-data")) {
         request(ui.ctx(), CtxAction::OpenUrl(LINDEX_MARKET.into()));

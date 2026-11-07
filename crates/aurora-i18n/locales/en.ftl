@@ -13528,3 +13528,31 @@ favorites-folder-count = { $n ->
     [one] { $n } landmark
    *[other] { $n } landmarks
 }
+
+# Native first-slice gesture/sound boards; saved values contain item references.
+board-title = Gesture & Sound Boards
+board-default-name = My board
+board-new = New board
+board-add = Add selected item
+board-stop = Stop Board
+board-help = Select one gesture or sound in Inventory, then add it. Opening or adding never plays it.
+board-selection-help = Exactly one current gesture or sound inventory item must be selected.
+board-sound-help = Sounds are heard nearby. Stop Board cannot recall an already emitted sound.
+board-no-data = Board data is unavailable. Unknown or invalid files are preserved.
+board-empty = This board is empty.
+board-missing = Missing or unavailable item
+board-delete-question = Delete this board?
+board-edit-name = Board name
+board-loading = Loading or saving board data…
+board-ready = Ready
+board-unavailable = Native session or board store unavailable.
+board-busy = Board work is busy. Try again explicitly.
+board-save-failed = Board changes could not be saved. The previous board is kept.
+board-cancelled = Board work canceled.
+board-conflict = Board data changed elsewhere. Close and reopen to reload before editing.
+board-invalid = Invalid, unsupported or mismatched board data is preserved.
+board-stale = This action belongs to an older board or session. Try again explicitly.
+board-blocked = Gesture playback is restricted.
+board-duplicate = That inventory item is already on this board.
+board-kind-gesture = Gesture
+board-name-placeholder = Enter board name

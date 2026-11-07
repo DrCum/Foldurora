@@ -108,6 +108,7 @@ impl App {
 
     /// LoggedIn: the session is recorded for the next login to this account.
     pub(super) fn session_started(&mut self, session_id: uuid::Uuid) {
+        self.reset_boards();
         self.relogin.retries = 0;
         let key = self.login_key();
         if !self.demo {

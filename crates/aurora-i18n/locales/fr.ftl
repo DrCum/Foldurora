@@ -13524,3 +13524,31 @@ favorites-folder-count = { $n ->
     [one] { $n } repère
    *[other] { $n } repères
 }
+
+# Tableaux natifs de gestes et de sons ; seules les références d’objets sont enregistrées.
+board-title = Tableaux de gestes et de sons
+board-default-name = Mon tableau
+board-new = Nouveau tableau
+board-add = Ajouter la sélection
+board-stop = Arrêter le tableau
+board-help = Sélectionnez un seul geste ou son dans l’inventaire, puis ajoutez-le. Ouvrir ou ajouter ne le joue jamais.
+board-selection-help = Un seul geste ou son disponible doit être sélectionné dans l’inventaire.
+board-sound-help = Les sons sont entendus à proximité. L’arrêt ne peut pas rappeler un son déjà émis.
+board-no-data = Les données sont indisponibles. Les fichiers inconnus ou invalides sont conservés.
+board-empty = Ce tableau est vide.
+board-missing = Objet absent ou indisponible
+board-delete-question = Supprimer ce tableau ?
+board-edit-name = Nom du tableau
+board-loading = Chargement ou enregistrement du tableau…
+board-ready = Prêt
+board-unavailable = Session native ou stockage du tableau indisponible.
+board-busy = Une opération est en cours. Réessayez explicitement.
+board-save-failed = Les modifications n’ont pas pu être enregistrées. Le tableau précédent est conservé.
+board-cancelled = Opération du tableau annulée.
+board-conflict = Les données ont changé ailleurs. Fermez puis rouvrez pour les recharger avant de modifier.
+board-invalid = Les données invalides, incompatibles ou d’un autre compte sont conservées.
+board-stale = Cette action concerne un ancien tableau ou une ancienne session. Réessayez explicitement.
+board-blocked = La lecture des gestes est restreinte.
+board-duplicate = Cet objet d’inventaire figure déjà dans ce tableau.
+board-kind-gesture = Geste
+board-name-placeholder = Saisissez le nom du tableau

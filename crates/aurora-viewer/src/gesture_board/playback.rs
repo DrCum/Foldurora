@@ -50,7 +50,7 @@ impl Facts {
                 m.activation != 0 && m.source.session.grid == self.grid && m.source.session.generation == self.logical_generation
             })
     }
-    fn same_source(self, other: Self) -> bool {
+    pub(crate) fn same_source(self, other: Self) -> bool {
         self.agent == other.agent
             && self.login == other.login
             && self.grid == other.grid
