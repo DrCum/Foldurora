@@ -64,12 +64,14 @@ or real-grid routing. Japanese captures require the installed CJK fallback font.
 These variables exist only in test builds. Run
 `cargo test --workspace attention_cpu_visual_fixture -- --ignored --test-threads=1 --nocapture`
 with one locale and fresh directory per process. The production CPU painter
-captures compact/expanded filters, selected reminders, pending/failed saves,
+captures 18 screens per locale: compact/expanded filters, selected reminders, pending/failed saves,
 unavailable/empty/load-failed state, narrow 150% and short layouts. All data and
 transcript/path privacy sentinels are synthetic. Required text and clip/privacy
 checks accompany the original PNGs. No native window, authentication, World or
 read/activation command is created; these captures do not establish native
-Windows ownership/IME or real-grid acceptance.
+Windows ownership/IME or real-grid acceptance. Expanded top/bottom captures use
+real wheel input to show every profile and category across the pair; a control
+outside the filter scroll clip is not counted as visibly available.
 
 **Native Linux Shared Chat CPU input fixture.**
 

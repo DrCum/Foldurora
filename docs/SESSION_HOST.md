@@ -185,7 +185,8 @@ Reading a conversation does not answer or remove its pending offers. Its native
 UI retains its existing reading behavior in both styles; this stage adds no
 claim that all passive managed rendering is prevented from acknowledging read.
 Chat V2 peers are required; older chat peers fail closed. Inactive New IM,
-Friends, contacts, groups, automatic host reading and Attention remain absent.
+Friends, contacts, groups and automatic host reading remain absent. See the
+separate [conversation Attention candidate](FOLDURORA.md#conversation-attention-candidate).
 The read stage's compiled, synthetic visual and native acceptance is pending.
 
 Read batches carry at most four source-relative rows, each with current native

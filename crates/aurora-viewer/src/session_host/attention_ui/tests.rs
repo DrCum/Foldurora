@@ -32,12 +32,14 @@ pub(super) fn direct() -> Conversation {
 }
 
 pub(super) fn host() -> HostSnapshot {
-    let mut snapshot = HostSnapshot::default();
-    snapshot.attention_preferences = PreferenceState {
-        preferences: Preferences::default(),
-        writable: true,
-        error: None,
-        operation: None,
+    let mut snapshot = HostSnapshot {
+        attention_preferences: PreferenceState {
+            preferences: Preferences::default(),
+            writable: true,
+            error: None,
+            operation: None,
+        },
+        ..Default::default()
     };
     for (index, slot) in SlotId::all().enumerate() {
         let source = source(index as u8 + 1);

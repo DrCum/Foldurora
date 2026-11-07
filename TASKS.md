@@ -8,8 +8,12 @@
   preferences preserve the slot registry/rollback schema and retain published
   values on save failure. A compact owned CPU surface keeps filters collapsed,
   with last-painted input capture, IME/refocus fences and exact save outcomes.
-  Model, persistence, real-egui/bridge and lifecycle source tests are authored;
-  compiled checks, CPU captures and native acceptance remain pending. Native
+  Runtime checkpoint `3055a9d2` passed all 202 required checks; full Linux totals
+  were 8,019 passed, one inherited terrain GPU precision failure and 53 ignored.
+  Original CPU captures exposed collapsed-height and remaining-width filter
+  defects. Bounded viewport/grid fixes and real-wheel reachability checks now
+  cover default/narrow/short sizes and long names. Final combined lint/tests,
+  EN/FR/JA captures and native acceptance remain pending. Native
   Review, offers/groups, auto-reading and monitors remain later increments.
 
 - 🔧 Native Shared Chat CPU input fixture (2026-11-07): isolated Linux ignored

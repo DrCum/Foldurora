@@ -1,5 +1,43 @@
 # Foldurora workspace and character preview
 
+## Conversation Attention candidate
+
+`feat/attention-integration` extends the frozen `6b512b1a` Shared Chat/Enter
+candidate with a compact **Attention** window. Open it from the controller's
+bell or its character-management entry. It lists unread Nearby and existing
+resident-IM conversations for the five saved profiles, with actual account/grid
+identity beside each profile label. Direct messages and all five profiles are
+included by default; Nearby is off. Legacy unslotted workers remain supported
+by Shared Chat but are outside this first Attention inbox.
+
+Filters start collapsed and scroll when expanded. Their separate private
+`attention-preferences.json` leaves the existing profile registry unchanged.
+Failed saves retain the published settings and allow retry. **Dismiss reminder**
+changes only the local reminder; it does not mark native messages read.
+**Open shared chat**, **Previous** and **Next** select the captured existing
+conversation without switching the active world or issuing Read/Send. Delivered
+edits stay with their old composer, and an unavailable target has no fallback.
+
+This candidate adds no chat/control protocol change. Use the same packaged
+executable for the host and workers. Native Review, offers, groups, automatic
+host reading and preview monitors remain separate work. The package manifest
+and coordination ledger record its exact checks; source review and synthetic
+CPU captures do not establish Windows or grid acceptance. The user reported
+that the camera works as expected, without identifying the exact tested commit.
+
+Human acceptance should check the bell/management entry, owned-window focus,
+close/reopen, filters at normal and narrow sizes, profile rename/reorder, save
+and controller restart. With human-managed logins, create a controlled existing
+IM, compare native unread, dismiss it locally, then receive another message.
+Open/Next/Previous must preserve the active world, native unread and each
+source/conversation's draft and Undo. Check source loss while Attention is
+closed and held pointer/Enter/Space through focus or source changes. Only the
+human logs in or tests on a grid.
+
+The sections below retain earlier source-stage descriptions. Their exclusions
+and pending checks belong to those checkpoints, rather than superseding the
+current candidate and its own evidence.
+
 ## Native unread, explicit Read and shutter candidate
 
 The separate `feat/native-read-integration` candidate follows frozen Shared Chat
