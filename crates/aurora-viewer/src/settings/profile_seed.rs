@@ -1,7 +1,9 @@
-//! Pure, closed selective-profile projection. Behavior follows the explicit
+//! Bounded, closed selective-profile data projection. Behavior follows the explicit
 //! native preference groups/default filling in fssessionprofileseed.h and
 //! tools/session-host/main.cpp::selectProfileCopy (pinned abbe3, LGPL2.1).
-//! No path, filesystem, login, Settings load/save, or native effect is available.
+//! No profile path/writer, login, or Settings load/save effect is available.
+//! Native default construction may lazily query the keyboard layout; the real
+//! adapter must acquire defaults off the GUI/control pump under its worker lease.
 //! Unknown unselected JSON VALUES survive successful writes; refusals emit no
 //! replacement bytes. This prerequisite is test-only until its real IO consumer.
 use super::{ChatStyle, ColorSettings, FavoritesAccess, NotificationsStyle, Rgba, Settings, WorldMapStyle, presentation};
@@ -474,18 +476,15 @@ struct Selection {
     bindings: Option<Bindings>,
 }
 impl Selection {
-    fn from_map(map: &Map<String, Value>, families: Families) -> Result<Self, Error> {
-        fn top<T: serde::de::DeserializeOwned>(map: &Map<String, Value>, fields: &[&str]) -> Result<T, Error> {
-            let chosen: Map<_, _> = fields
-                .iter()
-                .filter_map(|key| map.get(*key).map(|value| ((*key).to_owned(), value.clone())))
-                .collect();
-            serde_json::from_value(Value::Object(chosen)).map_err(|_| Error::Selected)
+    fn from_map(map: &json::Document, families: Families) -> Result<Self, Error> {
+        fn top<T: serde::de::DeserializeOwned>(map: &json::Document, fields: &[&str]) -> Result<T, Error> {
+            let selected = fields.iter().filter_map(|key| map.get(*key).map(|raw| (*key, raw.as_ref())));
+            T::deserialize(serde::de::value::MapDeserializer::<_, serde_json::Error>::new(selected)).map_err(|_| Error::Selected)
         }
-        fn nested<T: serde::de::DeserializeOwned + Default>(map: &Map<String, Value>, key: &str) -> Result<T, Error> {
+        fn nested<T: serde::de::DeserializeOwned + Default>(map: &json::Document, key: &str) -> Result<T, Error> {
             map.get(key).map_or_else(
                 || Ok(T::default()),
-                |value| serde_json::from_value(value.clone()).map_err(|_| Error::Selected),
+                |raw| serde_json::from_str(raw.get()).map_err(|_| Error::Selected),
             )
         }
         let graphics: Option<Graphics> = families
@@ -566,20 +565,25 @@ impl ProfileSeed {
                     Interface::FIELDS.len(),
                     Interface::FIELDS.iter().filter(|key| !map.contains_key(**key)).count(),
                 ),
-                Family::Colors => (
-                    Colors::FIELDS.len(),
-                    Colors::FIELDS
-                        .iter()
-                        .filter(|key| map.get("colors").and_then(Value::as_object).is_none_or(|m| !m.contains_key(**key)))
-                        .count(),
-                ),
+                Family::Colors => {
+                    let members = map.get("colors").map(|raw| json::members(raw)).transpose()?;
+                    (
+                        Colors::FIELDS.len(),
+                        Colors::FIELDS
+                            .iter()
+                            .filter(|key| members.as_ref().is_none_or(|m| !m.contains_key(**key)))
+                            .count(),
+                    )
+                }
                 Family::Bindings => {
                     let defaults = Bindings::default().map.len();
-                    let present = map
-                        .get("keybinds")
-                        .and_then(|v| v.get("map"))
-                        .and_then(Value::as_array)
-                        .map_or(0, Vec::len);
+                    let members = map.get("keybinds").map(|raw| json::members(raw)).transpose()?;
+                    let present = members
+                        .as_ref()
+                        .and_then(|m| m.get("map"))
+                        .map(|raw| serde_json::from_str::<Vec<&serde_json::value::RawValue>>(raw.get()).map_err(|_| Error::Selected))
+                        .transpose()?
+                        .map_or(0, |rows| rows.len());
                     (defaults, defaults.saturating_sub(present))
                 }
             };
@@ -599,13 +603,17 @@ impl ProfileSeed {
     pub(crate) fn summary(&self) -> &[Summary] {
         &self.summaries
     }
-    /// Pure preparation only: the future adapter must still own native profile
+    /// Data preparation only: native defaults may query the keyboard layout.
+    /// The future adapter must acquire defaults off its GUI/control pump and own profile
     /// locks, original bytes, cancellation and exact Apply transaction guards.
     /// A refusal returns no output and never modifies either input byte slice.
     pub(crate) fn patch(&self, target: Option<&[u8]>) -> Result<(Vec<u8>, Vec<Summary>), Error> {
         let mut map = match target {
             Some(bytes) => json::object(bytes)?,
-            None => Map::from_iter([("settings_version".into(), Value::from(VERSION))]),
+            None => json::Document::from_iter([(
+                "settings_version".into(),
+                serde_json::value::to_raw_value(&VERSION).map_err(|_| Error::Version)?,
+            )]),
         };
         let previous = Selection::from_map(&map, self.families)?.values()?;
         let next = self.selected.values()?;
@@ -631,8 +639,10 @@ impl ProfileSeed {
                 }
             };
         }
-        map.extend(next);
-        Ok((bounded_bytes(&Value::Object(map), MAX_FILE)?, summaries))
+        for (key, value) in next {
+            map.insert(key, serde_json::value::to_raw_value(&value).map_err(|_| Error::Selected)?);
+        }
+        Ok((bounded_bytes(&map, MAX_FILE)?, summaries))
     }
 }
 struct BoundedBytes {
@@ -660,7 +670,7 @@ impl Write for BoundedBytes {
         Ok(())
     }
 }
-fn bounded_bytes(value: &Value, limit: usize) -> Result<Vec<u8>, Error> {
+fn bounded_bytes<T: Serialize + ?Sized>(value: &T, limit: usize) -> Result<Vec<u8>, Error> {
     let mut writer = BoundedBytes { bytes: Vec::new(), limit };
     serde_json::to_writer(&mut writer, value).map_err(|_| Error::Bound)?;
     Ok(writer.bytes)
