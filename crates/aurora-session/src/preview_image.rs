@@ -11,6 +11,12 @@ use std::sync::{
     atomic::{AtomicU64, AtomicUsize, Ordering},
 };
 
+mod layout;
+pub use layout::PreviewLayout;
+
+#[cfg(test)]
+mod prerequisite_tests;
+
 pub const MAX_IMAGE_BYTES: usize = 640 * 360 * 4;
 pub const HOST_IMAGE_BYTES: usize = 64 * 1024 * 1024;
 pub const IMAGE_AUTHORITY_MILLIS: u64 = 1000;
@@ -361,6 +367,24 @@ impl CaptureClaim {
     pub fn geometry(self) -> PreviewGeometry {
         self.geometry
     }
+    pub fn epochs(self) -> PreviewEpochs {
+        self.epochs
+    }
+    pub fn activation(self) -> u64 {
+        self.activation
+    }
+    pub fn demand(self) -> u64 {
+        self.demand
+    }
+    /// Policy agreement only, not proof that this claim was issued by the
+    /// current SourceImages owner. Final admission still matches the full
+    /// pending claim, including its exact local owner-instance association.
+    pub fn matches_policy(self, policy: PreviewPolicy) -> bool {
+        self.source == policy.source
+            && self.epochs == policy.epochs
+            && self.activation == policy.access.activation
+            && policy.access.capture_active
+    }
     fn valid(self) -> bool {
         self.instance != 0 && self.activation != 0 && self.connection != 0 && self.demand != 0 && self.request != 0
     }
@@ -650,6 +674,13 @@ impl SourceImages {
     }
 
     pub fn sync(&mut self, policy: PreviewPolicy, now: u64) -> Result<(), ImageError> {
+        self.sync_observed(policy, now, now)
+    }
+
+    /// `observed_at` is the actual full authenticated policy receipt time on
+    /// this host's monotonic clock. Re-reading a cached policy or repainting
+    /// cannot renew its original deadline. Worker timestamps are not accepted.
+    pub fn sync_observed(&mut self, policy: PreviewPolicy, observed_at: u64, now: u64) -> Result<(), ImageError> {
         self.tick(now)?;
         if self.retired {
             return Err(ImageError::Stale);
@@ -658,10 +689,18 @@ impl SourceImages {
             self.retire();
             return Err(ImageError::Stale);
         }
-        let expires = now.checked_add(IMAGE_AUTHORITY_MILLIS).ok_or_else(|| {
+        if observed_at > now {
+            self.retire();
+            return Err(ImageError::Clock);
+        }
+        let expires = observed_at.checked_add(IMAGE_AUTHORITY_MILLIS).ok_or_else(|| {
             self.retire();
             ImageError::Clock
         })?;
+        if expires <= now {
+            self.purge()?;
+            return Err(ImageError::Stale);
+        }
         if let Some(old) = self.policy {
             if !policy.epochs.follows(old.epochs) || policy.access.activation < old.access.activation {
                 self.purge()?;

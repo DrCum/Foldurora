@@ -490,6 +490,8 @@ pub(super) struct WorkerConfig {
     pub host_pid: u32,
     #[serde(default)]
     pub chat: Option<ChatBootstrap>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<super::preview_bootstrap::PreviewBootstrap>,
 }
 
 impl WorkerConfig {
@@ -503,6 +505,10 @@ impl WorkerConfig {
             "invalid private chat endpoint"
         );
         anyhow::ensure!(
+            self.preview.as_ref().is_none_or(|preview| preview.port != 0),
+            "invalid private preview endpoint"
+        );
+        anyhow::ensure!(
             self.expected_account.is_some() == self.expected_grid.is_some(),
             "incomplete worker account binding"
         );
@@ -511,6 +517,19 @@ impl WorkerConfig {
             "worker belongs to another installation"
         );
         Ok(())
+    }
+
+    fn encode_for_launch(&mut self) -> anyhow::Result<Vec<u8>> {
+        self.encode_with_limit(MAX_CONFIG)
+    }
+    fn encode_with_limit(&mut self, limit: usize) -> anyhow::Result<Vec<u8>> {
+        self.validate()?;
+        let mut bytes = serde_json::to_vec(self)?;
+        if bytes.len() > limit && self.preview.take().is_some() {
+            bytes = serde_json::to_vec(self)?;
+        }
+        anyhow::ensure!(bytes.len() <= limit, "worker configuration exceeds limit");
+        Ok(bytes)
     }
 
     pub fn directory(&self) -> io::Result<PathBuf> {
@@ -1848,20 +1867,22 @@ fn new_config(
         chat: chat_port
             .map(|port| super::chat_transport::ChatSecret::random().map(|key| ChatBootstrap { port, key }))
             .transpose()?,
+        preview: None,
     };
     config.validate()?;
     Ok(config)
 }
 
 fn launch(
-    config: WorkerConfig,
+    mut config: WorkerConfig,
     account: Option<&(SavedAccount, crate::login_accounts::Account)>,
     reservation: Option<crate::characters::HostLaunchPermit>,
 ) -> anyhow::Result<Child> {
     let directory = config.directory()?;
     super::profile::private_dir(&directory)?;
     let path = directory.join("bootstrap.json");
-    publish(&path, &serde_json::to_vec(&config)?)?;
+    let encoded = config.encode_for_launch()?;
+    publish(&path, &encoded)?;
     let mut command = std::process::Command::new(std::env::current_exe()?.canonicalize()?);
     command.arg("--host-worker-config").arg(&path);
     if let Some(key) = config.expected_account {
@@ -1948,7 +1969,56 @@ mod tests {
             lease_epoch: 7,
             host_pid: std::process::id(),
             chat: None,
+            preview: None,
         }
+    }
+
+    #[test]
+    fn preview_bootstrap_optional_absence_and_two_private_keys_fit_existing_limit() {
+        let mut base = config();
+        let encoded = base.encode_for_launch().unwrap();
+        assert!(
+            !serde_json::from_slice::<serde_json::Value>(&encoded)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .contains_key("preview")
+        );
+        assert!(serde_json::from_slice::<WorkerConfig>(&encoded).unwrap().preview.is_none());
+        base.chat = Some(ChatBootstrap {
+            port: 12345,
+            key: serde_json::from_str(&format!("\"{}\"", "07".repeat(32))).unwrap(),
+        });
+        base.preview = Some(super::super::preview_bootstrap::PreviewBootstrap {
+            port: 54321,
+            key: super::super::preview_bootstrap::PreviewSecret::synthetic([9; 32]).unwrap(),
+        });
+        base.generation = u64::MAX;
+        base.lease_epoch = u64::MAX;
+        let encoded = base.encode_for_launch().unwrap();
+        assert!(encoded.len() <= MAX_CONFIG);
+        assert!(serde_json::from_slice::<WorkerConfig>(&encoded).unwrap().preview.is_some());
+        assert!(!format!("{base:?}").contains(&"09".repeat(32)));
+        base.preview.as_mut().unwrap().port = 0;
+        assert!(base.validate().is_err());
+        assert!(serde_json::from_str::<super::super::preview_bootstrap::PreviewSecret>(&format!("\"{}\"", "00".repeat(32))).is_err());
+    }
+
+    #[test]
+    fn preview_bootstrap_optional_overflow_drops_only_preview_and_invalid_base_still_refuses() {
+        let mut base = config();
+        let limit = base.encode_for_launch().unwrap().len();
+        base.preview = Some(super::super::preview_bootstrap::PreviewBootstrap {
+            port: 12345,
+            key: super::super::preview_bootstrap::PreviewSecret::synthetic([7; 32]).unwrap(),
+        });
+        assert!(serde_json::to_vec(&base).unwrap().len() > limit);
+        let bytes = base.encode_with_limit(limit).unwrap();
+        assert!(base.preview.is_none());
+        assert!(serde_json::from_slice::<WorkerConfig>(&bytes).unwrap().preview.is_none());
+        assert!(base.encode_with_limit(limit - 1).is_err());
+        base.generation = 0;
+        assert!(base.encode_for_launch().is_err());
     }
 
     #[test]

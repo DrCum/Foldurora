@@ -12,6 +12,7 @@ pub(crate) mod chat_transport;
 mod chat_ui;
 mod chat_window;
 mod native;
+mod preview_bootstrap;
 pub(crate) mod profile;
 mod review;
 // Unused prerequisite only; native IO/bootstrap/authority integration is absent.

@@ -7,32 +7,14 @@ use ring::{
     hmac,
     rand::{SecureRandom, SystemRandom},
 };
-use std::sync::Arc;
 
 const AUTH_DOMAIN: &[u8] = b"aurora-session-preview/auth/v1";
 const DATA_DOMAIN: &[u8] = b"aurora-session-preview/data/v1";
 const AUTH_MILLIS: u64 = 1000;
-const AUTH_MAX: usize = 80;
+const AUTH_MAX: usize = 96;
 
-#[derive(Clone)]
-pub(crate) struct PreviewSecret(Arc<[u8; 32]>);
-impl PreviewSecret {
-    pub fn random() -> Result<Self, Error> {
-        Ok(Self(Arc::new(random()?)))
-    }
-    #[cfg(test)]
-    pub(super) fn synthetic(bytes: [u8; 32]) -> Result<Self, Error> {
-        if bytes.iter().all(|byte| *byte == 0) {
-            return Err(Error::Authentication);
-        }
-        Ok(Self(Arc::new(bytes)))
-    }
-}
-impl std::fmt::Debug for PreviewSecret {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("PreviewSecret([redacted])")
-    }
-}
+pub(super) use super::super::preview_bootstrap::PreviewSecret;
+
 fn random() -> Result<[u8; 32], Error> {
     let mut bytes = [0; 32];
     SystemRandom::new().fill(&mut bytes).map_err(|_| Error::Authentication)?;
@@ -64,30 +46,31 @@ fn envelope(scope: Scope, stage: u8, value: &[u8]) -> AuthBytes {
     bytes[6] = scope.lane as u8;
     bytes[7] = stage;
     bytes[8..16].copy_from_slice(&scope.connection.to_be_bytes());
-    bytes[16..16 + value.len()].copy_from_slice(value);
+    bytes[16..24].copy_from_slice(&scope.role_epoch.to_be_bytes());
+    bytes[24..24 + value.len()].copy_from_slice(value);
     AuthBytes {
         bytes,
-        len: 16 + value.len(),
+        len: 24 + value.len(),
     }
 }
 fn check(scope: Scope, stage: u8, bytes: &[u8], len: usize) -> Result<&[u8], Error> {
-    if scope.connection == 0
-        || bytes.len() != 16 + len
+    if !scope.valid()
+        || bytes.len() != 24 + len
         || &bytes[..4] != b"APAU"
         || bytes[4..6] != VERSION.to_be_bytes()
         || bytes[6] != scope.lane as u8
         || bytes[7] != stage
         || bytes[8..16] != scope.connection.to_be_bytes()
+        || bytes[16..24] != scope.role_epoch.to_be_bytes()
     {
         return Err(Error::Authentication);
     }
-    Ok(&bytes[16..])
+    Ok(&bytes[24..])
 }
 
 /// Every proof/derived key binds full installation/host/worker/session/account/
 /// grid/generation/lease, the role, connection generation and both fresh nonces.
-fn context(key: &hmac::Key, domain: &[u8], role: &[u8], scope: Scope, server: &[u8; 32], client: &[u8; 32]) -> hmac::Context {
-    let mut context = hmac::Context::with_key(key);
+fn context(mut context: hmac::Context, domain: &[u8], role: &[u8], scope: Scope, server: &[u8; 32], client: &[u8; 32]) -> hmac::Context {
     let worker = scope.source.worker();
     let session = scope.source.session();
     for part in [
@@ -96,6 +79,7 @@ fn context(key: &hmac::Key, domain: &[u8], role: &[u8], scope: Scope, server: &[
         role,
         &[scope.lane as u8],
         &scope.connection.to_be_bytes(),
+        &scope.role_epoch.to_be_bytes(),
         worker.installation.as_bytes(),
         worker.host.as_bytes(),
         worker.worker.as_bytes(),
@@ -112,8 +96,7 @@ fn context(key: &hmac::Key, domain: &[u8], role: &[u8], scope: Scope, server: &[
     context
 }
 fn proof(secret: &PreviewSecret, role: u8, scope: Scope, server: &[u8; 32], client: &[u8; 32]) -> [u8; TAG_BYTES] {
-    let key = hmac::Key::new(hmac::HMAC_SHA256, secret.0.as_ref());
-    let tag = context(&key, AUTH_DOMAIN, &[role], scope, server, client).sign();
+    let tag = context(secret.context(), AUTH_DOMAIN, &[role], scope, server, client).sign();
     let mut bytes = [0; TAG_BYTES];
     bytes.copy_from_slice(tag.as_ref());
     bytes
@@ -121,13 +104,11 @@ fn proof(secret: &PreviewSecret, role: u8, scope: Scope, server: &[u8; 32], clie
 fn verifies(secret: &PreviewSecret, role: u8, scope: Scope, server: &[u8; 32], client: &[u8; 32], tag: &[u8]) -> bool {
     // The outer HMAC makes ring::hmac::verify available for constant-time
     // verification of the domain/role-separated incremental proof digest.
-    let key = hmac::Key::new(hmac::HMAC_SHA256, secret.0.as_ref());
-    let digest = context(&key, AUTH_DOMAIN, &[role], scope, server, client).sign();
-    hmac::verify(&key, digest.as_ref(), tag).is_ok()
+    let digest = context(secret.context(), AUTH_DOMAIN, &[role], scope, server, client).sign();
+    secret.verifies(digest.as_ref(), tag)
 }
 fn signed_proof(secret: &PreviewSecret, role: u8, scope: Scope, server: &[u8; 32], client: &[u8; 32]) -> [u8; TAG_BYTES] {
-    let key = hmac::Key::new(hmac::HMAC_SHA256, secret.0.as_ref());
-    let tag = hmac::sign(&key, &proof(secret, role, scope, server, client));
+    let tag = secret.sign(&proof(secret, role, scope, server, client));
     let mut bytes = [0; TAG_BYTES];
     bytes.copy_from_slice(tag.as_ref());
     bytes
@@ -145,7 +126,7 @@ pub(crate) struct HostHandshake {
 }
 impl HostHandshake {
     pub fn new(scope: Scope, secret: PreviewSecret, now: u64) -> Result<Self, Error> {
-        if scope.connection == 0 {
+        if !scope.valid() {
             return Err(Error::Binding);
         }
         Ok(Self {
@@ -187,7 +168,7 @@ pub(crate) struct WorkerHandshake {
 }
 impl WorkerHandshake {
     pub fn new(scope: Scope, secret: PreviewSecret, now: u64) -> Result<Self, Error> {
-        if scope.connection == 0 {
+        if !scope.valid() {
             return Err(Error::Binding);
         }
         Ok(Self {
@@ -244,9 +225,8 @@ pub(crate) struct Keys {
 }
 impl Keys {
     fn new(scope: Scope, direction: Direction, secret: &PreviewSecret, server: &[u8; 32], client: &[u8; 32]) -> Self {
-        let root = hmac::Key::new(hmac::HMAC_SHA256, secret.0.as_ref());
         let derive = |purpose| {
-            let tag = context(&root, DATA_DOMAIN, &[purpose, direction as u8], scope, server, client).sign();
+            let tag = context(secret.context(), DATA_DOMAIN, &[purpose, direction as u8], scope, server, client).sign();
             hmac::Key::new(hmac::HMAC_SHA256, tag.as_ref())
         };
         Self {

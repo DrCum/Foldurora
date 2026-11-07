@@ -143,15 +143,20 @@ constructing a host controller or opening preference storage. Its private X11
 driver contract is in `docs/TESTING.md`; it does not establish native delivery.
 
 `aurora-session::preview_wire` adds a closed last-active image wire prerequisite:
-fixed 40-byte versioned headers, bounded 4096-byte strict metadata, exact fitted
-raw RGBA layouts and separate Metadata/Pixels roles. Pixels never enter serde.
+fixed 48-byte V2 headers and a fixed 96-byte untrusted worker-only Hello, bounded
+4096-byte strict metadata, exact fitted raw RGBA layouts and separate Metadata/Pixels roles. Pixels never enter serde.
 `session_host/preview_transport` is registered only under cfg(test): fresh mutual
 challenge proofs and direction/lane/source/connection-separated keys authenticate
 metadata before shared ImageBudget reservation and authenticate every streamed
 payload before handoff. Its generic nonblocking Read/Write state has bounded
 bytes/syscalls, absolute partial deadlines, ten role-admission slots, rotating
 five-source budgets and independent metadata priority. No listener, connector,
-thread, bootstrap, App, native bridge or image surface is enabled.
+thread, App, native bridge or image surface is enabled. An optional private
+preview bootstrap DTO is accepted in WorkerConfig but never populated here;
+absence preserves the previous launch schema. Launch serialization validates
+the complete 4096-byte bound and drops optional preview on overflow only when
+the independently valid base configuration fits. Its separate key has redacted
+Debug and strict fixed-length serde; random/MAC helpers remain test-only.
 
 That handoff is explicitly `Received::UnadmittedPixels`: transport scope/MAC/
 layout validity does not make bytes drawable or validate their captured policy,
@@ -195,6 +200,26 @@ WorkerBridge is restored before observation. Production remembered-view demand
 is absent: this prerequisite starts no endpoint, request, pixel IO or GPU loop.
 Renderer physical witnesses are sampled for this local model; continuous IO-side
 atomic guards and authenticated service integration remain a later slice.
+
+The disabled sender can move a renderer-owned CapturedViewport and its actual
+CapturePublicationGuard without allocating another RGBA buffer or image pool.
+Every partial write rechecks that original publication lease. Resource/codec
+fixtures use a private predicate only; they do not prove native/render permits.
+Fresh pixel-role attachment requires mutual authentication at a strictly higher
+role epoch with a new validity Arc; the retired Arc cannot become current again.
+V2 Layout/CaptureStopped/CaptureStopAck metadata is closed and source-qualified.
+The physical stop/ACK/close coordinator remains future service work: only the
+worker may initiate pixel close after the exact authenticated ACK, while privacy
+metadata continues independently. No endpoint is enabled by these DTOs.
+
+PreviewLayout and narrow CaptureClaim accessors expose checked geometry/policy
+agreement without minting capture authority. SourceImages::sync_observed uses
+the original authenticated host receipt time, so rereading a cached policy never
+renews its deadline. Future host service work must use one 32 MiB raw pool,
+reserve 24 MiB for credited UI copies and 8 MiB for framing/allocator headroom;
+worker work must keep the existing shared renderer pool within 7 MiB and all
+framing/auth/commands within the remaining 1 MiB of its 8 MiB total. Already-
+admitted history uses retention fences, never current Active/capture fences.
 
 `aurora-render::viewport_capture` provides pure checked geometry, nonreused
 request/callback identities and byte-credit lifetimes for a future asynchronous

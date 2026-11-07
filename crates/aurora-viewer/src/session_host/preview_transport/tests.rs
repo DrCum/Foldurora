@@ -12,7 +12,7 @@ use std::{
     rc::Rc,
 };
 
-fn source(id: u8) -> PreviewSource {
+pub(super) fn source(id: u8) -> PreviewSource {
     PreviewSource::new(
         WorkerIdentity {
             installation: InstallationId::from_bytes([1; 32]).unwrap(),
@@ -29,24 +29,28 @@ fn source(id: u8) -> PreviewSource {
     )
     .unwrap()
 }
-fn scope(lane: Lane) -> Scope {
+pub(super) fn scope(lane: Lane) -> Scope {
     Scope {
         source: source(3),
         connection: 8,
+        role_epoch: 1,
         lane,
     }
 }
-fn secret() -> PreviewSecret {
+pub(super) fn secret() -> PreviewSecret {
     PreviewSecret::synthetic([7; 32]).unwrap()
 }
 fn sessions(lane: Lane) -> (Authenticated, Authenticated) {
-    let mut host = HostHandshake::new(scope(lane), secret(), 0).unwrap();
-    let mut worker = WorkerHandshake::new(scope(lane), secret(), 0).unwrap();
+    scoped_sessions(scope(lane))
+}
+pub(super) fn scoped_sessions(scope: Scope) -> (Authenticated, Authenticated) {
+    let mut host = HostHandshake::new(scope, secret(), 0).unwrap();
+    let mut worker = WorkerHandshake::new(scope, secret(), 0).unwrap();
     let answer = worker.answer(host.challenge().as_slice(), 1).unwrap();
     let (accepted, host) = host.accept(answer.as_slice(), 2).unwrap();
     (host, worker.finish(accepted.as_slice(), 3).unwrap())
 }
-fn policy() -> PreviewPolicy {
+pub(super) fn policy() -> PreviewPolicy {
     PreviewPolicy::new(
         source(3),
         PreviewEpochs::new(1, 1, 1, 1, 1).unwrap(),
@@ -148,19 +152,22 @@ impl Write for Pipe {
     }
 }
 
-struct Harness {
-    host: Pair,
-    worker: Pair,
+pub(super) struct Harness {
+    pub(super) host: Pair,
+    pub(super) worker: Pair,
     host_meta: Pipe,
     worker_meta: Pipe,
     host_pixels: Pipe,
     worker_pixels: Pipe,
-    budget: ImageBudget,
-    stamp: PreviewStamp,
-    images: SourceImages,
+    pub(super) budget: ImageBudget,
+    pub(super) stamp: PreviewStamp,
+    pub(super) images: SourceImages,
 }
 impl Harness {
-    fn new(read: usize, write: usize, cap: PreviewSize, large: bool) -> Self {
+    pub(super) fn set_pixel_write_limit(&mut self, limit: usize) {
+        self.worker_pixels.write = limit;
+    }
+    pub(super) fn new(read: usize, write: usize, cap: PreviewSize, large: bool) -> Self {
         Self::with_budget(read, write, cap, large, ImageBudget::new(4 * MAX_IMAGE_BYTES).unwrap())
     }
     fn with_budget(read: usize, write: usize, cap: PreviewSize, large: bool, budget: ImageBudget) -> Self {
@@ -179,7 +186,7 @@ impl Harness {
         let (host_pixels, worker_pixels) = Pipe::pair(read, write);
         Self {
             host: Pair::new(hm, hp, budget.clone()).unwrap(),
-            worker: Pair::new(wm, wp, budget.clone()).unwrap(),
+            worker: Pair::worker(wm, wp).unwrap(),
             host_meta,
             worker_meta,
             host_pixels,
@@ -189,7 +196,7 @@ impl Harness {
             images,
         }
     }
-    fn queue(&mut self) {
+    pub(super) fn queue(&mut self) {
         self.worker
             .queue_metadata(Metadata::Policy {
                 connection: 8,
@@ -204,18 +211,18 @@ impl Harness {
             .queue_pixels(UnadmittedPixels::copy_from(self.stamp, &raw, &self.budget).unwrap())
             .unwrap();
     }
-    fn worker_tick(&mut self, now: u64) -> Result<Vec<Received>, Error> {
+    pub(super) fn worker_tick(&mut self, now: u64) -> Result<Vec<Received>, Error> {
         self.worker
             .poll(&mut self.worker_meta, &mut self.worker_pixels, now, &mut TickBudget::new())
     }
-    fn host_tick(&mut self, now: u64) -> Result<Vec<Received>, Error> {
+    pub(super) fn host_tick(&mut self, now: u64) -> Result<Vec<Received>, Error> {
         self.host
             .poll(&mut self.host_meta, &mut self.host_pixels, now, &mut TickBudget::new())
     }
-    fn receive(&mut self) -> UnadmittedPixels {
+    pub(super) fn receive(&mut self) -> UnadmittedPixels {
         self.receive_at(10)
     }
-    fn receive_at(&mut self, now: u64) -> UnadmittedPixels {
+    pub(super) fn receive_at(&mut self, now: u64) -> UnadmittedPixels {
         for _ in 0..20_000 {
             self.worker_tick(now).unwrap();
             for packet in self.host_tick(now).unwrap() {
@@ -288,9 +295,9 @@ fn preview_auth_mutual_roles_domains_source_lease_and_nonce_replay_fail_closed()
     let mut host = HostHandshake::new(scope(Lane::Pixels), secret(), 0).unwrap();
     let mut worker = WorkerHandshake::new(scope(Lane::Pixels), secret(), 0).unwrap();
     let answer = worker.answer(host.challenge().as_slice(), 1).unwrap();
-    let mut reflected = answer.as_slice()[..16].to_vec();
+    let mut reflected = answer.as_slice()[..24].to_vec();
     reflected[7] = 3;
-    reflected.extend_from_slice(&answer.as_slice()[48..80]);
+    reflected.extend_from_slice(&answer.as_slice()[56..88]);
     assert!(
         worker.finish(&reflected, 2).is_err(),
         "a correctly shaped reflected worker MAC cannot authenticate the host role"
@@ -354,7 +361,7 @@ fn preview_stream_authenticated_wrong_source_or_invalid_geometry_is_rejected_bef
             policy: policy(),
         };
         let metadata = wire::encode_metadata(message).unwrap();
-        let header = Header::new(Lane::Metadata, Direction::WorkerToHost, 8, 1, metadata.as_slice().len(), 0).unwrap();
+        let header = Header::new(Lane::Metadata, Direction::WorkerToHost, 8, 1, 1, metadata.as_slice().len(), 0).unwrap();
         meta.input
             .borrow_mut()
             .bytes
@@ -378,7 +385,7 @@ fn preview_stream_authenticated_wrong_source_or_invalid_geometry_is_rejected_bef
             bytes = serde_json::to_vec(&value).unwrap();
         }
         let raw = vec![255; geometry.payload_bytes()];
-        let header = Header::new(Lane::Pixels, Direction::WorkerToHost, 8, 1, bytes.len(), raw.len()).unwrap();
+        let header = Header::new(Lane::Pixels, Direction::WorkerToHost, 8, 1, 1, bytes.len(), raw.len()).unwrap();
         pixels.input.borrow_mut().bytes.extend(signed_frame(&wp, header, &bytes, &raw));
         assert!(host.poll(&mut meta, &mut pixels, 10, &mut TickBudget::new()).is_err());
         assert_eq!(budget.used(), 0);
@@ -769,6 +776,7 @@ fn preview_admission_caps_pairs_and_pending_roles_and_rejects_incumbent_replacem
             let scope = Scope {
                 source: source(worker),
                 connection: 8,
+                role_epoch: 1,
                 lane,
             };
             slots.push((admissions.begin(scope).unwrap(), scope));

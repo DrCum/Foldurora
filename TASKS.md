@@ -8,12 +8,18 @@
   pixels after restoration. Raw transport output is explicitly unadmitted;
   an owned SourceImages admission seam rejects mismatched capture authority or
   native sequence without replacing the cache or releasing credit before bytes.
-  Pure codec and fake-IO/auth/credit/parking/admission regressions
-  are authored; execution and independent review remain pending. Viewer code is
-  cfg(test)-only: no endpoint, service thread, bootstrap, native adapter, image
-  surface, capture enablement or inactive rendering is shipped. Future service
-  integration must reserve fixed metadata/framing headroom in the shared 64 MiB
-  host allowance and retire SourceImages on authenticated-channel loss/errors.
+  Pure codec and fake-IO/auth/credit/parking/admission regressions are authored;
+  compilation and execution remain root-owned. A further disabled prerequisite
+  adds fixed Hello/V2 pixel-role epochs, closed Layout and capture-stop/ACK DTOs,
+  original policy-receipt expiry, optional private bootstrap size/fallback checks,
+  a moved renderer-allocation sender and fresh role attachment. Its private fake
+  publication fixtures prove framing/resources only; actual render guards remain
+  renderer-owned. Independent source review is pending for this increment.
+  Transport registration remains cfg(test), new launches keep preview absent:
+  no endpoint, service thread, native adapter, image surface, capture enablement
+  or inactive rendering is shipped. Future service integration must implement
+  exact stop/ACK/single-worker-close ordering, source/view/intent fences and the
+  host 32/24/8 MiB plus worker 7/1 MiB partitions; auth loss purges history.
 
 - 🔧 Monitor image prerequisites (2026-11-07; no issue): pure bounded capture
   geometry, callback/request identities and byte credits; exact source/policy

@@ -46,7 +46,7 @@ fn claim(size: PreviewSize) -> CaptureClaim {
         .unwrap()
 }
 fn header(lane: Lane, direction: Direction, metadata: &[u8], pixels: usize) -> Header {
-    Header::new(lane, direction, u64::MAX, u64::MAX, metadata.len(), pixels).unwrap()
+    Header::new(lane, direction, u64::MAX, 1, u64::MAX, metadata.len(), pixels).unwrap()
 }
 
 #[test]
@@ -69,6 +69,40 @@ fn preview_wire_maximal_closed_metadata_and_full_stamp_fit_fixed_storage_without
             rate: PreviewRate::Five,
         },
         Metadata::Capture(claim),
+        Metadata::Layout {
+            connection: u64::MAX,
+            layout: PreviewLayout::new(
+                source(),
+                policy().epochs(),
+                u64::MAX,
+                u64::MAX,
+                u64::MAX,
+                [u32::MAX, u32::MAX],
+                [0, 0, u32::MAX, u32::MAX],
+            )
+            .unwrap(),
+        },
+        Metadata::CaptureStopped {
+            source: source(),
+            connection: u64::MAX,
+            pixel_epoch: u64::MAX,
+            stop: u64::MAX,
+            policy: PreviewPolicy::new(
+                source(),
+                policy().epochs(),
+                crate::preview_image::PreviewAccess {
+                    capture_active: false,
+                    ..policy().access()
+                },
+            )
+            .unwrap(),
+        },
+        Metadata::CaptureStopAck {
+            source: source(),
+            connection: u64::MAX,
+            pixel_epoch: u64::MAX,
+            stop: u64::MAX,
+        },
         Metadata::Stop {
             source: source(),
             connection: u64::MAX,
@@ -103,14 +137,14 @@ fn preview_wire_maximal_closed_metadata_and_full_stamp_fit_fixed_storage_without
 
 #[test]
 fn preview_wire_rejects_oversized_versions_reserved_roles_directions_and_noncanonical_lengths() {
-    let base = Header::new(Lane::Pixels, Direction::WorkerToHost, 1, 1, 100, MAX_IMAGE_BYTES)
+    let base = Header::new(Lane::Pixels, Direction::WorkerToHost, 1, 1, 1, 100, MAX_IMAGE_BYTES)
         .unwrap()
         .encode();
     for mutation in 0..9 {
         let mut bytes = base;
         match mutation {
             0 => bytes[4] = 1,
-            1 => bytes[32] = 1,
+            1 => bytes[40] = 1,
             2 => bytes[6] = 3,
             3 => bytes[7] = 1,
             4 => bytes[8..16].fill(0),
@@ -128,7 +162,7 @@ fn preview_wire_rejects_oversized_versions_reserved_roles_directions_and_noncano
     let mut extra = base.to_vec();
     extra.push(0);
     assert!(Header::decode(&extra).is_err());
-    assert!(Header::new(Lane::Metadata, Direction::WorkerToHost, 1, 1, 100, 64).is_err());
+    assert!(Header::new(Lane::Metadata, Direction::WorkerToHost, 1, 1, 1, 100, 64).is_err());
 }
 
 #[test]
@@ -152,7 +186,7 @@ fn preview_wire_metadata_rejects_unknown_generic_payloads_binding_directions_and
         )
         .is_err()
     );
-    let wrong_connection = Header::new(Lane::Metadata, Direction::WorkerToHost, 1, 1, bytes.as_slice().len(), 0).unwrap();
+    let wrong_connection = Header::new(Lane::Metadata, Direction::WorkerToHost, 1, 1, 1, bytes.as_slice().len(), 0).unwrap();
     assert_eq!(decode_metadata(wrong_connection, bytes.as_slice()), Err(WireError::Binding));
     assert!(
         encode_metadata(Metadata::Stop {
@@ -190,6 +224,7 @@ fn preview_wire_all_fit_caps_check_layout_exact_payload_and_forbidden_stamp_fiel
             Lane::Pixels,
             Direction::WorkerToHost,
             u64::MAX,
+            1,
             1,
             bytes.as_slice().len(),
             stamp.geometry().payload_bytes() - 4,
@@ -244,4 +279,111 @@ fn preview_wire_maximally_escaped_bounded_metadata_decodes_and_overflow_rejects_
     let huge = vec![b' '; MAX_METADATA_BYTES + 1];
     assert!(decode_metadata_value::<Metadata>(&huge).is_err());
     assert!(!format!("{bytes:?} {message:?}").contains(&"ff".repeat(32)));
+}
+
+#[test]
+fn preview_wire_hello_is_fixed_untrusted_worker_only_and_rejects_every_partial_shape() {
+    for lane in [Lane::Metadata, Lane::Pixels] {
+        let connection = if lane == Lane::Metadata { 0 } else { u64::MAX };
+        let hello = Hello::new(source().worker(), u64::MAX, lane, connection).unwrap();
+        let bytes = hello.encode();
+        let decoded = Hello::decode(&bytes).unwrap();
+        assert_eq!(decoded.identity(), source().worker());
+        assert_eq!(decoded.lease_epoch(), u64::MAX);
+        assert_eq!(decoded.lane(), lane);
+        assert_eq!(decoded.connection(), connection);
+        for cut in 0..HELLO_BYTES {
+            assert!(Hello::decode(&bytes[..cut]).is_err());
+        }
+        let mut extra = bytes.to_vec();
+        extra.push(0);
+        assert!(Hello::decode(&extra).is_err());
+        for index in [7, 95] {
+            let mut invalid = bytes;
+            invalid[index] = 1;
+            assert!(Hello::decode(&invalid).is_err());
+        }
+        let mut invalid = bytes;
+        invalid[8..40].fill(0);
+        assert!(Hello::decode(&invalid).is_err());
+    }
+    assert!(Hello::new(source().worker(), 0, Lane::Metadata, 0).is_err());
+    assert!(Hello::new(source().worker(), 1, Lane::Pixels, 0).is_err());
+    assert!(Hello::new(source().worker(), 1, Lane::Metadata, 1).is_err());
+}
+
+#[test]
+fn preview_wire_v2_role_epoch_layout_and_capture_stop_are_closed_and_direction_bound() {
+    let layout = PreviewLayout::new(
+        source(),
+        policy().epochs(),
+        u64::MAX,
+        u64::MAX,
+        u64::MAX,
+        [1920, 1080],
+        [0, 0, 1920, 1080],
+    )
+    .unwrap();
+    let stopped = PreviewPolicy::new(
+        source(),
+        policy().epochs(),
+        crate::preview_image::PreviewAccess {
+            capture_active: false,
+            ..policy().access()
+        },
+    )
+    .unwrap();
+    for message in [
+        Metadata::Layout {
+            connection: u64::MAX,
+            layout,
+        },
+        Metadata::CaptureStopped {
+            source: source(),
+            connection: u64::MAX,
+            pixel_epoch: 2,
+            stop: 3,
+            policy: stopped,
+        },
+        Metadata::CaptureStopAck {
+            source: source(),
+            connection: u64::MAX,
+            pixel_epoch: 2,
+            stop: 3,
+        },
+    ] {
+        let bytes = encode_metadata(message).unwrap();
+        let h = header(Lane::Metadata, message.direction(), bytes.as_slice(), 0);
+        assert_eq!(decode_metadata(h, bytes.as_slice()).unwrap(), message);
+        let mut unknown: serde_json::Value = serde_json::from_slice(bytes.as_slice()).unwrap();
+        unknown["data"]["url"] = "ignored".into();
+        let invalid = serde_json::to_vec(&unknown).unwrap();
+        assert!(decode_metadata(header(Lane::Metadata, message.direction(), &invalid, 0), &invalid).is_err());
+    }
+    assert!(
+        encode_metadata(Metadata::CaptureStopped {
+            source: source(),
+            connection: 1,
+            pixel_epoch: 1,
+            stop: 1,
+            policy: policy()
+        })
+        .is_err()
+    );
+    assert!(
+        encode_metadata(Metadata::CaptureStopAck {
+            source: source(),
+            connection: 1,
+            pixel_epoch: 0,
+            stop: 1
+        })
+        .is_err()
+    );
+    let h = Header::new(Lane::Pixels, Direction::WorkerToHost, 1, 7, 1, 10, 64).unwrap();
+    assert_eq!(Header::decode(&h.encode()).unwrap().role_epoch(), 7);
+    let mut v1 = h.encode();
+    v1[4..6].copy_from_slice(&1u16.to_be_bytes());
+    assert_eq!(Header::decode(&v1), Err(WireError::Version));
+    assert!(Header::new(Lane::Metadata, Direction::WorkerToHost, 1, 2, 1, 10, 0).is_err());
+    assert!(Header::new(Lane::Pixels, Direction::WorkerToHost, 1, 0, 1, 10, 64).is_err());
 }

@@ -4,16 +4,19 @@
 //! traffic; this wire grants no rendering, input, Read or Send authority.
 //! Pixels are raw opaque top-down sRGB RGBA8, never serde/base64/image files.
 
-use crate::preview_image::{CaptureClaim, MAX_IMAGE_BYTES, PreviewPolicy, PreviewSource, PreviewStamp};
+use crate::preview_image::{CaptureClaim, MAX_IMAGE_BYTES, PreviewLayout, PreviewPolicy, PreviewSource, PreviewStamp};
 use crate::{PreviewRate, PreviewSize};
 use serde::{Deserialize, Serialize};
 use std::io::{self, Write};
 
-pub const VERSION: u16 = 1;
+pub const VERSION: u16 = 2;
 pub const MAX_METADATA_BYTES: usize = 4096;
-pub const HEADER_BYTES: usize = 40;
+pub const HEADER_BYTES: usize = 48;
 pub const TAG_BYTES: usize = 32;
 pub const MAX_FRAME_BYTES: usize = HEADER_BYTES + MAX_METADATA_BYTES + MAX_IMAGE_BYTES + 2 * TAG_BYTES;
+
+mod hello;
+pub use hello::{HELLO_BYTES, Hello};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WireError {
@@ -44,6 +47,7 @@ pub struct Header {
     lane: Lane,
     direction: Direction,
     connection: u64,
+    role_epoch: u64,
     sequence: u64,
     metadata: u32,
     pixels: u32,
@@ -54,18 +58,19 @@ impl Header {
         lane: Lane,
         direction: Direction,
         connection: u64,
+        role_epoch: u64,
         sequence: u64,
         metadata: usize,
         pixels: usize,
     ) -> Result<Self, WireError> {
-        if connection == 0 || sequence == 0 {
+        if connection == 0 || sequence == 0 || role_epoch == 0 {
             return Err(WireError::Sequence);
         }
         if metadata == 0 || metadata > MAX_METADATA_BYTES || pixels > MAX_IMAGE_BYTES {
             return Err(WireError::Oversized);
         }
         match lane {
-            Lane::Metadata if pixels != 0 => return Err(WireError::Invalid),
+            Lane::Metadata if pixels != 0 || role_epoch != 1 => return Err(WireError::Invalid),
             Lane::Pixels if direction != Direction::WorkerToHost => return Err(WireError::Direction),
             Lane::Pixels if pixels < 4 * 4 * 4 || !pixels.is_multiple_of(4) => return Err(WireError::Invalid),
             _ => {}
@@ -74,6 +79,7 @@ impl Header {
             lane,
             direction,
             connection,
+            role_epoch,
             sequence,
             metadata: metadata as u32,
             pixels: pixels as u32,
@@ -87,6 +93,9 @@ impl Header {
     }
     pub fn connection(self) -> u64 {
         self.connection
+    }
+    pub fn role_epoch(self) -> u64 {
+        self.role_epoch
     }
     pub fn sequence(self) -> u64 {
         self.sequence
@@ -113,11 +122,12 @@ impl Header {
         bytes[16..24].copy_from_slice(&self.sequence.to_be_bytes());
         bytes[24..28].copy_from_slice(&self.metadata.to_be_bytes());
         bytes[28..32].copy_from_slice(&self.pixels.to_be_bytes());
+        bytes[32..40].copy_from_slice(&self.role_epoch.to_be_bytes());
         bytes
     }
     pub fn decode(bytes: &[u8]) -> Result<Self, WireError> {
         let bytes: &[u8; HEADER_BYTES] = bytes.try_into().map_err(|_| WireError::Invalid)?;
-        if &bytes[..4] != b"APRV" || bytes[32..].iter().any(|byte| *byte != 0) {
+        if &bytes[..4] != b"APRV" || bytes[40..].iter().any(|byte| *byte != 0) {
             return Err(WireError::Invalid);
         }
         if u16::from_be_bytes([bytes[4], bytes[5]]) != VERSION {
@@ -135,7 +145,15 @@ impl Header {
         };
         let u64_at = |offset| u64::from_be_bytes(std::array::from_fn(|index| bytes[offset + index]));
         let u32_at = |offset| u32::from_be_bytes(std::array::from_fn(|index| bytes[offset + index]));
-        Self::new(lane, direction, u64_at(8), u64_at(16), u32_at(24) as usize, u32_at(28) as usize)
+        Self::new(
+            lane,
+            direction,
+            u64_at(8),
+            u64_at(32),
+            u64_at(16),
+            u32_at(24) as usize,
+            u32_at(28) as usize,
+        )
     }
 }
 
@@ -158,6 +176,23 @@ pub enum Metadata {
         rate: PreviewRate,
     },
     Capture(CaptureClaim),
+    Layout {
+        connection: u64,
+        layout: PreviewLayout,
+    },
+    CaptureStopped {
+        source: PreviewSource,
+        connection: u64,
+        pixel_epoch: u64,
+        stop: u64,
+        policy: PreviewPolicy,
+    },
+    CaptureStopAck {
+        source: PreviewSource,
+        connection: u64,
+        pixel_epoch: u64,
+        stop: u64,
+    },
     Stop {
         source: PreviewSource,
         connection: u64,
@@ -196,11 +231,13 @@ impl Metadata {
         match self {
             Self::Policy { policy, .. } => policy.source(),
             Self::Capture(claim) => claim.source(),
+            Self::Layout { layout, .. } => layout.source(),
             Self::Invalidate { source, .. }
             | Self::Demand { source, .. }
             | Self::Stop { source, .. }
             | Self::Stopped { source, .. }
             | Self::Unavailable { source, .. } => source,
+            Self::CaptureStopped { source, .. } | Self::CaptureStopAck { source, .. } => source,
         }
     }
     pub fn connection(self) -> u64 {
@@ -211,12 +248,16 @@ impl Metadata {
             | Self::Stop { connection, .. }
             | Self::Stopped { connection, .. }
             | Self::Unavailable { connection, .. } => connection,
+            Self::Layout { connection, .. } | Self::CaptureStopped { connection, .. } | Self::CaptureStopAck { connection, .. } => {
+                connection
+            }
             Self::Capture(claim) => claim.connection(),
         }
     }
     pub fn direction(self) -> Direction {
         match self {
-            Self::Demand { .. } | Self::Capture(_) | Self::Stop { .. } => Direction::HostToWorker,
+            Self::Demand { .. } | Self::Capture(_) | Self::Stop { .. } | Self::CaptureStopAck { .. } => Direction::HostToWorker,
+            Self::Layout { .. } | Self::CaptureStopped { .. } => Direction::WorkerToHost,
             Self::Policy { .. } | Self::Invalidate { .. } | Self::Stopped { .. } | Self::Unavailable { .. } => Direction::WorkerToHost,
         }
     }
@@ -225,6 +266,22 @@ impl Metadata {
             return Err(WireError::Sequence);
         }
         match self {
+            Self::CaptureStopped {
+                source,
+                pixel_epoch,
+                stop,
+                policy,
+                ..
+            } => {
+                if pixel_epoch == 0 || stop == 0 {
+                    return Err(WireError::Sequence);
+                }
+                if policy.source() != source || policy.access().capture_active {
+                    return Err(WireError::Binding);
+                }
+                Ok(())
+            }
+            Self::CaptureStopAck { pixel_epoch: 0, .. } | Self::CaptureStopAck { stop: 0, .. } => Err(WireError::Sequence),
             Self::Demand { demand: 0, .. }
             | Self::Stop { demand: 0, .. }
             | Self::Stopped { demand: 0, .. }

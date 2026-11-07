@@ -5,6 +5,7 @@
 
 mod admission;
 mod auth;
+mod captured;
 mod stream;
 
 use aurora_session::preview_image::PreviewSource;
@@ -70,8 +71,17 @@ impl Side {
 pub(crate) struct Scope {
     pub source: PreviewSource,
     pub connection: u64,
+    pub role_epoch: u64,
     pub lane: Lane,
 }
 
+impl Scope {
+    fn valid(self) -> bool {
+        self.connection != 0 && self.role_epoch != 0 && (self.lane != Lane::Metadata || self.role_epoch == 1)
+    }
+}
+
+#[cfg(test)]
+mod prerequisite_tests;
 #[cfg(test)]
 mod tests;
