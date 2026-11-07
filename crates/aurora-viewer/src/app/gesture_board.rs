@@ -450,11 +450,7 @@ impl State {
                 }
             }
             Command::Stop(board, ticket) => {
-                self.pending.retain(|_, (t, _, _)| t.board() != board);
-                if let Ok(effects) = self
-                    .runtime
-                    .stop_board(ticket, &data, &mut app.gesture_state.manager, Instant::now())
-                {
+                if let Ok(effects) = self.stop_board(board, ticket, &data, &mut app.gesture_state.manager, Instant::now()) {
                     app.gesture_effects(effects);
                 }
             }
@@ -493,6 +489,18 @@ impl State {
                 self.edit(app, action.proof, &data, affected, change);
             }
         }
+    }
+    fn stop_board(
+        &mut self,
+        board: BoardId,
+        ticket: playback::BoardTicket,
+        data: &Catalogue,
+        manager: &mut crate::gestures::Manager,
+        now: Instant,
+    ) -> Result<Vec<crate::gestures::Effect>, playback::Error> {
+        let effects = self.runtime.stop_board(ticket, data, manager, now)?;
+        self.pending.retain(|_, (t, _, _)| t.board() != board);
+        Ok(effects)
     }
     fn edit(&mut self, app: &App, proof: Proof, data: &Catalogue, affected: Option<BoardId>, change: Change) {
         if self.job.is_some() {

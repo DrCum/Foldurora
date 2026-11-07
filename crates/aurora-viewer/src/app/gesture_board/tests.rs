@@ -331,3 +331,37 @@ fn board_native_ui_real_new_rename_delete_confirm_carries_exact_original_catalog
     assert_eq!(f.data.boards.len(), 2);
     assert!(!f.manager.has_playing());
 }
+
+#[test]
+fn board_app_old_stop_cannot_drop_new_cache_context_before_exact_runtime_validation() {
+    let mut f = Frames::new();
+    let board = f.data.boards[0].id;
+    let target = f.add.unwrap();
+    let now = Instant::now();
+    let old = f.actor.runtime.capture_board(&f.data, board, now).unwrap();
+    f.actor.stop_board(board, old, &f.data, &mut f.manager, now).unwrap();
+    f.manager.entries.remove(&target.item());
+    let ticket = f
+        .actor
+        .runtime
+        .capture(&f.data, board, f.data.boards[0].tiles[0].id, target, &f.manager, now)
+        .unwrap();
+    assert!(matches!(f.actor.runtime.click(ticket,&f.data,target,&mut f.manager,now),Ok(playback::Click::NeedsCache(t))if t==ticket));
+    let proof = f.actor.proof(None, now).unwrap();
+    f.actor.pending.insert(target.item(), (ticket, proof, target));
+    assert!(matches!(
+        f.actor.stop_board(board, old, &f.data, &mut f.manager, now),
+        Err(playback::Error::Stale)
+    ));
+    assert!(
+        f.actor
+            .pending
+            .get(&target.item())
+            .is_some_and(|(t, _, item)| *t == ticket && *item == target)
+    );
+    assert!(f.actor.runtime.pending(target.item()) == Some(ticket));
+    let current = f.actor.runtime.capture_board(&f.data, board, now).unwrap();
+    f.actor.stop_board(board, current, &f.data, &mut f.manager, now).unwrap();
+    assert!(f.actor.pending.is_empty());
+    assert!(f.actor.runtime.pending(target.item()).is_none());
+}
