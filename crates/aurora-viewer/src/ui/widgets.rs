@@ -1108,6 +1108,12 @@ pub(crate) fn viewport_area(ctx: &egui::Context, id: egui::Id) -> ViewportArea {
     ViewportArea { area, bounds }
 }
 
+/// The viewfinder belongs to the live scene even when general toolbars
+/// use the whole workspace. Its areas must never grow into world input.
+pub(crate) fn viewfinder_area(ctx: &egui::Context, id: egui::Id) -> ViewportArea {
+    viewport_area(ctx, id).constrain_to(super::layout::world_rect(ctx))
+}
+
 impl ViewportArea {
     pub(crate) fn order(mut self, order: egui::Order) -> Self {
         self.area = self.area.order(order);
@@ -1139,6 +1145,7 @@ impl ViewportArea {
     }
     pub(crate) fn constrain_to(mut self, bounds: egui::Rect) -> Self {
         self.area = self.area.constrain_to(bounds);
+        self.bounds = Some(bounds);
         self
     }
     pub(crate) fn show<R>(self, ctx: &egui::Context, body: impl FnOnce(&mut egui::Ui) -> R) -> egui::InnerResponse<R> {
@@ -1148,6 +1155,8 @@ impl ViewportArea {
                 ui.set_max_size(bounds.size());
                 ui.set_clip_rect(ui.clip_rect().intersect(bounds));
                 egui::ScrollArea::both()
+                    .min_scrolled_width(0.0)
+                    .min_scrolled_height(0.0)
                     .max_width(bounds.width())
                     .max_height(bounds.height())
                     .show(ui, body)

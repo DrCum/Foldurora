@@ -310,7 +310,10 @@ impl Viewfinder {
         out: &mut Vec<Out>,
     ) {
         let dial = self.dial;
-        crate::ui::widgets::viewport_area(ctx, Id::unique("vf_ring"))
+        // Reserve the dock's width on both sides to keep the ring centred
+        // without allowing its +/- buttons to pass underneath the dock.
+        let ruler = Vec2::new((screen.width() - 2.0 * 106.0 - 84.0).clamp(48.0, RULER.x), RULER.y);
+        crate::ui::widgets::viewfinder_area(ctx, Id::unique("vf_ring"))
             .order(Order::Foreground)
             .fade_in(false)
             .pivot(Align2::CENTER_BOTTOM)
@@ -319,11 +322,14 @@ impl Viewfinder {
                 ui.spacing_mut().item_spacing = Vec2::new(10.0, 4.0);
                 let r = self.ring(dial, s, panel, *fov, f);
                 // the title and its keys
-                let (head, _) = ui.allocate_exact_size(Vec2::new(RULER.x + 2.0 * 42.0, 14.0), Sense::hover());
+                let (head, _) = ui.allocate_exact_size(
+                    Vec2::new(ruler.x + 2.0 * 42.0, if ruler.x < 300.0 { 28.0 } else { 14.0 }),
+                    Sense::hover(),
+                );
                 shadow_text(
                     ui.painter(),
                     p,
-                    Pos2::new(head.left() + 42.0, head.center().y),
+                    Pos2::new(head.left() + 42.0, head.top() + 7.0),
                     Align2::LEFT_CENTER,
                     r.title,
                     bold(ctx, 11.0),
@@ -332,7 +338,7 @@ impl Viewfinder {
                 shadow_text(
                     ui.painter(),
                     p,
-                    Pos2::new(head.right() - 42.0, head.center().y),
+                    Pos2::new(head.right() - 42.0, head.bottom() - 7.0),
                     Align2::RIGHT_CENTER,
                     r.keys,
                     regular(11.0),
@@ -345,7 +351,7 @@ impl Viewfinder {
                     }
                     // the ruler moves under the index: dragged right, the
                     // value comes down
-                    let (rect, resp) = ui.allocate_exact_size(RULER, Sense::click_and_drag());
+                    let (rect, resp) = ui.allocate_exact_size(ruler, Sense::click_and_drag());
                     self.turn_dial(ui, &resp, dial, -1.0, s, panel, fov, f, out);
                     let _ = resp.on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
                     // the ruler drawn from the value after this frame's change
@@ -361,7 +367,7 @@ impl Viewfinder {
 
     /// The AF mode and area as choices, at the start of the bottom bar.
     pub(super) fn af_choices(&mut self, ctx: &egui::Context, p: &Palette, screen: Rect, s: &Settings, at: Pos2, out: &mut Vec<Out>) {
-        crate::ui::widgets::viewport_area(ctx, Id::unique("vf_af_choices"))
+        crate::ui::widgets::viewfinder_area(ctx, Id::unique("vf_af_choices"))
             .order(Order::Foreground)
             .fade_in(false)
             .pivot(Align2::LEFT_CENTER)
@@ -435,7 +441,7 @@ impl Viewfinder {
             ),
         };
         let mut pad = Pad::default();
-        crate::ui::widgets::viewport_area(ctx, Id::unique("vf_pad"))
+        crate::ui::widgets::viewfinder_area(ctx, Id::unique("vf_pad"))
             .order(Order::Foreground)
             .fade_in(false)
             .pivot(Align2::LEFT_BOTTOM)
@@ -561,7 +567,7 @@ impl Viewfinder {
             return;
         };
         let left = ((end - now).max(0.0)).ceil() as i32;
-        crate::ui::widgets::viewport_area(ctx, Id::unique("vf_countdown"))
+        crate::ui::widgets::viewfinder_area(ctx, Id::unique("vf_countdown"))
             .order(Order::Foreground)
             .fade_in(false)
             .interactable(false)

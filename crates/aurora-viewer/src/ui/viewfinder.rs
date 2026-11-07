@@ -515,7 +515,7 @@ impl Viewfinder {
         let before = s.clone();
         let light_before = panel.light;
         let screen = super::layout::world_rect(ctx);
-        let controls = crate::ui::layout::toolbar_rect(ctx);
+        let controls = screen;
         let display = s.viewfinder.display;
         let full = display == Display::Full;
         let shows = display != Display::Hidden;
@@ -549,7 +549,19 @@ impl Viewfinder {
         // (the last photo's card takes its place while it shows)
         let card = f.now < self.review_until && f.review.is_some();
         if shows && !self.hinted && !self.menu && !self.help && !card {
-            hint(ctx, p, controls, if ctl { 156.0 } else { 128.0 }, ctl && !pad);
+            hint(
+                ctx,
+                p,
+                controls,
+                if ctl && controls.width() < 1100.0 {
+                    238.0
+                } else if ctl {
+                    156.0
+                } else {
+                    128.0
+                },
+                ctl && !pad,
+            );
         }
         if let Some((text, error, until)) = &self.message {
             if f.now < *until {
@@ -696,7 +708,7 @@ impl Viewfinder {
             Color32::TRANSPARENT,
         );
         // (the AF mode and area are the bottom bar's, once)
-        crate::ui::widgets::viewport_area(ctx, Id::unique("vf_top_left"))
+        crate::ui::widgets::viewfinder_area(ctx, Id::unique("vf_top_left"))
             .order(Order::Foreground)
             .fade_in(false)
             .fixed_pos(screen.left_top() + Vec2::new(GAP, 12.0))
@@ -732,7 +744,7 @@ impl Viewfinder {
             });
 
         // what the photo will be: each a switch, a click for the next value
-        crate::ui::widgets::viewport_area(ctx, Id::unique("vf_top_right"))
+        crate::ui::widgets::viewfinder_area(ctx, Id::unique("vf_top_right"))
             .order(Order::Foreground)
             .fade_in(false)
             .pivot(Align2::RIGHT_TOP)
@@ -840,7 +852,7 @@ impl Viewfinder {
             *y += 24.0;
         };
         // (the time of day is a switch too)
-        crate::ui::widgets::viewport_area(ctx, Id::unique("vf_time"))
+        crate::ui::widgets::viewfinder_area(ctx, Id::unique("vf_time"))
             .order(Order::Foreground)
             .fade_in(false)
             .pivot(Align2::LEFT_CENTER)
@@ -936,7 +948,7 @@ impl Viewfinder {
             shadow_text(back, p, Pos2::new(x, y), Align2::LEFT_CENTER, &keys, regular(12.0), p.muted);
             // put away from where it is read (the quick menu brings it back)
             y += 24.0;
-            let hide = crate::ui::widgets::viewport_area(ctx, Id::unique("vf_hints_hide"))
+            let hide = crate::ui::widgets::viewfinder_area(ctx, Id::unique("vf_hints_hide"))
                 .order(Order::Foreground)
                 .fade_in(false)
                 .pivot(Align2::LEFT_CENTER)
@@ -1234,7 +1246,10 @@ impl Viewfinder {
             Color32::TRANSPARENT,
             p.navy.gamma_multiply(0.72),
         );
-        let y = screen.bottom() - 16.0 - 22.0;
+        let compact = screen.width() < 1100.0;
+        // On a single monitor the AF choices and sharp range need their
+        // own row, above the ring rather than over the lens values.
+        let y = screen.bottom() - if compact { 180.0 } else { 38.0 };
         // the confirmation dot
         let dot = Pos2::new(screen.left() + GAP + 6.0, y);
         let t = self.af.phase_time(f.now);
@@ -1320,7 +1335,7 @@ impl Viewfinder {
             );
         } else {
             // the depth of field off: a click turns it on
-            crate::ui::widgets::viewport_area(ctx, Id::unique("vf_all_sharp"))
+            crate::ui::widgets::viewfinder_area(ctx, Id::unique("vf_all_sharp"))
                 .order(Order::Foreground)
                 .fade_in(false)
                 .pivot(Align2::RIGHT_TOP)
@@ -1333,12 +1348,22 @@ impl Viewfinder {
                 });
         }
 
-        // the dials
-        crate::ui::widgets::viewport_area(ctx, Id::unique("vf_dials"))
+        // Keep the value row reachable by horizontal scrolling if its
+        // labels cannot all fit. The AF row above remains independent.
+        let dial_bounds = if compact {
+            Rect::from_min_max(
+                Pos2::new(screen.left() + GAP, screen.bottom() - 68.0),
+                Pos2::new(screen.right() - GAP, screen.bottom() - 8.0),
+            )
+        } else {
+            screen
+        };
+        crate::ui::widgets::viewfinder_area(ctx, Id::unique("vf_dials"))
             .order(Order::Foreground)
             .fade_in(false)
             .pivot(Align2::CENTER_BOTTOM)
             .fixed_pos(Pos2::new(screen.center().x, screen.bottom() - 16.0))
+            .constrain_to(dial_bounds)
             .show(ctx, |ui| {
                 // top-aligned, each block lowered so that its line (the
                 // values' text, the scale's ticks, the AE-L frame) sits
@@ -1527,12 +1552,20 @@ impl Viewfinder {
         f: &Frame,
         out: &mut Vec<Out>,
     ) {
-        crate::ui::widgets::viewport_area(ctx, Id::unique("vf_dock"))
+        crate::ui::widgets::viewfinder_area(ctx, Id::unique("vf_dock"))
             .order(Order::Foreground)
             .fade_in(false)
             .pivot(Align2::RIGHT_CENTER)
             .fixed_pos(Pos2::new(screen.right() - 20.0, screen.center().y))
+            .constrain_to(Rect::from_min_max(
+                screen.left_top() + Vec2::new(20.0, 64.0),
+                screen.right_bottom() - Vec2::new(20.0, if screen.width() < 1100.0 { 208.0 } else { 128.0 }),
+            ))
             .show(ctx, |ui| {
+                // A centred column expands to its available width. Give it
+                // the shutter's width, not the whole scene: otherwise this
+                // foreground area also swallows scene wheel and ring input.
+                ui.set_width(66.0);
                 ui.vertical_centered(|ui| {
                     ui.spacing_mut().item_spacing.y = 10.0;
                     if dock_button(
@@ -1704,7 +1737,7 @@ impl Viewfinder {
             ctx.request_repaint();
         }
         let mut asked = Vec::new();
-        let area = crate::ui::widgets::viewport_area(ctx, id)
+        let area = crate::ui::widgets::viewfinder_area(ctx, id)
             .order(Order::Foreground)
             .fade_in(false)
             .movable(true)
@@ -1799,9 +1832,9 @@ impl Viewfinder {
         f: &Frame,
         out: &mut Vec<Out>,
     ) {
-        let cols = 9.0;
-        let width = (screen.width() - 2.0 * GAP - 120.0).min(1300.0);
-        crate::ui::widgets::viewport_area(ctx, Id::unique("vf_menu"))
+        let width = (screen.width() - 2.0 * GAP - 86.0).clamp(160.0, 1300.0);
+        let cols = ((width - 28.0) / 130.0).floor().clamp(1.0, 9.0);
+        crate::ui::widgets::viewfinder_area(ctx, Id::unique("vf_menu"))
             .order(Order::Foreground)
             .fade_in(false)
             .pivot(Align2::CENTER_BOTTOM)
@@ -1847,14 +1880,15 @@ impl Viewfinder {
 
     /// The keys and the mouse, in a panel in the middle.
     fn help_panel(&mut self, ctx: &egui::Context, p: &Palette, screen: Rect, f: &Frame) {
-        crate::ui::widgets::viewport_area(ctx, Id::unique("vf_help"))
+        crate::ui::widgets::viewfinder_area(ctx, Id::unique("vf_help"))
             .order(Order::Foreground)
             .fade_in(false)
             .pivot(Align2::CENTER_CENTER)
             .fixed_pos(screen.center())
             .show(ctx, |ui| {
                 widgets::overlay(ui, p, egui::Margin::symmetric(26, 22), |ui| {
-                    ui.set_width(548.0);
+                    let width = (screen.width() - 72.0).clamp(180.0, 548.0);
+                    ui.set_width(width);
                     ui.spacing_mut().item_spacing.y = 8.0;
                     ui.horizontal(|ui| {
                         ui.label(
@@ -1966,7 +2000,8 @@ impl Viewfinder {
                                 egui::Grid::new(("vf_help", title))
                                     .num_columns(2)
                                     .spacing(Vec2::new(14.0, 8.0))
-                                    .min_col_width(170.0)
+                                    .min_col_width(0.0)
+                                    .max_col_width((width - 14.0) * 0.5)
                                     .show(ui, |ui| {
                                         for (key, text) in rows {
                                             ui.label(egui::RichText::new(key).font(bold(ctx, 13.0)).color(p.ink));
@@ -2001,7 +2036,7 @@ impl Viewfinder {
         view: &View,
         out: &mut Vec<Out>,
     ) {
-        crate::ui::widgets::viewport_area(ctx, Id::unique("vf_drawer"))
+        crate::ui::widgets::viewfinder_area(ctx, Id::unique("vf_drawer"))
             .order(Order::Foreground)
             .fade_in(false)
             .pivot(Align2::RIGHT_TOP)
@@ -2055,7 +2090,7 @@ fn brackets(painter: &egui::Painter, c: Pos2, scale: f32, stroke: Stroke, shadow
 
 /// The first hint: how to focus and take the photo.
 fn hint(ctx: &egui::Context, p: &Palette, screen: Rect, bottom: f32, pad_hint: bool) {
-    crate::ui::widgets::viewport_area(ctx, Id::unique("vf_hint"))
+    crate::ui::widgets::viewfinder_area(ctx, Id::unique("vf_hint"))
         .order(Order::Foreground)
         .fade_in(false)
         .interactable(false)
@@ -2086,7 +2121,7 @@ fn hint(ctx: &egui::Context, p: &Palette, screen: Rect, bottom: f32, pad_hint: b
 /// area keeps the size of the last message, and a longer one wrapped into
 /// it would stand as a column of syllables.
 fn message(ctx: &egui::Context, p: &Palette, screen: Rect, text: &str, error: bool) {
-    crate::ui::widgets::viewport_area(ctx, Id::unique("vf_message"))
+    crate::ui::widgets::viewfinder_area(ctx, Id::unique("vf_message"))
         .order(Order::Foreground)
         .fade_in(false)
         .interactable(false)
@@ -2109,7 +2144,7 @@ fn ghost_disp(ctx: &egui::Context, p: &Palette, screen: Rect) -> bool {
         .zip(ctx.pointer_hover_pos())
         .is_some_and(|(r, pos)| r.contains(pos));
     let mut clicked = false;
-    crate::ui::widgets::viewport_area(ctx, id)
+    crate::ui::widgets::viewfinder_area(ctx, id)
         .order(Order::Foreground)
         .fade_in(false)
         .pivot(Align2::RIGHT_BOTTOM)
@@ -2142,7 +2177,7 @@ fn review(ctx: &egui::Context, p: &Palette, screen: Rect, f: &Frame, bottom: f32
     };
     let mut picture = None;
     let mut clicked = false;
-    crate::ui::widgets::viewport_area(ctx, Id::unique("vf_review"))
+    crate::ui::widgets::viewfinder_area(ctx, Id::unique("vf_review"))
         .order(Order::Foreground)
         .fade_in(false)
         .pivot(Align2::CENTER_BOTTOM)

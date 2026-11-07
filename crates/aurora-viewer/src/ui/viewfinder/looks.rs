@@ -22,7 +22,7 @@ impl Viewfinder {
         panel: &mut SnapshotUi,
         out: &mut Vec<Out>,
     ) {
-        crate::ui::widgets::viewport_area(ctx, Id::unique("vf_looks"))
+        crate::ui::widgets::viewfinder_area(ctx, Id::unique("vf_looks"))
             .order(Order::Foreground)
             .fade_in(false)
             .pivot(Align2::RIGHT_CENTER)
@@ -68,7 +68,7 @@ impl Viewfinder {
         };
         let x = frame.left() + at.clamp(0.0, 1.0) * frame.width();
         let grip = Rect::from_x_y_ranges(x - 12.0..=x + 12.0, frame.y_range());
-        crate::ui::widgets::viewport_area(ctx, Id::unique("vf_look_compare"))
+        crate::ui::widgets::viewfinder_area(ctx, Id::unique("vf_look_compare"))
             .order(Order::Middle)
             .fade_in(false)
             .fixed_pos(grip.min)

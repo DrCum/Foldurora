@@ -20,7 +20,7 @@ impl Viewfinder {
         view: &View,
         out: &mut Vec<Out>,
     ) {
-        crate::ui::widgets::viewport_area(ctx, Id::unique("vf_light"))
+        crate::ui::widgets::viewfinder_area(ctx, Id::unique("vf_light"))
             .order(Order::Foreground)
             .fade_in(false)
             .pivot(Align2::RIGHT_CENTER)

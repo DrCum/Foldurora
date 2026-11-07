@@ -2032,20 +2032,31 @@ mod tests {
                 f.fov = crate::snapshot::fov_of_focal(50.0);
                 f.frames(5);
                 let area = |f: &ViewportPhotoFixture, name| {
-                    f.ctx.memory(|m| m.area_rect(egui::Id::unique(name))).expect("actual viewfinder area")
+                    f.ctx
+                        .memory(|m| m.area_rect(egui::Id::unique(name)))
+                        .expect("actual viewfinder area")
                 };
                 let bounds = f.bounds();
                 let dock = area(&f, "vf_dock");
                 assert!(dock.width() <= 90.0, "dock owns an oversized hit region: {dock:?}");
-                assert!((dock.right() - (bounds.right() - 20.0)).abs() < 2.0, "dock must follow the scene's right edge");
+                assert!(
+                    (dock.right() - (bounds.right() - 20.0)).abs() < 2.0,
+                    "dock must follow the scene's right edge"
+                );
                 let ring = area(&f, "vf_ring");
-                assert!((ring.center().x - bounds.center().x).abs() < 2.0, "ring must follow the scene's centre");
+                assert!(
+                    (ring.center().x - bounds.center().x).abs() < 2.0,
+                    "ring must follow the scene's centre"
+                );
                 assert!(bounds.contains_rect(ring));
                 assert!(!dock.intersects(ring), "dock must not intercept the lens ring");
                 for modifiers in [egui::Modifiers::NONE, egui::Modifiers::ALT] {
                     let point = bounds.center();
                     f.show(vec![egui::Event::ModifiersChanged(modifiers), egui::Event::PointerMoved(point)]);
-                    assert!(!widgets::pointer_over_ui(&f.ctx, point), "scene wheel is blocked before the camera handler");
+                    assert!(
+                        !widgets::pointer_over_ui(&f.ctx, point),
+                        "scene wheel is blocked before the camera handler"
+                    );
                 }
                 for cycle in 0..3 {
                     // Open and close the real settings drawer: this raises its
