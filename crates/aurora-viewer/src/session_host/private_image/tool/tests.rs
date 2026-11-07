@@ -222,6 +222,7 @@ fn show(tool: &mut Tool<Fake>, context: &Context) {
 #[test]
 fn private_tool_routes_only_owned_native_events_and_shows_only_current_original_frame() {
     let (mut tool, context, budget, trace) = fixture();
+    assert!(tool.live(), "the facade getter observes this actual owner state");
     assert!(tool.event(&(), 8, &Event::Text("wrong owner"), &mut |_, _| {}).unwrap().is_none());
     assert!(trace.borrow().calls.is_empty());
     tool.request_redraw(&(), &mut |_, _| {}).unwrap();
@@ -322,6 +323,7 @@ fn private_tool_requests_keep_observed_pin_placement_and_delivered_retirement_or
         trace.borrow_mut().calls.push("flush");
     });
     assert_eq!(trace.borrow().calls, ["hide", "input", "flush", "drop"]);
+    assert!(!tool.live(), "retirement cannot be mistaken for a live native subscriber");
     assert_eq!(
         trace.borrow().drop_credits,
         [128],

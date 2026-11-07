@@ -265,6 +265,10 @@ impl MonitorSurface {
     pub(in crate::session_host) fn id(&self) -> winit::window::WindowId {
         self.tool.id
     }
+    /// Lifetime observation only; actual view/image permission remains external.
+    pub(in crate::session_host) fn is_live(&self) -> bool {
+        self.tool.live()
+    }
     pub(in crate::session_host) fn event(
         &mut self,
         event_loop: &winit::event_loop::ActiveEventLoop,
