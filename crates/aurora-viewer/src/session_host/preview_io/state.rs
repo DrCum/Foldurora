@@ -355,6 +355,37 @@ impl RetainedFrame {
     }
 }
 
+pub(crate) struct SourceUpdate {
+    pub observation: Observation,
+    pub frame: Option<FrameHandoff>,
+}
+pub(crate) struct HostUpdate {
+    pub sources: Vec<SourceUpdate>,
+    pub pending_roles: usize,
+    pub connected_roles: usize,
+    pub raw_bytes: usize,
+}
+pub(super) struct HostMailbox {
+    pub permits: Vec<HostPermit>,
+    pub revision: u64,
+    pub commands: VecDeque<CommandOffer>,
+    pub updates: Vec<SourceUpdate>,
+    pub observations: Option<VersionedObservationSet>,
+    pub diagnostics: [usize; 3],
+}
+impl HostMailbox {
+    pub fn new() -> Self {
+        Self {
+            permits: Vec::with_capacity(MAX_WORKERS),
+            revision: 1,
+            commands: VecDeque::with_capacity(QUEUE * MAX_WORKERS),
+            updates: Vec::with_capacity(MAX_WORKERS),
+            observations: None,
+            diagnostics: [0; 3],
+        }
+    }
+}
+
 #[cfg(test)]
 mod owned_admission_tests {
     use super::*;
@@ -522,35 +553,5 @@ mod owned_admission_tests {
         };
         assert_eq!(error, ImageError::Stale);
         assert_eq!(budget.used(), 0);
-    }
-}
-pub(crate) struct SourceUpdate {
-    pub observation: Observation,
-    pub frame: Option<FrameHandoff>,
-}
-pub(crate) struct HostUpdate {
-    pub sources: Vec<SourceUpdate>,
-    pub pending_roles: usize,
-    pub connected_roles: usize,
-    pub raw_bytes: usize,
-}
-pub(super) struct HostMailbox {
-    pub permits: Vec<HostPermit>,
-    pub revision: u64,
-    pub commands: VecDeque<CommandOffer>,
-    pub updates: Vec<SourceUpdate>,
-    pub observations: Option<VersionedObservationSet>,
-    pub diagnostics: [usize; 3],
-}
-impl HostMailbox {
-    pub fn new() -> Self {
-        Self {
-            permits: Vec::with_capacity(MAX_WORKERS),
-            revision: 1,
-            commands: VecDeque::with_capacity(QUEUE * MAX_WORKERS),
-            updates: Vec::with_capacity(MAX_WORKERS),
-            observations: None,
-            diagnostics: [0; 3],
-        }
     }
 }

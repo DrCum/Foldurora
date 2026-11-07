@@ -1328,8 +1328,10 @@ mod tests {
         }
         let restored_rect = restored.memory(|m| m.area_rect(Id::unique("inventory"))).unwrap();
         assert!((restored_rect.left() - original.left()).abs() < 1.0);
-        let mut autosave = Autosave::default();
-        autosave.due = Some(Instant::now());
+        let mut autosave = Autosave {
+            due: Some(Instant::now()),
+            ..Default::default()
+        };
         autosave.after_pass(&ctx, Instant::now());
         assert!(autosave.due.is_none());
         workspace_apply(&ctx, &baseline);

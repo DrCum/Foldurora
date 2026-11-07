@@ -278,14 +278,13 @@ impl HostChannel {
         } else if capture.is_some() {
             return Err(Error::Binding);
         }
-        if let PreviewCommand::Stop { demand } = &command {
-            if !mailbox
+        if let PreviewCommand::Stop { demand } = &command
+            && !mailbox
                 .updates
                 .iter()
                 .any(|u| u.observation.token.same_metadata(token) && u.observation.accepted_demand.is_some_and(|r| r.demand == *demand))
-            {
-                return Err(Error::Binding);
-            }
+        {
+            return Err(Error::Binding);
         }
         if matches!(command, PreviewCommand::Stop { .. })
             && let Some(update) = mailbox.updates.iter_mut().find(|u| u.observation.token == token)

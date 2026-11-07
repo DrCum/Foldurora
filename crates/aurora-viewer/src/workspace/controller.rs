@@ -187,14 +187,13 @@ impl Controller {
         if p.binding != reply.binding || p.operation != reply.operation || p.source != reply.source {
             return;
         }
-        if let Ok(result) = &reply.result {
-            if result
+        if let Ok(result) = &reply.result
+            && (result
                 .as_ref()
                 .is_some_and(|c| c.validate().is_err() || c.account != p.source.agent || c.grid != p.source.grid)
-                || (p.writing && result.as_ref() != p.expected.as_ref())
-            {
-                return;
-            }
+                || (p.writing && result.as_ref() != p.expected.as_ref()))
+        {
+            return;
         }
         let pending = self.pending.take().expect("matched workspace IO");
         if self.exhausted || reply.binding != self.binding || self.source.as_ref() != Some(&reply.source) {

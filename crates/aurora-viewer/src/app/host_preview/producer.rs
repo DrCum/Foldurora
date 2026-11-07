@@ -533,10 +533,9 @@ impl Producer {
             .as_ref()
             .and_then(|bridge| bridge.preview_channel())
             .is_some_and(|channel| channel.ended())
+            && let Some(bridge) = &mut app.host_session
         {
-            if let Some(bridge) = &mut app.host_session {
-                bridge.disable_preview();
-            }
+            bridge.disable_preview();
         }
         let mut context = self.observe(app, gfx, photo, Instant::now(), false);
         if pass == Pass::Cpu
