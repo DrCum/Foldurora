@@ -457,7 +457,9 @@ fn preview_stream_fragmented_read_write_matrix_roundtrips_exact_opaque_pixels_an
                 pixels
                     .test_bytes()
                     .unwrap()
-                    .chunks_exact(4)
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
                     .enumerate()
                     .all(|(index, pixel)| pixel == color(index))
             );
@@ -705,7 +707,9 @@ fn reject_authenticated_capture_without_cache_replacement(corruption: CorruptCap
         cached
             .bytes(30)
             .unwrap()
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .enumerate()
             .all(|(index, pixel)| pixel == color(index))
     );

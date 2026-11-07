@@ -19,7 +19,7 @@ static NEXT_SOURCE_IMAGES: AtomicU64 = AtomicU64::new(1);
 
 fn source_instance(counter: &AtomicU64) -> Result<u64, ImageError> {
     counter
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |next| next.checked_add(1))
+        .try_update(Ordering::AcqRel, Ordering::Acquire, |next| next.checked_add(1))
         .map_err(|_| ImageError::Exhausted)
 }
 
@@ -543,7 +543,7 @@ impl ImageBudget {
         }
         self.0
             .used
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |used| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |used| {
                 used.checked_add(bytes).filter(|next| *next <= self.0.limit)
             })
             .map_err(|_| ImageError::Capacity)?;

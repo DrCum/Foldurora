@@ -57,7 +57,7 @@ impl Shared {
 
     fn with_budget(size: (u32, u32), budget: CaptureBudget) -> Result<Arc<Self>, CaptureError> {
         let device = NEXT_DEVICE
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |next| next.checked_add(1))
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |next| next.checked_add(1))
             .map_err(|_| CaptureError::Exhausted)?;
         let boundary = CaptureBoundary::new(device, 1, size)?;
         Ok(Arc::new(Self {
@@ -103,7 +103,7 @@ impl Shared {
     pub fn invalidate(&self) {
         if self
             .generation
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |value| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |value| {
                 value.checked_add(1).filter(|_| value != 0)
             })
             .is_err()

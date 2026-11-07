@@ -84,7 +84,7 @@ impl UnadmittedPixels {
         })
     }
     pub fn copy_from(stamp: PreviewStamp, input: &[u8], budget: &ImageBudget) -> Result<Self, Error> {
-        if input.len() != stamp.geometry().payload_bytes() || input.chunks_exact(4).any(|pixel| pixel[3] != 255) {
+        if input.len() != stamp.geometry().payload_bytes() || input.as_chunks::<4>().0.iter().any(|pixel| pixel[3] != 255) {
             return Err(Error::Invalid);
         }
         let mut pixels = Self::blank(stamp, budget)?;

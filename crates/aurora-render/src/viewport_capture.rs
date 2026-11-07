@@ -16,7 +16,7 @@ static NEXT_QUEUE: AtomicU64 = AtomicU64::new(1);
 
 fn allocate_queue_instance(counter: &AtomicU64) -> Result<u64, CaptureError> {
     counter
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |next| next.checked_add(1))
+        .try_update(Ordering::AcqRel, Ordering::Acquire, |next| next.checked_add(1))
         .map_err(|_| CaptureError::Exhausted)
 }
 
@@ -256,7 +256,7 @@ impl CaptureBudget {
     fn reserve(&self, bytes: usize) -> Result<Credit, CaptureError> {
         self.0
             .used
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |used| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |used| {
                 used.checked_add(bytes).filter(|next| *next <= self.0.limit)
             })
             .map_err(|_| CaptureError::Capacity)?;
@@ -296,7 +296,7 @@ impl PixelReservation {
         &mut self.bytes
     }
     pub fn finish(self) -> Result<CapturePixels, CaptureError> {
-        if self.bytes.chunks_exact(4).any(|pixel| pixel[3] != 255) {
+        if self.bytes.as_chunks::<4>().0.iter().any(|pixel| pixel[3] != 255) {
             return Err(CaptureError::Invalid);
         }
         Ok(CapturePixels(Arc::new(Pixels {
@@ -843,7 +843,7 @@ mod tests {
         let callback = queue.begin_map(request.token(), boundary(), 1, 1).unwrap();
         callback.complete(true);
         let mut invalid = budget.pixels(request.layout()).unwrap();
-        assert!(invalid.bytes_mut().chunks_exact(4).all(|pixel| pixel[3] == 0));
+        assert!(invalid.bytes_mut().as_chunks::<4>().0.iter().all(|pixel| pixel[3] == 0));
         assert!(invalid.finish().is_err());
         queue
             .finish_map(request.token(), boundary(), pixels(&budget, request.layout()), 2)
