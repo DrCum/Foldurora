@@ -27,7 +27,15 @@ impl App {
         if let Err(outcome) = bridge.review_authorized(request.target.key.source, request.activation, &gfx.window) {
             return outcome;
         }
+        // HWND/foreground checks may outlive the control receipt. Re-evaluate
+        // the actual login source and fresh grant at the effect boundary.
+        if host_chat::source(self, bridge) != Some(request.target.key.source)
+            || !bridge.review_still_current(request.target.key.source, request.activation)
+        {
+            return ReviewOutcome::RejectedNative;
+        }
         self.review_input.begin();
+        self.alt_codes.reset();
         egui::Popup::close_all(&self.egui_ctx);
         self.egui_ctx.stop_dragging();
         self.egui_ctx.input_mut(|input| input.pointer = Default::default());
@@ -67,13 +75,21 @@ pub(super) struct ReviewInput {
     armed: bool,
     focused: bool,
     before_focus: bool,
+    ime_composing: bool,
+    ime_quarantined: bool,
+    ime_enter_quarantined: bool,
 }
 
 impl ReviewInput {
     fn begin(&mut self) {
-        self.blocked = self.held;
+        self.ime_enter_quarantined |= self.ime_composing || self.ime_quarantined;
+        self.blocked = self.held || self.ime_enter_quarantined;
         self.first_pass = true;
         self.armed = true;
+        self.ime_quarantined |= self.ime_composing;
+        // Commit may precede its confirming key-down. Preserve that key fence
+        // through terminal IME events and focus snapshots until physical up.
+        // A canceled old composition conservatively consumes the first Enter.
     }
 
     pub fn observe(&mut self, event: &winit::event::WindowEvent) -> bool {
@@ -84,6 +100,9 @@ impl ReviewInput {
         if let WindowEvent::Focused(focused) = event {
             self.focused(*focused);
         }
+        if let WindowEvent::Ime(ime) = event {
+            return self.ime(ime);
+        }
         let WindowEvent::KeyboardInput { event, is_synthetic, .. } = event else {
             return false;
         };
@@ -93,6 +112,22 @@ impl ReviewInput {
         self.key(event.state == ElementState::Pressed, *is_synthetic, event.repeat)
     }
 
+    fn ime(&mut self, ime: &winit::event::Ime) -> bool {
+        use winit::event::Ime;
+        let suppress = self.ime_quarantined;
+        match ime {
+            // An empty Preedit can precede Commit, so only an explicit terminal
+            // event releases a composition captured before Review.
+            Ime::Preedit(..) => self.ime_composing = true,
+            Ime::Commit(_) | Ime::Disabled => {
+                self.ime_composing = false;
+                self.ime_quarantined = false;
+            }
+            Ime::Enabled => {}
+        }
+        suppress
+    }
+
     fn focused(&mut self, focused: bool) {
         if self.focused == focused {
             return;
@@ -100,7 +135,7 @@ impl ReviewInput {
         self.focused = focused;
         if focused {
             self.held = self.before_focus;
-            self.blocked &= self.held;
+            self.blocked = (self.blocked && self.held) || self.ime_enter_quarantined;
         }
         self.before_focus = false;
     }
@@ -112,6 +147,7 @@ impl ReviewInput {
                 self.blocked = false;
                 self.armed = false;
                 self.before_focus = false;
+                self.ime_enter_quarantined = false;
             }
             return false;
         }
@@ -119,7 +155,12 @@ impl ReviewInput {
         if !self.focused {
             self.before_focus = true;
         }
-        if self.armed && (synthetic || repeat) {
+        if self.first_pass || self.ime_quarantined || self.ime_enter_quarantined {
+            // This press will be rejected by the new-target frame fence. Its
+            // later OS repeats must remain rejected until a physical release.
+            self.blocked = true;
+            self.armed = true;
+        } else if self.armed && (synthetic || repeat) {
             self.blocked = true;
         } else if self.armed && !was_held {
             self.armed = false;
@@ -127,7 +168,14 @@ impl ReviewInput {
         !synthetic && self.blocked
     }
 
-    pub fn filter(&mut self, raw: &mut egui::RawInput) {
+    /// The final App input boundary, after egui-winit, native Alt codes and
+    /// ordinary queued input assembly, immediately before run_ui.
+    pub fn finish_frame_input(&mut self, raw: &mut egui::RawInput, alt_text: &mut Vec<String>) {
+        raw.events.extend(alt_text.drain(..).map(egui::Event::Text));
+        self.filter(raw);
+    }
+
+    fn filter(&mut self, raw: &mut egui::RawInput) {
         if std::mem::take(&mut self.first_pass) {
             // Pending input began before the explicit target change. Do not
             // interpret it against the newly selected native conversation.
@@ -149,6 +197,122 @@ impl ReviewInput {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn native_editor_frame(
+        ctx: &egui::Context,
+        input: &mut ReviewInput,
+        alt_text: &mut Vec<String>,
+        field: &'static str,
+        draft: &mut String,
+        events: Vec<egui::Event>,
+    ) {
+        let mut raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 300.0))),
+            time: Some(ctx.cumulative_pass_nr() as f64 / 60.0),
+            focused: true,
+            events,
+            ..Default::default()
+        };
+        // Use the exact final App assembly boundary, including the separate
+        // native Alt-code queue, before the existing egui editor sees input.
+        input.finish_frame_input(&mut raw, alt_text);
+        let mut output = ctx.run_ui(raw, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                ui.add(egui::TextEdit::singleline(draft).id(egui::Id::unique(field)))
+                    .request_focus();
+            });
+        });
+        output.textures_delta.clear();
+    }
+
+    #[test]
+    fn native_review_final_app_input_assembly_quarantines_queued_alt_code_text_before_new_editor() {
+        use winit::keyboard::KeyCode;
+        let ctx = egui::Context::default();
+        let mut input = ReviewInput::default();
+        let mut draft = "New target draft".to_owned();
+        let mut alt_text = Vec::new();
+        native_editor_frame(&ctx, &mut input, &mut alt_text, "review_alt_target", &mut draft, Vec::new());
+        let mut alt_codes = crate::alt_codes::AltCodes::default();
+        alt_codes.alt_pressed();
+        assert!(alt_codes.key_pressed(KeyCode::Numpad3, false));
+        alt_text.push(alt_codes.alt_released(None).unwrap());
+        input.begin();
+        native_editor_frame(&ctx, &mut input, &mut alt_text, "review_alt_target", &mut draft, Vec::new());
+        assert!(alt_text.is_empty());
+        assert_eq!(draft, "New target draft", "pre-review Alt text cannot bypass the final input fence");
+        alt_codes.alt_pressed();
+        assert!(alt_codes.key_pressed(KeyCode::Numpad3, false));
+        alt_codes.reset(); // the production Review effect also retires unfinished Alt sequences
+        assert!(alt_codes.alt_released(Some("old release")).is_none());
+        alt_codes.alt_pressed();
+        assert!(alt_codes.key_pressed(KeyCode::Numpad3, false));
+        alt_text.push(alt_codes.alt_released(None).unwrap());
+        native_editor_frame(&ctx, &mut input, &mut alt_text, "review_alt_target", &mut draft, Vec::new());
+        assert!(draft.contains('♥'), "a fresh native Alt sequence remains an ordinary edit");
+    }
+
+    #[test]
+    fn native_review_old_ime_composition_cannot_commit_across_later_frames_into_new_editor() {
+        use winit::event::{Ime, WindowEvent};
+        let ctx = egui::Context::default();
+        let mut input = ReviewInput::default();
+        let mut alt_text = Vec::new();
+        let mut old = "Old draft".to_owned();
+        let mut target = "New draft".to_owned();
+        native_editor_frame(&ctx, &mut input, &mut alt_text, "review_ime_old", &mut old, Vec::new());
+        assert!(!input.observe(&WindowEvent::Ime(Ime::Preedit("未確定".into(), None))));
+        native_editor_frame(
+            &ctx,
+            &mut input,
+            &mut alt_text,
+            "review_ime_old",
+            &mut old,
+            vec![egui::Event::Ime(egui::ImeEvent::Preedit {
+                text: "未確定".into(),
+                active_range_chars: None,
+            })],
+        );
+        let parked = old.clone();
+        input.begin();
+        native_editor_frame(&ctx, &mut input, &mut alt_text, "review_ime_target", &mut target, Vec::new());
+        assert!(
+            input.observe(&WindowEvent::Ime(Ime::Preedit(String::new(), None))),
+            "empty Preedit is not proof the old Commit ended"
+        );
+        native_editor_frame(&ctx, &mut input, &mut alt_text, "review_ime_target", &mut target, Vec::new());
+        assert!(
+            input.key(true, false, false),
+            "an old composition's confirmation Enter cannot send the new draft"
+        );
+        assert!(input.observe(&WindowEvent::Ime(Ime::Commit("old candidate".into()))));
+        native_editor_frame(&ctx, &mut input, &mut alt_text, "review_ime_target", &mut target, Vec::new());
+        assert_eq!(target, "New draft");
+        assert_eq!(old, parked, "Review and the old terminal event never change parked text");
+        input.key(false, false, false);
+        assert!(!input.observe(&WindowEvent::Ime(Ime::Preedit("新".into(), None))));
+        native_editor_frame(
+            &ctx,
+            &mut input,
+            &mut alt_text,
+            "review_ime_target",
+            &mut target,
+            vec![egui::Event::Ime(egui::ImeEvent::Preedit {
+                text: "新".into(),
+                active_range_chars: None,
+            })],
+        );
+        assert!(!input.observe(&WindowEvent::Ime(Ime::Commit("新".into()))));
+        native_editor_frame(
+            &ctx,
+            &mut input,
+            &mut alt_text,
+            "review_ime_target",
+            &mut target,
+            vec![egui::Event::Ime(egui::ImeEvent::Commit("新".into()))],
+        );
+        assert!(target.contains('新'), "a fresh composition after old termination remains usable");
+    }
 
     fn native_world() -> crate::world::World {
         let mut world = crate::world::World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
@@ -285,6 +449,7 @@ mod tests {
         assert!(!input.key(false, true, false));
         assert!(!input.key(true, true, false));
         assert!(input.key(true, false, false));
+        input.filter(&mut egui::RawInput::default());
         assert!(input.key(true, false, true));
         assert!(!input.key(false, false, false));
         assert!(!input.key(true, false, false));
@@ -330,6 +495,7 @@ mod tests {
             if !snapshot_before_focus {
                 input.key(true, true, false);
             }
+            input.filter(&mut egui::RawInput::default());
             assert!(input.key(true, false, false));
             input.key(false, false, false);
             assert!(!input.key(true, false, false));
@@ -340,6 +506,50 @@ mod tests {
         input.focused(false);
         input.begin();
         input.focused(true); // no Enter in native focus snapshot
+        input.filter(&mut egui::RawInput::default());
         assert!(!input.key(true, false, false));
+    }
+
+    #[test]
+    fn native_review_enter_discarded_before_first_draw_stays_fenced_until_real_release() {
+        let mut input = ReviewInput::default();
+        input.focused(true);
+        input.begin(); // Enter was physically up at the Review boundary
+        assert!(input.key(true, false, false));
+        input.finish_frame_input(&mut egui::RawInput::default(), &mut Vec::new());
+        assert!(
+            input.key(true, false, false),
+            "repeat=false cannot rescue the discarded first press"
+        );
+        assert!(input.key(true, false, true));
+        assert!(!input.key(false, true, false));
+        assert!(input.key(true, false, false));
+        assert!(!input.key(false, false, false));
+        assert!(!input.key(true, false, false));
+    }
+
+    #[test]
+    fn native_review_old_ime_confirmation_enter_is_fenced_in_either_terminal_event_order() {
+        use winit::event::{Ime, WindowEvent};
+        for commit_first in [false, true] {
+            let mut input = ReviewInput::default();
+            input.focused(true);
+            assert!(!input.observe(&WindowEvent::Ime(Ime::Preedit("old candidate".into(), None))));
+            input.begin();
+            input.finish_frame_input(&mut egui::RawInput::default(), &mut Vec::new());
+            if commit_first {
+                assert!(input.observe(&WindowEvent::Ime(Ime::Commit("old candidate".into()))));
+            }
+            input.focused(false);
+            input.focused(true); // native review focus cannot rearm the old confirmation key
+            assert!(input.key(true, false, false));
+            if !commit_first {
+                assert!(input.observe(&WindowEvent::Ime(Ime::Commit("old candidate".into()))));
+            }
+            assert!(input.key(true, false, false));
+            assert!(input.key(true, false, true));
+            assert!(!input.key(false, false, false));
+            assert!(!input.key(true, false, false), "physical release permits the next explicit send");
+        }
     }
 }

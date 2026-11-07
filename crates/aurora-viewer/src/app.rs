@@ -10587,8 +10587,6 @@ impl App {
         }
         ui::fonts::preview::release_unused(&self.egui_ctx);
         let mut raw = gfx.egui_state.take_egui_input(&gfx.window);
-        self.review_input.filter(&mut raw);
-        raw.events.extend(self.alt_text.drain(..).map(egui::Event::Text));
         self.demo_script_input(&mut raw);
         if self.demo && std::env::var("AURORA_DEMO_OPTIONS").is_ok_and(|mode| mode == "1:scale-keys") {
             raw.focused = true;
@@ -10888,6 +10886,7 @@ impl App {
         let mut windows_ms = 0.0;
         self.demo_interface_viewport();
         let has_native_canvas = raw.screen_rect.is_some();
+        self.review_input.finish_frame_input(&mut raw, &mut self.alt_text);
         let mut full = ctx.run_ui(raw, |ui| {
             if has_native_canvas {
                 let native_canvas =

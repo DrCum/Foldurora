@@ -488,9 +488,6 @@ mod tests {
             let source = self.source;
             mark_native_read(&mut self.world, request, true, &|| source == Some(request.key.source))
         }
-        fn review_conversation(&mut self, request: aurora_session::chat::ReviewConversationRequest) -> aurora_session::chat::ReviewOutcome {
-            self.app.review_existing_conversation(self.bridge, request)
-        }
         fn submit_literal(&mut self, key: ChatKey, text: &str) -> SendOutcome {
             if self.source() != Some(key.source) {
                 return SendOutcome::RejectedNative;

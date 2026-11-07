@@ -294,21 +294,8 @@ impl WorkerBridge {
         window: &winit::window::Window,
     ) -> Result<(), aurora_session::chat::ReviewOutcome> {
         use aurora_session::chat::ReviewOutcome;
-        let current = self
-            .bound_session()
-            .and_then(|binding| aurora_session::chat::ChatSource::try_from(binding).ok());
-        let facts = ReviewAuthority {
-            current,
-            activation: self.guard.activation(),
-            managed: !self.detached && self.supported && self.admitted,
-            active: self.guard.mode() == WorkerMode::Active,
-            display_active: matches!(self.gate, DisplayGate::Active),
-            render_owned: self.guard.render_owned(),
-            input_owned: self.guard.input_owned(),
-            blocked: self.status.blocked,
-            native_matches: self.window != 0 && native_window(window) == self.window && self.status.native_window == self.window,
-        };
-        if !facts.accepts(source, activation) {
+        let native_matches = self.window != 0 && native_window(window) == self.window && self.status.native_window == self.window;
+        if !self.review_authority(native_matches).accepts(source, activation, Instant::now()) {
             return Err(ReviewOutcome::RejectedNative);
         }
         let viewport = self.guard.viewport().ok_or(ReviewOutcome::RejectedNative)?;
@@ -320,9 +307,38 @@ impl WorkerBridge {
         }
         #[cfg(windows)]
         if native::review_foreground(viewport.host_window, self.window, self.config.host_pid) {
-            return Ok(());
+            return if self.review_still_current(source, activation) {
+                Ok(())
+            } else {
+                Err(ReviewOutcome::RejectedNative)
+            };
         }
         Err(ReviewOutcome::NotForeground)
+    }
+
+    /// Cheap final gate after native queries, immediately before the App effect.
+    /// Reading a fresh monotonic time here prevents an expired lease from being
+    /// represented by an earlier successful HWND/foreground check.
+    pub(crate) fn review_still_current(&self, source: aurora_session::chat::ChatSource, activation: u64) -> bool {
+        self.review_authority(self.window != 0 && self.status.native_window == self.window)
+            .accepts(source, activation, Instant::now())
+    }
+
+    fn review_authority(&self, native_matches: bool) -> ReviewAuthority {
+        ReviewAuthority {
+            current: (self.status.phase == aurora_session::Phase::Online)
+                .then(|| aurora_session::chat::ChatSource::try_from((self.guard.binding(), self.config.lease_epoch)).ok())
+                .flatten(),
+            last_receipt: self.last_receipt,
+            activation: self.guard.activation(),
+            managed: !self.detached && self.supported && self.admitted,
+            active: self.guard.mode() == WorkerMode::Active,
+            display_active: matches!(self.gate, DisplayGate::Active),
+            render_owned: self.guard.render_owned(),
+            input_owned: self.guard.input_owned(),
+            blocked: self.status.blocked,
+            native_matches,
+        }
     }
 
     pub fn world_allowed(&self) -> bool {
@@ -719,6 +735,7 @@ fn receipt_is_current(received: Option<Instant>, now: Instant) -> bool {
 
 struct ReviewAuthority {
     current: Option<aurora_session::chat::ChatSource>,
+    last_receipt: Option<Instant>,
     activation: u64,
     managed: bool,
     active: bool,
@@ -730,9 +747,10 @@ struct ReviewAuthority {
 }
 
 impl ReviewAuthority {
-    fn accepts(&self, source: aurora_session::chat::ChatSource, activation: u64) -> bool {
+    fn accepts(&self, source: aurora_session::chat::ChatSource, activation: u64, now: Instant) -> bool {
         source.validate().is_ok()
             && self.current == Some(source)
+            && receipt_is_current(self.last_receipt, now)
             && activation != 0
             && activation == self.activation
             && self.managed
@@ -1423,8 +1441,10 @@ mod tests {
     fn native_review_strict_authority_rejects_every_permissive_input_fallback_and_incomplete_grant() {
         let (guard, _) = guard_and_command();
         let source = aurora_session::chat::ChatSource::try_from((guard.binding(), 1)).unwrap();
+        let received = Instant::now();
         let valid = || ReviewAuthority {
             current: Some(source),
+            last_receipt: Some(received),
             activation: 7,
             managed: true,
             active: true,
@@ -1434,7 +1454,7 @@ mod tests {
             blocked: false,
             native_matches: true,
         };
-        assert!(valid().accepts(source, 7));
+        assert!(valid().accepts(source, 7, received));
         for case in 0..10 {
             let mut facts = valid();
             match case {
@@ -1450,14 +1470,42 @@ mod tests {
                 9 => facts.activation = 0,
                 _ => unreachable!(),
             }
-            assert!(!facts.accepts(source, 7), "strict case {case}");
+            assert!(!facts.accepts(source, 7, received), "strict case {case}");
         }
         let mut changed = source;
         changed.session.generation += 1;
-        assert!(!valid().accepts(changed, 7));
+        assert!(!valid().accepts(changed, 7, received));
         changed = source;
         changed.lease_epoch += 1;
-        assert!(!valid().accepts(changed, 7));
-        assert!(!valid().accepts(source, 0));
+        assert!(!valid().accepts(changed, 7, received));
+        assert!(!valid().accepts(source, 0, received));
+    }
+
+    #[test]
+    fn native_review_effect_boundary_rechecks_fresh_source_and_lease_after_native_query_work() {
+        let (guard, _) = guard_and_command();
+        let source = aurora_session::chat::ChatSource::try_from((guard.binding(), 1)).unwrap();
+        let received = Instant::now();
+        let mut facts = ReviewAuthority {
+            current: Some(source),
+            last_receipt: Some(received),
+            activation: 7,
+            managed: true,
+            active: true,
+            display_active: true,
+            render_owned: true,
+            input_owned: true,
+            blocked: false,
+            native_matches: true,
+        };
+        // Same immutable Active/native grant facts can pass before the OS work
+        // and expire while that work runs. The final gate reads the clock again.
+        assert!(facts.accepts(source, 7, received));
+        let after_queries = received + std::time::Duration::from_millis(aurora_session::LEASE_MILLIS);
+        assert!(!facts.accepts(source, 7, after_queries));
+        facts.last_receipt = Some(after_queries);
+        assert!(facts.accepts(source, 7, after_queries));
+        facts.current.as_mut().unwrap().session.generation += 1;
+        assert!(!facts.accepts(source, 7, after_queries));
     }
 }
