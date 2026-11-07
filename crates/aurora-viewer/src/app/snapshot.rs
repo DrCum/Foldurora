@@ -3172,7 +3172,7 @@ mod canvas_tests {
         let live = camera.proj(source.aspect());
         // One exact and one inexact preview aspect, both far narrower than
         // the old sixteen-pixel preview floor permitted.
-        for photo in [(32, 7680), (35, 7680)] {
+        for photo in [(32, 7680), (34, 7680)] {
             let target = preview_size(photo, None);
             assert_eq!(target, (3, 720));
             let guide = crate::ui::snapshot::scene_frame(scene, photo, false);

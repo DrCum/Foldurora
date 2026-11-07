@@ -1761,9 +1761,15 @@ mod tests {
 
     impl ViewportPhotoFixture {
         fn new(classic: bool) -> Self {
+            Self::new_at_scale(classic, 1.25, 1.2)
+        }
+
+        fn new_at_scale(classic: bool, native_scale: f32, zoom: f32) -> Self {
             let ctx = egui::Context::default();
             crate::theme::Theme::default().apply(&ctx, 1.0);
-            ctx.set_zoom_factor(1.2);
+            // Queue only the requested zoom. Queuing 1.2 and then requesting
+            // the still-current 1.0 leaves egui's pending 1.2 unchanged.
+            ctx.set_zoom_factor(zoom);
             ctx.all_styles_mut(|style| style.animation_time = 0.0);
             let frozen = ctx.load_texture(
                 "held photo fixture",
@@ -1794,7 +1800,7 @@ mod tests {
                 scene: PhotoScene::Panel,
                 viewfinder: Default::default(),
                 frozen,
-                native_scale: 1.25,
+                native_scale,
                 edge_subjects: false,
             }
         }
@@ -2112,10 +2118,8 @@ mod tests {
         for scene in [PhotoScene::FullFrame, PhotoScene::Viewfinder] {
             for restricted in [false, true] {
                 for (native_scale, zoom) in [(1.0, 1.0), (1.25, 1.2), (2.0, 1.5)] {
-                    let mut f = ViewportPhotoFixture::new(false);
+                    let mut f = ViewportPhotoFixture::new_at_scale(false, native_scale, zoom);
                     f.scene = scene;
-                    f.native_scale = native_scale;
-                    f.ctx.set_zoom_factor(zoom);
                     f.viewport.restrict_ui = restricted;
                     f.settings.aspect = Aspect::R4x5;
                     f.settings.guide = Guide::Thirds;
@@ -2154,7 +2158,7 @@ mod tests {
                             guides.iter().any(|actual| {
                                 (actual[0] - points[0]).abs().max_elem() < 0.1 && (actual[1] - points[1]).abs().max_elem() < 0.1
                             }),
-                            "missing guide {points:?} in {guides:?}"
+                            "missing guide for {scene:?}/{restricted}/{native_scale}/{zoom}: {points:?} in {guides:?}"
                         );
                     }
                     let mask = p.navy.gamma_multiply(if scene == PhotoScene::Viewfinder { 0.66 } else { 0.62 });
@@ -2248,10 +2252,8 @@ mod tests {
     #[test]
     fn actual_viewfinder_edge_subjects_and_comparison_clip_to_the_world_with_unrestricted_controls() {
         for (native_scale, zoom) in [(1.25, 1.2), (2.0, 1.5)] {
-            let mut f = ViewportPhotoFixture::new(false);
+            let mut f = ViewportPhotoFixture::new_at_scale(false, native_scale, zoom);
             f.scene = PhotoScene::Viewfinder;
-            f.native_scale = native_scale;
-            f.ctx.set_zoom_factor(zoom);
             f.viewport.restrict_ui = false;
             f.viewport.left = 50.0;
             f.viewport.right = 5.0;
@@ -2271,20 +2273,33 @@ mod tests {
                 crate::snapshot::viewfinder::distance_text(2.0),
                 crate::snapshot::viewfinder::distance_text(8.0)
             );
-            let mut marks = 0;
+            let mut bracket_marks = 0;
+            let mut face_boxes = 0;
             let mut labels = std::collections::BTreeSet::new();
             let mut overflowing_marks = 0;
             let mut flash = false;
             for shape in &shapes {
                 let mark = match &shape.shape {
-                    egui::Shape::LineSegment { stroke, .. } => stroke.color == p.success && stroke.width == 3.0,
-                    egui::Shape::Rect(rect) => rect.stroke.color == p.success && rect.stroke.width == 2.5,
+                    // Each bracket contains both arms in one three-point
+                    // path; it is not two independent LineSegment shapes.
+                    egui::Shape::Path(path)
+                        if path.points.len() == 3
+                            && !path.closed
+                            && path.stroke.width == 3.0
+                            && matches!(&path.stroke.color, egui::epaint::ColorMode::Solid(color) if *color == p.success) =>
+                    {
+                        bracket_marks += 1;
+                        true
+                    }
+                    egui::Shape::Rect(rect) if rect.stroke.color == p.success && rect.stroke.width == 2.5 => {
+                        face_boxes += 1;
+                        true
+                    }
                     _ => false,
                 };
                 let label = matches!(&shape.shape, egui::Shape::Text(text) if ["Edge face", "Edge group", zone.as_str()].contains(&text.galley.text()));
                 if mark || label {
                     assert_rect_near(shape.clip_rect, world);
-                    marks += usize::from(mark);
                     if label && let egui::Shape::Text(text) = &shape.shape {
                         labels.insert(text.galley.text().to_owned());
                     }
@@ -2299,8 +2314,8 @@ mod tests {
                 }
             }
             assert!(
-                marks >= 10 && labels.len() == 3,
-                "edge face, group, brackets and zone must be painted"
+                bracket_marks == 4 && face_boxes == 2 && labels.len() == 3,
+                "edge subjects must be painted: bracket paths={bracket_marks}, face boxes={face_boxes}, labels={labels:?}"
             );
             assert!(
                 overflowing_marks > 0,
