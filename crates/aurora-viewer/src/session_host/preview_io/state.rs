@@ -364,11 +364,14 @@ mod owned_admission_tests {
     // Pure existing metadata/control fixtures only; no channel, socket, native
     // window or Renderer authority is created by this ownership regression.
     fn fixture() -> (SourceImages, FrameHandoff, ImageBudget, ControlGuard, PreviewGeometry) {
+        fixture_with_slots(1)
+    }
+    fn fixture_with_slots(slots: usize) -> (SourceImages, FrameHandoff, ImageBudget, ControlGuard, PreviewGeometry) {
         let source = super::super::tests::source(1);
         let control = super::super::tests::control(source);
         let state = super::super::tests::state(control.clone(), Some(EpochFence::new()));
         let geometry = PreviewGeometry::new([640, 360], [0, 0, 640, 360], PreviewSize::Small).unwrap();
-        let budget = ImageBudget::new(geometry.payload_bytes()).unwrap();
+        let budget = ImageBudget::new(geometry.payload_bytes() * slots).unwrap();
         let mut owner = SourceImages::new(source, budget.clone()).unwrap();
         owner.sync(state.policy, 0).unwrap();
         let claim = owner.request(8, 1, geometry, 1).unwrap();
@@ -458,7 +461,7 @@ mod owned_admission_tests {
     }
     #[test]
     fn preview_handoff_owned_model_rejection_returns_complete_handoff_for_exact_original_retry() {
-        let (mut owner, frame, budget, control, geometry) = fixture();
+        let (mut owner, frame, budget, control, geometry) = fixture_with_slots(2);
         let token = frame.token;
         let received = frame.received_at;
         let claim = frame.claim();

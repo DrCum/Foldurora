@@ -986,8 +986,11 @@ mod owned_admission_tests {
     use aurora_session::preview_image::{IMAGE_AUTHORITY_MILLIS, PreviewGeometry};
 
     fn fixture() -> (SourceImages, UnadmittedPixels, ImageBudget, PreviewGeometry) {
+        fixture_with_slots(1)
+    }
+    fn fixture_with_slots(slots: usize) -> (SourceImages, UnadmittedPixels, ImageBudget, PreviewGeometry) {
         let geometry = PreviewGeometry::new([640, 360], [0, 0, 640, 360], PreviewSize::Small).unwrap();
-        let budget = ImageBudget::new(geometry.payload_bytes()).unwrap();
+        let budget = ImageBudget::new(geometry.payload_bytes() * slots).unwrap();
         let mut model = SourceImages::new(source(3), budget.clone()).unwrap();
         model.sync(policy(), 0).unwrap();
         let claim = model.request(8, 1, geometry, 1).unwrap();
@@ -1004,7 +1007,7 @@ mod owned_admission_tests {
     }
     #[test]
     fn preview_pixels_owned_model_rejection_returns_exact_allocation_and_can_retry_only_original_pending() {
-        let (mut owner, pixels, budget, geometry) = fixture();
+        let (mut owner, pixels, budget, geometry) = fixture_with_slots(2);
         let pointer = pixels.bytes.as_ptr();
         let length = pixels.bytes.len();
         let capacity = pixels.bytes.capacity();
@@ -1019,7 +1022,11 @@ mod owned_admission_tests {
         assert_eq!(pixels.bytes.capacity(), capacity);
         assert_eq!(pixels.stamp, stamp);
         assert_eq!(budget.used(), length);
+        let spare = budget.reserve(geometry).unwrap();
+        assert_eq!(budget.used(), 2 * length);
         assert!(budget.reserve(geometry).is_err());
+        drop(spare);
+        assert_eq!(budget.used(), length);
         assert!(
             wrong.cancel_capture(wrong_claim),
             "failed admission did not consume another model's pending request"
@@ -1055,7 +1062,7 @@ mod owned_admission_tests {
     }
     #[test]
     fn preview_pixels_owned_expiry_preserves_model_clock_purge_and_cannot_replay_into_fresh_pending() {
-        let (mut owner, pixels, budget, geometry) = fixture();
+        let (mut owner, pixels, budget, geometry) = fixture_with_slots(2);
         let old = pixels.claim();
         let pointer = pixels.bytes.as_ptr();
         let (error, pixels) = rejected(pixels.try_admit(&mut owner, IMAGE_AUTHORITY_MILLIS));
