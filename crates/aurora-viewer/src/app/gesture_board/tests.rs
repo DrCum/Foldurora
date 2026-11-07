@@ -567,3 +567,75 @@ fn board_native_ui_batched_pointer_uses_actual_press_and_release_positions_witho
     assert!(f.draw(vec![pointer(b, false)]).0.is_none());
     assert!(!f.manager.has_playing());
 }
+
+#[test]
+fn board_native_demo_real_login_fixture_has_only_explicit_standalone_memory_identity() {
+    let login = crate::demo::events()
+        .into_iter()
+        .find_map(|event| {
+            if let aurora_net::NetEvent::LoggedIn(login) = event {
+                Some(login)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert!(login.session_id.is_nil());
+    let local = login_identity(&login, login.agent_id, true, false, 1).unwrap();
+    assert!(!local.is_nil());
+    assert_ne!(Some(local), login_identity(&login, login.agent_id, true, false, 2));
+    assert!(login_identity(&login, login.agent_id, false, false, 1).is_none());
+    assert!(login_identity(&login, login.agent_id, true, true, 1).is_none());
+    assert!(login_identity(&login, login.agent_id, true, false, 0).is_none());
+    assert!(login_identity(&login, Uuid::from_u128(99), true, false, 1).is_none());
+    let mut real = (*login).clone();
+    real.session_id = Uuid::from_u128(77);
+    assert_eq!(login_identity(&real, real.agent_id, false, true, 1), Some(real.session_id));
+}
+#[test]
+fn board_app_current_exact_tile_stop_remains_allowed_under_start_restriction() {
+    let mut f = Frames::new();
+    let target = f.add.unwrap();
+    let board = f.data.boards[0].id;
+    let tile = f.data.boards[0].tiles[0].id;
+    let now = Instant::now();
+    let start = f.actor.runtime.capture(&f.data, board, tile, target, &f.manager, now).unwrap();
+    assert!(start_blocked(start, target, true));
+    assert!(!start_blocked(start, target, false));
+    f.manager.play(target.item(), Gesture::default(), None);
+    let native = f.manager.playback_id(target.item()).unwrap();
+    let stop = f.actor.runtime.capture(&f.data, board, tile, target, &f.manager, now).unwrap();
+    assert!(stop.is_stop());
+    assert!(!start_blocked(stop, target, true));
+    assert!(matches!(
+        f.actor.runtime.click(stop, &f.data, target, &mut f.manager, now),
+        Ok(playback::Click::Stopped(_))
+    ));
+    assert!(f.manager.playback_id(target.item()).is_none());
+    f.manager.play(target.item(), Gesture::default(), None);
+    assert!(f.manager.playback_id(target.item()) != Some(native));
+    assert!(matches!(
+        f.actor.runtime.click(stop, &f.data, target, &mut f.manager, now),
+        Err(playback::Error::Stale)
+    ));
+    assert!(f.manager.has_playing());
+    let sound = actions::resolve_playback_item(&f.inv, Uuid::from_u128(8105), PlaybackKind::Sound).unwrap();
+    let sound_tile = TileId::new();
+    f.data = f
+        .data
+        .apply(Change::Add {
+            board,
+            tile: Tile {
+                id: sound_tile,
+                item: Reference {
+                    reference: sound.reference(),
+                    kind: Kind::Sound,
+                },
+            },
+        })
+        .unwrap();
+    f.manager.enabled = false;
+    let sound_ticket = f.actor.runtime.capture(&f.data, board, sound_tile, sound, &f.manager, now).unwrap();
+    assert!(!start_blocked(sound_ticket, sound, true));
+    assert!(f.actor.runtime.validate_sound(sound_ticket, &f.data, sound, now).is_ok());
+}

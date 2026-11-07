@@ -80,6 +80,10 @@ pub(crate) struct Ticket {
     captured_at: Instant,
 }
 impl Ticket {
+    pub fn is_stop(self) -> bool {
+        matches!(self.intent, Intent::Stop(_))
+    }
+
     pub fn board(self) -> BoardId {
         self.board
     }
