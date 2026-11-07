@@ -679,19 +679,19 @@ impl App {
             if !state.loaded
                 && state.job.is_none()
                 && let Some(proof) = proof
+                && state.queue(app, proof, None, true, presentation)
+                && app.demo
             {
-                if state.queue(app, proof, None, true, presentation) && app.demo {
-                    state.queue(
-                        app,
-                        proof,
-                        Some(Change::Create {
-                            id: BoardId::new(),
-                            name: aurora_i18n::tr!("board-default-name").into(),
-                        }),
-                        false,
-                        presentation,
-                    );
-                }
+                state.queue(
+                    app,
+                    proof,
+                    Some(Change::Create {
+                        id: BoardId::new(),
+                        name: aurora_i18n::tr!("board-default-name").into(),
+                    }),
+                    false,
+                    presentation,
+                );
             }
             state.complete(app, presentation);
         });

@@ -280,6 +280,9 @@ fn sort(items: &mut [Uuid], inv: &Inventory, order: &HashMap<Uuid, i32>) {
 }
 
 #[cfg(test)]
+pub(crate) use groups::tests::{Fixture as GroupFixture, fixture as group_fixture};
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::world::inventory::{FetchState, Folder};
@@ -426,6 +429,3 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 }
-
-#[cfg(test)]
-pub(crate) use groups::tests::{Fixture as GroupFixture, fixture as group_fixture};

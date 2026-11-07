@@ -24,9 +24,11 @@ fn scope(uri: &str) -> GroupScope {
     GroupScope::new(Uuid::from_u128(101), Uuid::from_u128(102), LoginGrid::from_uri(uri).unwrap()).unwrap()
 }
 fn inventory(account: Uuid) -> Inventory {
-    let mut inv = Inventory::default();
-    inv.owner = account;
-    inv.root = Uuid::from_u128(1);
+    let mut inv = Inventory {
+        owner: account,
+        root: Uuid::from_u128(1),
+        ..Default::default()
+    };
     for (id, parent, kind, children, items) in [
         (1, 0, 8, vec![Uuid::from_u128(2)], vec![]),
         (
@@ -137,10 +139,12 @@ pub(crate) fn fixture() -> Fixture {
     let root = std::env::temp_dir().join(format!("aurora-favorite-groups-{}", Uuid::new_v4()));
     std::fs::create_dir_all(&root).unwrap();
     let source = scope("https://grid.example.invalid/login");
-    let mut favorites = Favorites::default();
     // Same admission/owner/poll path, isolated capacity so the ordinary
     // parallel test suite cannot make unrelated fixture loads starve.
-    favorites.group_workers = WorkerPool::isolated(MAX_WORKERS);
+    let mut favorites = Favorites {
+        group_workers: WorkerPool::isolated(MAX_WORKERS),
+        ..Default::default()
+    };
     favorites.capture_login_grid(&request("https://grid.example.invalid/login"));
     let grid = favorites.take_login_grid().unwrap();
     assert!(grid == source.grid);
@@ -328,8 +332,10 @@ fn favorite_group_old_editor_cannot_reapply_after_failed_save_or_new_model() {
 fn favorite_group_os_lock_is_nonblocking_and_foreign_publication_cas_preserves_newer_file() {
     let mut f = fixture();
     f.save(10, "A");
-    let mut other = Favorites::default();
-    other.group_workers = f.favorites.group_workers.clone();
+    let mut other = Favorites {
+        group_workers: f.favorites.group_workers.clone(),
+        ..Default::default()
+    };
     other.bind_groups(Some(f.source), f.root.clone());
     let deadline = Instant::now() + Duration::from_secs(5);
     while other.group_status() == GroupStatus::Loading {
