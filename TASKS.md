@@ -1,5 +1,14 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Monitor image prerequisites (2026-11-07; no issue): pure bounded capture
+  geometry, callback/request identities and byte credits; exact source/policy
+  metadata admits current Active captures and retains only already-admitted
+  last-active history. Source loss/privacy/expiry invalidate held metadata,
+  while four fixed plus cycling views deduplicate into up to five inactive
+  demands under the existing 10 FPS aggregate budget. Fake-backend/model tests
+  are authored; execution and independent review remain pending. No renderer,
+  App, image IPC, native command or parked rendering path is enabled.
+
 - 🔧 Native Attention CPU input fixture (2026-11-07; no issue): source-only
   Linux ignored test around the production AttentionWindow, with synthetic
   body-free snapshots, local Open/Dismiss intents and queued-only preferences.

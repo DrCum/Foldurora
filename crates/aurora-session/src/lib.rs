@@ -11,6 +11,7 @@ pub mod chat;
 mod coordinator;
 mod identity;
 mod preview;
+pub mod preview_image;
 mod protocol;
 mod worker;
 
@@ -18,7 +19,7 @@ pub use coordinator::{Coordinator, Effect, HostNotice, RosterEntry, STARTUP_MILL
 pub use identity::{
     AccountKey, Binding, ConversationId, GridKey, HostId, InstallationId, SessionId, SessionIdentity, WorkerId, WorkerIdentity,
 };
-pub use preview::{PreviewDemand, PreviewRate, PreviewSize, admit_previews};
+pub use preview::{PreviewDemand, PreviewRate, PreviewSize, admit_previews, admit_previews_with_active};
 pub use protocol::{
     Command, Envelope, Error, Event, FrameProof, GpuProgress, HostedViewport, Label, MAX_MESSAGE_BYTES, MAX_WORKERS, Message,
     PROTOCOL_VERSION, Phase, PhysicalRect, PrepareBoundary, RejectReason, WorkerMode, WorkerStatus, decode, encode,

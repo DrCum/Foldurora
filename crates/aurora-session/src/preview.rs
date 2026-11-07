@@ -1,10 +1,11 @@
 use crate::{Error, MAX_WORKERS};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PreviewRate {
     Half,
+    #[default]
     One,
     Two,
     Five,
@@ -23,9 +24,10 @@ impl PreviewRate {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PreviewSize {
+    #[default]
     Small,
     Medium,
     Large,
@@ -59,7 +61,23 @@ pub struct PreviewDemand {
 /// possible total without admitting a new lane over acknowledged/in-flight
 /// reservations. None also covers exhausted / unsafe rendering budgets.
 pub fn admit_previews(demands: &[PreviewDemand], budget_half_fps: u32) -> Result<Vec<Option<PreviewRate>>, Error> {
-    if demands.len() > MAX_WORKERS - 1 || demands.iter().any(|d| d.acknowledged_half_fps > 10 || d.pending_half_fps > 10) {
+    admit_previews_with_active(demands, budget_half_fps, true)
+}
+
+/// Each entry is one unique source after the broker deduplicates its views.
+/// `has_active` comes from acknowledged controller state, never a window or
+/// capture request; it is only capacity arithmetic and grants no rendering.
+/// With no Active, four fixed views plus cycling can cover all five sources
+/// (`fssessionmonitormodel.h::visibleSources`, Legacy Viewer).
+pub fn admit_previews_with_active(
+    demands: &[PreviewDemand],
+    budget_half_fps: u32,
+    has_active: bool,
+) -> Result<Vec<Option<PreviewRate>>, Error> {
+    if demands.len() > MAX_WORKERS - usize::from(has_active)
+        || budget_half_fps > 20
+        || demands.iter().any(|d| d.acknowledged_half_fps > 10 || d.pending_half_fps > 10)
+    {
         return Err(Error::Capacity);
     }
     let eligible = |d: &PreviewDemand| d.visible && d.inactive && d.session_current && d.requested.is_some();

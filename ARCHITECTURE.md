@@ -142,6 +142,15 @@ surface with test-only synthetic snapshots and captured local intents, without
 constructing a host controller or opening preference storage. Its private X11
 driver contract is in `docs/TESTING.md`; it does not establish native delivery.
 
+`aurora-render::viewport_capture` provides pure checked geometry, nonreused
+request/callback identities and byte-credit lifetimes for a future asynchronous
+readback. `aurora-session::preview_image` models exact-source image metadata,
+Active-only admission, already-admitted last-active retention, expiry and
+revocation. Its deduplicated preview budget can represent five inactive sources
+when no world is Active. These models perform no capture, socket or GPU work;
+renderer/App integration, authenticated image delivery and native validation
+remain separate prerequisites. They do not enable parked world rendering.
+
 `ChatUi` owns a bounded policy-stamped draft map, including each editor's Undo
 state. A pass moves editor state into egui only for its exact source/conversation/
 policy/incarnation and removes it afterward, so background authority changes can
