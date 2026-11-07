@@ -19,6 +19,8 @@ mod monitor_edits;
 mod monitor_input;
 #[cfg(any(windows, test))]
 mod monitor_manager;
+#[cfg(any(windows, test))]
+mod monitor_reads;
 #[cfg(windows)]
 mod monitor_shell;
 #[cfg(windows)]
@@ -115,6 +117,8 @@ pub fn run() -> anyhow::Result<()> {
         monitor_focus: None,
         #[cfg(windows)]
         monitor_placements: [None; 5],
+        #[cfg(windows)]
+        monitor_reads: monitor_reads::ViewReads::default(),
         error: None,
         next_poll: now,
         repaint: Some(now),
@@ -166,6 +170,8 @@ struct Shell {
     monitor_focus: Option<(monitor_model::View, preview_projection::ViewNamespace)>,
     #[cfg(windows)]
     monitor_placements: [Option<private_image::Placement>; 5],
+    #[cfg(windows)]
+    monitor_reads: monitor_reads::ViewReads,
     error: Option<String>,
     next_poll: Instant,
     repaint: Option<Instant>,

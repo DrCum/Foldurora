@@ -5,7 +5,7 @@ use super::monitor_manager::index;
 use super::monitor_model::{Binding, View};
 use super::monitor_ui::{Action as MonitorAction, Command, State};
 use super::monitor_window::MonitorWindow;
-use super::preview_projection::PreviewError;
+use super::preview_projection::{PreviewError, PreviewRead};
 use super::shared_chat::SharedChat;
 use super::slots::SlotId;
 use super::ui::Notice;
@@ -42,6 +42,22 @@ impl Shell {
         self.notice_at = Some(Instant::now());
         self.request_repaint();
     }
+    fn monitor_read(&mut self, view: View) -> Option<PreviewRead> {
+        let namespace = self.monitors.namespace(view);
+        self.monitor_reads.retain_namespace(view, namespace);
+        let namespace = namespace?;
+        match self.monitor_reader.try_read(view, namespace) {
+            Ok(read) if self.monitors.current_read(view, &read) => {
+                self.monitor_reads.remember(&read);
+                Some(read)
+            }
+            Err(PreviewError::Busy | PreviewError::Stale) => self
+                .monitor_reads
+                .fallback(view, namespace)
+                .filter(|read| self.monitors.current_read(view, read)),
+            _ => None,
+        }
+    }
     fn publish_monitors(&mut self, event_loop: &ActiveEventLoop) -> Result<(), PreviewError> {
         let mut failure = None;
         for view in View::ALL {
@@ -69,10 +85,7 @@ impl Shell {
         // output now, including unchanged views waiting for the new full set.
         for view in View::ALL {
             let at = index(view);
-            let read = self
-                .monitors
-                .namespace(view)
-                .and_then(|namespace| self.monitor_reader.try_read(view, namespace).ok());
+            let read = self.monitor_read(view);
             let keep = match (self.monitor_windows[at].as_mut(), read.as_ref()) {
                 (Some(window), Some(read)) => window.retain(&self.monitors, read, &mut self.shared_chat),
                 _ => false,
@@ -166,10 +179,7 @@ impl Shell {
     fn sync_monitor_windows(&mut self, event_loop: &ActiveEventLoop) {
         for view in View::ALL {
             let at = index(view);
-            let read = self
-                .monitors
-                .namespace(view)
-                .and_then(|namespace| self.monitor_reader.try_read(view, namespace).ok());
+            let read = self.monitor_read(view);
             let current = read.as_ref().is_some_and(|read| self.monitors.current_read(view, read));
             let keep = current
                 && self.monitor_windows[at]
@@ -266,27 +276,18 @@ impl Shell {
             return true;
         }
         if let Err(error) = self.refresh_monitors(event_loop) {
-            if let Some(mut window) = self.monitor_windows[at].take() {
-                window.retire(&mut self.shared_chat);
-            }
             if !matches!(error, PreviewError::Busy | PreviewError::Stale) {
+                if let Some(mut window) = self.monitor_windows[at].take() {
+                    window.retire(&mut self.shared_chat);
+                }
                 self.monitor_error(error);
+                if let Err(error) = self.publish_monitors(event_loop) {
+                    self.monitor_error(error);
+                }
+                return true;
             }
-            if let Err(error) = self.publish_monitors(event_loop) {
-                self.monitor_error(error);
-            }
-            return true;
         }
-        let Some(namespace) = self.monitors.namespace(view) else {
-            if let Some(mut window) = self.monitor_windows[at].take() {
-                window.retire(&mut self.shared_chat);
-            }
-            if let Err(error) = self.publish_monitors(event_loop) {
-                self.monitor_error(error);
-            }
-            return true;
-        };
-        let Ok(read) = self.monitor_reader.try_read(view, namespace) else {
+        let Some(read) = self.monitor_read(view) else {
             if let Some(mut window) = self.monitor_windows[at].take() {
                 window.retire(&mut self.shared_chat);
             }
@@ -346,14 +347,17 @@ impl Shell {
     }
 
     fn monitor_action(&mut self, event_loop: &ActiveEventLoop, view: View, action: MonitorAction) {
-        if self.refresh_monitors(event_loop).is_err() || self.closing.is_some() || self.ui.modal_open() || self.snapshot.stopped {
+        let refreshed = self.refresh_monitors(event_loop);
+        let roster_current = refreshed.is_ok();
+        if refreshed.is_err_and(|error| !matches!(error, PreviewError::Busy | PreviewError::Stale))
+            || self.closing.is_some()
+            || self.ui.modal_open()
+            || self.snapshot.stopped
+        {
             return;
         }
-        let Some(namespace) = self.monitors.namespace(view) else { return };
-        let Ok(read) = self.monitor_reader.try_read(view, namespace) else {
-            return;
-        };
-        if !self.monitors.current_read(view, &read) {
+        let Some(read) = self.monitor_read(view) else { return };
+        if !read.view_current() {
             return;
         }
         let Some(binding) = self.monitors.model().binding(view) else {
@@ -381,6 +385,22 @@ impl Shell {
             action @ MonitorAction::Control { .. } => {
                 if !self.monitors.validate(&action) {
                     return;
+                }
+                let MonitorAction::Control { command, .. } = &action else { return };
+                if matches!(command, Command::Navigate(_) | Command::Play | Command::Exchange(_)) && !roster_current {
+                    return;
+                }
+                if matches!(command, Command::Settings { .. } | Command::Exchange(_)) {
+                    // Never upgrade a view-only fallback to backend authority.
+                    // A separately acquired genuine current command read is
+                    // required, and Controller checks it again before enqueue.
+                    let Some(namespace) = self.monitors.namespace(view) else { return };
+                    let Ok(command_read) = self.monitor_reader.try_read(view, namespace) else {
+                        return;
+                    };
+                    if !self.monitors.current_read(view, &command_read) || !command_read.commands_current() {
+                        return;
+                    }
                 }
                 let mut observed_pin = None;
                 if let MonitorAction::Control {
@@ -462,10 +482,11 @@ impl Shell {
                 self.monitor_error(error);
             }
         }
-        let blocked = !fresh || self.ui.modal_open() || self.closing.is_some() || self.snapshot.stopped;
-        let input_busy = self.monitor_windows[index(View::Cycling)]
-            .as_ref()
-            .is_some_and(MonitorWindow::timer_busy);
+        let blocked = self.ui.modal_open() || self.closing.is_some() || self.snapshot.stopped;
+        let input_busy = !fresh
+            || self.monitor_windows[index(View::Cycling)]
+                .as_ref()
+                .is_some_and(MonitorWindow::timer_busy);
         let time = self.monitor_time();
         let windows = &mut self.monitor_windows;
         let chat = &mut self.shared_chat;
@@ -504,6 +525,7 @@ impl Shell {
     }
     pub(super) fn retire_monitor_windows(&mut self) {
         self.monitor_focus = None;
+        self.monitor_reads.clear();
         for entry in &mut self.monitor_windows {
             if let Some(mut window) = entry.take() {
                 window.retire(&mut self.shared_chat);

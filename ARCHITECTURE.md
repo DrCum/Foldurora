@@ -58,10 +58,22 @@ The original body has 13 regular definitions in the exact base; these two new
 prefix regressions bring it to 15. Prior component counts below describe their
 earlier frozen checkpoints. The native join additionally requires Root's
 separate pointer Context-lock correction before any execution.
-This first native-front freeze still retires a surface on try-read Busy; the
-approved original-expiry `PreviewRead::view_only` image-free Chat fallback is a
-separate follow-up with the host owner. No frozen source/runtime claim covers
-that unfinished seam or the eventual production promotion.
+The first bulk freeze (e096, corrected by 8af) retires on try-read Busy. Its
+separate `monitor_reads.rs` follow-up stores one genuine stripped view-only read
+per exact view/namespace at its original receipt expiry. It retains no image,
+refresh permission, backend command authority or terminal receipt vectors.
+Namespace change, source-owner revoke and original expiry discard the cache.
+Before fallback body paint, an existing private image owner is physically
+retired through the same old-edit flush/bitmap-drop path; a current image-free
+owner can then preserve canonical Chat through unrelated head turnover/Busy.
+Roster Busy suspends only cycling timers. Canonical drafts use independent
+current Chat policy; preview Settings/Exchange reacquire a genuine normal read
+with commands_current and Controller revalidates before queue admission.
+Genuine accepted-read cache fixtures belong to the host-projection owner; no UI
+proof constructor or runtime mock is added. This source seam remains uncompiled,
+unrun and separately reviewed before the eventual production promotion.
+Uncertain settings display the last confirmed preference without claiming the
+native change failed or that the previous native configuration is still in use.
 
 The disabled CPU/body integration preserves the reviewed private surface and
 Monitor body atoms on the existing disabled monitor foundations. Production

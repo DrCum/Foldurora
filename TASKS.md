@@ -43,8 +43,14 @@
   regressions are authored/uncompiled/unrun. Existing fake owner tests and
   capture definitions are preserved. Existing prerequisite cfg(test) promotion,
   real host/worker join, producer enablement and all execution remain Root-owned.
-  The approved original-expiry image-free view-only Busy fallback is the next
-  separate source follow-up; this bulk freeze still retires on reader Busy.
+  A separate source follow-up adds bounded original-expiry view-only Busy cache,
+  stripping images/commands/receipts; old private owners retire before fallback
+  paint, independently permitted canonical Chat remains usable, and preview
+  commands still require a fresh backend read. Roster Busy suspends only timers.
+  Genuine proof/expiry cache cases are owned by host-projection tests, not UI
+  authority constructors. This seam is authored/uncompiled/unrun and awaits
+  separate review. Uncertain settings now say last confirmed, without implying
+  knowledge of an unacknowledged native result.
   No Linux/macOS uncredited fallback, inactive producer or parity claim is added.
 
 - 🔧 Combined monitor validation (2026-11-07; no issue): the component entries
