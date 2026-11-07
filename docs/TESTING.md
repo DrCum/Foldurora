@@ -105,8 +105,12 @@ last 120 seconds for evidence and owned-process cleanup.
 Begin with repeat coverage before any intent: unblock to focus/type a synthetic
 draft, block the initial held Enter, lose focus to the owned owner window, then
 unblock/refocus the composer while still holding Enter. Require a non-synthetic
-OS `repeat=true` event after focus loss, with the editor focused/enabled, Shift
-up and no earlier intent. No Send may result. Release/fresh Enter must Send.
+OS `repeat=true` event after focus loss, with the same selected source's editor
+focused/enabled, a nonempty valid canonical draft, available/current Send
+permission, explicitly no Pending Send, Shift up and no earlier intent. Each
+native Enter repeat records this selected row, full captured ChatKey and exact
+predicate observations in `repeat_observation`; a counter alone is insufficient.
+No Send may result. Release/fresh Enter must Send.
 Then check Shift+Enter, Ctrl+Enter, delivered text before source/conversation
 navigation, captured Read/no Send or activation, held Read source replacement,
 and close/reopen retention. Driver assertions must compare exact intent sources,

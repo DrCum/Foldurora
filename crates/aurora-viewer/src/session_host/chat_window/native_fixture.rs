@@ -75,6 +75,28 @@ impl Fixture {
         self.chat = Some(chat);
     }
 
+    fn repeat_observation(&self, is_chat: bool) -> Value {
+        let model = self.model.native_fixture_status(self.chat.as_ref().map(|chat| &chat.context));
+        let source = model["sources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|source| source["key"]["source"] == model["selected"]);
+        let sendable = source.is_some_and(|source| {
+            ["focused", "editable", "available", "can_send", "draft_nonempty", "literal_ready"]
+                .iter()
+                .all(|name| source[*name] == true)
+                && source["send_pending"] == false
+        });
+        let focused = self.chat.as_ref().is_some_and(ChatWindow::focused);
+        let shift = self.chat.as_ref().is_some_and(|chat| chat.native_modifiers.shift_key());
+        json!({"selected": model["selected"], "selected_source": source,
+            "captured_key": source.map(|source| &source["key"]), "native_window_focused": focused,
+            "chat_event": is_chat, "blocked": self.blocked, "prior_focus_losses": self.focus_losses,
+            "prior_intents": self.intents.len(), "shift_down": shift,
+            "eligible": is_chat && focused && !self.blocked && self.focus_losses > 0 && self.intents.is_empty() && !shift && sendable})
+    }
+
     fn publish(&self) {
         let chat = self.chat.as_ref().map(|chat| {
             let context = &chat.context;
@@ -183,31 +205,17 @@ impl ApplicationHandler for Fixture {
         let is_chat = self.chat.as_ref().is_some_and(|chat| chat.id() == id);
         let data = match &event {
             WindowEvent::KeyboardInput { event, is_synthetic, .. } => {
-                let eligible = is_chat
-                    && !self.blocked
-                    && self.focus_losses > 0
-                    && self.intents.is_empty()
-                    && self.chat.as_ref().is_some_and(|chat| {
-                        chat.focused()
-                            && self.model.composer_rect(&chat.context).is_some()
-                            && self.model.native_fixture_status(Some(&chat.context))["sources"]
-                                .as_array()
-                                .unwrap()
-                                .iter()
-                                .any(|source| source["focused"] == true && source["editable"] == true)
-                    });
-                if eligible
-                    && event.repeat
+                let observation = (event.repeat && event.logical_key == winit::keyboard::Key::Named(winit::keyboard::NamedKey::Enter))
+                    .then(|| self.repeat_observation(is_chat));
+                if observation.as_ref().is_some_and(|observation| observation["eligible"] == true)
                     && event.state == ElementState::Pressed
-                    && event.logical_key == winit::keyboard::Key::Named(winit::keyboard::NamedKey::Enter)
-                    && !self.chat.as_ref().unwrap().native_modifiers.shift_key()
                     && !*is_synthetic
                 {
                     self.focused_repeats_before_intent += 1;
                 }
                 Some(
                     json!({"kind": "key", "key": format!("{:?}", event.logical_key), "state": format!("{:?}", event.state),
-                    "repeat": event.repeat, "synthetic": is_synthetic, "focused_composer_before_intent": eligible}),
+                    "repeat": event.repeat, "synthetic": is_synthetic, "repeat_observation": observation}),
                 )
             }
             WindowEvent::ModifiersChanged(modifiers) => Some(json!({"kind": "modifiers", "value": format!("{:?}", modifiers.state())})),

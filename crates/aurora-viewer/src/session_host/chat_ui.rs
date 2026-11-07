@@ -206,6 +206,9 @@ impl ChatUi {
         serde_json::json!({"key": self.key(), "policy": self.policy, "available": self.available,
             "draft": self.draft(), "drafts": drafts, "editable": response.as_ref().map(egui::Response::enabled),
             "focused": response.as_ref().map(egui::Response::has_focus), "send_receipt": self.receipt,
+            "draft_nonempty": !self.draft().trim().is_empty(), "literal_ready": ChatText::new(self.draft()).is_ok(),
+            "send_pending": self.receipt.is_some_and(|receipt| receipt.outcome == SendOutcome::Pending),
+            "can_send": self.available && self.policy.is_some_and(|policy| policy.lease_current && policy.ready && policy.can_send),
             "read_metadata": self.read_metadata, "read_busy": self.read_busy})
     }
 
