@@ -3576,3 +3576,12 @@ Open-source technologies that could set Aurora apart (human request of 2026-10-1
   plus root production registration are required at join. No Cargo/native/GPU,
   endpoint enablement or product acceptance was performed by the source author;
   independent source review, root combined checks and human validation remain.
+
+- 🔧 Native Board action scope prerequisite (source-only): opaque WorkerBridge
+  scope over actual accepted Active source/lease/activation/logical generation
+  and original control expiry; final exact authority check without preview,
+  renderer or foreground coupling. Standby/unsupported/expired managed state
+  fails closed. Three production-helper tests use the real accepted WorkerGuard
+  binding and cover incomplete grants, source/generation/activation changes,
+  future receipts and immutable expiry across renewal; UNRUN. Actual Board App
+  consumers, combined compiler/runtime checks and human validation remain.

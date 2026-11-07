@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::Instant;
 
+pub(crate) mod action;
 mod preview;
 pub(crate) use preview::AcceptedNativePreviewSource;
 /// Fixed reservation inside the worker image lane's 1 MiB metadata headroom.

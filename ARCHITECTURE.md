@@ -5090,3 +5090,14 @@ maintenance after cancellation/result consumption. Native metadata has a fixed
 7 MiB pixel/resource pool. Sealed V4 IO/Broker dependencies and root-owned module
 promotion remain explicit join prerequisites; this source slice does not promote
 modules, create host demand, or enable a host bootstrap factory.
+
+`session_host/worker/action.rs` supplies opaque native action scopes from actual
+accepted managed Active ownership, separate from Review foreground/image grants.
+The full source/lease, activation and actual logical session generation must
+match; the original accepted control receipt expiry is held unchanged. Effect
+checks re-evaluate current native authority and that ORIGINAL expiry, so later
+heartbeats cannot extend a captured action. Callers additionally retire their
+own App action epoch on source/handoff/lifecycle loss. Managed unavailable never
+implies standalone permission. This helper performs no render, input, focus,
+read, socket or native window operation. Actual Board consumers are a separate
+root-combined dependency; tests are source-authored UNRUN.
