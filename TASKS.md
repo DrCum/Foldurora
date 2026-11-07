@@ -3654,3 +3654,8 @@ Open-source technologies that could set Aurora apart (human request of 2026-10-1
     credit/lifecycle regressions are authored UNRUN (40 Host tests total); compile
     mechanicals are folded in without changing effect/guard order. Exact source
     review and root compilation/runtime remain pending; factory stays closed.
+
+  - Image-control poison explicitly releases the control guard and invokes
+    terminal Store cleanup; a terminal frontdoor stops image actor resources
+    before a later control read. Adds one real prepared-cache/credit regression
+    (41 Host tests authored UNRUN), with ordinary hosting independent.

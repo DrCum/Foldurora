@@ -5240,3 +5240,9 @@ drops rejected or final results after releasing the completion mutex. One Broker
 cannot drain/coalesce another Broker's completion. Seven further authored UNRUN
 lifecycle/resource cases bring Host coverage to 40; actual OS/GPU permission is
 outside these authenticated protocol/pure CPU ownership fixtures' scope.
+
+Control-mutex poison drops the poisoned guard before invoking the same try-only
+terminal Store retirement; subsequent actor polls stop image resources before
+attempting the poisoned publication again. This remains an image-component
+failure, independent of ordinary host control. One additional actual cache/credit
+poison regression is authored UNRUN (41 Host tests total).

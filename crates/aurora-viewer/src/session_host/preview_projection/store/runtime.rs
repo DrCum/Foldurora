@@ -542,6 +542,10 @@ impl BrokerProjection {
 
 impl BrokerProjection {
     pub(in crate::session_host) fn poll(&mut self, captures: &[AcceptedPreviewCapture]) {
+        if !self.reader.0.frontdoor.current() {
+            self.stop();
+            return;
+        }
         if self.channel.as_ref().is_some_and(|channel| channel.ended()) {
             self.fail_images();
         }

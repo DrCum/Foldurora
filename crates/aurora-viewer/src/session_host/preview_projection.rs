@@ -210,13 +210,16 @@ impl Shared {
         drop(garbage);
     }
     fn try_control(&self) -> Result<std::sync::MutexGuard<'_, Arc<ControlSnapshot>>, PreviewError> {
-        self.control.try_lock().map_err(|error| match error {
-            std::sync::TryLockError::WouldBlock => PreviewError::Busy,
-            std::sync::TryLockError::Poisoned(_) => {
+        match self.control.try_lock() {
+            Ok(control) => Ok(control),
+            Err(std::sync::TryLockError::WouldBlock) => Err(PreviewError::Busy),
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => {
                 self.frontdoor.retire();
-                PreviewError::Unavailable
+                drop(poisoned.into_inner());
+                self.retire_store();
+                Err(PreviewError::Unavailable)
             }
-        })
+        }
     }
     fn now(&self) -> u64 {
         self.clock.elapsed().as_millis().min(u128::from(u64::MAX)) as u64

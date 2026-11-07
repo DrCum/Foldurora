@@ -1265,3 +1265,34 @@ fn preview_host_stop_between_final_terminal_check_and_unlock_cannot_abandon_stor
     drop(store);
     drop(guard); // Already-consumed cleanup cannot run the hook twice.
 }
+
+#[test]
+fn preview_host_poisoned_control_retires_prepared_store_without_waiting_for_stop_or_next_poll() {
+    let mut owned = Owned::new();
+    owned.capture_ready();
+    let old = owned.prepared_frame(1);
+    let shared = owned.reader.0.clone();
+    let budget = owned.channel.image_budget();
+    let poison = shared.clone();
+    assert!(
+        std::thread::spawn(move || {
+            let _control = poison.control.lock().unwrap();
+            panic!("intentional image-only control poison fixture");
+        })
+        .join()
+        .is_err()
+    );
+    assert!(matches!(owned.reader.try_status(), Err(PreviewError::Unavailable)));
+    assert!(!old.current());
+    let store = shared.store.lock().unwrap();
+    assert!(store.entries[0].model.is_none());
+    assert!(store.entries[0].raw.is_none());
+    assert!(store.entries[0].prepared.is_none());
+    assert!(store.views.is_empty());
+    assert!(store.ledger.uncertain(owned.descriptor.source));
+    assert!(store.garbage.is_empty());
+    drop(store);
+    assert!(budget.used() > 0);
+    drop(old);
+    until(|| (budget.used() == 0).then_some(()));
+}
