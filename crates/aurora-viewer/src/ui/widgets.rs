@@ -628,7 +628,7 @@ impl<'a> Floater<'a> {
         let restore_id = window_id.with("restore_size");
         let expanded = ctx.data_mut(|d| d.get_persisted::<Vec2>(expanded_id)).unwrap_or(self.default_size);
         let restore = ctx.data_mut(|d| d.remove_temp::<bool>(restore_id)).unwrap_or(false);
-        let workspace = workspace_placement(ctx, self.id);
+        let workspace = workspace_placement(ctx, self.id, self.default_pos, self.default_size);
         let resizable = self.resizable && !minimized;
         let bounds = self.viewport_control.then(|| super::layout::toolbar_canvas(ctx)).flatten();
         let backup_id = window_id.with("viewport_control_unrestricted_rect");
@@ -1243,7 +1243,7 @@ pub(crate) fn bare_window(
         w = w.fixed_size(size);
     }
     let slot = super::layout::slot(ctx, window_id);
-    let workspace = workspace_placement(ctx, id);
+    let workspace = workspace_placement(ctx, id, default.min, default.size());
     if let Some((pos, size)) = workspace {
         w = w.fixed_size(size.min(room.size()).max(min_size)).current_pos(pos);
     }
@@ -1443,6 +1443,75 @@ pub(crate) fn workspace_expanded_size(ctx: &egui::Context, id: &str) -> Option<V
     saved_canvas_size(ctx, egui::Id::unique(id))
         .or_else(|| ctx.data_mut(|d| d.get_persisted::<Vec2>(egui::Id::unique(id).with("expanded_size"))))
 }
+/// Geometry-only rollback data. This never contains editor/Undo/focus state.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct WorkspaceGeometryState {
+    expanded: Option<Vec2>,
+    unrestricted: Option<Vec2>,
+    pending: Option<[f32; 4]>,
+    reset: Option<WorkspaceGeometryReset>,
+    area_position: Option<egui::Pos2>,
+    area_size: Option<Vec2>,
+}
+#[derive(Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkspaceGeometryReset {
+    position: Option<egui::Pos2>,
+    size: Option<Vec2>,
+}
+pub(crate) fn workspace_geometry_state(ctx: &egui::Context, id: &str) -> WorkspaceGeometryState {
+    let key = egui::Id::unique(id);
+    let area = egui::AreaState::load(ctx, key);
+    ctx.data_mut(|d| WorkspaceGeometryState {
+        expanded: d.get_persisted::<Vec2>(key.with("expanded_size")),
+        unrestricted: d.get_persisted::<Vec2>(key.with("viewport_unrestricted_size")),
+        pending: d.get_persisted::<[f32; 4]>(key.with("workspace_geometry")),
+        reset: d.get_persisted::<WorkspaceGeometryReset>(key.with("workspace_geometry_reset")),
+        area_position: area.and_then(|a| a.pivot_pos.map(|_| a.left_top_pos())),
+        area_size: area.and_then(|a| a.size),
+    })
+}
+/// Restore only geometry keys a Workspace may have introduced. Area geometry
+/// resets are consumed at the next ordinary draw: Areas::set_state would mark
+/// a closed area visible, so cancellation never calls it or opens the window.
+pub(crate) fn workspace_restore_geometry_state(ctx: &egui::Context, id: &str, old: WorkspaceGeometryState, projection: bool) {
+    let key = egui::Id::unique(id);
+    let has_area = egui::AreaState::load(ctx, key).is_some();
+    if projection && let Some(mut area) = egui::AreaState::load(ctx, key) {
+        // Only the isolated legacy-save clone is modified here. Live rollback
+        // must not mark a closed area visible through Areas::set_state.
+        area.pivot = egui::Align2::LEFT_TOP;
+        area.pivot_pos = old.area_position;
+        area.size = old.area_size;
+        ctx.memory_mut(|m| m.areas_mut().set_state(egui::LayerId::new(egui::Order::Middle, key), area));
+    }
+    ctx.data_mut(|d| {
+        d.remove::<Vec2>(key.with("expanded_size"));
+        d.remove::<Vec2>(key.with("viewport_unrestricted_size"));
+        d.remove::<[f32; 4]>(key.with("workspace_geometry"));
+        d.remove::<WorkspaceGeometryReset>(key.with("workspace_geometry_reset"));
+        if let Some(v) = old.expanded {
+            d.insert_persisted(key.with("expanded_size"), v);
+        }
+        if let Some(v) = old.unrestricted {
+            d.insert_persisted(key.with("viewport_unrestricted_size"), v);
+        }
+        if let Some(v) = old.pending {
+            d.insert_persisted(key.with("workspace_geometry"), v);
+        }
+        if let Some(v) = old.reset {
+            d.insert_persisted(key.with("workspace_geometry_reset"), v);
+        } else if old.pending.is_none() && has_area {
+            d.insert_persisted(
+                key.with("workspace_geometry_reset"),
+                WorkspaceGeometryReset {
+                    position: old.area_position,
+                    size: old.area_size,
+                },
+            );
+        }
+    });
+}
 pub(crate) fn workspace_place(ctx: &egui::Context, id: &str, pos: egui::Pos2, size: Vec2) {
     ctx.data_mut(|d| {
         d.insert_persisted(egui::Id::unique(id).with("workspace_geometry"), [pos.x, pos.y, size.x, size.y]);
@@ -1450,12 +1519,19 @@ pub(crate) fn workspace_place(ctx: &egui::Context, id: &str, pos: egui::Pos2, si
         d.insert_persisted(egui::Id::unique(id).with("viewport_unrestricted_size"), size);
     });
 }
-fn workspace_placement(ctx: &egui::Context, id: &str) -> Option<(egui::Pos2, Vec2)> {
+fn workspace_placement(ctx: &egui::Context, id: &str, default_position: egui::Pos2, default_size: Vec2) -> Option<(egui::Pos2, Vec2)> {
     ctx.data_mut(|d| {
         let key = egui::Id::unique(id).with("workspace_geometry");
-        let g = d.get_persisted::<[f32; 4]>(key)?;
-        d.remove::<[f32; 4]>(key);
-        Some((egui::pos2(g[0], g[1]), egui::vec2(g[2], g[3])))
+        if let Some(g) = d.get_persisted::<[f32; 4]>(key) {
+            d.remove::<[f32; 4]>(key);
+            d.remove::<WorkspaceGeometryReset>(egui::Id::unique(id).with("workspace_geometry_reset"));
+            Some((egui::pos2(g[0], g[1]), egui::vec2(g[2], g[3])))
+        } else {
+            let reset_key = egui::Id::unique(id).with("workspace_geometry_reset");
+            let reset = d.get_persisted::<WorkspaceGeometryReset>(reset_key)?;
+            d.remove::<WorkspaceGeometryReset>(reset_key);
+            Some((reset.position.unwrap_or(default_position), reset.size.unwrap_or(default_size)))
+        }
     })
 }
 

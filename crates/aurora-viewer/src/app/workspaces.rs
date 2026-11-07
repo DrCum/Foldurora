@@ -100,7 +100,8 @@ impl App {
         self.workspaces.placement = None;
         p.baseline.settings(&mut self.settings, false);
         if restore_geometry {
-            ui::layout::workspace_apply(&self.egui_ctx, &p.baseline.geometry);
+            ui::layout::workspace_cancel_gesture(&self.egui_ctx);
+            ui::layout::workspace_restore(&self.egui_ctx);
         }
         self.workspaces.active = p.active;
         self.settings.workspace_held = None;
@@ -119,25 +120,15 @@ impl App {
         if self.workspaces.source != source {
             // Normal logout/login events call cancel before World changes. A
             // late mismatched source cannot restore old geometry into the new one.
+            // Loss of host receipt/grant is not a different native World.
+            // Cleanup may restore its own baseline without admitting an action.
             let same = self
                 .workspaces
                 .source
                 .as_ref()
-                .zip(source.as_ref())
-                .is_some_and(|(a, b)| a.agent == b.agent && a.login == b.login && a.grid == b.grid);
+                .is_some_and(|s| s.agent == self.world.agent_id && self.world.login.as_ref().is_some_and(|l| l.session_id == s.login));
             self.workspace_cancel_preview(same);
-            if let Some(n) = self.workspaces.binding.checked_add(1) {
-                self.workspaces.binding = n;
-            } else {
-                self.workspaces.exhausted = true;
-            }
-            self.workspaces.source = source;
-            self.workspaces.catalogue = None;
-            self.workspaces.persisted = false;
-            self.workspaces.active = None;
-            self.workspaces.previous = None;
-            self.workspaces.status = Status::Unavailable;
-            self.workspaces.advance();
+            self.workspaces.bind(source);
             self.workspace_ui.reset();
         }
         let permit = self.workspace_ui.open && self.gfx.as_ref().is_some_and(|g| self.workspace_permit(g));
@@ -177,6 +168,13 @@ impl App {
         if self.workspaces.pending.is_some() && self.workspaces.permit {
             self.egui_ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
+    }
+    /// Called before World consumes login/disconnect, including exact
+    /// same-source reauthentication. No old IO/UI capture can be readmitted.
+    pub(super) fn workspace_source_boundary(&mut self) {
+        self.workspace_cancel_preview(true);
+        self.workspaces.bind(None);
+        self.workspace_ui.reset();
     }
     fn workspace_io(&mut self, next: Option<Catalogue>, active: Option<Uuid>) {
         if self.workspaces.pending.is_some() || self.workspaces.exhausted {
@@ -286,6 +284,9 @@ impl App {
                     return;
                 }
                 let current = self.workspace_capture();
+                if self.workspaces.preview.is_some() {
+                    ui::layout::workspace_restore(&self.egui_ctx);
+                }
                 let baseline = self.workspaces.begin_preview(layout, id, current, commit);
                 self.settings.workspace_held = Some(baseline.clone());
                 ui::layout::workspace_preview(&self.egui_ctx, Some(baseline.geometry));
@@ -320,7 +321,7 @@ impl App {
                     return;
                 }
                 let mut next = self.workspaces.catalogue.clone().expect("ready workspace catalogue");
-                if next.records.iter().any(|r| r.name.to_lowercase() == name.to_lowercase()) {
+                if !next.name_available(&name, rename) {
                     self.workspaces.status = Status::Invalid;
                     return;
                 }
@@ -402,7 +403,11 @@ impl App {
                 self.workspace_cancel_preview(true);
                 return;
             }
-            ui::layout::workspace_apply(&self.egui_ctx, &p.layout.geometry);
+            if p.restore_absence {
+                ui::layout::workspace_previous(&self.egui_ctx, &p.layout.geometry);
+            } else {
+                ui::layout::workspace_apply(&self.egui_ctx, &p.layout.geometry);
+            }
             p.passes += 1;
             p.room = Some(room);
             self.workspaces.placement = Some(p);

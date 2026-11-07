@@ -133,6 +133,13 @@ pub(crate) fn valid_name(name: &str) -> bool {
     !name.is_empty() && name == name.trim() && name.len() <= 96 && name.chars().count() <= 64 && !name.chars().any(char::is_control)
 }
 impl Catalogue {
+    pub(crate) fn name_available(&self, name: &str, except: Option<Uuid>) -> bool {
+        valid_name(name)
+            && !self
+                .records
+                .iter()
+                .any(|r| Some(r.id) != except && r.name.to_lowercase() == name.to_lowercase())
+    }
     pub(crate) fn empty(account: Uuid, grid: String) -> Self {
         Self {
             version: 1,
@@ -282,5 +289,26 @@ mod tests {
             s.world_viewport, viewport,
             "fitted host viewport remains under existing host policy"
         );
+    }
+    #[test]
+    fn workspace_rename_accepts_its_own_unchanged_or_case_only_name_but_not_another_record() {
+        let mut c = Catalogue::empty(Uuid::new_v4(), "a".repeat(64));
+        let id = Uuid::new_v4();
+        c.records.push(Record {
+            id,
+            name: "Desk".into(),
+            layout: layout(),
+        });
+        c.records.push(Record {
+            id: Uuid::new_v4(),
+            name: "Other".into(),
+            layout: layout(),
+        });
+        assert!(c.name_available("Desk", Some(id)));
+        assert!(c.name_available("DESK", Some(id)));
+        assert!(!c.name_available("other", Some(id)));
+        assert!(!c.name_available("DESK", None));
+        c.records[0].name = "DESK".into();
+        assert!(c.validate().is_ok());
     }
 }

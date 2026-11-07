@@ -3,15 +3,41 @@ use crate::theme::Palette;
 use crate::workspace::controller::{Action, Command, Controller, Status, Ticket};
 use uuid::Uuid;
 pub(crate) const WINDOW: &str = "named_workspaces";
-#[derive(Default)]
 pub(crate) struct WorkspaceUi {
     pub open: bool,
     selected: Option<Uuid>,
     name: String,
     delete: Option<(Ticket, Uuid)>,
     painted: Option<Ticket>,
+    selection_epoch: u64,
+    selection_observed: Option<Uuid>,
+    selection_exhausted: bool,
+}
+impl Default for WorkspaceUi {
+    fn default() -> Self {
+        Self {
+            open: false,
+            selected: None,
+            name: String::new(),
+            delete: None,
+            painted: None,
+            selection_epoch: 1,
+            selection_observed: None,
+            selection_exhausted: false,
+        }
+    }
 }
 impl WorkspaceUi {
+    fn selection_changed(&mut self) {
+        if let Some(next) = self.selection_epoch.checked_add(1) {
+            self.selection_epoch = next;
+        } else {
+            self.selection_exhausted = true;
+        }
+        self.selection_observed = self.selected;
+        self.painted = None;
+        self.delete = None;
+    }
     pub(crate) fn reset(&mut self) {
         *self = Self::default();
     }
@@ -21,6 +47,10 @@ impl WorkspaceUi {
             self.painted = None;
             return None;
         }
+        if self.selection_observed != self.selected {
+            self.selection_changed();
+        }
+        let selection_scope = self.selection_epoch;
         if self.delete.as_ref().is_some_and(|(t, _)| !c.accepts(t)) {
             self.delete = None;
         }
@@ -28,7 +58,10 @@ impl WorkspaceUi {
             t.record = self.selected;
             t
         });
-        let ticket = self.painted.take().filter(|t| Some(t) == current.as_ref() && c.accepts(t));
+        let ticket = self
+            .painted
+            .take()
+            .filter(|t| !self.selection_exhausted && Some(t) == current.as_ref() && c.accepts(t));
         let enabled = ticket.is_some() && c.ready();
         let was_open = self.open;
         let mut open = self.open;
@@ -74,10 +107,14 @@ impl WorkspaceUi {
                     .show(ui, |ui| {
                         if let Some(cat) = &c.catalogue {
                             for r in &cat.records {
-                                if ui.selectable_label(self.selected == Some(r.id), &r.name).clicked() {
+                                let row = ui.selectable_label(self.selected == Some(r.id), &r.name);
+                                #[cfg(test)]
+                                ui.ctx()
+                                    .data_mut(|d| d.insert_temp(egui::Id::unique(("workspace_test_row", r.id)), row.id));
+                                if row.clicked() {
                                     self.selected = Some(r.id);
                                     self.name = r.name.clone();
-                                    self.delete = None;
+                                    self.selection_changed();
                                 }
                             }
                         }
@@ -88,78 +125,88 @@ impl WorkspaceUi {
                         .char_limit(64)
                         .hint_text(tr!("workspaces-name")),
                 );
-                ui.horizontal_wrapped(|ui| {
-                    if ui
-                        .add_enabled(enabled && c.preview.is_none(), egui::Button::new(tr!("workspaces-save")))
-                        .clicked()
-                    {
-                        command = Some(Command::Save(self.name.trim().to_owned()));
-                    }
-                    if let Some(id) = self.selected.filter(|id| c.record(*id).is_some()) {
-                        if ui
-                            .add_enabled(enabled && c.preview.is_none(), egui::Button::new(tr!("workspaces-rename")))
-                            .clicked()
-                        {
-                            command = Some(Command::Rename(id, self.name.trim().to_owned()));
-                        }
-                        if ui
-                            .add_enabled(enabled && c.preview.is_none(), egui::Button::new(tr!("workspaces-delete")))
-                            .clicked()
-                        {
-                            self.delete = ticket.clone().filter(|t| t.record == Some(id)).map(|t| (t, id));
-                        }
-                        if ui.add_enabled(enabled, egui::Button::new(tr!("workspaces-preview"))).clicked() {
-                            command = Some(Command::Preview(id));
-                        }
-                        if ui.add_enabled(enabled, egui::Button::new(tr!("workspaces-switch"))).clicked() {
-                            command = Some(Command::Switch(id));
-                        }
-                    }
-                    if ui
-                        .add_enabled(ticket.is_some() && c.preview.is_some(), egui::Button::new(tr!("workspaces-cancel")))
-                        .clicked()
-                    {
-                        command = Some(Command::Cancel);
-                    }
-                    if ui
-                        .add_enabled(
-                            enabled && c.preview.is_none() && c.previous.is_some(),
-                            egui::Button::new(tr!("workspaces-previous")),
-                        )
-                        .clicked()
-                    {
-                        command = Some(Command::Previous);
-                    }
-                    if ui
-                        .add_enabled(
-                            ticket.is_some() && c.pending.is_none() && c.status == Status::Error,
-                            egui::Button::new(tr!("workspaces-retry")),
-                        )
-                        .clicked()
-                    {
-                        command = Some(Command::Retry);
-                    }
-                });
-                if let Some(id) = self
-                    .delete
-                    .as_ref()
-                    .filter(|(t, id)| c.accepts(t) && c.record(*id).is_some())
-                    .map(|(_, id)| *id)
-                {
+                ui.push_id(("workspace_selection_controls", selection_scope), |ui| {
                     ui.horizontal_wrapped(|ui| {
-                        ui.label(tr!("workspaces-delete-confirm"));
-                        if ui.add_enabled(enabled, egui::Button::new(tr!("workspaces-delete"))).clicked() {
-                            command = Some(Command::Delete(id));
-                            self.delete = None;
+                        if ui
+                            .add_enabled(enabled && c.preview.is_none(), egui::Button::new(tr!("workspaces-save")))
+                            .clicked()
+                        {
+                            command = Some(Command::Save(self.name.trim().to_owned()));
                         }
-                        if ui.button(tr!("common-cancel")).clicked() {
-                            self.delete = None;
+                        if let Some(id) = self.selected.filter(|id| c.record(*id).is_some()) {
+                            if ui
+                                .add_enabled(enabled && c.preview.is_none(), egui::Button::new(tr!("workspaces-rename")))
+                                .clicked()
+                            {
+                                command = Some(Command::Rename(id, self.name.trim().to_owned()));
+                            }
+                            if ui
+                                .add_enabled(enabled && c.preview.is_none(), egui::Button::new(tr!("workspaces-delete")))
+                                .clicked()
+                            {
+                                self.delete = ticket.clone().filter(|t| t.record == Some(id)).map(|t| (t, id));
+                            }
+                            if ui.add_enabled(enabled, egui::Button::new(tr!("workspaces-preview"))).clicked() {
+                                command = Some(Command::Preview(id));
+                            }
+                            let switch = ui.add_enabled(enabled, egui::Button::new(tr!("workspaces-switch")));
+                            #[cfg(test)]
+                            ui.ctx()
+                                .data_mut(|d| d.insert_temp(egui::Id::unique("workspace_test_switch"), switch.id));
+                            if switch.clicked() {
+                                command = Some(Command::Switch(id));
+                            }
+                        }
+                        if ui
+                            .add_enabled(ticket.is_some() && c.preview.is_some(), egui::Button::new(tr!("workspaces-cancel")))
+                            .clicked()
+                        {
+                            command = Some(Command::Cancel);
+                        }
+                        if ui
+                            .add_enabled(
+                                enabled && c.preview.is_none() && c.previous.is_some(),
+                                egui::Button::new(tr!("workspaces-previous")),
+                            )
+                            .clicked()
+                        {
+                            command = Some(Command::Previous);
+                        }
+                        if ui
+                            .add_enabled(
+                                ticket.is_some() && c.pending.is_none() && c.status == Status::Error,
+                                egui::Button::new(tr!("workspaces-retry")),
+                            )
+                            .clicked()
+                        {
+                            command = Some(Command::Retry);
                         }
                     });
-                }
+                    if let Some(id) = self
+                        .delete
+                        .as_ref()
+                        .filter(|(t, id)| c.accepts(t) && c.record(*id).is_some())
+                        .map(|(_, id)| *id)
+                    {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(tr!("workspaces-delete-confirm"));
+                            if ui.add_enabled(enabled, egui::Button::new(tr!("workspaces-delete"))).clicked() {
+                                command = Some(Command::Delete(id));
+                                self.delete = None;
+                            }
+                            if ui.button(tr!("common-cancel")).clicked() {
+                                self.delete = None;
+                            }
+                        });
+                    }
+                });
             });
         });
         self.open = open;
+        if selection_scope != self.selection_epoch || self.selection_exhausted {
+            self.painted = None;
+            return None;
+        }
         if was_open && !open && c.preview.is_some() {
             command = Some(Command::Cancel);
         }
@@ -317,6 +364,131 @@ mod tests {
         assert!(draw(&mut frames, &mut st, &c, vec![pointer(pos, false)]).1.is_none());
         let action = click(&mut frames, &mut st, &c, aurora_i18n::tr!("workspaces-switch")).unwrap();
         assert_eq!(Some(action.ticket.source), c.source);
+    }
+    #[test]
+    fn native_workspace_held_switch_cannot_follow_keyboard_or_accessibility_selection_even_a_b_a() {
+        for accesskit in [false, true] {
+            for return_to_a in [false, true] {
+                let (mut c, mut st) = fixture();
+                let a = st.selected.unwrap();
+                let b = Uuid::new_v4();
+                let layout = c.record(a).unwrap().layout.clone();
+                c.catalogue.as_mut().unwrap().records.push(Record {
+                    id: b,
+                    name: "Other".into(),
+                    layout,
+                });
+                let mut frames = Frames::new();
+                let pos = location(&mut frames, &mut st, &c, aurora_i18n::tr!("workspaces-switch"));
+                let old = frames
+                    .ctx
+                    .data(|d| d.get_temp::<egui::Id>(egui::Id::unique("workspace_test_switch")))
+                    .unwrap();
+                draw(&mut frames, &mut st, &c, vec![egui::Event::PointerMoved(pos)]);
+                assert!(draw(&mut frames, &mut st, &c, vec![pointer(pos, true)]).1.is_none());
+                let mut last = old;
+                for target in std::iter::once(b).chain(return_to_a.then_some(a)) {
+                    let widget = frames
+                        .ctx
+                        .data(|d| d.get_temp::<egui::Id>(egui::Id::unique(("workspace_test_row", target))))
+                        .unwrap();
+                    frames.ctx.memory_mut(|m| m.request_focus(widget));
+                    if accesskit {
+                        assert!(
+                            draw(
+                                &mut frames,
+                                &mut st,
+                                &c,
+                                vec![egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+                                    action: egui::accesskit::Action::Click,
+                                    target_tree: egui::accesskit::TreeId::ROOT,
+                                    target_node: widget.accesskit_id(),
+                                    data: None
+                                })]
+                            )
+                            .1
+                            .is_none()
+                        );
+                    } else {
+                        for pressed in [true, false] {
+                            assert!(
+                                draw(
+                                    &mut frames,
+                                    &mut st,
+                                    &c,
+                                    vec![egui::Event::Key {
+                                        key: egui::Key::Space,
+                                        physical_key: None,
+                                        pressed,
+                                        repeat: false,
+                                        modifiers: egui::Modifiers::NONE
+                                    }]
+                                )
+                                .1
+                                .is_none()
+                            );
+                        }
+                    }
+                    assert_eq!(st.selected, Some(target), "actual row selection while pointer stays held");
+                    for _ in 0..4 {
+                        assert!(draw(&mut frames, &mut st, &c, vec![]).1.is_none());
+                    }
+                    assert!(frames.ctx.input(|i| i.pointer.primary_down()));
+                    let next = frames
+                        .ctx
+                        .data(|d| d.get_temp::<egui::Id>(egui::Id::unique("workspace_test_switch")))
+                        .unwrap();
+                    assert_ne!(next, old);
+                    assert_ne!(next, last);
+                    last = next;
+                }
+                assert!(
+                    draw(&mut frames, &mut st, &c, vec![pointer(pos, false)]).1.is_none(),
+                    "a settled replacement control cannot inherit the old press"
+                );
+                let expected = if return_to_a { a } else { b };
+                let fresh = click(&mut frames, &mut st, &c, aurora_i18n::tr!("workspaces-switch")).unwrap();
+                assert!(matches!(fresh.command,Command::Switch(id) if id==expected));
+            }
+        }
+    }
+    #[test]
+    fn native_workspace_selection_epoch_exhaustion_keeps_real_controls_disabled_without_reuse() {
+        let (mut c, mut st) = fixture();
+        let a = st.selected.unwrap();
+        let b = Uuid::new_v4();
+        let layout = c.record(a).unwrap().layout.clone();
+        c.catalogue.as_mut().unwrap().records.push(Record {
+            id: b,
+            name: "Other".into(),
+            layout,
+        });
+        st.selection_observed = st.selected;
+        st.selection_epoch = u64::MAX;
+        let mut frames = Frames::new();
+        location(&mut frames, &mut st, &c, aurora_i18n::tr!("workspaces-switch"));
+        let row = frames
+            .ctx
+            .data(|d| d.get_temp::<egui::Id>(egui::Id::unique(("workspace_test_row", b))))
+            .unwrap();
+        assert!(
+            draw(
+                &mut frames,
+                &mut st,
+                &c,
+                vec![egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+                    action: egui::accesskit::Action::Click,
+                    target_tree: egui::accesskit::TreeId::ROOT,
+                    target_node: row.accesskit_id(),
+                    data: None
+                })]
+            )
+            .1
+            .is_none()
+        );
+        assert!(st.selection_exhausted);
+        assert_eq!(st.selection_epoch, u64::MAX);
+        assert!(click(&mut frames, &mut st, &c, aurora_i18n::tr!("workspaces-switch")).is_none());
     }
     #[test]
     fn native_workspace_preferences_layout_entry_uses_real_options_result_without_changing_layout() {

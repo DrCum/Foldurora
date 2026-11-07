@@ -3524,3 +3524,9 @@ Open-source technologies that could set Aurora apart (human request of 2026-10-1
 - Root validation and independent source review pending. New pure/private-file/
   actual-egui tests authored UNRUN by author; human Windows acceptance of both
   styles, DPI, separate profiles, cancellation and host transitions still pending.
+
+- Workspace source-review follow-up: retain known closed-role geometry and typed
+  absence rollback/Previous; reject opened Windows hardlinks; invalidate held
+  gestures across nonreused selections; quarantine rollback drags; accept own
+  case-only Rename; explicit logical source-generation and cleanup fences.
+  Regression tests are authored UNRUN; immutable 168 source baseline preserved.

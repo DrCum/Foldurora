@@ -5028,3 +5028,12 @@ geometry and ordinary autosave pauses during Preview. Cancel/Switch resume the
 existing debounced layout saver. Previous is session-only and changes after
 successful placement. New tests are authored, not run by the source author;
 root compilation/offline and human native acceptance remain separate gates.
+
+Workspace rollback retains a typed per-role geometry checkpoint, including absent
+roles. Saved known geometry remains deferred for closed windows; Cancel removes
+only touched introduced state. A typed reset is consumed only on ordinary native
+drawing, so rollback does not mark a closed egui Area visible or open/focus chat.
+Selection incarnations are checked and never reused within a source/model scope,
+including A→B→A. Windows private data, lock and temp handles additionally require
+one hardlink. Logical login boundaries retire exact-same-source captures while
+retaining the outstanding IO credit until its original completion.

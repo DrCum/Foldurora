@@ -267,12 +267,34 @@ fn open_private_file(path: &Path, create_new: bool) -> io::Result<File> {
     if !metadata.is_file() || platform::is_reparse(&metadata) {
         return Err(invalid("host file is not a plain file"));
     }
+    #[cfg(windows)]
+    validate_opened_single_link(&file)?;
     platform::validate_file(path, &metadata)?;
     Ok(file)
 }
 
 fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::PermissionDenied, message)
+}
+
+/// The ACL belongs to the file, so another hardlink can have the same private
+/// owner/DACL while bypassing the selected profile's namespace. Query the
+/// already opened handle, not a second path lookup.
+#[cfg(windows)]
+fn validate_opened_single_link(file: &File) -> io::Result<()> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle};
+    let mut info = std::mem::MaybeUninit::<BY_HANDLE_FILE_INFORMATION>::uninit();
+    // SAFETY: File owns a live handle; the writable, aligned output has the
+    // exact Win32 ABI size and is read only after a successful query.
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle().cast(), info.as_mut_ptr()) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: the successful API call initialized this output structure.
+    if unsafe { info.assume_init() }.nNumberOfLinks != 1 {
+        return Err(invalid("private file has multiple hard links"));
+    }
+    Ok(())
 }
 
 /// Native named layouts use the already selected character profile, including
@@ -351,6 +373,8 @@ impl WorkspaceDirectory {
         if !m.is_file() || platform::is_reparse(&m) {
             return Err(invalid("workspace file is not plain"));
         }
+        #[cfg(windows)]
+        validate_opened_single_link(&f)?;
         platform::validate_file(&path, &m)?;
         let mut b = Vec::new();
         f.take((limit + 1) as u64).read_to_end(&mut b)?;
@@ -368,6 +392,8 @@ impl WorkspaceDirectory {
             let mut f = create_private_file(&temp)?;
             f.write_all(bytes)?;
             f.sync_all()?;
+            #[cfg(windows)]
+            validate_opened_single_link(&f)?;
             drop(f);
             // The caller's cooperative store lock covers read/encode/rename;
             // also detect a non-cooperating replacement during the disk flush.
@@ -699,6 +725,39 @@ mod platform {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(windows)]
+    #[test]
+    fn native_workspace_windows_hardlinks_to_private_data_lock_and_temporary_handles_are_rejected() {
+        let d = WorkspaceDirectory::select(Uuid::new_v4(), &"c".repeat(64)).unwrap();
+        let lock = d.lock().unwrap();
+        d.publish(b"original", None).unwrap();
+        drop(lock);
+        let path = d.path.join("named-v1.json");
+        let alias = d.path.join("data-alias");
+        std::fs::hard_link(&path, &alias).unwrap();
+        assert!(d.read(64).is_err(), "matching private ACL does not make a hardlink safe");
+        assert!(d.publish(b"replacement", Some(b"original")).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"original");
+        assert_eq!(std::fs::read(&alias).unwrap(), b"original");
+        std::fs::remove_file(alias).unwrap();
+        assert_eq!(d.read(64).unwrap().unwrap(), b"original");
+        let lock_alias = d.path.join("lock-alias");
+        std::fs::hard_link(d.path.join("store.lock"), &lock_alias).unwrap();
+        assert!(d.lock().is_err());
+        std::fs::remove_file(lock_alias).unwrap();
+        let temporary = d.path.join("temporary");
+        let f = create_private_file(&temporary).unwrap();
+        let temp_alias = d.path.join("temporary-alias");
+        std::fs::hard_link(&temporary, &temp_alias).unwrap();
+        assert!(
+            validate_opened_single_link(&f).is_err(),
+            "publication rechecks the same opened temp handle after sync"
+        );
+        drop(f);
+        std::fs::remove_file(temp_alias).unwrap();
+        std::fs::remove_file(temporary).unwrap();
+        drop(d.lock().unwrap());
+    }
     #[test]
     fn native_workspace_private_store_is_exclusive_and_never_repairs_a_link_or_public_file() {
         let d = WorkspaceDirectory::select(Uuid::new_v4(), &"a".repeat(64)).unwrap();

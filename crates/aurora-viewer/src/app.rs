@@ -8908,7 +8908,7 @@ impl App {
         while !still && let Ok((sent, ev)) = self.net.events.try_recv() {
             let workspace_boundary = matches!(&ev, NetEvent::LoggedIn(_) | NetEvent::Disconnected { .. });
             if workspace_boundary {
-                self.workspace_cancel_preview(true);
+                self.workspace_source_boundary();
             }
             // (`sent`: when the session read the datagram, the time its
             // motion starts from)

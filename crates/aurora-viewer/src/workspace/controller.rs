@@ -58,6 +58,7 @@ pub(crate) struct Placement {
     pub active: Option<Uuid>,
     pub room: Option<egui::Rect>,
     pub previous: Option<(Layout, Option<Uuid>)>,
+    pub restore_absence: bool,
 }
 pub(crate) struct Pending {
     pub source: Source,
@@ -109,13 +110,27 @@ impl Default for Controller {
     }
 }
 impl Controller {
-    pub(crate) fn begin_preview(&mut self, mut layout: Layout, id: Uuid, current: Layout, commit: bool) -> Layout {
-        let baseline = self.preview.as_ref().map_or(current, |p| p.baseline.clone());
-        for (g, b) in layout.geometry.iter_mut().zip(baseline.geometry) {
-            if b.is_none() {
-                *g = None;
-            }
+    /// A logical login boundary retires even an identical server-provided
+    /// identity. The one outstanding IO slot is retained until its own reply.
+    pub(crate) fn bind(&mut self, source: Option<Source>) {
+        if let Some(next) = self.binding.checked_add(1) {
+            self.binding = next;
+        } else {
+            self.exhausted = true;
         }
+        self.source = source;
+        self.catalogue = None;
+        self.persisted = false;
+        self.active = None;
+        self.previous = None;
+        self.preview = None;
+        self.placement = None;
+        self.permit = false;
+        self.status = Status::Unavailable;
+        self.advance();
+    }
+    pub(crate) fn begin_preview(&mut self, layout: Layout, id: Uuid, current: Layout, commit: bool) -> Layout {
+        let baseline = self.preview.as_ref().map_or(current, |p| p.baseline.clone());
         let active = self.preview.as_ref().map_or(self.active, |p| p.active);
         self.preview = Some(Preview {
             baseline: baseline.clone(),
@@ -129,6 +144,7 @@ impl Controller {
             active: Some(id),
             room: None,
             previous: commit.then(|| (baseline.clone(), active)),
+            restore_absence: false,
         });
         self.status = Status::Previewing;
         baseline
@@ -137,12 +153,7 @@ impl Controller {
         if self.preview.is_some() {
             return None;
         }
-        let (mut layout, active) = self.previous.clone()?;
-        for (g, b) in layout.geometry.iter_mut().zip(current.geometry) {
-            if b.is_none() {
-                *g = None;
-            }
-        }
+        let (layout, active) = self.previous.clone()?;
         self.preview = Some(Preview {
             baseline: current.clone(),
             active: self.active,
@@ -155,6 +166,7 @@ impl Controller {
             active,
             room: None,
             previous: Some((current.clone(), self.active)),
+            restore_absence: true,
         });
         self.status = Status::Previewing;
         Some(current)
@@ -185,7 +197,7 @@ impl Controller {
             }
         }
         let pending = self.pending.take().expect("matched workspace IO");
-        if reply.binding != self.binding || self.source.as_ref() != Some(&reply.source) {
+        if self.exhausted || reply.binding != self.binding || self.source.as_ref() != Some(&reply.source) {
             return;
         }
         match reply.result {
@@ -320,6 +332,57 @@ mod tests {
         assert_eq!(c.status, Status::Saving);
     }
     #[test]
+    fn workspace_logical_reauthentication_fences_identical_source_tickets_and_old_io_until_finished() {
+        let source = source();
+        let mut c = Controller::default();
+        c.bind(Some(source.clone()));
+        c.permit = true;
+        let old = c.ticket().unwrap();
+        let old_binding = c.binding;
+        c.pending = Some(Pending {
+            source: source.clone(),
+            binding: old_binding,
+            operation: 4,
+            active: None,
+            writing: false,
+            expected: None,
+        });
+        c.bind(None);
+        c.bind(Some(source.clone()));
+        c.permit = true;
+        assert!(!c.accepts(&old));
+        assert!(c.pending.is_some(), "unfinished old IO keeps its sole credit");
+        c.accept_reply(super::super::store::Reply {
+            source: source.clone(),
+            binding: old_binding,
+            operation: 4,
+            result: Ok(None),
+        });
+        assert!(c.pending.is_none());
+        assert!(c.catalogue.is_none());
+        assert_eq!(c.status, Status::Unavailable);
+        c.binding = u64::MAX;
+        c.pending = Some(Pending {
+            source: source.clone(),
+            binding: u64::MAX,
+            operation: 5,
+            active: None,
+            writing: false,
+            expected: None,
+        });
+        c.bind(Some(source.clone()));
+        assert!(c.exhausted);
+        c.accept_reply(super::super::store::Reply {
+            source,
+            binding: u64::MAX,
+            operation: 5,
+            result: Ok(None),
+        });
+        assert!(c.pending.is_none());
+        assert!(c.catalogue.is_none());
+        assert_eq!(c.status, Status::Unavailable);
+    }
+    #[test]
     fn workspace_write_reply_must_match_entire_original_proposed_catalogue() {
         let s = source();
         let expected = Catalogue::empty(s.agent, s.grid.clone());
@@ -404,11 +467,18 @@ mod tests {
         assert_eq!(c.placement.as_ref().unwrap().layout, d);
     }
     #[test]
-    fn workspace_preview_does_not_create_unknown_closed_role_geometry() {
+    fn workspace_preview_and_previous_keep_known_geometry_for_unmeasured_closed_roles() {
         let mut c = Controller::default();
         let mut old = layout(0.0);
         old.geometry[3] = None;
-        c.begin_preview(layout(5.0), Uuid::new_v4(), old, false);
-        assert!(c.placement.as_ref().unwrap().layout.geometry[3].is_none());
+        let target = layout(5.0);
+        c.begin_preview(target.clone(), Uuid::new_v4(), old.clone(), false);
+        assert_eq!(c.placement.as_ref().unwrap().layout.geometry[3], target.geometry[3]);
+        assert!(c.preview.as_ref().unwrap().baseline.geometry[3].is_none());
+        c.preview = None;
+        c.placement = None;
+        c.previous = Some((target.clone(), None));
+        c.begin_previous(old);
+        assert_eq!(c.placement.as_ref().unwrap().layout.geometry[3], target.geometry[3]);
     }
 }
