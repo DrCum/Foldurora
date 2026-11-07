@@ -1,0 +1,158 @@
+{
+  "status": "PASS: independent archived evidence audit of six isolated Linux CPU Attention native cases",
+  "source_commit": "2d8094224e1b44f2cc557d944b9db10ad51e3886",
+  "elf_sha256": "99ee531b6c3c5c274598982d656b88884f98138fa89f7991bbee09cb57442232",
+  "driver_sha256": "f0f80738ba23a605ba1ccedee54e7b9144619e11da4d141b29ac280651599067",
+  "suite": "/workspace/work/attention-filter-fix-sol/.scratch/attention-native-driver/suite-ss3i70g1",
+  "suite_json_sha256": "1a992e40d380c3a5d36f8250582907c200f6044a3d1165532693492e5b8d3113",
+  "suite_seconds": 63.863927459999104,
+  "scope": "Exact2d809 only; synthetic body-free snapshots and recorded local intents through production AttentionWindow and real isolated X11 input. Unrelated full-suite failures on2d809 are not waived.",
+  "published_states_checked": 102,
+  "screenshots_hashes_dimensions_checked": 36,
+  "frozen_elf_physical_inodes_hashed": 1,
+  "unique_displays": [
+    ":301",
+    ":401",
+    ":501",
+    ":601",
+    ":701",
+    ":801"
+  ],
+  "unique_fixture_pids": [
+    656146,
+    656239,
+    656297,
+    656383,
+    656456,
+    656498
+  ],
+  "case_checks_total": 96,
+  "cases": {
+    "enter": {
+      "check_count": 13,
+      "final_intents": 3,
+      "native_event_count": 64,
+      "fixture_normal_exit_reaped": true,
+      "forced_fixture_cleanup": false,
+      "xvfb_exit_status": {
+        "identity_present": true,
+        "execution_state": "Z",
+        "running": false,
+        "exited_unreaped": true
+      },
+      "xvfb_wait_seconds": 4.374599666334689e-05,
+      "first_native_false_repeat": true,
+      "server_true_repeat_count": 3,
+      "all_event_and_effect_predicates_valid": true,
+      "no_premature_physical_release": true,
+      "priming_edges": 1,
+      "manual_repeat_train": false,
+      "fresh_and_release_away_opens_exact": true
+    },
+    "space": {
+      "check_count": 13,
+      "final_intents": 3,
+      "native_event_count": 63,
+      "fixture_normal_exit_reaped": true,
+      "forced_fixture_cleanup": false,
+      "xvfb_exit_status": {
+        "identity_present": true,
+        "execution_state": "Z",
+        "running": false,
+        "exited_unreaped": true
+      },
+      "xvfb_wait_seconds": 4.3715990614145994e-05,
+      "first_native_false_repeat": true,
+      "server_true_repeat_count": 2,
+      "all_event_and_effect_predicates_valid": true,
+      "no_premature_physical_release": true,
+      "priming_edges": 1,
+      "manual_repeat_train": false,
+      "fresh_and_release_away_opens_exact": true
+    },
+    "stale": {
+      "check_count": 23,
+      "final_intents": 3,
+      "native_event_count": 71,
+      "fixture_normal_exit_reaped": true,
+      "forced_fixture_cleanup": false,
+      "xvfb_exit_status": {
+        "identity_present": true,
+        "execution_state": "Z",
+        "running": false,
+        "exited_unreaped": true
+      },
+      "xvfb_wait_seconds": 0.0003086850047111511,
+      "three_captured_open_changes_cancel_without_fallback": true
+    },
+    "navigation": {
+      "check_count": 11,
+      "final_intents": 2,
+      "native_event_count": 28,
+      "fixture_normal_exit_reaped": true,
+      "forced_fixture_cleanup": false,
+      "xvfb_exit_status": {
+        "identity_present": true,
+        "execution_state": "Z",
+        "running": false,
+        "exited_unreaped": true
+      },
+      "xvfb_wait_seconds": 4.070199793204665e-05,
+      "adjacent_keys_and_captured_target_retirement_valid": true
+    },
+    "dismiss": {
+      "check_count": 10,
+      "final_intents": 1,
+      "native_event_count": 20,
+      "fixture_normal_exit_reaped": true,
+      "forced_fixture_cleanup": false,
+      "xvfb_exit_status": {
+        "identity_present": true,
+        "execution_state": "Z",
+        "running": false,
+        "exited_unreaped": true
+      },
+      "xvfb_wait_seconds": 4.120200173929334e-05,
+      "native_read_metadata_equal_and_reopen_fresh_incarnation_valid": true
+    },
+    "preferences": {
+      "check_count": 26,
+      "final_intents": 3,
+      "native_event_count": 50,
+      "fixture_normal_exit_reaped": true,
+      "forced_fixture_cleanup": false,
+      "xvfb_exit_status": {
+        "identity_present": true,
+        "execution_state": "Z",
+        "running": false,
+        "exited_unreaped": true
+      },
+      "xvfb_wait_seconds": 3.952899714931846e-05,
+      "all_seven_filters_visible_in_committed_clipped_maps": true,
+      "native_wheel_edges": 0,
+      "native_os_wheel_exercised": false,
+      "queued_ticket_retained_across_close": true,
+      "disabled_pending_click_no_duplicate": true,
+      "failed_publish_unchanged_and_fresh_retry_exact": true,
+      "native_read_metadata_unchanged": true
+    }
+  },
+  "all_fixtures_normal_exit_no_forced_cleanup": true,
+  "xvfb_zombies_reported_as_present_exited_unreaped": true,
+  "normal_grace_observed": "All six servers alreadyZ at first grace observation; actual S\u2192Z grace branch not exercised here, covered by prior fake-clock/source check.",
+  "prior_three_negative_suites_preserved": true,
+  "reviewer_actions": "Static file/hash/JSON and AST-extracted pure predicates only. No driver import, native/X/input/ELF/Cargo/network run by reviewer.",
+  "not_established": [
+    "Native OS wheel/offscreen scrolling: all seven controls already fit and no wheel edge was needed in this run",
+    "15d Windows native acceptance or exact-source native transfer",
+    "Shell/SharedChat real navigation and delivered editor flushing",
+    "real Worker/World authority or activation/read/send",
+    "authentication or image/command IPC",
+    "preference disk IO",
+    "Windows/GPU/multiple monitors",
+    "grid/real profiles/credentials",
+    "real IME",
+    "full2d809 workspace success",
+    "native worker read-on-draw safety/default changes"
+  ]
+}

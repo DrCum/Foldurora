@@ -53,8 +53,17 @@ The separate strict-Clippy fix is frozen at
 on `fix/attention-windows-clippy`: one equivalent production helper use and the
 workflow branch allow entry. Its
 [new Windows run 42390650825](https://github.com/DrCum/Foldurora/actions/runs/42390650825)
-is **pending verification**. The old branch/images/receipts remain exact 9a;
-none of their measured results transfer to 15d without its own verification.
+is now **verified green for exact 15d**: actual parser/format/strict-Clippy/tests/
+build/package commands passed; 7,991 passed, zero failed, 52 ignored, with all
+203 required names passing once in both logs. Artifact
+[13583034550](https://github.com/DrCum/Foldurora/actions/runs/42390650825/artifacts/13583034550),
+version `0.9.3-beta.20261106.1+207.g15d33e6c9`, passed both ZIP CRCs, provenance,
+AMD64/PE32+ version and seven embedded icon-payload checks. Portable SHA-256:
+`9c41f011c4fc0625bc5e022ea0ecd9f81f4b05d3b22c8cf189304fd08e588e89`;
+EXE SHA-256:
+`1805013d2ffcfa089c324d485ac7ba76c43fa00fdd557809047c1fb460026f91`.
+No Windows executable was installed or run. The old 9a images/receipts and its
+negative Windows result remain unchanged; these are distinct exact-source checks.
 
 The first Attention slice includes five stable saved-profile filters, Nearby
 and existing Direct conversations (Direct on, Nearby off by default), a local
@@ -76,9 +85,12 @@ This is CPU UI evidence, not native-window/OS-input, Windows, GPU, real IME,
 authentication, preference-file IO, Shared Chat/World submission or grid
 acceptance. No real profiles, broker, worker, login or live network are used by
 this fixture. Native Review, monitors and chat protocol V3 are outside this MVP.
-The separately source-reviewed native Attention fixture and external driver have
-not been compiled or run. The separately measured Linux normal build and negative Windows candidate are
-recorded above; neither result is inferred from these images.
+The separate [six-case native Attention component gallery](../20261107-2d809422-attention-native-cpu/README.md)
+now records an exact 2d809422 Linux/X11 synthetic fixture pass. It has zero native
+wheel edges and does not waive that source's separate full-workspace failures or
+transfer native acceptance to 9a/15d Windows. The distinct normal Linux build,
+negative 9a Windows candidate and verified-green 15d package are recorded above;
+none is inferred from these images.
 
 ## English selected reminder, filters collapsed — 540×580
 

@@ -1,0 +1,76 @@
+{
+  "schema": 1,
+  "source_commit": "2d8094224e1b44f2cc557d944b9db10ad51e3886",
+  "test_elf_sha256": "99ee531b6c3c5c274598982d656b88884f98138fa89f7991bbee09cb57442232",
+  "test_elf_bytes": 775619920,
+  "driver_sha256": "f0f80738ba23a605ba1ccedee54e7b9144619e11da4d141b29ac280651599067",
+  "suite": "suite-ss3i70g1",
+  "suite_json_sha256": "1a992e40d380c3a5d36f8250582907c200f6044a3d1165532693492e5b8d3113",
+  "independent_receipt_sha256": "4b00fdbcac41b5a5ea6dcdadc26170eda51295f5e61b9bb1af60808f3816dd71",
+  "publication": "Six original PNGs copied byte for byte; no resize, edit, composition or recapture. Original capture records are hashed but not published.",
+  "scope": "Synthetic body-free snapshots and recorded local intents through production AttentionWindow with isolated X11 input; exact source/component only.",
+  "native_wheel_edges": 0,
+  "all_seven_filter_controls_already_fit": true,
+  "images": [
+    {
+      "file": "enter/enter-held-repeat-no-action.png",
+      "original_suite_relative_path": "enter/enter-held-repeat-no-action.png",
+      "caption": "Held Enter remains inert before physical release",
+      "bytes": 56530,
+      "width": 540,
+      "height": 580,
+      "sha256": "a47a8c4fd3a31fa5074ff064f42abbc3611b5313c5044fbc823231e2ea37c2ff",
+      "original_capture_record_sha256": "10cddbf225f538cc42dfaa2af053b2b1fdf3cc26e9bac1a2b3f320877ff949d2"
+    },
+    {
+      "file": "space/space-fresh-release-away.png",
+      "original_suite_relative_path": "space/space-fresh-release-away.png",
+      "caption": "Space after release away and a fresh captured gesture",
+      "bytes": 56530,
+      "width": 540,
+      "height": 580,
+      "sha256": "a47a8c4fd3a31fa5074ff064f42abbc3611b5313c5044fbc823231e2ea37c2ff",
+      "original_capture_record_sha256": "42c373cd5032b0dc8a883563f407f73029f54b54a0dcf73e237f0a221af0f46f"
+    },
+    {
+      "file": "stale/replace-source-after-stale-release.png",
+      "original_suite_relative_path": "stale/replace-source-after-stale-release.png",
+      "caption": "Retired source leaves the captured selection unavailable",
+      "bytes": 60329,
+      "width": 540,
+      "height": 580,
+      "sha256": "9214d455ba957b286bd3687740466c474b060763ffcf42fd87da9633c1921219",
+      "original_capture_record_sha256": "cccde050a92018b87bc1ad2e4c6142b7666a28a378805babf43b9ce735b12054"
+    },
+    {
+      "file": "navigation/held-next-cancelled.png",
+      "original_suite_relative_path": "navigation/held-next-cancelled.png",
+      "caption": "Replacing the held Next target does not substitute another",
+      "bytes": 55173,
+      "width": 540,
+      "height": 580,
+      "sha256": "38d7e7adb2eda4a52d6c66942f3d846ad7704004824f008af7f0528cf71d2c53",
+      "original_capture_record_sha256": "3f0cb5a834140b1e5a7dcbdfbc6097ef47fb9a6b6facae7c1418f02daffc0b11"
+    },
+    {
+      "file": "dismiss/dismiss-reappeared.png",
+      "original_suite_relative_path": "dismiss/dismiss-reappeared.png",
+      "caption": "A new reminder incarnation does not revive the old action",
+      "bytes": 52569,
+      "width": 540,
+      "height": 580,
+      "sha256": "e8d2297e5e377a4fc6c3367f453af330f70cee6a680ceda09a34fec247a2845a",
+      "original_capture_record_sha256": "333d1f0da95d9345d24b44b403189303499881f8d42283d62b1dacb32bd6c08b"
+    },
+    {
+      "file": "preferences/expanded-filters.png",
+      "original_suite_relative_path": "preferences/expanded-filters.png",
+      "caption": "All five profile filters and both category filters fit without a wheel edge",
+      "bytes": 62864,
+      "width": 540,
+      "height": 580,
+      "sha256": "1a6c257f490c4a03669930dc9b12f3199872b1a903a5605381d23749de6fc575",
+      "original_capture_record_sha256": "6c054799f3963c1ea369beea5b544b577f342a527f4d89d6677435128c2f380c"
+    }
+  ]
+}
