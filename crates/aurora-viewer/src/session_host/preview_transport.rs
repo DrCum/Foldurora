@@ -12,8 +12,9 @@ use aurora_session::preview_image::PreviewSource;
 use aurora_session::preview_wire::{Direction, Lane, WireError};
 use std::io;
 
+pub(super) use super::preview_bootstrap::PreviewSecret;
 pub(super) use admission::{Admissions, RoundRobin};
-pub(super) use auth::{HostHandshake, PreviewSecret, WorkerHandshake};
+pub(super) use auth::{HostHandshake, WorkerHandshake};
 pub(super) use stream::{AdmittedPixels, Pair, Received, TickBudget, UnadmittedPixels};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
