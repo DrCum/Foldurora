@@ -26,6 +26,39 @@ fn actor() -> State {
     s.runtime.window(true).unwrap();
     s
 }
+fn inventory() -> Inventory {
+    use aurora_llsd::{Llsd, llsd_map};
+    let root = Uuid::from_u128(100);
+    // The seed adds demo items beneath the login skeleton; it does not create
+    // the personal root. Use the same initializer as an actual login event.
+    let raw = llsd_map! {
+        "agent_id" => Llsd::Uuid(facts().agent),
+        "inventory-root" => Llsd::Array(vec![llsd_map! { "folder_id" => Llsd::Uuid(root) }]),
+        "inventory-skeleton" => Llsd::Array(vec![llsd_map! {
+            "folder_id" => Llsd::Uuid(root),
+            "parent_id" => Llsd::Uuid(Uuid::nil()),
+            "name" => Llsd::String("Fixture inventory".into()),
+            "type_default" => Llsd::Integer(8),
+            "version" => Llsd::Integer(1)
+        }])
+    };
+    let mut inventory = Inventory::from_login(&raw);
+    crate::world::inventory::demo::seed(&mut inventory, facts().agent);
+    inventory
+}
+#[test]
+fn board_app_fixture_requires_login_skeleton_before_native_item_resolution() {
+    let mut uninitialized = Inventory::default();
+    crate::world::inventory::demo::seed(&mut uninitialized, facts().agent);
+    assert!(actions::resolve_playback_item(&uninitialized, Uuid::from_u128(8106), PlaybackKind::Gesture).is_err());
+    let mut initialized = inventory();
+    assert_eq!(initialized.owner, facts().agent);
+    assert!(!initialized.root.is_nil());
+    let item = actions::resolve_playback_item(&initialized, Uuid::from_u128(8106), PlaybackKind::Gesture).unwrap();
+    assert_eq!(item.reference(), Uuid::from_u128(8106));
+    initialized.folders.remove(&initialized.root);
+    assert!(actions::resolve_playback_item(&initialized, item.reference(), PlaybackKind::Gesture).is_err());
+}
 #[test]
 fn board_app_source_window_action_and_terminal_counter_fences_never_reuse_ready_proofs() {
     let mut state = actor();
@@ -79,8 +112,7 @@ fn board_app_stale_store_reply_cannot_consume_new_operation_or_new_source_job() 
 }
 #[test]
 fn board_app_add_duplicate_checks_actual_resolved_inventory_alias_not_saved_reference() {
-    let mut inv = Inventory::default();
-    crate::world::inventory::demo::seed(&mut inv, facts().agent);
+    let mut inv = inventory();
     let original = actions::resolve_playback_item(&inv, Uuid::from_u128(8106), PlaybackKind::Gesture).unwrap();
     let mut alias = inv.items[&original.item()].clone();
     alias.id = Uuid::from_u128(990001);
@@ -124,8 +156,7 @@ impl Frames {
     fn new() -> Self {
         let ctx = egui::Context::default();
         crate::theme::Theme::default().apply(&ctx, 1.0);
-        let mut inv = Inventory::default();
-        crate::world::inventory::demo::seed(&mut inv, facts().agent);
+        let inv = inventory();
         let item = actions::resolve_playback_item(&inv, Uuid::from_u128(8106), PlaybackKind::Gesture).unwrap();
         let board = BoardId::new();
         let data = Catalogue::empty(facts().agent, facts().grid)
