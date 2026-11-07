@@ -9,6 +9,8 @@ use std::time::Instant;
 
 mod preview;
 pub(crate) use preview::AcceptedNativePreviewSource;
+/// Fixed reservation inside the worker image lane's 1 MiB metadata headroom.
+pub(crate) const NATIVE_PREVIEW_METADATA_BYTES: usize = 64 * 1024;
 
 struct Startup {
     config: WorkerConfig,

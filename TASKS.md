@@ -3563,3 +3563,16 @@ Open-source technologies that could set Aurora apart (human request of 2026-10-1
   no Cargo/native/GPU/socket execution by source author and no production endpoint,
   bootstrap/capture/UI enablement. Root validation and independent source review
   remain separate, then actual pipeline integration and human Windows acceptance.
+
+- 🔧 Actual native LastActive producer consumer (source-only): optional worker
+  channel lifetime; genuine accepted-source proof with original receipt/expiry;
+  pre-effect shared capture fence; bounded exact native configuration receipts;
+  CPU preclaim layout; ordinary Active-frame request and asynchronous move-only
+  result publication; prior-origin retirement-only cleanup. No auto demand or
+  Standby world rendering. Production-helper tests compose actual World policy
+  facts, native layout/configuration matching and SourceImages admission/history;
+  receipt eviction, duplicate Stop, original deadlines/rate limits and metadata
+  bounds are covered by authored UNRUN cases. Shared V4 sealed IO/Broker branches
+  plus root production registration are required at join. No Cargo/native/GPU,
+  endpoint enablement or product acceptance was performed by the source author;
+  independent source review, root combined checks and human validation remain.

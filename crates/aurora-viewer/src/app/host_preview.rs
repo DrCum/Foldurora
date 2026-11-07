@@ -1,5 +1,6 @@
-//! CPU-only LastActive policy prerequisite. No image endpoint, demand producer,
-//! capture request or inactive render loop is enabled by this module.
+//! Native LastActive policy and optional producer. A validated Some bootstrap
+//! and explicit typed demand are required; no roster subscription or inactive
+//! world-render loop is created here. Root owns combined endpoint enablement.
 //!
 //! Legacy `FSSessionWorker::sharingAllowed` (fssessionworker.cpp:294, pinned
 //! abbe3cb0) forbids names/location privacy. Aurora also applies its
@@ -15,6 +16,9 @@ use aurora_render::WorldViewport;
 use aurora_session::preview_image::{PreviewAccess, PreviewEpochs, PreviewPolicy, PreviewSource};
 use std::time::Instant;
 use uuid::Uuid;
+
+mod demand;
+mod producer;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct WorldPolicy {
@@ -167,6 +171,7 @@ pub(super) struct HostPreview {
     last_physical: Option<PhysicalStamp>,
     exhausted: bool,
     observed_at: Option<Instant>,
+    producer: Option<Box<producer::Producer>>,
 }
 
 impl HostPreview {
@@ -292,10 +297,19 @@ impl HostPreview {
     }
 
     pub(super) fn retire(&mut self) {
+        if let Some(producer) = &mut self.producer {
+            producer.retire();
+        }
         // Even if the next observation repeats all values, it must earn new
         // epochs. There is no validity flag that can revive old image handles.
         self.policy = None;
         self.observed = None;
+    }
+
+    pub(super) fn capture_barrier(&self) {
+        if let Some(producer) = &self.producer {
+            producer.capture_barrier();
+        }
     }
 }
 
@@ -310,14 +324,21 @@ fn advance(value: &mut u64) -> bool {
 
 impl App {
     /// Runs before the parked return and before other GUI work even with no
-    /// pending image. This function never starts image IO or submits rendering.
+    /// pending image. No new world frame is requested; only prior-origin
+    /// capture completion or retirement may advance on its existing owner.
     pub(super) fn tick_host_preview(&mut self) {
+        if self.has_preview_producer() {
+            let mut gfx = self.gfx.take();
+            self.run_preview_producer(gfx.as_mut(), aurora_render::PhotoContext::None, producer::Pass::Cpu);
+            self.gfx = gfx;
+            return;
+        }
         if self.host_session.is_none() {
             self.host_preview.retire();
             return;
         }
         self.configure_host_chat_rules();
-        let facts = self.host_preview_facts(self.gfx.as_ref(), aurora_render::PhotoContext::None);
+        let facts = self.host_preview_facts(self.gfx.as_ref(), aurora_render::PhotoContext::None, false);
         if self.host_preview.sync(facts, Instant::now())
             && let Some(gfx) = &mut self.gfx
         {
@@ -326,18 +347,32 @@ impl App {
     }
 
     pub(super) fn host_preview_frame(&mut self, gfx: &mut Gfx, photo_context: aurora_render::PhotoContext) {
+        if self.run_preview_producer(Some(&mut *gfx), photo_context, producer::Pass::Observe) {
+            return;
+        }
         if self.host_session.is_none() {
             self.host_preview.retire();
             return;
         }
         self.configure_host_chat_rules();
-        let facts = self.host_preview_facts(Some(gfx), photo_context);
+        let facts = self.host_preview_facts(Some(gfx), photo_context, false);
         if self.host_preview.sync(facts, Instant::now()) {
             gfx.renderer.invalidate_viewport_capture();
         }
     }
 
-    fn host_preview_facts(&self, gfx: Option<&Gfx>, photo_context: aurora_render::PhotoContext) -> NativePreviewFacts {
+    pub(super) fn host_preview_before_render(
+        &mut self,
+        gfx: &mut Gfx,
+        photo_context: aurora_render::PhotoContext,
+        viewport: WorldViewport,
+    ) {
+        if !self.run_preview_producer(Some(&mut *gfx), photo_context, producer::Pass::BeforeRender(viewport)) {
+            self.host_preview_frame(gfx, photo_context);
+        }
+    }
+
+    fn host_preview_facts(&self, gfx: Option<&Gfx>, photo_context: aurora_render::PhotoContext, remembered: bool) -> NativePreviewFacts {
         let scope = self.host_session.as_ref().and_then(|bridge| {
             let scope = bridge.preview_scope()?;
             let actual = super::host_chat::source(self, bridge)?;
@@ -390,9 +425,8 @@ impl App {
                 && !self.gpu_stall.close
                 && gfx.is_some_and(|gfx| !gfx.renderer.failed() && !gfx.renderer.device_lost()),
             photo,
-            // Explicit OpenMonitor binding will supply this in the IO slice.
-            // Merely starting a worker or logging in never subscribes it.
-            remembered: false,
+            // Only a genuine current metadata-domain applied demand sets this.
+            remembered,
         }
     }
 }
@@ -404,7 +438,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    fn world() -> World {
+    pub(super) fn world() -> World {
         let mut world = World::new(Arc::new(crate::scene::avatar::AvatarLibrary::load()));
         for event in crate::demo::events() {
             world.apply(event);
@@ -429,7 +463,7 @@ mod tests {
         }));
     }
 
-    fn facts(world: &World, now: Instant) -> NativePreviewFacts {
+    pub(super) fn facts(world: &World, now: Instant) -> NativePreviewFacts {
         let source = PreviewSource::new(
             WorkerIdentity {
                 installation: InstallationId::from_bytes([1; 32]).unwrap(),

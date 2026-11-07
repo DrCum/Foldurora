@@ -81,6 +81,8 @@ pub(super) struct Runtime {
     channel: WorkerChannel,
     source: SourceDomain,
     capture: CaptureDomain,
+    sent_source: Option<ControlGuard>,
+    suspended: bool,
 }
 
 #[derive(Default)]
@@ -120,6 +122,8 @@ impl Runtime {
                 channel,
                 source: SourceDomain::default(),
                 capture: CaptureDomain::default(),
+                sent_source: None,
+                suspended: true,
             }),
             Err(_) => {
                 log::warn!("worker image service could not start");
@@ -152,7 +156,10 @@ impl WorkerBridge {
         if let Some(runtime) = &mut self.preview {
             runtime.revoke_capture();
             runtime.source.retire();
-            let _ = runtime.channel.set_source(None);
+            if runtime.sent_source.take().is_some() {
+                let _ = runtime.channel.set_source(None);
+            }
+            runtime.suspended = true;
         }
     }
     /// Source renewals use the original accepted control receipt. This is also
@@ -168,11 +175,27 @@ impl WorkerBridge {
             .as_ref()
             .and_then(|proof| ControlGuard::from_native(proof).ok())
             .map(|control| SourceLease { control });
-        if lease.is_none() {
+        if lease.is_none() || runtime.suspended {
             runtime.revoke_capture();
+            if runtime.sent_source.take().is_some() {
+                let _ = runtime.channel.set_source(None);
+            }
+            return;
+        }
+        let lease = lease.expect("checked accepted native source");
+        if runtime
+            .sent_source
+            .as_ref()
+            .is_some_and(|old| old.same_domain(&lease.control) && old.expires_at() == lease.control.expires_at())
+        {
+            return;
         }
         // Failure is confined to this image lane. No hosting detach/chat loss.
-        let _ = runtime.channel.set_source(lease);
+        if runtime.channel.set_source(Some(lease.clone())).is_ok() {
+            runtime.sent_source = Some(lease.control);
+        } else {
+            runtime.sent_source = None;
+        }
     }
     pub(crate) fn preview_source_proof(&self) -> Option<AcceptedNativePreviewSource> {
         self.preview
@@ -185,6 +208,21 @@ impl WorkerBridge {
     }
     pub(crate) fn preview_channel(&self) -> Option<&WorkerChannel> {
         Some(&self.preview.as_ref()?.channel)
+    }
+    pub(crate) fn resume_preview_source(&mut self) {
+        if let Some(runtime) = &mut self.preview {
+            runtime.suspended = false;
+        }
+        self.refresh_preview_source();
+    }
+    pub(crate) fn suspend_preview_source(&mut self) {
+        if let Some(runtime) = &mut self.preview {
+            runtime.revoke_capture();
+            runtime.suspended = true;
+            if runtime.sent_source.take().is_some() {
+                let _ = runtime.channel.set_source(None);
+            }
+        }
     }
     pub(crate) fn preview_capture_barrier(&self) {
         if let Some(runtime) = &self.preview {

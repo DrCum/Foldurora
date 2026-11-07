@@ -5073,3 +5073,20 @@ Control/capture guard construction consumes opaque actual Broker/WorkerBridge
 accepted-proof tokens; raw fields stay private to the IO subtree. The consumer
 branches and root-owned production module promotion are explicit prerequisites.
 No listener, bootstrap, producer or Monitor UI is promoted by this shared slice.
+
+The actual native LastActive consumer lives in `app/host_preview/producer.rs`,
+with a bounded native settings ledger in `demand.rs`. A validated optional worker
+bootstrap owns the real image channel; ordinary hosting/chat stay independent.
+The App publishes actual policy/layout on its existing CPU turn, applies at most
+one fresh typed command, and acknowledges configuration only after native apply
+and capture revocation. Zero accepted demand issues no new capture request,
+normal capture poll or world frame. Only an already ordinary Active frame can
+freeze a request; completed credited pixels move to the IO owner without an App
+pixel read/copy, compression, socket call or GPU wait. Existing physical-retention
+and separate capture witnesses preserve admitted LastActive history during park
+while rejecting late frames. Prior-origin cleanup uses retirement-only renderer
+maintenance after cancellation/result consumption. Native metadata has a fixed
+64 KiB reserve within the worker's withheld IO MiB, independent of the renderer's
+7 MiB pixel/resource pool. Sealed V4 IO/Broker dependencies and root-owned module
+promotion remain explicit join prerequisites; this source slice does not promote
+modules, create host demand, or enable a host bootstrap factory.

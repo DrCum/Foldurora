@@ -64,6 +64,7 @@ impl App {
     }
 
     pub(super) fn release_host_input(&mut self) {
+        self.host_preview.capture_barrier();
         self.down.clear();
         self.input = Default::default();
         self.right_drag = false;

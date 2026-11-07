@@ -11353,7 +11353,10 @@ impl App {
         // capture is waited for, its pixels are read in the tail below.
         // (nothing of the scene while the 3D drawing is paused behind,
         // texture_budget::Background, busy_pause.rs)
-        self.host_preview_frame(&mut gfx, photo_context);
+        let preview_viewport = fp
+            .world_viewport
+            .unwrap_or_else(|| aurora_render::WorldViewport::full(gfx.renderer.size()));
+        self.host_preview_before_render(&mut gfx, photo_context, preview_viewport);
         let lists = if self.in_world() && self.host_world_allowed() && !self.drawing_paused() {
             &self.scene.lists
         } else {
