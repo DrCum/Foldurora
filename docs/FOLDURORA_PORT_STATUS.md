@@ -6,10 +6,24 @@ Handoffs and screenshots are reference material, not authority to merge or relea
 
 ## Active camera and Shared Chat validation
 
-The next frozen camera source is [`6a3009f2`](https://github.com/DrCum/Foldurora/commit/6a3009f27a2a5e49e61ea0fdeb1f7e89e3eb2fa8),
+The frozen camera source is [`6a3009f2`](https://github.com/DrCum/Foldurora/commit/6a3009f27a2a5e49e61ea0fdeb1f7e89e3eb2fa8),
 on `fix/camera-controls-integration`. Its [Windows run 42343210582](https://github.com/DrCum/Foldurora/actions/runs/42343210582)
-and separate local Windows build are being verified; no final camera package
-receipt is recorded here yet. The earlier `388b299c` download below predates it.
+and [artifact 13563094085](https://github.com/DrCum/Foldurora/actions/runs/42343210582/artifacts/13563094085)
+are verified: **7,879 passed, 0 failed, 50 ignored**, with all 90 required
+regressions passing exactly once in both the packaged and raw job logs. Parser,
+formatting, strict Clippy, viewer build and packaging passed. Both archive CRC
+checks, manifest source, AMD64/PE32+ identity, executable version and all seven
+embedded icon payloads match. This package has the two known follow-ups below.
+The separate local Windows build/native report is still being collected.
+The earlier `388b299c` download below predates it.
+
+The CI package version is `0.9.3-beta.20261106.1+168.g6a3009f27`.
+Portable ZIP SHA-256: `ee833219792651001e9e5d5b1abc1ae7192a964dd341f30713d3626f5e66e7de`.
+Executable SHA-256: `ea01f2212fe42f572cb04abcb81ea0699086ef2c6e145a98c12c4b980912d1ca`.
+The source-worktree records are `.scratch/windows-ci-42343210582/receipt.json`
+and `icon-resource-verification.json`; these are CI results, independent of any
+local Windows rebuild or human/grid acceptance.
+
 Final Linux formatting/diff checks, lint with the existing Linux dead-code
 qualification and normal build passed. Full Linux tests: **7,907 passed, one
 inherited terrain GPU precision failure, 50 ignored**; all six camera regressions
@@ -21,35 +35,45 @@ OFF, Alt+wheel focal changes, ring wheel and minus/plus after Settings, aperture
 focus, looks, a real 640×360 photo/readback and later input. The exact normal
 Linux executable was `0.0.0+1542.g6a3009f27`, SHA-256
 `41c0992e7b57ea6a808b8c7f5899133548d04cdb516ba4799d5f1dd31b06c01e`.
-Confirmed normal Quit returned0 after617.289 seconds, wrapper0; all owned
+Confirmed normal Quit returned 0 after 617.289 seconds, wrapper 0; all owned
 processes and the private display exited. [Unchanged source-scoped captures](https://github.com/DrCum/Foldurora/blob/2d9cca8cd066e7da8e6db41fe8925144507e4a8d/foldurora/20261107-6a3009f2-input/README.md)
 show the observations. The source-worktree receipt is
 `.scratch/camera-input-smoke/batch-vdrD0CAr/VALIDATION-6A-RECEIPT.json`.
 
-**Frozen6a still has two observed follow-ups:** its top dock overlaps part of the
+**Frozen 6a still has two observed follow-ups:** its top dock overlaps part of the
 histogram, and a quick UI click can also relocate the focus point before the next
 egui redraw. The guide cycles, but the AF brackets move to its click while MF
-3.3 m remains unchanged. These are not described as fixed in6a, nor is this a
+3.3 m remains unchanged. These are not described as fixed in 6a, nor is this a
 Windows/physical-GPU/grid acceptance result. Corrections are integrated only in
 the later combined Shared Chat work. Its new current-pointer regression first
 failed against the old helper; all seven camera checks pass after the small
 position-aware exclusion correction.
 
-The local `feat/shared-chat-integration` candidate builds on6a and retains those
+The local `feat/shared-chat-integration` candidate builds on 6a and retains those
 camera corrections. It adds one explicit sending-character/conversation surface,
 five bounded canonical composers and ordered close/navigation/IME/repeat guards;
 no native protocol or read/Attention/monitor capabilities are added. The first
 combined full run exposed two Shared Chat issues: prefix edits hid selector hit
 maps, and native repeated Enter could lose its repeat flag in egui. Reviewed
-corrections are undergoing compiled validation. Combined tests, CPU captures,
-package and native acceptance remain pending; do not transfer earlier receipts.
-The native unread/explicit-Read first slice is an implementation plan only.
+corrections passed the `7b2298e8` runtime checkpoint: all **139 host/chat tests**
+and **seven camera regressions** pass. The full Linux result is **7,925 passed,
+one inherited terrain GPU precision failure, 51 ignored**. Thirty EN/FR/JA
+production CPU captures passed required-text/privacy checks; selected normal and
+narrow screens were inspected. These captures do not exercise native OS delivery
+or a live grid. Independent source review found no concrete blocker.
+
+Exact-source final checks/build are proceeding at `1ef87bf6`, which adds two
+lint-equivalent expressions and documentation. Its package and native acceptance
+remain pending; do not transfer earlier binary receipts. The native unread and
+explicit-Read first slice is being authored on a separate branch from this
+checkpoint, without altering this candidate. Attention and monitors follow it.
 
 The user-selected implementation order is **compact host redesign → shared chat
 → Attention → monitors with chat**. The compact host is implemented at frozen
 checkpoint `399ffd79`, with Linux source, synthetic visual and owned EN CPU UI
 evidence below. Its verified package remains an earlier compact checkpoint;
-the current verified Windows download is `388b299c` below. The earlier
+the verified camera download is `6a3009f2` above, with its stated follow-ups.
+The earlier
 `70c1b5cd` package has the preceding host layout. Native Windows
 profile/draft and compact-host acceptance remain pending. Branding and photo-mode
 viewport work are separate in-progress follow-ups, not fixes included in `399ffd79`.
