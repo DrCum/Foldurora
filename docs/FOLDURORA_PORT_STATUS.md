@@ -4,6 +4,11 @@ This is the coordination ledger for the Folderstorm port. Source, automated
 checks, native Windows acceptance and human grid acceptance are separate results.
 Handoffs and screenshots are reference material, not authority to merge or release.
 
+The [current feature backlog](FOLDURORA_FEATURE_BACKLOG.md) records the active
+Monitor, Workspace and Board slices and the remaining Folderstorm behavior.
+The late initial port-order table below is historical; newer exact-build entries
+and the backlog supersede its implementation inventory.
+
 ## Latest Attention Review: verified Windows package
 
 The current Windows test package is verified for exact source
@@ -1312,7 +1317,10 @@ to that capture commit; they do not depend on the cloud `.scratch` directories.
 | `70c1b5cd`: actual helper with a synthetic crash report | [Open](https://raw.githubusercontent.com/DrCum/Foldurora/b3e9771643403f51fac92ef441d30935d422ee21/foldurora/20261106-70c1b5cd/06-crash-details-synthetic.png) |
 | Earlier `5c741b61`: restored Nearby draft, unchanged chat component | [Open](https://raw.githubusercontent.com/DrCum/Foldurora/b3e9771643403f51fac92ef441d30935d422ee21/foldurora/20261106-70c1b5cd/07-chat-nearby-draft-restored-5c741b61.png) |
 
-## Port order and dependencies
+## Historical initial port order and dependencies
+
+This table preserves the earlier plan and checkpoint-specific evidence. Use the
+[current backlog](FOLDURORA_FEATURE_BACKLOG.md) for present implementation gaps.
 
 | Feature | Current gap | Next concrete work |
 | --- | --- | --- |
@@ -1330,10 +1338,11 @@ to that capture commit; they do not depend on the cloud `.scratch` directories.
 | Photo/camera viewport — separate follow-up | Verified `f5ae21d5` package includes the source that passed bounded software-Vulkan clean/Interface exports. Restricted 480-pixel controls still overlap/clip; native Windows photo/export acceptance is pending. The older scene expansion remains in `399ffd79`. | Fix/validate narrow control usability and native Windows photo/export behavior. Integrated `388b299c` passed the bounded landscape/isolation checks recorded above. |
 | Selective upstream catch-up — separate integration | Pushed `388b299c` adds 16 reviewed upstream commits to `f5ae21d5`, with exact provenance proof and 25 deferred. Linux lint/tests and normal build passed except the inherited terrain precision test; bounded software-Vulkan rendering checks passed with HUD normal Quit unproven after the harness deadline; Windows package proof is pending. | Validate exact-source runtime/package behavior; preserve earlier evidence and the deferred dependency groups. |
 
-Folderstorm can later acknowledge a visible, following, at-tail transcript after
-a configured delay (default 60 seconds with visible-read acknowledgment enabled).
-That automatic acknowledgment is a separate unported behavior; no current parity
-is claimed for it.
+Pinned Folderstorm's displayed-chat auto-read defaults on and checks eligible
+painted incoming text at the visible tail, rate-limited to one poll per second.
+The 60-second delay belongs to the separate optional active-character policy,
+which defaults off. Host automatic read remains unported; current explicit
+observed-watermark Mark read and native read-on-draw have their separate scope.
 
 After the compact host redesign, the selected next milestone is a shared CPU
 chat source/conversation selector using the existing Nearby/resident-IM transport
