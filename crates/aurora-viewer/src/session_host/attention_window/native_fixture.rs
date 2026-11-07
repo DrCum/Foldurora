@@ -120,6 +120,9 @@ struct Fixture {
 impl Fixture {
     fn new(directory: PathBuf) -> Self {
         let snapshot = native_fixture_host();
+        // Review has separate broker/native tests. This OS-input fixture
+        // grants no activation capability and never manufactures a review.
+        assert!(!snapshot.can_activate && snapshot.review_operations.is_empty());
         // Mapping is always slot 1..5; Nearby stays excluded by real defaults.
         assert_eq!(snapshot.chat.len(), 5);
         let mut fixture = Self {
@@ -367,6 +370,9 @@ impl Fixture {
                 self.body.queued(self.preference_ticket, preferences);
                 json!({"kind": "preferences", "ticket": self.preference_ticket, "preferences": preferences,
                     "queued_only": true, "published": self.snapshot.attention_preferences.preferences})
+            }
+            Action::Select(_) | Action::Review(_) | Action::CancelReview(_) => {
+                panic!("native Review is outside this local reminder fixture")
             }
         };
         assert_eq!(before, self.snapshot.chat.iter().map(|chat| chat.reads.clone()).collect::<Vec<_>>());
