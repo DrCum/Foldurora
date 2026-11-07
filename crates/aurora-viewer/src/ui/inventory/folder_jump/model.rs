@@ -204,7 +204,7 @@ impl Default for Model {
     fn default() -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(1);
         let instance = NEXT
-            .fetch_update(AtomicOrdering::Relaxed, AtomicOrdering::Relaxed, |value| value.checked_add(1))
+            .try_update(AtomicOrdering::Relaxed, AtomicOrdering::Relaxed, |value| value.checked_add(1))
             .unwrap_or(0);
         Self {
             instance,
@@ -358,6 +358,10 @@ impl Model {
 
     pub(super) fn selected(&self) -> Option<Uuid> {
         self.selected
+    }
+
+    pub(super) fn source(&self) -> Option<Source> {
+        self.source
     }
 
     pub(super) fn rows(&self) -> impl ExactSizeIterator<Item = Row<'_>> {
