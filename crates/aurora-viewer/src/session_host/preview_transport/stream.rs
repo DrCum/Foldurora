@@ -180,7 +180,7 @@ impl std::fmt::Debug for AdmittedPixels {
     }
 }
 pub(crate) enum Received {
-    Metadata(Metadata),
+    Metadata { metadata: Metadata, received_at: Instant },
     UnadmittedPixels(UnadmittedPixels),
 }
 impl std::fmt::Debug for Received {
@@ -451,7 +451,10 @@ impl Incoming {
         {
             auth.receive.verify_finish(self.body.take().ok_or(Error::Invalid)?, &self.finish)?;
             return match header.lane() {
-                Lane::Metadata => Ok(Some(Received::Metadata(self.decoded.take().ok_or(Error::Invalid)?))),
+                Lane::Metadata => Ok(Some(Received::Metadata {
+                    metadata: self.decoded.take().ok_or(Error::Invalid)?,
+                    received_at: Instant::now(),
+                })),
                 Lane::Pixels => Ok(Some(Received::UnadmittedPixels(self.pixels.take().ok_or(Error::Invalid)?))),
             };
         }
@@ -912,7 +915,7 @@ impl Pair {
             return Err(error);
         }
         for packet in &output {
-            if let Received::Metadata(metadata) = packet {
+            if let Received::Metadata { metadata, .. } = packet {
                 if matches!(metadata, Metadata::Policy { .. })
                     || matches!(metadata,Metadata::CaptureStopped{pixel_epoch,..} if *pixel_epoch==self.pixel_epoch)
                 {

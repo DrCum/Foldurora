@@ -106,6 +106,45 @@ impl Owned {
             state,
         }
     }
+    fn accept_demand(&self, id: u64, config: DemandConfiguration) -> DemandReceipt {
+        let token = self.ready().token;
+        self.host
+            .try_command(
+                token,
+                PreviewCommand::RememberActive {
+                    demand: id,
+                    size: config.size,
+                    rate: config.rate,
+                },
+                None,
+            )
+            .unwrap();
+        let command = until(|| self.worker.take_command());
+        assert!(
+            matches!(command.command, PreviewCommand::RememberActive { demand, size, rate } if demand==id && size==config.size && rate==config.rate)
+        );
+        let receipt = DemandReceipt {
+            source: token.source,
+            metadata_connection: token.connection,
+            demand: id,
+            requested: config,
+            outcome: DemandOutcome::Accepted {
+                effective: config,
+                native_revision: id,
+            },
+        };
+        self.worker.try_demand_receipt(command.token, receipt).unwrap();
+        until(|| {
+            self.host
+                .try_observations()
+                .ok()?
+                .sources()
+                .iter()
+                .any(|o| o.accepted_demand() == Some(&receipt))
+                .then_some(())
+        });
+        receipt
+    }
     fn observation(&self, status: Status) -> Option<Observation> {
         self.host
             .take_update()?
@@ -529,6 +568,13 @@ fn preview_io_owned_loopback_explicit_stop_is_capture_only_until_exact_native_de
         .admit(&mut model, &io.control, io.host.shared.clock(Instant::now()))
         .unwrap();
     let token = io.ready().token;
+    io.accept_demand(
+        1,
+        DemandConfiguration {
+            size: PreviewSize::Small,
+            rate: PreviewRate::One,
+        },
+    );
     io.host.try_command(token, PreviewCommand::Stop { demand: 1 }, None).unwrap();
     let stop = until(|| io.worker.take_command());
     assert!(matches!(stop.command, PreviewCommand::Stop { demand: 1 }));
@@ -741,4 +787,121 @@ fn preview_io_owned_loopback_park_before_pixel_challenge_retires_role_without_lo
             .with_pixels(&io.control, io.host.shared.clock(Instant::now()), |_| ())
             .is_some()
     );
+}
+
+#[test]
+fn preview_io_v4_exact_native_demand_receipts_and_metadata_peek_leave_owned_frame_untouched() {
+    let io = Owned::new(true);
+    let config = DemandConfiguration {
+        size: PreviewSize::Small,
+        rate: PreviewRate::One,
+    };
+    let receipt = io.accept_demand(1, config);
+    let (mut model, frame, _) = io.capture(PreviewSize::Small);
+    let budget = io.host.image_budget().used();
+    {
+        let mut m = io.host.shared.mailbox.lock().unwrap();
+        let source = m.updates.iter_mut().find(|u| u.observation.token.source == receipt.source).unwrap();
+        source.frame = Some(frame);
+        io.host.shared.publication.publish(&mut m).unwrap();
+    }
+    let first = io.host.try_observations().unwrap();
+    let second = io.host.try_observations().unwrap();
+    assert_eq!(first.stamp().publisher(), second.stamp().publisher());
+    assert!(first.stamp() == second.stamp() || !first.current());
+    assert_eq!(io.host.image_budget().used(), budget);
+    assert!(
+        first
+            .sources()
+            .iter()
+            .any(|o| o.demand_receipt() == Some(&receipt) && o.accepted_demand() == Some(&receipt))
+    );
+    let frame = io.host.take_update().unwrap().sources.into_iter().find_map(|u| u.frame).unwrap();
+    assert!(io.host.take_update().unwrap().sources.into_iter().all(|u| u.frame.is_none()));
+    assert!(io.host.try_observations().unwrap().current());
+    let image = frame.admit(&mut model, &io.control, io.host.shared.clock(Instant::now())).unwrap();
+    assert!(
+        image
+            .with_pixels(&io.control, io.host.shared.clock(Instant::now()), |bytes| bytes.len())
+            .is_some()
+    );
+    let held = first.head_guard();
+    io.host.stop();
+    assert!(!held.current());
+}
+#[test]
+fn preview_io_v4_demand_receipt_rejects_wrong_source_connection_config_and_old_terminal_without_retarget() {
+    let io = Owned::new(true);
+    let config = DemandConfiguration {
+        size: PreviewSize::Small,
+        rate: PreviewRate::One,
+    };
+    let first = io.accept_demand(1, config);
+    let original_token = io.worker.connection().unwrap();
+    let next = DemandConfiguration {
+        size: PreviewSize::Large,
+        rate: PreviewRate::Five,
+    };
+    let token = io.ready().token;
+    io.host
+        .try_command(
+            token,
+            PreviewCommand::RememberActive {
+                demand: 2,
+                size: next.size,
+                rate: next.rate,
+            },
+            None,
+        )
+        .unwrap();
+    let command = until(|| io.worker.take_command());
+    let good = DemandReceipt {
+        demand: 2,
+        requested: next,
+        outcome: DemandOutcome::Accepted {
+            effective: next,
+            native_revision: 2,
+        },
+        ..first
+    };
+    assert!(
+        io.worker
+            .try_demand_receipt(command.token, DemandReceipt { source: source(2), ..good })
+            .is_err()
+    );
+    assert!(
+        io.worker
+            .try_demand_receipt(
+                command.token,
+                DemandReceipt {
+                    metadata_connection: good.metadata_connection + 1,
+                    ..good
+                }
+            )
+            .is_err()
+    );
+    assert!(
+        io.worker
+            .try_demand_receipt(command.token, DemandReceipt { requested: config, ..good })
+            .is_err()
+    );
+    io.worker.try_demand_receipt(command.token, good).unwrap();
+    until(|| {
+        io.host
+            .try_observations()
+            .ok()?
+            .sources()
+            .iter()
+            .any(|o| o.accepted_demand() == Some(&good))
+            .then_some(())
+    });
+    let before = io.host.try_observations().unwrap().sources()[0].policy().unwrap().origin().serial();
+    io.worker.try_demand_receipt(original_token, first).unwrap();
+    // The later authenticated heartbeat is queued after the duplicate outcome.
+    // Waiting for it proves the host consumed that duplicate, not just its queue.
+    until(|| (io.host.try_observations().ok()?.sources()[0].policy()?.origin().serial() > before).then_some(()));
+    let latest = io.host.try_observations().unwrap();
+    assert!(latest.sources().iter().any(|o| o.accepted_demand() == Some(&good)));
+    assert!(io.host.try_command(token, PreviewCommand::Stop { demand: 1 }, None).is_err());
+    assert!(io.host.try_command(token, PreviewCommand::Stop { demand: 2 }, None).is_ok());
 }

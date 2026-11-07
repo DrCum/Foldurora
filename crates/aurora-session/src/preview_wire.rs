@@ -9,11 +9,14 @@ use crate::{PreviewRate, PreviewSize};
 use serde::{Deserialize, Serialize};
 use std::io::{self, Write};
 
-pub const VERSION: u16 = 3;
+pub const VERSION: u16 = 4;
 pub const MAX_METADATA_BYTES: usize = 4096;
 pub const HEADER_BYTES: usize = 48;
 pub const TAG_BYTES: usize = 32;
 pub const MAX_FRAME_BYTES: usize = HEADER_BYTES + MAX_METADATA_BYTES + MAX_IMAGE_BYTES + 2 * TAG_BYTES;
+
+mod demand;
+pub use demand::{DemandConfiguration, DemandOutcome, DemandReceipt, DemandRejection};
 
 mod hello;
 pub use hello::{HELLO_BYTES, Hello};
@@ -175,6 +178,7 @@ pub enum Metadata {
         size: PreviewSize,
         rate: PreviewRate,
     },
+    DemandReceipt(DemandReceipt),
     Capture(CaptureClaim),
     Layout {
         connection: u64,
@@ -227,6 +231,7 @@ impl std::fmt::Debug for Metadata {
 impl Metadata {
     pub fn source(self) -> PreviewSource {
         match self {
+            Self::DemandReceipt(receipt) => receipt.source,
             Self::Policy { policy, .. } => policy.source(),
             Self::Capture(claim) | Self::Unavailable { claim, .. } => claim.source(),
             Self::Layout { layout, .. } => layout.source(),
@@ -238,6 +243,7 @@ impl Metadata {
     }
     pub fn connection(self) -> u64 {
         match self {
+            Self::DemandReceipt(receipt) => receipt.metadata_connection,
             Self::Policy { connection, .. }
             | Self::Invalidate { connection, .. }
             | Self::Demand { connection, .. }
@@ -252,7 +258,7 @@ impl Metadata {
     pub fn direction(self) -> Direction {
         match self {
             Self::Demand { .. } | Self::Capture(_) | Self::Stop { .. } | Self::CaptureStopAck { .. } => Direction::HostToWorker,
-            Self::Layout { .. } | Self::CaptureStopped { .. } => Direction::WorkerToHost,
+            Self::DemandReceipt(_) | Self::Layout { .. } | Self::CaptureStopped { .. } => Direction::WorkerToHost,
             Self::Policy { .. } | Self::Invalidate { .. } | Self::Stopped { .. } | Self::Unavailable { .. } => Direction::WorkerToHost,
         }
     }
@@ -261,6 +267,7 @@ impl Metadata {
             return Err(WireError::Sequence);
         }
         match self {
+            Self::DemandReceipt(receipt) => receipt.validate(),
             Self::CaptureStopped {
                 source,
                 pixel_epoch,

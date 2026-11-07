@@ -5037,3 +5037,20 @@ Selection incarnations are checked and never reused within a source/model scope,
 including A→B→A. Windows private data, lock and temp handles additionally require
 one hardlink. Logical login boundaries retire exact-same-source captures while
 retaining the outstanding IO credit until its original completion.
+
+The disabled image-data V4 prerequisite adds closed native `DemandReceipt` values
+in `aurora-session/preview_wire/demand.rs`; accepted effective size/rate must equal
+the original request and carry a nonzero native revision. Auth remains V2, Hello
+V1, and control/chat versions are unchanged. IO correlates immutable outcomes
+with bounded demand highwaters; Stop names only an actual accepted configuration.
+Policy/layout/pixel activity cannot acknowledge native settings application.
+`preview_io/publication.rs` provides a non-consuming metadata-only try-peek with
+an immutable, globally nonreused publisher/current-head guard and separate policy /
+layout origin receipts captured at authenticated frame completion. Status or
+frame publication never refreshes those original timestamps. The later projection
+must compare whole-set and per-domain highwaters under its Store lock BEFORE any
+`SourceImages` mutation; these types do not implement or enable that projection.
+Control/capture guard construction consumes opaque actual Broker/WorkerBridge
+accepted-proof tokens; raw fields stay private to the IO subtree. The consumer
+branches and root-owned production module promotion are explicit prerequisites.
+No listener, bootstrap, producer or Monitor UI is promoted by this shared slice.

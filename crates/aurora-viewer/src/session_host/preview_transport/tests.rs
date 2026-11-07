@@ -568,11 +568,9 @@ fn preview_stream_metadata_revoke_overtakes_stalled_image_and_allowed_cannot_res
         .unwrap();
     h.worker_tick(20).unwrap();
     let metadata = h.host_tick(20).unwrap();
-    assert!(
-        metadata
-            .iter()
-            .any(|packet| matches!(packet,Received::Metadata(Metadata::Policy {policy,..})if !policy.access().retain_last_active))
-    );
+    assert!(metadata.iter().any(
+        |packet| matches!(packet,Received::Metadata { metadata: Metadata::Policy {policy,..}, .. }if !policy.access().retain_last_active)
+    ));
     let raw = vec![255; h.stamp.geometry().payload_bytes()];
     assert!(matches!(
         h.worker
@@ -637,7 +635,11 @@ fn preview_stream_normal_park_retains_only_already_source_admitted_history() {
         .unwrap();
     h.worker_tick(20).unwrap();
     for packet in h.host_tick(20).unwrap() {
-        if let Received::Metadata(Metadata::Policy { policy, .. }) = packet {
+        if let Received::Metadata {
+            metadata: Metadata::Policy { policy, .. },
+            ..
+        } = packet
+        {
             h.images.sync(policy, 20).unwrap();
         }
     }
@@ -848,4 +850,61 @@ fn preview_stream_interrupted_io_and_repeated_empty_polls_are_bounded() {
         "no authenticated Policy heartbeat expires even without a first pixel byte"
     );
     assert_eq!(h.budget.used(), 0);
+}
+
+#[test]
+fn preview_v4_native_demand_receipt_fragmented_fake_io_preserves_authenticated_completion_time_without_pixels() {
+    use aurora_session::preview_wire::{DemandConfiguration, DemandOutcome, DemandReceipt};
+    for read in [1, 7, 48, 4096] {
+        for write in [1, 11, 4096] {
+            let mut h = Harness::new(read, write, PreviewSize::Small, false);
+            let config = DemandConfiguration {
+                size: PreviewSize::Small,
+                rate: aurora_session::PreviewRate::One,
+            };
+            let receipt = DemandReceipt {
+                source: source(3),
+                metadata_connection: 8,
+                demand: 4,
+                requested: config,
+                outcome: DemandOutcome::Accepted {
+                    effective: config,
+                    native_revision: 9,
+                },
+            };
+            h.worker
+                .queue_metadata(Metadata::Policy {
+                    connection: 8,
+                    policy: policy(),
+                })
+                .unwrap();
+            h.worker.queue_metadata(Metadata::DemandReceipt(receipt)).unwrap();
+            let began = std::time::Instant::now();
+            let mut found = None;
+            for _ in 0..20_000 {
+                h.worker_tick(10).unwrap();
+                for packet in h.host_tick(10).unwrap() {
+                    if let Received::Metadata {
+                        metadata: Metadata::DemandReceipt(got),
+                        received_at,
+                    } = packet
+                    {
+                        assert_eq!(got, receipt);
+                        assert!(received_at >= began);
+                        assert!(received_at <= std::time::Instant::now());
+                        found = Some(received_at);
+                    }
+                }
+                if found.is_some() {
+                    break;
+                }
+            }
+            let original = found.expect("bounded fragmented native receipt");
+            for _ in 0..3 {
+                assert!(h.host_tick(10).unwrap().is_empty());
+            }
+            assert!(original <= std::time::Instant::now());
+            assert_eq!(h.budget.used(), 0, "metadata receipt cannot admit/allocate pixels");
+        }
+    }
 }

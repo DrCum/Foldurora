@@ -29,6 +29,7 @@ pub(crate) enum Error {
     Closed,
     Expired,
     CaptureRevoked,
+    StaleSnapshot,
     Io(io::ErrorKind),
 }
 

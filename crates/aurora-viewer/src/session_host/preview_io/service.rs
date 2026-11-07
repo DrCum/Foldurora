@@ -33,6 +33,7 @@ fn host_budget() -> ImageBudget {
 }
 pub(super) struct Shared<T> {
     pub mailbox: Mutex<T>,
+    pub publication: super::publication::Publisher,
     pub wake: Condvar,
     pub emergency: Arc<AtomicBool>,
     pub capture_stop: AtomicBool,
@@ -63,6 +64,7 @@ impl<T> Shared<T> {
             .try_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_add(1))
             .unwrap_or(0);
         Self {
+            publication: super::publication::Publisher::new(incarnation),
             incarnation,
             mailbox: Mutex::new(mailbox),
             wake: Condvar::new(),
@@ -98,6 +100,7 @@ impl<T> Shared<T> {
         }
     }
     pub fn retire(&self) {
+        self.publication.invalidate();
         self.advance(&self.retirement_epoch);
         self.emergency.store(true, Ordering::Release);
         self.wake.notify_one();
@@ -139,6 +142,7 @@ impl<T> Shared<T> {
         }
     }
     fn stop(&self) {
+        self.publication.retire();
         self.emergency.store(true, Ordering::Release);
         self.stop.store(true, Ordering::Release);
         self.wake.notify_all();
@@ -233,6 +237,7 @@ impl HostChannel {
             self.shared.fail();
             Error::Sequence
         })?;
+        self.shared.publication.invalidate();
         mailbox.permits.clear();
         mailbox.permits.extend_from_slice(permits);
         self.shared.publication_failed.store(false, Ordering::Release);
@@ -253,7 +258,7 @@ impl HostChannel {
             || !mailbox
                 .updates
                 .iter()
-                .any(|u| u.observation.token == token && u.observation.current())
+                .any(|u| u.observation.token.same_metadata(token) && u.observation.current())
         {
             return Err(Error::Binding);
         }
@@ -273,6 +278,15 @@ impl HostChannel {
         } else if capture.is_some() {
             return Err(Error::Binding);
         }
+        if let PreviewCommand::Stop { demand } = &command {
+            if !mailbox
+                .updates
+                .iter()
+                .any(|u| u.observation.token.same_metadata(token) && u.observation.accepted_demand.is_some_and(|r| r.demand == *demand))
+            {
+                return Err(Error::Binding);
+            }
+        }
         if matches!(command, PreviewCommand::Stop { .. })
             && let Some(update) = mailbox.updates.iter_mut().find(|u| u.observation.token == token)
         {
@@ -290,6 +304,24 @@ impl HostChannel {
         mailbox.commands.push_back(CommandOffer { token, command, capture });
         self.shared.wake.notify_one();
         Ok(())
+    }
+    pub fn try_observations(&self) -> Result<VersionedObservationSet, Error> {
+        if self.shared.emergency.load(Ordering::Acquire) || self.shared.stop.load(Ordering::Acquire) {
+            return Err(Error::Closed);
+        }
+        let m = self.shared.mailbox.try_lock().map_err(|_| Error::Busy)?;
+        let set = m.observations.as_ref().ok_or(Error::StaleSnapshot)?;
+        if !set.current() {
+            return Err(Error::StaleSnapshot);
+        }
+        let set = set.clone();
+        if self.shared.stop.load(Ordering::Acquire) || self.shared.emergency.load(Ordering::Acquire) {
+            return Err(Error::Closed);
+        }
+        if !set.current() {
+            return Err(Error::StaleSnapshot);
+        }
+        Ok(set)
     }
     pub fn take_update(&self) -> Option<HostUpdate> {
         if self.shared.emergency.load(Ordering::Acquire) || self.shared.stop.load(Ordering::Acquire) {
@@ -536,6 +568,13 @@ impl WorkerChannel {
             token,
         )
     }
+    pub fn try_demand_receipt(&self, token: ConnectionToken, receipt: DemandReceipt) -> Result<(), Error> {
+        receipt.validate()?;
+        if receipt.source != token.source || receipt.metadata_connection != token.connection {
+            return Err(Error::Binding);
+        }
+        self.outcome(Outcome::Demand { token, receipt }, token)
+    }
     pub fn acknowledge_stop(&self, token: ConnectionToken, demand: u64) -> Result<(), Error> {
         if demand == 0 {
             return Err(Error::Sequence);
@@ -549,11 +588,21 @@ impl WorkerChannel {
         let Ok(mut m) = self.shared.mailbox.try_lock() else {
             return Err(Error::Busy);
         };
-        if m.token != Some(token) {
+        if m.token.is_none_or(|current| !current.same_metadata(token)) {
             return Err(Error::Binding);
         }
         if m.outcomes.len() >= QUEUE {
             return Err(Error::Busy);
+        }
+        match &outcome {
+            Outcome::Demand { receipt, .. } => {
+                m.demands.finish(*receipt)?;
+            }
+            Outcome::Stopped { demand, .. } => {
+                m.demands.stopped(*demand)?;
+            }
+            Outcome::Unavailable { .. } if m.token != Some(token) => return Err(Error::Binding),
+            _ => {}
         }
         m.outcomes.push_back(outcome);
         self.shared.wake.notify_one();
@@ -665,6 +714,11 @@ mod tests {
             };
             channel.publish_permits(std::slice::from_ref(&original)).unwrap();
             let observed = Observation {
+                domain: ObservationDomain::new(shared.incarnation, &original, 1, EpochFence::new()),
+                policy_receipt: None,
+                layout_receipt: None,
+                demand_receipt: None,
+                accepted_demand: None,
                 token: ConnectionToken {
                     source,
                     connection: 1,
@@ -902,7 +956,13 @@ mod tests {
                 registration: 1,
             }])
             .unwrap();
+        let domain_permit = shared.mailbox.lock().unwrap().permits[0].clone();
         let observed = Observation {
+            domain: ObservationDomain::new(shared.incarnation, &domain_permit, 1, EpochFence::new()),
+            policy_receipt: None,
+            layout_receipt: None,
+            demand_receipt: None,
+            accepted_demand: None,
             token: ConnectionToken {
                 source: s,
                 connection: 1,
@@ -947,6 +1007,45 @@ mod tests {
         );
         drop(held);
         assert_eq!(b.used(), baseline);
+    }
+    #[test]
+    fn preview_io_try_observations_is_nonconsuming_try_only_and_invalidated_before_source_coalescing() {
+        let source = source(1);
+        let c = control(source);
+        let shared = Arc::new(Shared::new(HostMailbox::new()));
+        let channel = HostChannel {
+            shared: shared.clone(),
+            installation: source.worker().installation,
+            host: source.worker().host,
+            budget: host_budget(),
+        };
+        let permit = HostPermit {
+            source,
+            secret: PreviewSecret::synthetic([7; 32]).unwrap(),
+            control: c,
+            registration: 1,
+        };
+        channel.publish_permits(std::slice::from_ref(&permit)).unwrap();
+        assert!(matches!(channel.try_observations(), Err(Error::StaleSnapshot)));
+        let token = ConnectionToken::transport_fixture(source, 1, 0, shared.incarnation).unwrap();
+        let observation = Observation::new(token, &permit, EpochFence::new(), shared.emergency.clone());
+        {
+            let mut m = shared.mailbox.lock().unwrap();
+            assert!(matches!(channel.try_observations(), Err(Error::Busy)));
+            m.updates.push(SourceUpdate { observation, frame: None });
+            shared.publication.publish(&mut m).unwrap();
+        }
+        let first = channel.try_observations().unwrap();
+        let second = channel.try_observations().unwrap();
+        assert_eq!(first.stamp(), second.stamp());
+        assert!(first.current());
+        assert_eq!(first.sources().len(), 1);
+        assert!(channel.take_update().unwrap().sources[0].frame.is_none());
+        assert_eq!(channel.try_observations().unwrap().stamp(), first.stamp());
+        channel.publish_permits(&[]).unwrap();
+        assert!(!first.current());
+        assert!(!first.sources()[0].observation().current());
+        assert!(matches!(channel.try_observations(), Err(Error::StaleSnapshot)));
     }
 }
 
@@ -1002,10 +1101,26 @@ mod resource_tests {
             reservation.bytes_mut().fill(255);
             held.push(reservation.finish().unwrap());
         }
+        {
+            let mut m = channel.shared.mailbox.lock().unwrap();
+            for demand in 1..=32 {
+                m.demands
+                    .request(
+                        demand,
+                        DemandConfiguration {
+                            size: PreviewSize::Small,
+                            rate: PreviewRate::One,
+                        },
+                    )
+                    .unwrap();
+            }
+        }
         let m = channel.shared.mailbox.lock().unwrap();
         assert_eq!((m.commands.len(), m.outcomes.len()), (QUEUE, QUEUE));
         assert!(m.frame.is_some());
-        let storage = lane::worker_storage_ceiling()
+        assert!(m.demands.allocated_bytes() > 0);
+        let storage = m.demands.allocated_bytes()
+            + lane::worker_storage_ceiling()
             + std::mem::size_of::<Shared<WorkerMailbox>>()
             + std::mem::size_of::<WorkerMailbox>()
             + m.commands.capacity() * std::mem::size_of::<ReceivedCommand>()

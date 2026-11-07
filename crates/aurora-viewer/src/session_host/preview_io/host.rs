@@ -32,6 +32,7 @@ struct Source {
     last_stop: u64,
     last_stop_policy: Option<PreviewPolicy>,
     pending_capture: Option<(CaptureClaim, CaptureControlGuard, Instant)>,
+    demands: super::demand::DemandBook,
 }
 impl Drop for Source {
     fn drop(&mut self) {
@@ -41,6 +42,9 @@ impl Drop for Source {
 }
 impl Source {
     fn metadata(&mut self, m: Metadata, now: Instant) -> Result<(), Error> {
+        if m.source() != self.permit.source || m.connection() != self.observation.token.connection {
+            return Err(Error::Binding);
+        }
         match m {
             Metadata::Policy { policy, .. } => {
                 if !policy.access().retain_last_active {
@@ -58,14 +62,13 @@ impl Source {
                 if self.observation.layout.is_some_and(|layout| !layout.matches_policy(policy)) {
                     self.observation.layout = None;
                 }
-                self.observation.policy = Some(policy);
-                self.observation.policy_received_at = Some(now);
+                self.observation.install_policy(policy, now)?;
             }
             Metadata::Layout { layout, .. } => {
                 if self.observation.policy.is_none_or(|p| !layout.matches_policy(p)) {
                     return Err(Error::Binding);
                 }
-                self.observation.layout = Some(layout);
+                self.observation.install_layout(layout, now)?;
             }
             Metadata::Invalidate { .. } => return Err(Error::Expired),
             Metadata::CaptureStopped {
@@ -99,8 +102,7 @@ impl Source {
                 self.pair.suspend_pixels();
                 self.last_stop = stop;
                 self.last_stop_policy = Some(policy);
-                self.observation.policy = Some(policy);
-                self.observation.policy_received_at = Some(now);
+                self.observation.install_policy(policy, now)?;
                 self.pair.queue_metadata(Metadata::CaptureStopAck {
                     source: self.permit.source,
                     connection: self.observation.token.connection,
@@ -114,7 +116,23 @@ impl Source {
                 });
                 self.observation.status = Status::CaptureStopped;
             }
-            Metadata::Stopped { demand, .. } => self.observation.stopped_demand = Some(demand),
+            Metadata::DemandReceipt(receipt) => {
+                if !self.demands.finish(receipt)? {
+                    return Ok(());
+                }
+                if matches!(receipt.outcome, DemandOutcome::Accepted { .. }) {
+                    self.observation.accepted_demand = Some(receipt);
+                }
+                self.observation.demand_receipt = Some(receipt);
+            }
+            Metadata::Stopped { demand, .. } => {
+                if self.observation.stopped_demand == Some(demand) {
+                    return Ok(());
+                }
+                self.demands.stopped(demand)?;
+                self.observation.stopped_demand = Some(demand);
+                self.observation.accepted_demand = None;
+            }
             Metadata::Unavailable { claim: outcome, reason } => {
                 if self.pending_capture.as_ref().is_some_and(|(claim, _, _)| *claim == outcome) {
                     self.pending_capture = None;
@@ -202,8 +220,8 @@ impl Source {
             policy_expires: self.observation.policy_received_at.and_then(|at| at.checked_add(DEADLINE)),
         })?;
         for packet in self.pair.poll_roles::<TcpStream>(&mut self.metadata, None, clock, tick)? {
-            if let Received::Metadata(m) = packet {
-                self.metadata(m, now)?;
+            if let Received::Metadata { metadata, received_at } = packet {
+                self.metadata(metadata, received_at)?;
             } else {
                 return Err(Error::Direction);
             }
@@ -266,6 +284,9 @@ fn publish(source: &mut Source, shared: &Shared<HostMailbox>) {
             frame: source.frame.take(),
         });
     }
+    if shared.publication.publish(&mut m).is_err() {
+        shared.fail();
+    }
 }
 fn fail(source: &mut Source, shared: &Shared<HostMailbox>) {
     source.observation.retention.revoke();
@@ -281,6 +302,7 @@ pub(super) fn run(installation: InstallationId, host: HostId, shared: Arc<Shared
     struct End(Arc<Shared<HostMailbox>>);
     impl Drop for End {
         fn drop(&mut self) {
+            self.0.publication.retire();
             self.0.emergency.store(true, Ordering::Release);
             self.0.stop.store(true, Ordering::Release);
             self.0.wake.notify_all();
@@ -346,16 +368,20 @@ pub(super) fn run(installation: InstallationId, host: HostId, shared: Arc<Shared
                 .retain(|u| permits.iter().any(|p| p.source == u.observation.token.source && p.current(now)));
         }
         for command in commands {
-            if let Some(s) = sources.iter_mut().find(|s| s.observation.token == command.token) {
+            if let Some(s) = sources.iter_mut().find(|s| s.observation.token.same_metadata(command.token)) {
                 let valid = match &command.command {
                     PreviewCommand::Capture(c) => {
-                        s.capture.current()
+                        s.observation.token == command.token
+                            && s.capture.current()
                             && s.pending_capture.is_none()
                             && command.capture.as_ref().is_some_and(|g| g.current(**c, Instant::now()))
                             && s.observation.policy.is_some_and(|p| c.matches_policy(p))
                             && s.pair.has_pixels()
                     }
-                    _ => true,
+                    PreviewCommand::RememberActive { demand, size, rate } => {
+                        s.demands.request(*demand, DemandConfiguration { size: *size, rate: *rate }).is_ok()
+                    }
+                    PreviewCommand::Stop { demand } => s.demands.can_stop(*demand),
                 };
                 if valid {
                     if matches!(command.command, PreviewCommand::Stop { .. }) {
@@ -478,23 +504,13 @@ pub(super) fn run(installation: InstallationId, host: HostId, shared: Arc<Shared
                         incarnation: shared.incarnation,
                     };
                     let capture = EpochFence::new();
+                    let observation = Observation::new(token, &permit, capture.clone(), shared.emergency.clone());
                     sources.push(Source {
                         permit,
                         pair,
                         metadata: p.io.stream,
                         pixels: None,
-                        observation: Observation {
-                            token,
-                            policy: None,
-                            policy_received_at: None,
-                            layout: None,
-                            status: Status::Metadata,
-                            stopped_demand: None,
-                            unavailable: None,
-                            retention: EpochFence::new(),
-                            capture: capture.clone(),
-                            emergency: shared.emergency.clone(),
-                        },
+                        observation,
                         capture,
                         frame: None,
                         suspension: None,
@@ -502,6 +518,7 @@ pub(super) fn run(installation: InstallationId, host: HostId, shared: Arc<Shared
                         last_stop: 0,
                         last_stop_policy: None,
                         pending_capture: None,
+                        demands: super::demand::DemandBook::default(),
                     });
                 } else if let Some(s) = sources
                     .iter_mut()
@@ -639,6 +656,9 @@ pub(super) fn run(installation: InstallationId, host: HostId, shared: Arc<Shared
         }
         {
             let mut m = shared.mailbox.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if shared.publication.publish(&mut m).is_err() {
+                shared.fail();
+            }
             m.diagnostics = [
                 pending.len(),
                 sources.iter().map(|s| 1 + usize::from(s.pixels.is_some())).sum(),
@@ -695,7 +715,7 @@ mod tests {
         assert_eq!(
             &host.challenge().as_slice()[4..6],
             &2u16.to_be_bytes(),
-            "auth schema remains V2 while image data is V3"
+            "auth schema remains V2 while image data is V4"
         );
         let mut worker = WorkerHandshake::new(scope, key.clone(), 0).unwrap();
         let proof = worker.answer(host.challenge().as_slice(), 1).unwrap();
@@ -740,6 +760,21 @@ mod tests {
             metadata,
             pixels: None,
             observation: Observation {
+                domain: ObservationDomain::new(
+                    1,
+                    &HostPermit {
+                        source,
+                        secret: PreviewSecret::synthetic([7; 32]).unwrap(),
+                        control: proof.control.clone(),
+                        registration: 1,
+                    },
+                    token.connection,
+                    EpochFence::new(),
+                ),
+                policy_receipt: None,
+                layout_receipt: None,
+                demand_receipt: None,
+                accepted_demand: None,
                 token,
                 policy: Some(base),
                 policy_received_at: Some(now),
@@ -758,6 +793,7 @@ mod tests {
             last_stop: 0,
             last_stop_policy: None,
             pending_capture: Some((fresh, proof, now)),
+            demands: super::demand::DemandBook::default(),
         };
         for old in [old_instance, old_demand, old_policy, old_activation] {
             assert_eq!(old.request(), fresh.request());
@@ -793,5 +829,122 @@ mod tests {
             .unwrap();
         assert!(state.pending_capture.is_none());
         drop(client);
+    }
+    fn metadata_fixture() -> Source {
+        let source = super::super::tests::source(1);
+        let control = super::super::tests::control(source);
+        let secret = PreviewSecret::synthetic([7; 32]).unwrap();
+        let scope = Scope {
+            source,
+            connection: 1,
+            role_epoch: 1,
+            lane: Lane::Metadata,
+        };
+        let mut host = HostHandshake::new(scope, secret.clone(), 0).unwrap();
+        let mut worker = WorkerHandshake::new(scope, secret.clone(), 0).unwrap();
+        let proof = worker.answer(host.challenge().as_slice(), 1).unwrap();
+        let (_, auth) = host.accept(proof.as_slice(), 2).unwrap();
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let pixel_fixture = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (metadata, _) = listener.accept().unwrap();
+        let permit = HostPermit {
+            source,
+            control,
+            secret,
+            registration: 1,
+        };
+        let capture = EpochFence::new();
+        let token = ConnectionToken::transport_fixture(source, 1, 1, 1).unwrap();
+        let observation = Observation::new(token, &permit, capture.clone(), Arc::new(std::sync::atomic::AtomicBool::new(false)));
+        Source {
+            permit,
+            pair: Pair::metadata(auth, Some(ImageBudget::new(1024 * 1024).unwrap())).unwrap(),
+            metadata,
+            pixels: Some(pixel_fixture),
+            observation,
+            capture,
+            frame: None,
+            suspension: None,
+            last_pixel: 1,
+            last_stop: 0,
+            last_stop_policy: None,
+            pending_capture: None,
+            demands: super::demand::DemandBook::default(),
+        }
+    }
+    #[test]
+    fn preview_io_actual_metadata_handler_duplicate_stop_never_mints_policy_origin_or_refreshes_receipt_time() {
+        let mut s = metadata_fixture();
+        let policy = super::super::tests::state(s.permit.control.clone(), None).policy;
+        let now = Instant::now();
+        let message = Metadata::CaptureStopped {
+            source: s.permit.source,
+            connection: 1,
+            pixel_epoch: 1,
+            stop: 1,
+            policy,
+        };
+        s.metadata(message, now).unwrap();
+        let origin = s.observation.policy_receipt.unwrap();
+        s.metadata(message, now + Duration::from_millis(700)).unwrap();
+        assert!(s.observation.policy_receipt == Some(origin));
+        assert_eq!(s.observation.policy_received_at, Some(now));
+        s.metadata(Metadata::Policy { connection: 1, policy }, now + Duration::from_millis(800))
+            .unwrap();
+        let heartbeat = s.observation.policy_receipt.unwrap();
+        assert!(heartbeat.origin().serial() > origin.origin().serial());
+        assert_eq!(heartbeat.received_at(), now + Duration::from_millis(800));
+    }
+    #[test]
+    fn preview_io_actual_metadata_handler_old_terminal_demand_duplicate_cannot_replace_new_accepted_configuration() {
+        let mut s = metadata_fixture();
+        let config = DemandConfiguration {
+            size: PreviewSize::Small,
+            rate: PreviewRate::One,
+        };
+        let receipt = |demand| DemandReceipt {
+            source: s.permit.source,
+            metadata_connection: 1,
+            demand,
+            requested: config,
+            outcome: DemandOutcome::Accepted {
+                effective: config,
+                native_revision: demand,
+            },
+        };
+        let first = receipt(1);
+        let second = receipt(2);
+        let now = Instant::now();
+        s.demands.request(1, config).unwrap();
+        s.metadata(Metadata::DemandReceipt(first), now).unwrap();
+        s.demands.request(2, config).unwrap();
+        s.metadata(Metadata::DemandReceipt(second), now).unwrap();
+        s.metadata(Metadata::DemandReceipt(first), now).unwrap();
+        assert_eq!(s.observation.accepted_demand, Some(second));
+        assert_eq!(s.observation.demand_receipt, Some(second));
+        assert!(
+            s.metadata(
+                Metadata::Stopped {
+                    source: s.permit.source,
+                    connection: 1,
+                    demand: 1
+                },
+                now
+            )
+            .is_err()
+        );
+        assert!(s.demands.can_stop(2));
+        assert_eq!(s.observation.accepted_demand, Some(second));
+        assert!(
+            s.metadata(
+                Metadata::DemandReceipt(DemandReceipt {
+                    metadata_connection: 2,
+                    ..second
+                }),
+                now
+            )
+            .is_err()
+        );
+        assert_eq!(s.observation.accepted_demand, Some(second));
     }
 }

@@ -3530,3 +3530,16 @@ Open-source technologies that could set Aurora apart (human request of 2026-10-1
   gestures across nonreused selections; quarantine rollback drags; accept own
   case-only Rename; explicit logical source-generation and cleanup fences.
   Regression tests are authored UNRUN; immutable 168 source baseline preserved.
+
+- 🔧 Shared native monitor image-data V4 and ordered metadata prerequisites
+  (source-only, disabled): closed exact native DemandReceipt codec, bounded IO
+  demand correlation and accepted-config Stop, non-consuming metadata publications
+  with globally nonreused current heads and independent ORIGINAL policy/layout
+  receipt identities. Adds shared generation fences and sealed actual host/native
+  proof consumers; projection/native token branches plus root production module
+  registration remain required. `PreviewPolicy::validate_successor` extracts the
+  actual SourceImages ordering rule for a retained expired floor without renewing
+  authority. New portable/fake-IO/owned-loopback regressions are authored UNRUN;
+  no Cargo/native/GPU/socket execution by source author and no production endpoint,
+  bootstrap/capture/UI enablement. Root validation and independent source review
+  remain separate, then actual pipeline integration and human Windows acceptance.

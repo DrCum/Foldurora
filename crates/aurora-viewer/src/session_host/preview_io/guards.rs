@@ -8,32 +8,92 @@ use std::sync::{
 };
 
 #[derive(Clone)]
-pub(crate) struct EpochFence(Arc<AtomicU64>);
+pub(crate) struct EpochFence {
+    local: Arc<std::sync::atomic::AtomicBool>,
+    generation: Option<(Arc<AtomicU64>, u64)>,
+}
 impl EpochFence {
     pub fn new() -> Self {
-        Self(Arc::new(AtomicU64::new(1)))
+        Self {
+            local: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            generation: None,
+        }
     }
-    pub(super) fn same(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.0, &other.0)
+    /// The counter belongs to the synchronous front door. IO may revoke its
+    /// own clone permanently, but must never reset or write that owner's counter.
+    pub fn generation(counter: Arc<AtomicU64>, expected: u64) -> Self {
+        Self {
+            local: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            generation: Some((counter, expected)),
+        }
+    }
+    pub(crate) fn same(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.local, &other.local)
+            && match (&self.generation, &other.generation) {
+                (None, None) => true,
+                (Some((a, x)), Some((b, y))) => x == y && Arc::ptr_eq(a, b),
+                _ => false,
+            }
     }
     pub fn revoke(&self) {
-        self.0.store(0, Ordering::Release);
+        self.local.store(false, Ordering::Release);
     }
     pub(crate) fn current(&self) -> bool {
-        self.0.load(Ordering::Acquire) == 1
+        self.local.load(Ordering::Acquire)
+            && self
+                .generation
+                .as_ref()
+                .is_none_or(|(counter, expected)| *expected != 0 && counter.load(Ordering::Acquire) == *expected)
     }
 }
+impl PartialEq for EpochFence {
+    fn eq(&self, other: &Self) -> bool {
+        self.same(other)
+    }
+}
+impl Eq for EpochFence {}
 /// Original control receipt deadline plus exact full source. This is not a
 /// roster lookup: only the later accepted-control owner may supply that proof.
 #[derive(Clone)]
 pub(crate) struct ControlGuard {
-    pub source: PreviewSource,
-    pub expires_at: Instant,
-    pub witness: EpochFence,
+    pub(super) source: PreviewSource,
+    pub(super) expires_at: Instant,
+    pub(super) witness: EpochFence,
 }
 impl ControlGuard {
+    pub fn from_host(token: &crate::session_host::transport::preview_control::AcceptedPreviewSource) -> Result<Self, Error> {
+        if !token.current(Instant::now()) {
+            return Err(Error::Expired);
+        }
+        Ok(Self {
+            source: token.source(),
+            expires_at: token.expires_at(),
+            witness: token.witness(),
+        })
+    }
+    pub fn from_native(token: &crate::session_host::worker::AcceptedNativePreviewSource) -> Result<Self, Error> {
+        let now = Instant::now();
+        if !token.current() || token.received_at() > now || token.expires_at() <= token.received_at() {
+            return Err(Error::Expired);
+        }
+        Ok(Self {
+            source: token.source(),
+            expires_at: token.expires_at(),
+            witness: token.witness(),
+        })
+    }
+    pub fn source(&self) -> PreviewSource {
+        self.source
+    }
+    pub fn expires_at(&self) -> Instant {
+        self.expires_at
+    }
+    pub fn same_domain(&self, other: &Self) -> bool {
+        self.source() == other.source() && self.witness.same(&other.witness)
+    }
+
     pub fn current(&self, now: Instant) -> bool {
-        self.expires_at > now && self.witness.current()
+        self.expires_at() > now && self.witness.current()
     }
 }
 #[derive(Clone)]
@@ -161,20 +221,44 @@ impl CapturePermitGuard {
 /// control state. Its capture-only fence never gates already-admitted history.
 #[derive(Clone)]
 pub(crate) struct CaptureControlGuard {
-    pub control: ControlGuard,
-    pub activation: u64,
-    pub viewport: aurora_session::HostedViewport,
-    pub witness: EpochFence,
+    pub(super) control: ControlGuard,
+    pub(super) activation: u64,
+    pub(super) viewport: aurora_session::HostedViewport,
+    pub(super) witness: EpochFence,
 }
 impl CaptureControlGuard {
+    pub fn from_host(token: &crate::session_host::transport::preview_control::AcceptedPreviewCapture) -> Result<Self, Error> {
+        if !token.current(Instant::now()) {
+            return Err(Error::Expired);
+        }
+        Ok(Self {
+            control: ControlGuard::from_host(token.source())?,
+            activation: token.activation(),
+            viewport: token.viewport(),
+            witness: token.witness(),
+        })
+    }
+    pub fn control(&self) -> &ControlGuard {
+        &self.control
+    }
+    pub fn source(&self) -> PreviewSource {
+        self.control.source
+    }
+    pub fn activation(&self) -> u64 {
+        self.activation
+    }
+    pub fn viewport(&self) -> aurora_session::HostedViewport {
+        self.viewport
+    }
+
     pub fn current(&self, claim: CaptureClaim, now: Instant) -> bool {
-        self.control.current(now)
+        self.control().current(now)
             && self.witness.current()
-            && self.activation != 0
-            && claim.source() == self.control.source
-            && claim.activation() == self.activation
-            && self.viewport.validate().is_ok()
-            && claim.geometry().source_size() == [self.viewport.rect.width, self.viewport.rect.height]
+            && self.activation() != 0
+            && claim.source() == self.source()
+            && claim.activation() == self.activation()
+            && self.viewport().validate().is_ok()
+            && claim.geometry().source_size() == [self.viewport().rect.width, self.viewport().rect.height]
     }
 }
 
@@ -268,5 +352,54 @@ mod tests {
         active.control = c;
         active.witness.revoke();
         assert!(!active.current(claim, Instant::now()));
+    }
+}
+
+#[cfg(test)]
+mod generation_tests {
+    use super::*;
+    #[test]
+    fn preview_io_generation_fence_local_revoke_never_resets_owner_or_revives_earlier_generation() {
+        let counter = Arc::new(AtomicU64::new(1));
+        let old = EpochFence::generation(counter.clone(), 1);
+        let held = old.clone();
+        assert!(old.current());
+        assert!(old.same(&held));
+        counter.store(2, Ordering::Release);
+        let new = EpochFence::generation(counter.clone(), 2);
+        assert!(!old.current());
+        assert!(new.current());
+        assert!(!old.same(&new));
+        old.revoke();
+        assert_eq!(counter.load(Ordering::Acquire), 2);
+        assert!(new.current());
+        new.revoke();
+        assert_eq!(counter.load(Ordering::Acquire), 2);
+        assert!(!new.current());
+        counter.store(3, Ordering::Release);
+        assert!(!old.current());
+        assert!(!held.current());
+        assert!(!new.current());
+        assert!(!EpochFence::generation(counter.clone(), 0).current());
+        counter.store(0, Ordering::Release);
+        assert!(!EpochFence::generation(counter, 3).current());
+        let c = super::super::tests::control(super::super::tests::source(1));
+        assert_eq!(c.source(), super::super::tests::source(1));
+        assert_eq!(c.expires_at(), c.expires_at);
+        assert!(c.same_domain(&c.clone()));
+        assert!(!c.same_domain(&super::super::tests::control(c.source())));
+    }
+    #[test]
+    fn preview_io_transport_fixture_is_only_exact_metadata_correlation_not_pixel_or_source_permission() {
+        let source = super::super::tests::source(1);
+        let metadata = ConnectionToken::transport_fixture(source, 1, 0, 1).unwrap();
+        let pixels = ConnectionToken::transport_fixture(source, 1, 2, 1).unwrap();
+        assert!(metadata.same_metadata(pixels));
+        assert!(metadata != pixels);
+        assert!(!metadata.same_metadata(ConnectionToken::transport_fixture(source, 2, 0, 1).unwrap()));
+        assert!(!metadata.same_metadata(ConnectionToken::transport_fixture(source, 1, 0, 2).unwrap()));
+        assert!(!metadata.same_metadata(ConnectionToken::transport_fixture(super::super::tests::source(2), 1, 0, 1).unwrap()));
+        assert!(ConnectionToken::transport_fixture(source, 0, 0, 1).is_none());
+        assert!(ConnectionToken::transport_fixture(source, 1, 0, 0).is_none());
     }
 }

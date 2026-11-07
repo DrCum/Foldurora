@@ -238,10 +238,11 @@ impl Connected {
         }
         for outcome in outcomes {
             let metadata = match outcome {
+                Outcome::Demand { token, receipt } if token.same_metadata(self.token) => Some(Metadata::DemandReceipt(receipt)),
                 Outcome::Unavailable { token, claim, reason } if token == self.token => {
                     Some(Metadata::Unavailable { claim: *claim, reason })
                 }
-                Outcome::Stopped { token, demand } if token == self.token => Some(Metadata::Stopped {
+                Outcome::Stopped { token, demand } if token.same_metadata(self.token) => Some(Metadata::Stopped {
                     source: token.source,
                     connection: token.connection,
                     demand,
@@ -282,7 +283,7 @@ impl Connected {
             Err(e) => return Err(e),
         };
         for packet in packets {
-            let Received::Metadata(metadata) = packet else {
+            let Received::Metadata { metadata, received_at } = packet else {
                 return Err(Error::Direction);
             };
             match metadata {
@@ -324,18 +325,27 @@ impl Connected {
                     shared.capture_consumed(consumed);
                 }
                 Metadata::Demand { demand, size, rate, .. } => {
-                    self.command(PreviewCommand::RememberActive { demand, size, rate }, now, shared)?
+                    self.command(PreviewCommand::RememberActive { demand, size, rate }, received_at, shared)?
                 }
                 Metadata::Capture(claim) => {
                     if !capture || self.stopping.is_some() || !self.pair.has_pixels() || !claim.matches_policy(state.policy) {
                         continue;
                     }
-                    self.command(PreviewCommand::Capture(Box::new(claim)), now, shared)?;
+                    self.command(PreviewCommand::Capture(Box::new(claim)), received_at, shared)?;
                 }
                 Metadata::Stop { demand, .. } => {
+                    if !shared
+                        .mailbox
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .demands
+                        .can_stop(demand)
+                    {
+                        return Err(Error::Binding);
+                    }
                     shared.capture_revoked();
                     self.begin_stop(policy, now, shared.capture_epoch.load(Ordering::Acquire))?;
-                    self.command(PreviewCommand::Stop { demand }, now, shared)?;
+                    self.command(PreviewCommand::Stop { demand }, received_at, shared)?;
                 }
                 _ => return Err(Error::Direction),
             }
@@ -369,6 +379,9 @@ impl Connected {
         }
         if m.commands.len() >= QUEUE {
             return Err(Error::Busy);
+        }
+        if let PreviewCommand::RememberActive { demand, size, rate } = &command {
+            m.demands.request(*demand, DemandConfiguration { size: *size, rate: *rate })?;
         }
         m.commands.push_back(ReceivedCommand {
             token: self.token,
@@ -517,6 +530,7 @@ pub(super) fn run(bootstrap: PreviewBootstrap, shared: Arc<Shared<WorkerMailbox>
                                         capture_gate: EpochFence::new(),
                                         retention_gate: EpochFence::new(),
                                     });
+                                    mailbox.demands = super::demand::DemandBook::default();
                                     mailbox.token = Some(token);
                                     mailbox.capture_gate = connected.as_ref().map(|c| c.capture_gate.clone());
                                 }

@@ -398,9 +398,116 @@ fn preview_wire_v3_unavailable_retains_full_claim_and_rejects_old_request_only_s
     let old = serde_json::json!({"type":"unavailable","data":{"source":captured.source(),"connection":captured.connection(),"request":captured.request(),"reason":"busy"}});
     let old = serde_json::to_vec(&old).unwrap();
     assert!(decode_metadata(header(Lane::Metadata, Direction::WorkerToHost, &old, 0), &old).is_err());
-    for version in [1u16, 2] {
+    for version in [1u16, 2, 3] {
         let mut bytes = h.encode();
         bytes[4..6].copy_from_slice(&version.to_be_bytes());
         assert_eq!(Header::decode(&bytes), Err(WireError::Version));
     }
+}
+
+fn demand_receipt() -> DemandReceipt {
+    let requested = DemandConfiguration {
+        size: PreviewSize::Large,
+        rate: PreviewRate::Five,
+    };
+    DemandReceipt {
+        source: source(),
+        metadata_connection: u64::MAX,
+        demand: u64::MAX,
+        requested,
+        outcome: DemandOutcome::Accepted {
+            effective: requested,
+            native_revision: u64::MAX,
+        },
+    }
+}
+#[test]
+fn preview_wire_v4_native_demand_receipt_exact_accepted_and_all_bounded_rejections_roundtrip() {
+    let accepted = demand_receipt();
+    let mut receipts = vec![accepted];
+    for reason in [
+        DemandRejection::Denied,
+        DemandRejection::Unsupported,
+        DemandRejection::Busy,
+        DemandRejection::Stale,
+        DemandRejection::Expired,
+    ] {
+        receipts.push(DemandReceipt {
+            outcome: DemandOutcome::Rejected { reason },
+            ..accepted
+        });
+    }
+    for receipt in receipts {
+        let metadata = Metadata::DemandReceipt(receipt);
+        let bytes = encode_metadata(metadata).unwrap();
+        assert!(bytes.as_slice().len() < MAX_METADATA_BYTES);
+        assert_eq!(
+            decode_metadata(
+                header(Lane::Metadata, Direction::WorkerToHost, bytes.as_slice(), 0),
+                bytes.as_slice()
+            )
+            .unwrap(),
+            metadata
+        );
+        assert_eq!(metadata.source(), receipt.source);
+        assert_eq!(metadata.connection(), receipt.metadata_connection);
+        assert!(
+            decode_metadata(
+                header(Lane::Metadata, Direction::HostToWorker, bytes.as_slice(), 0),
+                bytes.as_slice()
+            )
+            .is_err()
+        );
+        assert_eq!(format!("{receipt:?}"), "NativeDemandReceipt([redacted])");
+    }
+}
+#[test]
+fn preview_wire_v4_native_demand_receipt_rejects_zero_identity_silent_config_change_and_unknown_shape() {
+    let good = demand_receipt();
+    for bad in [
+        DemandReceipt { demand: 0, ..good },
+        DemandReceipt {
+            metadata_connection: 0,
+            ..good
+        },
+        DemandReceipt {
+            outcome: DemandOutcome::Accepted {
+                effective: good.requested,
+                native_revision: 0,
+            },
+            ..good
+        },
+        DemandReceipt {
+            outcome: DemandOutcome::Accepted {
+                effective: DemandConfiguration {
+                    size: PreviewSize::Small,
+                    ..good.requested
+                },
+                native_revision: 1,
+            },
+            ..good
+        },
+        DemandReceipt {
+            outcome: DemandOutcome::Accepted {
+                effective: DemandConfiguration {
+                    rate: PreviewRate::One,
+                    ..good.requested
+                },
+                native_revision: 1,
+            },
+            ..good
+        },
+    ] {
+        assert!(encode_metadata(Metadata::DemandReceipt(bad)).is_err());
+        let bytes = serde_json::to_vec(&Metadata::DemandReceipt(bad)).unwrap();
+        assert!(decode_metadata(header(Lane::Metadata, Direction::WorkerToHost, &bytes, 0), &bytes).is_err());
+    }
+    let mut value = serde_json::to_value(Metadata::DemandReceipt(good)).unwrap();
+    value["data"]["extra"] = serde_json::json!(true);
+    let bytes = serde_json::to_vec(&value).unwrap();
+    assert!(decode_metadata(header(Lane::Metadata, Direction::WorkerToHost, &bytes, 0), &bytes).is_err());
+    let mut value = serde_json::to_value(Metadata::DemandReceipt(good)).unwrap();
+    value["data"]["outcome"]["effective"]["extra"] = serde_json::json!(true);
+    let bytes = serde_json::to_vec(&value).unwrap();
+    assert!(decode_metadata(header(Lane::Metadata, Direction::WorkerToHost, &bytes, 0), &bytes).is_err());
 }

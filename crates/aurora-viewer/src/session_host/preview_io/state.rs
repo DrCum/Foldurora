@@ -62,6 +62,10 @@ pub(super) struct CommandOffer {
     pub capture: Option<CaptureControlGuard>,
 }
 pub(super) enum Outcome {
+    Demand {
+        token: ConnectionToken,
+        receipt: DemandReceipt,
+    },
     Unavailable {
         token: ConnectionToken,
         claim: Box<CaptureClaim>,
@@ -82,6 +86,7 @@ pub(super) struct WorkerMailbox {
     pub outcomes: VecDeque<Outcome>,
     pub token: Option<ConnectionToken>,
     pub capture_gate: Option<EpochFence>,
+    pub demands: super::demand::DemandBook,
     pub revision: u64,
 }
 impl WorkerMailbox {
@@ -96,6 +101,7 @@ impl WorkerMailbox {
             outcomes: VecDeque::with_capacity(QUEUE),
             token: None,
             capture_gate: None,
+            demands: super::demand::DemandBook::default(),
             revision: 1,
         }
     }
@@ -105,6 +111,7 @@ impl WorkerMailbox {
     pub fn reset(&mut self) {
         self.revision = self.revision.checked_add(1).unwrap_or(0);
         self.state = None;
+        self.demands = super::demand::DemandBook::default();
         self.frame = None;
         self.commands.clear();
         self.outcomes.clear();
@@ -119,12 +126,27 @@ impl WorkerMailbox {
 }
 #[derive(Clone)]
 pub(crate) struct HostPermit {
-    pub source: PreviewSource,
-    pub secret: PreviewSecret,
-    pub control: ControlGuard,
-    pub registration: u64,
+    pub(super) source: PreviewSource,
+    pub(super) secret: PreviewSecret,
+    pub(super) control: ControlGuard,
+    pub(super) registration: u64,
 }
 impl HostPermit {
+    pub fn from_host(
+        token: &crate::session_host::transport::preview_control::AcceptedPreviewSource,
+        secret: PreviewSecret,
+    ) -> Result<Self, Error> {
+        if token.registration() == 0 {
+            return Err(Error::Binding);
+        }
+        Ok(Self {
+            source: token.source(),
+            secret,
+            control: ControlGuard::from_host(token)?,
+            registration: token.registration(),
+        })
+    }
+
     pub(super) fn current(&self, now: Instant) -> bool {
         self.source == self.control.source && self.control.current(now)
     }
@@ -142,6 +164,11 @@ pub(crate) enum Status {
 }
 #[derive(Clone)]
 pub(crate) struct Observation {
+    pub(super) domain: ObservationDomain,
+    pub(super) policy_receipt: Option<PolicyReceipt>,
+    pub(super) layout_receipt: Option<LayoutReceipt>,
+    pub demand_receipt: Option<DemandReceipt>,
+    pub accepted_demand: Option<DemandReceipt>,
     pub token: ConnectionToken,
     pub policy: Option<PreviewPolicy>,
     pub policy_received_at: Option<Instant>,
@@ -154,6 +181,49 @@ pub(crate) struct Observation {
     pub(super) emergency: Arc<AtomicBool>,
 }
 impl Observation {
+    pub(super) fn new(token: ConnectionToken, permit: &HostPermit, capture: EpochFence, emergency: Arc<AtomicBool>) -> Self {
+        let retention = EpochFence::new();
+        Self {
+            domain: ObservationDomain::new(token.incarnation, permit, token.connection, retention.clone()),
+            policy_receipt: None,
+            layout_receipt: None,
+            demand_receipt: None,
+            accepted_demand: None,
+            token,
+            policy: None,
+            policy_received_at: None,
+            layout: None,
+            status: Status::Metadata,
+            stopped_demand: None,
+            unavailable: None,
+            retention,
+            capture,
+            emergency,
+        }
+    }
+
+    pub(super) fn install_policy(&mut self, policy: PreviewPolicy, now: Instant) -> Result<(), Error> {
+        let origin = ReceiptOrigin::next(
+            &self.domain,
+            self.policy_receipt.map(|p| p.origin()),
+            super::publication::ReceiptKind::Policy,
+        )?;
+        self.policy = Some(policy);
+        self.policy_received_at = Some(now);
+        self.policy_receipt = Some(PolicyReceipt::new(origin, now, policy));
+        Ok(())
+    }
+    pub(super) fn install_layout(&mut self, layout: PreviewLayout, now: Instant) -> Result<(), Error> {
+        let origin = ReceiptOrigin::next(
+            &self.domain,
+            self.layout_receipt.map(|p| p.origin()),
+            super::publication::ReceiptKind::Layout,
+        )?;
+        self.layout = Some(layout);
+        self.layout_receipt = Some(LayoutReceipt::new(origin, now, layout));
+        Ok(())
+    }
+
     pub fn current(&self) -> bool {
         !self.emergency.load(Ordering::Acquire)
             && self.retention.current()
@@ -252,6 +322,7 @@ pub(super) struct HostMailbox {
     pub revision: u64,
     pub commands: VecDeque<CommandOffer>,
     pub updates: Vec<SourceUpdate>,
+    pub observations: Option<VersionedObservationSet>,
     pub diagnostics: [usize; 3],
 }
 impl HostMailbox {
@@ -261,6 +332,7 @@ impl HostMailbox {
             revision: 1,
             commands: VecDeque::with_capacity(QUEUE * MAX_WORKERS),
             updates: Vec::with_capacity(MAX_WORKERS),
+            observations: None,
             diagnostics: [0; 3],
         }
     }
