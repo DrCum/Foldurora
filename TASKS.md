@@ -8,7 +8,10 @@
   in both styles. No Attention, activation, automatic host reading, new IM,
   groups or offer responses. Source, privacy, race, bounds and actual-egui
   regressions are authored; direct formatting, diff and locale-parity checks pass.
-  Compiled/native/human acceptance remains pending.
+  Seven combined negative-control regressions (three Read, four shutter) were
+  reproduced by compiled runtime assertions against old production behaviors.
+  Final fixed checks/native/human acceptance remain pending in this candidate's
+  manifest and coordination ledger.
 
 - 🔧 Completed viewfinder shutter clicks (offline observation, 2026-11-07;
   task `shutter-same-pass-sol`; no issue): accept egui's completed primary

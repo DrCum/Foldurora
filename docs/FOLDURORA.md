@@ -1,5 +1,38 @@
 # Foldurora workspace and character preview
 
+## Native unread, explicit Read and shutter candidate
+
+The separate `feat/native-read-integration` candidate follows frozen Shared Chat
+source `1ef87bf6`. It adds native Nearby and existing resident-IM unread metadata
+and an explicit **Mark read** action for the selected source/conversation. Native
+badge counts are independent of exported history-line order. Selecting a source,
+conversation or active world does not issue this action, and read updates do not
+replace a draft or its Undo/IME state.
+
+Read admission captures the source, permissions and observed native incoming/read
+revision. A later arrival or native read makes that observation stale; it cannot
+clear newer messages. Receipts contain no chat bodies and remain immutable;
+uncertainty queries a receipt without replaying the mutation. Controls reflect
+native readiness, privacy and mute rules. Both native chat styles retain their
+existing read-on-draw timing/defaults. This slice does not establish passive-read
+safety, add automatic host reading, Attention, new conversations or monitors.
+The separate chat wire protocol is V2 and rejects older chat peers; the control
+protocol stays V1. Use a matching executable for controller and workers.
+
+The same candidate includes the completed primary shutter-click follow-up below.
+All seven targeted old-behavior regressions were reproduced by runtime assertions
+in a compiled full-workspace negative control. Final fixed tests, lint, build,
+package and native/human acceptance belong to this candidate's own manifest and
+coordination ledger; earlier binary receipts do not transfer.
+
+Human-managed grid acceptance should compare native and Shared Chat counts,
+explicitly mark one selected Nearby/existing IM conversation read, and confirm
+that a new arrival or native read racing the gesture produces a stale result.
+Navigate while a receipt is pending; completion must retire the captured operation
+without clearing another draft. Change privacy/mute/source eligibility and verify
+text/Undo removal, then check reconnect uncertainty without automatic replay.
+Only the human logs in or tests on a grid.
+
 ## Shared Chat integration candidate
 
 The `feat/shared-chat-integration` branch applies the first Shared Chat surface
