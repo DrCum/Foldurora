@@ -396,6 +396,83 @@ fn monitor_body_captures_exact_binding_and_settings_base_without_optimistic_ackn
 }
 
 #[test]
+fn monitor_body_dispatch_retains_all_original_guards_and_only_explicit_read_metadata() {
+    let mut f = Frames::new([440.0, 560.0], 1.0);
+    let view = View::Fixed1;
+    let expected_ticket = f.model.capture_view(view).unwrap();
+    let expected_binding = f.model.binding(view).unwrap();
+    let expected_state = f.states[0];
+    let expected_playing = f.model.playing();
+    let expected_interval = f.model.interval();
+    let Some(Action::Control {
+        view: captured_view,
+        ticket,
+        binding,
+        base,
+        playing,
+        interval,
+        command: Command::Exchange(strong),
+    }) = f.click(1, control_id(view, "exchange"))
+    else {
+        panic!("fresh pointer gesture captures the complete Exchange action")
+    };
+    assert_eq!(captured_view, view);
+    assert_eq!(ticket, expected_ticket);
+    assert_eq!(binding, expected_binding);
+    assert_eq!(base, expected_state);
+    assert_eq!(playing, expected_playing);
+    assert_eq!(interval, expected_interval);
+    assert_eq!(strong.source().chat(), source(1));
+    assert!(f.model.validate_view(ticket) && f.model.can_exchange(strong));
+    assert_eq!(f.model.binding(view), Some(expected_binding), "capture does not perform Exchange");
+
+    f.model.close(view).unwrap();
+    f.model
+        .open_fixed(Source::new(SlotId::try_from(1).unwrap(), source(2), true).unwrap())
+        .unwrap();
+    assert!(!f.model.validate_view(ticket));
+    assert!(!f.model.can_exchange(strong));
+    assert_ne!(f.model.binding(view), Some(binding));
+    assert_eq!(
+        binding.source.chat(),
+        source(1),
+        "old dispatch is not retargeted to the replacement"
+    );
+
+    let mut r = Frames::new([440.0, 560.0], 1.0);
+    r.type_text(1, "Draft remains local across explicit Read");
+    let key = ChatKey {
+        source: source(1),
+        conversation: Conversation::Nearby,
+    };
+    let expected_read = *r.host.chat[0].reads.get(&key.conversation).unwrap();
+    let expected_policy = r.host.chat[0]
+        .conversations
+        .iter()
+        .find(|info| info.policy.key == key)
+        .unwrap()
+        .policy;
+    assert!(
+        r.chat.take_read_action_for(view.surface()).is_none(),
+        "drawing and editing do not request Read"
+    );
+    let Some(Action::Read(read)) = r.click(1, Id::unique("host_chat_read_rect")) else {
+        panic!("fresh explicit Read gesture returns its original canonical observation")
+    };
+    assert_eq!(read.key, key);
+    assert_eq!(read.policy_revision, expected_policy.revision);
+    assert_eq!(read.metadata, expected_read);
+    assert!(
+        r.chat.take_read_action_for(view.surface()).is_none(),
+        "the body transfers the Read action once"
+    );
+    r.settle(1);
+    assert!(!r.has("host-chat-read-pending"), "returning an action does not queue an operation");
+    assert_eq!(r.host.chat[0].reads.get(&key.conversation), Some(&expected_read));
+    assert_eq!(r.send(1).text.as_str(), "Draft remains local across explicit Read");
+}
+
+#[test]
 fn monitor_body_held_options_and_navigation_never_borrow_changed_source_or_published_base() {
     let mut f = Frames::new([440.0, 592.0], 1.0);
     f.focus(2);
