@@ -126,6 +126,20 @@ gestures, wearables and object contents.
   `handleDropMaterialProtections` (indra/newview/lltooldraganddrop.cpp).
 - **One shared rule, never a mask computed by hand.** The rights come from
   the shared helpers:
+
+  **Fork checkpoint qualification:** the catalogue below describes the upstream
+  helper model. This fork currently provides `actions::FULL`,
+  `actions::asset_uuid_shown`, `world::inventory::asset_ids` and
+  `build::contents_drop::agent_mask`, together with its existing action/texture
+  checks. `actions::agent_mask`, `actions::held`, `actions::task_agent_mask`,
+  `build::texture_copy` and
+  `build::contents_drop::worn_refused` are upstream targets not yet implemented
+  here. Their integration follows `026651a8` → `316e5e06` → `1ae9a375` →
+  `3ce55eba`. Until then, use the actual existing shared helpers and preserve the
+  current source-rights and worn/drop checks; do not invent calls to unavailable
+  APIs, replace them with a hand-written mask, or relax permissions to bypass
+  their absence. Entries naming those five targets below are not available APIs.
+
   - `world::inventory::actions::agent_mask` and `held`: the rights the agent
     holds on an item (its own, group-owned, someone else's, a Library item);
     `actions::task_agent_mask` for an item of an object's contents;

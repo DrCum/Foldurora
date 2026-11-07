@@ -1,5 +1,16 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Selective upstream catch-up (human request, 2026-11-07; no issue): apply
+  fifteen reviewed upstream commits individually with `-x` to frozen photo/
+  branding base `f5ae21d5`, from upstream snapshot `576dd54a`. Production
+  patches applied without conflict; four tracking-only conflicts preserve the
+  fork sections and incoming changes. The upstream hover-default change is
+  intentional; the imported permissions guidance identifies unavailable future
+  helpers explicitly. Source/dependency review and diff checks passed; compiled
+  checks, normal build, native and human grid acceptance remain pending.
+  Upstream validation annotations below remain historical, not new Foldurora
+  acceptance. See [docs/FOLDURORA.md](docs/FOLDURORA.md).
+
 - 🔧 Foldurora application artwork (human request, 2026-11-06; no issue): use
   the supplied purple folder SVG for application and toolbar branding, preserving
   its colors and transparency. Add multi-resolution Windows and macOS icons,

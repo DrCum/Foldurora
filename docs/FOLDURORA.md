@@ -1,5 +1,89 @@
 # Foldurora workspace and character preview
 
+## Selective upstream catch-up — 7 November 2026
+
+Branch `sync/upstream-safe-20261107` starts from frozen photo/branding source
+`f5ae21d535da3a338bace51ffb03af7beeb040c6`. The upstream snapshot is
+[`576dd54a707677bf5b93dd696142cc17fbdef270`](https://github.com/Aurora-Viewer/Aurora-Viewer/commit/576dd54a707677bf5b93dd696142cc17fbdef270),
+fetched from `Aurora-Viewer/Aurora-Viewer` main into
+`refs/upstream-review/20261107`. The existing `upstream/main` review checkpoint
+remains `c6e52d1ffe06`; the shared ancestor is `ae2fd1016ec8`.
+
+The upstream side has 58 commits after that ancestor. Seventeen were already
+imported, including photo-roll source `6ff95fb6dc9d` as `ff23f303e29c` (all six
+per-file changes match without diff context, although its full-context patch ID
+differs). This batch adds fifteen complete upstream commits individually with
+`-x`, in the order below, leaving 26 for the explicit follow-up plan. The first
+thirteen retain upstream order; two bounded additions follow them without
+rewriting those commits. This is a
+selective integration, not a merge of the whole upstream branch.
+The sections below retain earlier snapshots; this table and remaining-work plan
+supersede their older candidate/deferral status.
+
+| Upstream | Fork commit | Change |
+| --- | --- | --- |
+| `0dbede28efa1` | `a5de54015426` | Login/session details, explicit critical-message consent and renderer metadata |
+| `ed0ae3678bfd` | `723c55f4f22c` | Progressive UI-picture refinement and same-account portrait saving |
+| `19645b9935bc` | `1de7fc286743` | RLVa Trash purge exception with worn-item refusal retained |
+| `8607d6760503` | `23ab89bf99b4` | Favorites membership/count use each record's own flag |
+| `50cdd26ebe8d` | `5583653988a6` | Bounded retry when a switchable-graphics layer hides all adapters |
+| `fccd1629a67c` | `b643af68f33a` | Photo-isolation indirect draws and occlusion metadata use the same ordered list |
+| `74d0a4edb36c` | `57bb69ccba29` | Atomic account-local teleport history, preserving unreadable/malformed data |
+| `1311651d6ee4` | `2a127f02b6b5` | Shared numeric-name ordering across lists |
+| `19ca7bcd5047` | `d318bbb8477c` | Explicit IM-toast selection focuses its ordinary App conversation |
+| `58200ec8dddf` | `b06e105ad812` | Bounded retry for wanted meshes after repeated failure |
+| `84199e610bcb` | `ae221e32f59a` | Distinct menu icons and removal of an inactive placeholder |
+| `9751891878a3` | `30af203f7bda` | Blocked-person hover row keeps its layout gap |
+| `576dd54a7076` | `7426f56b62ad` | Outfit faux-bold text uses the scaled row origin |
+| `c6e52d1ffe06` | `1936ec42d178` | Inventory hover master preference, intentionally off by default |
+| `05180f17a58b` | `b3d4512ecb2d` | Creators' permissions guidance, followed by the explicit fork qualification |
+
+All production and non-tracking-document patches applied without conflict,
+including as a complete sequence against the exact base. Four `TASKS.md`
+conflicts retained the fork's sections and the upstream patch's changed entries;
+unchanged context about unimported media consent/uninstall was not introduced.
+No production source was manually resolved or partially extracted. The existing
+host/profile/chat authority, viewport/photo scope and branding remain present.
+
+The hover preference intentionally adopts upstream's ordinary default change:
+new or previously missing `show_hover_tooltips` is false, so text/picture hover
+cards require opting in. The existing thumbnail preference remains, gated by
+that master switch. The permissions-guidance commit is preserved intact with
+`-x`; the following fork note in `AGENTS.md` distinguishes available helpers from
+the five deferred API targets. It does not assume those implementations exist.
+
+Source/dependency review and `git diff --check` passed. No Cargo command, binary
+build or runtime test was run on this branch. Imported task descriptions retain
+historical **upstream** tests and human observations; they do not establish new
+Foldurora checks or grid acceptance. The lead must validate the exact integrated
+source, including login/consent reset, same-source images, rights/Favorites/sort,
+teleport-history IO, mesh retry, adapter-retry plans and photo isolation. Affected
+AMD/NVIDIA hardware and human grid behavior remain unverified. The history
+writer's 500 ms shutdown bound preserves atomic files, not guaranteed latest-save
+completion. Keep the frozen base and earlier test packages unchanged.
+
+### Remaining upstream integration plan
+
+These 26 commits are deliberately outside this batch. A clean text patch alone
+does not establish compatible behavior or complete dependencies.
+
+| Group | Commits | Concrete integration work |
+| --- | --- | --- |
+| Picking and selection | `c6ffeeb705aa`, `5e65df245f52`, `7851d13e61b3`, `037a71b4d351` | The own-avatar correction can stand alone. Integrate alpha click-through with its corrective invisible/Mask-face follow-up, preserving fork ray/epoch guards; reconcile selection tests and verify HUD/worn/world plus offset/fitted/photo coordinates. |
+| Cache/rights and texture operations | `026651a845eb` → `316e5e067499` → `1ae9a375f069` → `3ce55eba155e` | Preserve profile-before-key initialization and private stores. Validate UUID-name migration, distinct worker keys, restart, sealed/plain demo sources and texture permissions. Replace the explicit pending-target qualification in `AGENTS.md` only when those APIs exist. |
+| Selected object-contents copy | `54df367c7019` | No identified dependency on the cache/rights batch; reconcile tracking docs separately and retain source-rights, selected-item, no-copy, worn-item and approval regressions. |
+| Browser native file pickers | `ae10170eb635` | Add owned-modal/source visibility and host-park handling; validate browser replacement/close and switching with a pending picker. |
+| Masked HUD mip alpha | `07ff8662d325` | Independent of the picking chain. Reconcile cache/test context after UI-image refinement while preserving fork pick-mask planes; test old alpha codes and HUD cutoff/zoom. |
+| Media consent and camera migration | `db6209901611` → `275e3808b951` | Report the actually shown World media-consent Modal to host blocking without deadlocking inactive workers. Validate per-profile consent and deliberate camera-default migration; README follows working runtime support. |
+| Runtime updates | `e37ac4180630` | Resolve published-fork release-feed identity and multi-worker installation ownership; test loopback/stale-generation/notice/contended-install behavior. Development gating does not settle published behavior. |
+| GPU startup | `e1e44ed74bce` | Extend the imported adapter fix with the XR constructor argument while retaining the fork viewport argument, worker startup ordering and recovery recreation. |
+| GPU budget, recovery and peer pause | `38bab7286b56`, `f7d31f563e95`, `eb875bc9f55c` | Preserve host display invalidation, fresh surfaces, proactive pause/hysteresis and isolated registries; assess defaults and shared-device memory behavior together. |
+| Async logging | `4a613cd3e6e3` | Preserve checked durable controller startup/shutdown and sink-error propagation; ordinary queued-write drain is not a checked HostLog barrier. |
+| FSR | `f114ef820877` → `bb4d4fc7f49c` → `1d0118d479ad` | Reconcile native canvas, bounded world, scaled rendering and photo outputs without weakening device/surface fences. Add FSR documentation only after the feature works. |
+| Reflection probes | `a44ef04e1796` | Substantial CPU/WGSL ABI, culling and scan changes raise default slots from 32 to 256. Validate memory/quality, constrained GPUs, photo outputs and inactive-worker packets in a dedicated renderer batch. |
+| Uninstall | `3d11510600b2` | Define fork installation/profile scope before exposing shared OS registration/cache/credential removal to private workers. No uninstall action is authorized by this source review. |
+| Release news and task archive | `1378da4254f1`, `3bf52dacbc4a` | Reconcile only truthful implemented-feature claims and preserve fork task ownership; do not advertise deferred FSR/consent features or archive unfinished fork work. |
+
 ## Profile picker boundary follow-up
 
 Branch `fix/profile-popup-bounds` follows the combined profile/chat source
