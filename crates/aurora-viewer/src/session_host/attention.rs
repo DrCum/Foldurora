@@ -14,7 +14,9 @@ use super::transport::HostSnapshot;
 use aurora_session::chat::{ChatKey, Conversation, MAX_CONVERSATIONS, NativeChatPolicy, ReadMetadata};
 use aurora_session::{Label, MAX_WORKERS};
 use std::collections::VecDeque;
-use std::time::{Duration, Instant};
+#[cfg(test)]
+use std::time::Duration;
+use std::time::Instant;
 
 pub(super) const MAX_ROWS: usize = MAX_WORKERS * MAX_CONVERSATIONS;
 const MAX_DISMISSALS: usize = 128;
@@ -47,6 +49,7 @@ impl Row {
     /// Age of this locally unchanged metadata version, NOT age/freshness of a
     /// native sample. Host snapshots do not carry per-row receive timestamps;
     /// an equal observation can have been polled repeatedly or cached.
+    #[cfg(test)]
     pub fn unchanged_for(&self, now: Instant) -> Duration {
         now.saturating_duration_since(self.unchanged_since)
     }
@@ -317,12 +320,6 @@ impl Attention {
             (None, Direction::Previous) => self.rows.len() - 1,
         };
         self.capture(self.rows[index].key)
-    }
-
-    /// Convenience for an immediate, already completed navigation gesture.
-    pub fn navigate(&mut self, direction: Direction) -> Option<ChatKey> {
-        let ticket = self.capture_navigation(direction)?;
-        self.open_chat(ticket)
     }
 }
 

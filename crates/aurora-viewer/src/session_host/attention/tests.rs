@@ -113,6 +113,11 @@ fn dismiss(model: &mut Attention, key: ChatKey) {
     assert!(model.dismiss(ticket));
 }
 
+fn navigate(model: &mut Attention, direction: Direction) -> Option<ChatKey> {
+    let ticket = model.capture_navigation(direction)?;
+    model.open_chat(ticket)
+}
+
 #[test]
 fn attention_active_and_standby_readable_rows_ignore_send_and_mark_capacity() {
     let mut host = fixture(5, 1);
@@ -441,9 +446,9 @@ fn attention_selection_survives_reorder_without_unavailable_fallback() {
     model.sync(&host, &prefs);
     assert_eq!(model.selected(), Some(key(2, 2)));
     assert!(model.capture(key(2, 2)).is_none());
-    assert_eq!(model.navigate(Direction::Next), Some(key(1, 1)));
-    assert_eq!(model.navigate(Direction::Previous), Some(key(1, 2)));
-    assert_eq!(model.navigate(Direction::Next), Some(key(1, 1)));
+    assert_eq!(navigate(&mut model, Direction::Next), Some(key(1, 1)));
+    assert_eq!(navigate(&mut model, Direction::Previous), Some(key(1, 2)));
+    assert_eq!(navigate(&mut model, Direction::Next), Some(key(1, 1)));
 }
 
 #[test]
@@ -452,8 +457,8 @@ fn attention_explicit_navigation_wraps_and_never_mutates_native_state() {
     let before = host.chat.clone();
     let mut model = Attention::default();
     model.sync(&host, &Preferences::default());
-    assert_eq!(model.navigate(Direction::Previous), Some(key(2, 1)));
-    assert_eq!(model.navigate(Direction::Next), Some(key(1, 1)));
+    assert_eq!(navigate(&mut model, Direction::Previous), Some(key(2, 1)));
+    assert_eq!(navigate(&mut model, Direction::Next), Some(key(1, 1)));
     let ticket = model.capture(key(1, 1)).unwrap();
     assert_eq!(model.open_chat(ticket), Some(key(1, 1)));
     assert!(host.chat == before);
