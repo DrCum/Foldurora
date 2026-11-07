@@ -14,9 +14,6 @@ use super::transport::HostSnapshot;
 use aurora_session::chat::{ChatKey, Conversation, MAX_CONVERSATIONS, NativeChatPolicy, ReadMetadata};
 use aurora_session::{Label, MAX_WORKERS};
 use std::collections::VecDeque;
-#[cfg(test)]
-use std::time::Duration;
-use std::time::Instant;
 
 pub(super) const MAX_ROWS: usize = MAX_WORKERS * MAX_CONVERSATIONS;
 const MAX_DISMISSALS: usize = 128;
@@ -36,7 +33,6 @@ pub(super) struct Row {
     /// This is not a native arrival timestamp or cross-worker event clock.
     pub first_observed: u64,
     observation: u64,
-    unchanged_since: Instant,
 }
 
 impl Row {
@@ -44,14 +40,6 @@ impl Row {
     /// reappearance and clear allocate a new ID; metadata changes do not.
     pub fn id(&self) -> u64 {
         self.first_observed
-    }
-
-    /// Age of this locally unchanged metadata version, NOT age/freshness of a
-    /// native sample. Host snapshots do not carry per-row receive timestamps;
-    /// an equal observation can have been polled repeatedly or cached.
-    #[cfg(test)]
-    pub fn unchanged_for(&self, now: Instant) -> Duration {
-        now.saturating_duration_since(self.unchanged_since)
     }
 }
 
@@ -140,10 +128,6 @@ impl Attention {
     }
 
     pub fn sync(&mut self, snapshot: &HostSnapshot, preferences: &Preferences) {
-        self.sync_at(snapshot, preferences, Instant::now());
-    }
-
-    fn sync_at(&mut self, snapshot: &HostSnapshot, preferences: &Preferences, now: Instant) {
         // Build authority before user filters: hiding a slot/category does not
         // discard its reminder book, while policy/source loss always does.
         let mut current = Vec::with_capacity(MAX_ROWS);
@@ -209,7 +193,6 @@ impl Attention {
                         read,
                         first_observed: 0,
                         observation: 0,
-                        unchanged_since: now,
                     });
                 }
             }
@@ -240,7 +223,6 @@ impl Attention {
             if let Some(previous) = previous.filter(|old| old.read == row.read) {
                 row.first_observed = previous.first_observed;
                 row.observation = previous.observation;
-                row.unchanged_since = previous.unchanged_since;
             } else {
                 let Some(serial) = self.serial.checked_add(1) else {
                     self.clear();

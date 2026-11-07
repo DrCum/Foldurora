@@ -377,7 +377,7 @@ fn attention_policy_replacement_invalidates_dismissal_and_gesture() {
 }
 
 #[test]
-fn attention_filters_preserve_dismissal_but_reset_visible_observation_age() {
+fn attention_filters_preserve_dismissal_but_reset_visible_row_incarnation() {
     let host = fixture(2, 2);
     let mut prefs = Preferences::default();
     let mut model = Attention::default();
@@ -397,35 +397,38 @@ fn attention_filters_preserve_dismissal_but_reset_visible_observation_age() {
 }
 
 #[test]
-fn attention_local_observation_order_and_age_do_not_claim_native_freshness() {
+fn attention_local_observation_order_and_ids_survive_unchanged_metadata_and_arrival() {
     let mut host = fixture(2, 1);
     let mut prefs = Preferences::default();
     let mut model = Attention::default();
-    let start = Instant::now();
     // B is observed before A even though its stable slot sorts after A.
     chat(&mut host, 0).reads.clear();
-    model.sync_at(&host, &prefs, start);
+    model.sync(&host, &prefs);
     chat(&mut host, 0).reads.insert(direct(1), unread());
-    model.sync_at(&host, &prefs, start + Duration::from_secs(4));
+    model.sync(&host, &prefs);
     assert_eq!(model.rows().iter().map(|row| row.key).collect::<Vec<_>>(), [key(2, 1), key(1, 1)]);
-    assert_eq!(
-        model.rows()[0].unchanged_for(start + Duration::from_secs(5)),
-        Duration::from_secs(5)
-    );
-    assert_eq!(
-        model.rows()[1].unchanged_for(start + Duration::from_secs(5)),
-        Duration::from_secs(1)
-    );
-    let old_order = model.rows()[0].first_observed;
+    let ids: Vec<_> = model.rows().iter().map(Row::id).collect();
+    let earlier = model.capture(key(2, 1)).unwrap();
+    let later = model.capture(key(1, 1)).unwrap();
+    model.sync(&host, &prefs);
+    assert_eq!(model.rows().iter().map(Row::id).collect::<Vec<_>>(), ids);
+    assert!(model.validate(earlier));
+    assert!(model.validate(later));
+
+    // Another incoming arrival updates the earlier row's gesture observation,
+    // while preserving its first-unread position and widget identity.
     read(&mut host, 1, 1).unread += 1;
-    model.sync_at(&host, &prefs, start + Duration::from_secs(6));
-    assert_eq!(model.rows()[0].first_observed, old_order);
-    assert_eq!(model.rows()[0].unchanged_for(start + Duration::from_secs(6)), Duration::ZERO);
+    read(&mut host, 1, 1).observed.through += 1;
+    model.sync(&host, &prefs);
+    assert_eq!(model.rows().iter().map(Row::id).collect::<Vec<_>>(), ids);
+    assert!(!model.validate(earlier));
+    assert!(model.validate(later));
     prefs.oldest_first = true;
     host.chat.reverse();
-    model.sync_at(&host, &prefs, start + Duration::from_secs(7));
+    model.sync(&host, &prefs);
     // No offers exist: oldest_first must never mean descending/newest-first.
     assert_eq!(model.rows().iter().map(|row| row.key).collect::<Vec<_>>(), [key(2, 1), key(1, 1)]);
+    assert_eq!(model.rows().iter().map(Row::id).collect::<Vec<_>>(), ids);
 }
 
 #[test]
