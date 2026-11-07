@@ -891,6 +891,25 @@ impl SurfaceFrames {
         action
     }
 
+    /// Exercise the production body without the native edit-prefix split when
+    /// a regression specifically concerns multiple IME events in one pass.
+    fn raw_show(&mut self, index: usize, events: Vec<Event>) {
+        self.model.sync(&self.host, false);
+        self.frame += 1;
+        let raw = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(680.0, 680.0))),
+            time: Some(self.frame as f64 / 60.0),
+            focused: self.active == index,
+            events,
+            ..Default::default()
+        };
+        let palette = crate::theme::Theme::default().palette();
+        let mut output = self.contexts[index].run_ui(raw, |ui| {
+            assert!(self.model.show_for(Self::SURFACES[index], ui, &palette, InputMode::Live).is_none());
+        });
+        output.textures_delta.clear();
+    }
+
     fn settle(&mut self, index: usize, count: usize) {
         for _ in 0..count {
             assert!(self.show(index, Vec::new()).is_none());
@@ -1379,23 +1398,76 @@ fn shared_chat_one_native_batch_can_commit_then_preedit_without_lending_the_next
         if split_prefix {
             assert!(frames.show(0, events).is_none());
         } else {
-            // Exercise the production body directly as well as its usual native
-            // prefix pipeline: one TextEdit pass must preserve event ordering.
-            frames.model.sync(&frames.host, false);
-            frames.frame += 1;
-            let raw = RawInput {
-                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(680.0, 680.0))),
-                time: Some(frames.frame as f64 / 60.0),
-                focused: true,
-                events,
-                ..Default::default()
-            };
-            let palette = crate::theme::Theme::default().palette();
-            let mut output = frames.contexts[0].run_ui(raw, |ui| {
-                assert!(frames.model.show_for(ChatSurface::Shared, ui, &palette, InputMode::Live).is_none());
-            });
-            output.textures_delta.clear();
+            frames.raw_show(0, events);
         }
+        frames.focus(1);
+        assert_eq!(frames.click(1, "host_chat_send_rect").unwrap().text.as_str(), "Prefix committed");
+    }
+}
+
+#[test]
+fn shared_chat_same_pass_preedit_cancel_does_not_leave_a_checkpoint_that_can_discard_later_typing() {
+    for disabled in [false, true] {
+        let mut frames = SurfaceFrames::new();
+        frames.type_text(0, "Prefix");
+        #[allow(deprecated)]
+        let ending = if disabled {
+            egui::ImeEvent::Disabled
+        } else {
+            egui::ImeEvent::Preedit {
+                text: String::new(),
+                active_range_chars: None,
+            }
+        };
+        frames.raw_show(
+            0,
+            vec![
+                Event::Ime(egui::ImeEvent::Preedit {
+                    text: "CANCELLED".into(),
+                    active_range_chars: None,
+                }),
+                Event::Ime(ending),
+            ],
+        );
+        assert_eq!(frames.draft(0, source(1)), "Prefix");
+        assert!(frames.show(0, vec![Event::Text(" delivered".into())]).is_none());
+        frames.focus(1);
+        assert_eq!(frames.click(1, "host_chat_send_rect").unwrap().text.as_str(), "Prefix delivered");
+    }
+}
+
+#[test]
+fn shared_chat_same_pass_commit_then_cancel_next_preedit_preserves_the_actual_commit() {
+    for disabled in [false, true] {
+        let mut frames = SurfaceFrames::new();
+        frames.type_text(0, "Prefix ");
+        frames.show(
+            0,
+            vec![Event::Ime(egui::ImeEvent::Preedit {
+                text: "first candidate".into(),
+                active_range_chars: None,
+            })],
+        );
+        #[allow(deprecated)]
+        let ending = if disabled {
+            egui::ImeEvent::Disabled
+        } else {
+            egui::ImeEvent::Preedit {
+                text: String::new(),
+                active_range_chars: None,
+            }
+        };
+        frames.raw_show(
+            0,
+            vec![
+                Event::Ime(egui::ImeEvent::Commit("committed".into())),
+                Event::Ime(egui::ImeEvent::Preedit {
+                    text: "CANCELLED NEXT".into(),
+                    active_range_chars: None,
+                }),
+                Event::Ime(ending),
+            ],
+        );
         frames.focus(1);
         assert_eq!(frames.click(1, "host_chat_send_rect").unwrap().text.as_str(), "Prefix committed");
     }

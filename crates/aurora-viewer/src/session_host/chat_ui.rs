@@ -858,7 +858,7 @@ impl ChatUi {
                 self.view.owner_generation = self.edit_generation;
             }
             if owns_edit && let Some(draft) = self.drafts.get_mut(&self.view.conversation) {
-                if commit_before_preedit && self.view.ime_composing {
+                if commit_before_preedit {
                     // A single native batch can commit one segment and start
                     // the next. Preserve that delivered Commit while excluding
                     // only the final candidate's IME selection from rollback.
@@ -907,7 +907,7 @@ impl ChatUi {
                 previous_editor.cursor = canonical_cursor;
                 draft.editor = previous_editor;
             }
-            if owns_edit && was_composing && !self.view.ime_composing && !composition_committed {
+            if owns_edit && !self.view.ime_composing && !composition_committed {
                 self.cancel_compositions(self.surface);
             }
             ui.horizontal_wrapped(|ui| {
