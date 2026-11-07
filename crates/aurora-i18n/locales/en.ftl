@@ -13405,9 +13405,10 @@ photo-interface-aspect = To include the interface, choose Window or a matching a
 photo-canvas-changed = The window or interface scale changed. Take the photo again.
 
 host-chat-native-unread = Unread: { $count }
-host-chat-mark-read = Mark conversation read
+host-chat-mark-read = Mark read
 host-chat-read-pending = Marking conversation read…
 host-chat-read-uncertain = Read result uncertain. Checking the original operation; no retry will be sent.
 host-chat-read-unavailable = Read unavailable. The original operation will not be replayed.
 host-chat-read-applied = Conversation marked read.
 host-chat-read-stale = Conversation changed. Check the current unread count and click again.
+host-chat-read-help = Mark this conversation read in its viewer, including unread native cards. This does not answer offers.

@@ -30,15 +30,7 @@ impl App {
     }
 
     fn reconcile_host_read_interest(&mut self) {
-        let current: Vec<_> = catalogue(&self.world)
-            .into_iter()
-            .filter_map(|conversation| {
-                let key = native_read_key(conversation)?;
-                let (token, raw, badge) = self.world.read_counters(key)?;
-                Some((key, token, raw, badge))
-            })
-            .collect();
-        self.world.read_ledger.reconcile(&current);
+        reconcile_read_interest(&mut self.world);
     }
 
     fn configure_host_chat_rules(&mut self) {
@@ -86,37 +78,13 @@ impl NativeChat for AppChat<'_> {
         read_metadata(&self.app.world, conversation, !self.app.exit_prompt.open)
     }
     fn mark_read(&mut self, request: aurora_session::chat::MarkReadRequest) -> aurora_session::chat::ReadOutcome {
-        use aurora_session::chat::ReadOutcome;
         if self.source() != Some(request.key.source) {
-            return ReadOutcome::RejectedNative;
+            return aurora_session::chat::ReadOutcome::RejectedNative;
         }
-        // Reconcile immediately before comparison as well as at the outer
-        // operation boundary: native draw/close/history may have intervened.
-        self.app.reconcile_host_read_interest();
-        let Some(current) = self.read_metadata(request.key.conversation) else {
-            return ReadOutcome::RejectedNative;
-        };
-        if !current.can_mark_read {
-            return ReadOutcome::RejectedNative;
-        }
-        if current.observed != request.observed || current.unread_revision != request.unread_revision {
-            return ReadOutcome::StaleObservation;
-        }
-        let Some(key) = native_read_key(request.key.conversation) else {
-            return ReadOutcome::RejectedNative;
-        };
-        if self.source() != Some(request.key.source) {
-            return ReadOutcome::RejectedNative;
-        }
-        let Some((count, _)) = self.app.world.mark_conversation_read(key) else {
-            return ReadOutcome::RejectedNative;
-        };
-        self.app.world.acknowledge_read_messages();
-        if count == 0 {
-            ReadOutcome::AlreadyRead
-        } else {
-            ReadOutcome::Applied
-        }
+        let authority = self.authority;
+        mark_native_read(&mut self.app.world, request, !self.app.exit_prompt.open, &|| {
+            authority() == Some(request.key.source)
+        })
     }
     fn submit_literal(&mut self, key: ChatKey, text: &str) -> SendOutcome {
         if self.source() != Some(key.source) {
@@ -143,6 +111,53 @@ impl NativeChat for AppChat<'_> {
         // App::send / NetClient::send have no enqueue result. The call is made,
         // but we cannot promise acceptance or remote delivery. Never retry it.
         SendOutcome::Uncertain
+    }
+}
+
+fn reconcile_read_interest(world: &mut World) {
+    let current: Vec<_> = catalogue(world)
+        .into_iter()
+        .filter_map(|conversation| {
+            let key = native_read_key(conversation)?;
+            let (token, raw, badge) = world.read_counters(key)?;
+            Some((key, token, raw, badge))
+        })
+        .collect();
+    world.read_ledger.reconcile(&current);
+}
+
+fn mark_native_read(
+    world: &mut World,
+    request: aurora_session::chat::MarkReadRequest,
+    ui_ready: bool,
+    source_current: &dyn Fn() -> bool,
+) -> aurora_session::chat::ReadOutcome {
+    use aurora_session::chat::ReadOutcome;
+    reconcile_read_interest(world);
+    let Some(current) = read_metadata(world, request.key.conversation, ui_ready) else {
+        return ReadOutcome::RejectedNative;
+    };
+    if !current.can_mark_read {
+        return ReadOutcome::RejectedNative;
+    }
+    if current.observed != request.observed || current.unread_revision != request.unread_revision {
+        return ReadOutcome::StaleObservation;
+    }
+    let Some(key) = native_read_key(request.key.conversation) else {
+        return ReadOutcome::RejectedNative;
+    };
+    // The native owner does not yield between this exact lease check and reset.
+    if !source_current() {
+        return ReadOutcome::RejectedNative;
+    }
+    let Some((count, _)) = world.mark_conversation_read(key) else {
+        return ReadOutcome::RejectedNative;
+    };
+    world.acknowledge_read_messages();
+    if count == 0 {
+        ReadOutcome::AlreadyRead
+    } else {
+        ReadOutcome::Applied
     }
 }
 
@@ -455,6 +470,14 @@ mod tests {
         fn lines(&self, conversation: Conversation, cursor: NativeCursor, limit: usize) -> NativePage {
             lines(&self.world, conversation, cursor, limit)
         }
+        fn read_metadata(&self, conversation: Conversation) -> Option<aurora_session::chat::ReadMetadata> {
+            self.source()?;
+            read_metadata(&self.world, conversation, true)
+        }
+        fn mark_read(&mut self, request: aurora_session::chat::MarkReadRequest) -> aurora_session::chat::ReadOutcome {
+            let source = self.source;
+            mark_native_read(&mut self.world, request, true, &|| source == Some(request.key.source))
+        }
         fn submit_literal(&mut self, key: ChatKey, text: &str) -> SendOutcome {
             if self.source() != Some(key.source) {
                 return SendOutcome::RejectedNative;
@@ -632,5 +655,263 @@ mod tests {
                 .any(|packet| matches!(packet.message, ChatMessage::Event(ChatEvent::Line(_))))
         );
         assert!(backend.outgoing_sequence() > outgoing);
+    }
+    fn capture_read(
+        native: &mut Harness,
+        backend: &mut WorkerChat,
+        conversation: Conversation,
+        request: u64,
+    ) -> aurora_session::chat::MarkReadRequest {
+        reconcile_read_interest(&mut native.world);
+        backend.sync(native).unwrap();
+        let metadata = native.read_metadata(conversation).unwrap();
+        let replies = backend.handle(native, &poll(source(1), request * 10)).unwrap();
+        let revision = replies
+            .iter()
+            .find_map(|packet| match &packet.message {
+                ChatMessage::Event(ChatEvent::ReadBatch(rows)) => rows
+                    .iter()
+                    .find(|row| row.conversation == conversation)
+                    .map(|row| row.policy_revision),
+                _ => None,
+            })
+            .unwrap();
+        aurora_session::chat::MarkReadRequest {
+            key: ChatKey {
+                source: source(1),
+                conversation,
+            },
+            request,
+            policy_revision: revision,
+            observed: metadata.observed,
+            unread_revision: metadata.unread_revision,
+        }
+    }
+
+    fn apply_read(
+        native: &mut Harness,
+        backend: &mut WorkerChat,
+        request: aurora_session::chat::MarkReadRequest,
+        sequence: u64,
+    ) -> aurora_session::chat::ReadReceipt {
+        let packet = ChatPacket {
+            version: VERSION,
+            source: source(1),
+            sequence,
+            reply_to: 0,
+            message: ChatMessage::Command(ChatCommand::MarkRead(request)),
+        };
+        let replies = backend.handle(native, &packet).unwrap();
+        match replies[0].message {
+            ChatMessage::Event(ChatEvent::ReadReceipt(reply)) => reply.receipt.unwrap(),
+            _ => panic!("typed read receipt"),
+        }
+    }
+
+    #[test]
+    fn host_chat_native_read_rejects_new_arrivals_equal_count_replacement_and_native_reads() {
+        use aurora_session::chat::ReadOutcome;
+        let mut native = Harness {
+            world: world(),
+            source: Some(source(1)),
+            sent: Vec::new(),
+        };
+        let mut backend = WorkerChat::default();
+        say(&mut native.world, "A");
+        let a = capture_read(&mut native, &mut backend, Conversation::Nearby, 1);
+        say(&mut native.world, "B");
+        assert_eq!(apply_read(&mut native, &mut backend, a, 11).outcome, ReadOutcome::StaleObservation);
+        assert_eq!(native.world.chat_badge, 2);
+        let ab = capture_read(&mut native, &mut backend, Conversation::Nearby, 2);
+        native.world.nearby_read();
+        say(&mut native.world, "C");
+        say(&mut native.world, "D");
+        assert_eq!(native.world.chat_badge, 2, "counter returned to captured count");
+        assert_eq!(apply_read(&mut native, &mut backend, ab, 21).outcome, ReadOutcome::StaleObservation);
+        let cd = capture_read(&mut native, &mut backend, Conversation::Nearby, 3);
+        let receipt = apply_read(&mut native, &mut backend, cd, 31);
+        assert_eq!(receipt.outcome, ReadOutcome::Applied);
+        say(&mut native.world, "E");
+        assert_eq!(apply_read(&mut native, &mut backend, cd, 32), receipt);
+        assert_eq!(native.world.chat_badge, 1, "duplicate cannot clear a later arrival");
+        assert!(native.sent.is_empty());
+        let e = capture_read(&mut native, &mut backend, Conversation::Nearby, 4);
+        native.world.nearby_read();
+        assert_eq!(apply_read(&mut native, &mut backend, e, 41).outcome, ReadOutcome::StaleObservation);
+    }
+
+    #[test]
+    fn host_chat_native_read_renumber_history_replacement_and_privacy_are_authoritative() {
+        use aurora_session::chat::{ReadOutcome, ReadReceiptQuery};
+        let mut native = Harness {
+            world: world(),
+            source: Some(source(1)),
+            sent: Vec::new(),
+        };
+        let mut backend = WorkerChat::default();
+        say(&mut native.world, "A");
+        let a = capture_read(&mut native, &mut backend, Conversation::Nearby, 1);
+        native.world.clear_nearby_chat();
+        assert_eq!(apply_read(&mut native, &mut backend, a, 11).outcome, ReadOutcome::StaleObservation);
+        assert_eq!(native.world.chat_badge, 1, "clear history preserves native unread semantics");
+        let direct = Conversation::Direct(conversation_id(PEER).unwrap());
+        let old = capture_read(&mut native, &mut backend, direct, 2);
+        native.world.leave_session(PEER);
+        native.world.social.session_mut(PEER);
+        assert_eq!(
+            apply_read(&mut native, &mut backend, old, 21).outcome,
+            ReadOutcome::StaleObservation
+        );
+        let next = capture_read(&mut native, &mut backend, direct, 3);
+        let before = native.world.read_ledger.state(Some(PEER)).unwrap();
+        native.world.own_im(PEER, "own");
+        assert_eq!(native.world.read_ledger.state(Some(PEER)), Some(before));
+        let mut history = native.world.social.ims[0].lines[0].clone();
+        history.origin = Origin::Log;
+        native.world.social.ims[0].lines.push_front(history);
+        native.world.social.ims[0].clock.pushed_front(1);
+        reconcile_read_interest(&mut native.world);
+        assert_eq!(
+            native.world.read_ledger.state(Some(PEER)),
+            Some(before),
+            "history creates no incoming mark"
+        );
+        assert_eq!(apply_read(&mut native, &mut backend, next, 31).outcome, ReadOutcome::AlreadyRead);
+        restrict(&mut native.world, "@recvim=n");
+        let query = ChatPacket {
+            version: VERSION,
+            source: source(1),
+            sequence: 32,
+            reply_to: 0,
+            message: ChatMessage::Command(ChatCommand::QueryReadReceipt(ReadReceiptQuery {
+                key: next.key,
+                request: next.request,
+            })),
+        };
+        assert_eq!(backend.handle(&mut native, &query), Err(ChatError::Denied));
+        assert!(read_metadata(&native.world, direct, true).is_none());
+        assert!(native.sent.is_empty());
+    }
+
+    #[test]
+    fn host_chat_native_read_quiet_badges_own_system_and_unexported_cards_keep_native_semantics() {
+        let mut native = Harness {
+            world: world(),
+            source: Some(source(1)),
+            sent: Vec::new(),
+        };
+        let mut backend = WorkerChat::default();
+        reconcile_read_interest(&mut native.world);
+        let original = native.world.read_ledger.state(None).unwrap();
+        native.world.system_message("local notice");
+        assert_eq!(native.world.read_ledger.state(None).unwrap().incoming, original.incoming);
+        native.world.quiet_automated_chat = true;
+        let badge = native.world.chat_badge;
+        native.world.system_message("quiet local notice");
+        assert_eq!(native.world.chat_badge, badge);
+        assert_eq!(native.world.chat_unread, 2);
+        let observed = capture_read(&mut native, &mut backend, Conversation::Nearby, 1);
+        assert_eq!(native.read_metadata(Conversation::Nearby).unwrap().unread, badge as u64);
+        apply_read(&mut native, &mut backend, observed, 11);
+        assert_eq!((native.world.chat_unread, native.world.chat_badge), (0, 0));
+        let direct = Conversation::Direct(conversation_id(PEER).unwrap());
+        let observed = capture_read(&mut native, &mut backend, direct, 2);
+        // The counted card helper is exercised by actual producer tests; a
+        // typing announcement is a System card and still native incoming.
+        native.world.announce_incoming_im = true;
+        native.world.leave_session(PEER);
+        native.world.apply(aurora_net::NetEvent::InstantMessage(aurora_net::InstantMessage {
+            from_agent_id: PEER,
+            from_name: "Synthetic Resident".into(),
+            to_agent_id: OWNER,
+            dialog: 41,
+            session_id: PEER,
+            message: String::new(),
+            offline: false,
+            from_group: false,
+            binary_bucket: Vec::new(),
+            timestamp: 0,
+        }));
+        reconcile_read_interest(&mut native.world);
+        assert_eq!(native.world.social.ims[0].unread, 1);
+        assert_ne!(native.read_metadata(direct).unwrap().observed, observed.observed);
+        assert!(native.sent.is_empty());
+    }
+
+    #[test]
+    fn host_chat_native_read_fresh_source_mute_and_privacy_reject_before_reset() {
+        use aurora_session::chat::ReadOutcome;
+        let mut native = Harness {
+            world: world(),
+            source: Some(source(1)),
+            sent: Vec::new(),
+        };
+        let mut backend = WorkerChat::default();
+        say(&mut native.world, "private unread");
+        let observed = capture_read(&mut native, &mut backend, Conversation::Nearby, 1);
+        assert_eq!(
+            mark_native_read(&mut native.world, observed, true, &|| false),
+            ReadOutcome::RejectedNative
+        );
+        assert_eq!(native.world.chat_badge, 1);
+        for change in 0..4 {
+            let mut wrong = observed.key.source;
+            match change {
+                0 => wrong.session.generation += 1,
+                1 => wrong.lease_epoch += 1,
+                2 => wrong.session.account = AccountKey::from_bytes([8; 32]).unwrap(),
+                _ => wrong.session.grid = GridKey::from_bytes([8; 32]).unwrap(),
+            }
+            let request = aurora_session::chat::MarkReadRequest {
+                key: ChatKey {
+                    source: wrong,
+                    ..observed.key
+                },
+                ..observed
+            };
+            let packet = ChatPacket {
+                version: VERSION,
+                source: wrong,
+                sequence: 999,
+                reply_to: 0,
+                message: ChatMessage::Command(ChatCommand::MarkRead(request)),
+            };
+            assert_eq!(backend.handle(&mut native, &packet), Err(ChatError::Binding));
+            assert_eq!(native.world.chat_badge, 1);
+        }
+        restrict(&mut native.world, "@showloc=n");
+        assert_eq!(
+            mark_native_read(&mut native.world, observed, true, &|| true),
+            ReadOutcome::RejectedNative
+        );
+        assert_eq!(native.world.chat_badge, 1);
+        let direct = Conversation::Direct(conversation_id(PEER).unwrap());
+        let mut clean = world();
+        reconcile_read_interest(&mut clean);
+        let metadata = read_metadata(&clean, direct, true).unwrap();
+        let request = aurora_session::chat::MarkReadRequest {
+            key: ChatKey {
+                source: source(1),
+                conversation: direct,
+            },
+            request: 1,
+            policy_revision: 1,
+            observed: metadata.observed,
+            unread_revision: metadata.unread_revision,
+        };
+        clean
+            .mutes
+            .add(
+                crate::world::mutes::Mute {
+                    id: PEER,
+                    name: "Synthetic Resident".into(),
+                    kind: crate::world::mutes::MuteType::Agent,
+                    flags: 0,
+                },
+                0,
+            )
+            .unwrap();
+        assert_eq!(mark_native_read(&mut clean, request, true, &|| true), ReadOutcome::RejectedNative);
+        assert!(native.sent.is_empty());
     }
 }

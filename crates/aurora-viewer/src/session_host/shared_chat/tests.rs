@@ -799,3 +799,71 @@ fn shared_chat_navigation_drops_ambiguous_trailing_text_and_enter_in_the_same_ba
     frames.choose(source(1));
     assert_eq!(frames.send().unwrap().text.as_str(), "First draft");
 }
+
+fn install_read(frames: &mut Frames, incoming: u64) {
+    use aurora_session::chat::{ObservedIncoming, ReadMetadata};
+    Arc::make_mut(&mut frames.host.chat[0]).reads.insert(
+        Conversation::Nearby,
+        ReadMetadata {
+            unread: incoming,
+            unread_revision: incoming + 1,
+            observed: ObservedIncoming {
+                epoch: 1,
+                through: incoming,
+            },
+            can_mark_read: true,
+        },
+    );
+}
+
+#[test]
+fn shared_chat_read_edit_prefix_keeps_live_hit_map_and_retains_delivered_text() {
+    let mut frames = Frames::new();
+    install_read(&mut frames, 1);
+    frames.type_text("draft");
+    let at = frames.rect(Id::unique("host_chat_read_rect")).center();
+    assert!(
+        frames
+            .show(vec![
+                Event::Text(" plus delivered".into()),
+                Event::PointerMoved(at),
+                Event::PointerButton {
+                    pos: at,
+                    button: PointerButton::Primary,
+                    pressed: true,
+                    modifiers: Modifiers::NONE,
+                }
+            ])
+            .is_none()
+    );
+    assert!(frames.model.take_read_action().is_none(), "Editing pass cannot emit Read");
+    assert!(frames.pointer(at, false).is_none());
+    let read = frames
+        .model
+        .take_read_action()
+        .expect("Live release retains the Read press hit map");
+    assert_eq!(read.key.source, source(1));
+    let draft = frames.send().unwrap();
+    assert_eq!(draft.text.as_str(), "draft plus delivered");
+}
+
+#[test]
+fn shared_chat_read_press_switch_release_cannot_retarget_and_closed_policy_loss_purges_metadata() {
+    let mut frames = Frames::new();
+    install_read(&mut frames, 1);
+    let at = frames.rect(Id::unique("host_chat_read_rect")).center();
+    assert!(frames.pointer(at, true).is_none());
+    frames.model.select(source(2));
+    assert!(frames.pointer(at, false).is_none());
+    assert!(frames.model.take_read_action().is_none());
+    frames.choose(source(1));
+    let state = frames.model.states.iter().find(|state| state.ui.source() == source(1)).unwrap();
+    assert!(state.ui.has_read_metadata());
+    let chat = Arc::make_mut(&mut frames.host.chat[0]);
+    chat.conversations[0].policy.revision += 1;
+    chat.conversations[0].policy.can_read = false;
+    chat.reads.clear();
+    frames.model.sync(&frames.host, false); // closed/minimized: no UI pass
+    let state = frames.model.states.iter().find(|state| state.ui.source() == source(1)).unwrap();
+    assert!(!state.ui.has_read_metadata());
+}

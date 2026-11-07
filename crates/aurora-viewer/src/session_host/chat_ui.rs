@@ -243,12 +243,20 @@ impl ChatUi {
                 .any(|operation| matches!(operation.status, ReadStatus::Pending | ReadStatus::Uncertain))
         });
         if let Some(snapshot) = current {
-            if let Some(operation) = snapshot
-                .read_operations
-                .iter()
-                .filter(|operation| operation.request.key == self.key())
-                .max_by_key(|operation| operation.request.request)
-            {
+            let wanted = self
+                .read_operation
+                .filter(|operation| matches!(operation.status, ReadStatus::Pending | ReadStatus::Uncertain))
+                .map(|operation| operation.request);
+            let operation = if let Some(wanted) = wanted {
+                snapshot.read_operations.iter().find(|operation| operation.request == wanted)
+            } else {
+                snapshot
+                    .read_operations
+                    .iter()
+                    .filter(|operation| operation.request.key == self.key())
+                    .max_by_key(|operation| operation.request.request)
+            };
+            if let Some(operation) = operation {
                 self.read_operation = Some(*operation);
             }
         } else {
@@ -391,6 +399,11 @@ impl ChatUi {
         if self.key() == draft.key {
             self.warning = None;
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn has_read_metadata(&self) -> bool {
+        self.read_metadata.is_some()
     }
 
     pub fn take_read_action(&mut self) -> Option<ReadDraft> {
@@ -687,7 +700,7 @@ impl ChatUi {
                     );
                     let enabled = metadata.can_mark_read
                         && !self.read_busy
-                        && mode == InputMode::Live
+                        && matches!(mode, InputMode::Live | InputMode::Editing)
                         && focused
                         && !focus_changed
                         && !navigating
@@ -707,11 +720,12 @@ impl ChatUi {
                                 enabled,
                             )
                         })
-                        .inner;
+                        .inner
+                        .on_hover_text(aurora_i18n::tr!("host-chat-read-help"));
                     #[cfg(test)]
                     ui.ctx()
                         .data_mut(|data| data.insert_temp(Id::unique("host_chat_read_rect"), read.rect));
-                    if read.clicked() && action.is_none() {
+                    if read.clicked() && mode == InputMode::Live && action.is_none() {
                         self.read_action = Some(ReadDraft {
                             key: policy.key,
                             policy_revision: policy.revision,
@@ -1618,5 +1632,127 @@ mod tests {
             info.policy.key.conversation = Conversation::Group(ConversationId::from_bytes([11; 16]).unwrap());
         }
         assert!(!eligible(&snapshot));
+    }
+    fn with_read_metadata(mut snapshot: HostChatSnapshot, incoming: u64) -> HostChatSnapshot {
+        snapshot.reads.insert(
+            Conversation::Nearby,
+            ReadMetadata {
+                unread: incoming,
+                unread_revision: incoming + 1,
+                observed: aurora_session::chat::ObservedIncoming {
+                    epoch: 1,
+                    through: incoming,
+                },
+                can_mark_read: true,
+            },
+        );
+        snapshot
+    }
+
+    #[test]
+    fn host_chat_real_egui_unread_only_change_preserves_send_press_draft_and_ime() {
+        let a = with_read_metadata(snapshot(source()), 1);
+        let b = with_read_metadata(a.clone(), 2);
+        let mut frames = Frames::new();
+        frames.type_text(&a, "retained draft");
+        let at = frames.rect(&a, Id::unique("host_chat_send_rect")).center();
+        let pointer = |pressed| {
+            vec![
+                Event::PointerMoved(at),
+                Event::PointerButton {
+                    pos: at,
+                    button: PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]
+        };
+        assert!(frames.show(Some(&a), pointer(true)).is_none());
+        let sent = frames
+            .show(Some(&b), pointer(false))
+            .expect("arrival must not cancel an otherwise valid Send press");
+        assert_eq!(sent.text.as_str(), "retained draft");
+        assert_eq!(frames.ui.draft(), "retained draft");
+        let interaction = frames.ui.interaction;
+        frames.ui.ime_composing = true;
+        frames.ui.sync(Some(&a));
+        assert!(frames.ui.ime_composing);
+        assert_eq!(frames.ui.interaction, interaction);
+        assert_eq!(frames.ui.draft(), "retained draft");
+    }
+
+    #[test]
+    fn host_chat_real_egui_read_press_is_bound_to_native_observation_and_does_not_clear_draft() {
+        let a = with_read_metadata(snapshot(source()), 1);
+        let b = with_read_metadata(a.clone(), 2);
+        let mut frames = Frames::new();
+        frames.type_text(&a, "keep composer");
+        let at = frames.rect(&a, Id::unique("host_chat_read_rect")).center();
+        let pointer = |pressed| {
+            vec![
+                Event::PointerMoved(at),
+                Event::PointerButton {
+                    pos: at,
+                    button: PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]
+        };
+        assert!(frames.show(Some(&a), pointer(true)).is_none());
+        assert!(frames.show(Some(&b), pointer(false)).is_none());
+        assert!(
+            frames.ui.take_read_action().is_none(),
+            "release cannot acknowledge a newer observation"
+        );
+        assert!(frames.click(&b, Id::unique("host_chat_read_rect")).is_none());
+        let read = frames.ui.take_read_action().expect("fresh explicit Read");
+        assert_eq!(read.metadata, b.reads[&Conversation::Nearby]);
+        assert_eq!(read.key.conversation, Conversation::Nearby);
+        frames.ui.queued_read(read, 7);
+        assert_eq!(frames.ui.draft(), "keep composer");
+        assert!(frames.ui.receipt.is_none(), "Read does not create a Send receipt");
+    }
+
+    #[test]
+    fn host_chat_read_completion_after_navigation_and_local_rejection_clear_source_busy() {
+        let mut snapshot = with_read_metadata(snapshot(source()), 1);
+        let mut frames = Frames::new();
+        frames.ui.sync(Some(&snapshot));
+        let draft = ReadDraft {
+            key: frames.ui.key(),
+            policy_revision: 1,
+            metadata: snapshot.reads[&Conversation::Nearby],
+        };
+        frames.ui.queued_read(draft, 7);
+        frames.ui.select(direct());
+        frames.ui.sync(Some(&snapshot));
+        assert!(frames.ui.read_busy);
+        snapshot.read_operations.push(ReadOperation {
+            request: draft.request(7),
+            status: ReadStatus::Completed(ReadOutcome::Applied),
+        });
+        frames.ui.sync(Some(&snapshot));
+        assert!(
+            !frames.ui.read_busy,
+            "captured Nearby completion is observed while Direct is selected"
+        );
+        let direct_draft = ReadDraft {
+            key: frames.ui.key(),
+            policy_revision: 2,
+            metadata: draft.metadata,
+        };
+        frames.ui.queued_read(direct_draft, 8);
+        snapshot.read_operations.push(ReadOperation {
+            request: direct_draft.request(8),
+            status: ReadStatus::Unavailable,
+        });
+        frames.ui.sync(Some(&snapshot));
+        assert!(
+            !frames.ui.read_busy,
+            "broker pre-transport rejection is terminal for the admitted ticket"
+        );
+        frames.ui.sync(None);
+        assert!(frames.ui.read_metadata.is_none() && frames.ui.read_operation.is_none());
     }
 }

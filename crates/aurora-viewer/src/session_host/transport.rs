@@ -976,6 +976,7 @@ impl Broker {
                 self.effects(effects)?;
             }
             HostIntent::ChatRead(mut request) => {
+                request.request = ticket;
                 let key = request.key;
                 let live = self
                     .coordinator
@@ -990,8 +991,9 @@ impl Broker {
                     child.chat.set_control(None, false);
                     anyhow::bail!(HostError::Unavailable);
                 }
-                request.request = ticket;
-                child.chat.mark_read(request, Instant::now())?;
+                // The UI already owns this FIFO ticket. The peer publishes a
+                // terminal local rejection if native enqueue is no longer valid.
+                child.chat.admit_read(request, Instant::now())?;
             }
             HostIntent::ChatSend {
                 key,

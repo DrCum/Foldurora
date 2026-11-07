@@ -1,12 +1,13 @@
 //! Explicit production SharedChat + CPU-painter captures. All identities,
 //! policies, receipts and text are synthetic; no native window or IO is used.
 
+use super::super::chat_broker::{ReadOperation, ReadStatus};
 use super::tests::{host, source};
 use super::*;
 use crate::crash::software::Painter;
 use crate::theme::Theme;
 use crate::ui::fonts;
-use aurora_session::chat::{SendOutcome, SendReceipt};
+use aurora_session::chat::{Conversation, ObservedIncoming, ReadMetadata, ReadOutcome, SendOutcome, SendReceipt};
 use egui::{Event, PointerButton, Pos2, Rect};
 use serde_json::{Value, json};
 use std::path::Path;
@@ -45,7 +46,16 @@ struct Fixture {
 
 impl Fixture {
     fn new(logical: [u32; 2], scale: f32) -> Self {
-        let host = host();
+        let mut host = host();
+        Arc::make_mut(&mut host.chat[0]).reads.insert(
+            Conversation::Nearby,
+            ReadMetadata {
+                unread: 7,
+                unread_revision: 1,
+                observed: ObservedIncoming { epoch: 1, through: 7 },
+                can_mark_read: true,
+            },
+        );
         let mut model = SharedChat::default();
         model.sync(&host, false);
         model.select(source(1));
@@ -247,6 +257,55 @@ fn layout(output: &Path, name: &str, logical: [u32; 2], scale: f32) -> Vec<Value
     Arc::make_mut(&mut fixture.host.chat[0]).receipts[0].outcome = SendOutcome::AcceptedLocally;
     fixture.settle();
     fixture.type_text(PRIVATE_DRAFT);
+    assert!(fixture.click(Id::unique("host_chat_read_rect")).is_none());
+    let read = fixture
+        .model
+        .take_read_action()
+        .expect("explicit captured Read; no native transport installed");
+    fixture.model.queued_read(read, 80);
+    Arc::make_mut(&mut fixture.host.chat[0]).read_operations.push(ReadOperation {
+        request: read.request(80),
+        status: ReadStatus::Pending,
+    });
+    records.push(fixture.capture(
+        output,
+        &format!("{name}-06-read-pending"),
+        &[&identity, aurora_i18n::tr!("host-chat-read-pending")],
+        &[],
+    ));
+    let chat = Arc::make_mut(&mut fixture.host.chat[0]);
+    chat.read_operations[0].status = ReadStatus::Completed(ReadOutcome::StaleObservation);
+    chat.reads.insert(
+        Conversation::Nearby,
+        ReadMetadata {
+            unread: 8,
+            unread_revision: 2,
+            observed: ObservedIncoming { epoch: 1, through: 8 },
+            can_mark_read: true,
+        },
+    );
+    records.push(fixture.capture(
+        output,
+        &format!("{name}-07-read-stale"),
+        &[&identity, aurora_i18n::tr!("host-chat-read-stale")],
+        &[],
+    ));
+    assert!(fixture.click(Id::unique("host_chat_read_rect")).is_none());
+    let read = fixture
+        .model
+        .take_read_action()
+        .expect("new explicit action after checking current observation");
+    fixture.model.queued_read(read, 81);
+    Arc::make_mut(&mut fixture.host.chat[0]).read_operations.push(ReadOperation {
+        request: read.request(81),
+        status: ReadStatus::Uncertain,
+    });
+    records.push(fixture.capture(
+        output,
+        &format!("{name}-08-read-uncertain"),
+        &[&identity, aurora_i18n::tr!("host-chat-read-uncertain")],
+        &[],
+    ));
     let chat = Arc::make_mut(&mut fixture.host.chat[0]);
     chat.conversations[0].policy.revision += 1;
     chat.conversations[0].policy.can_send = false;

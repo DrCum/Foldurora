@@ -331,4 +331,23 @@ mod tests {
         w.payment(&group);
         assert_eq!(cards(&w, JANE).len(), 1);
     }
+    #[test]
+    fn native_read_payment_own_card_does_not_create_an_incoming_or_read_mutation() {
+        let mut w = world();
+        w.social.session_mut(JANE);
+        let (token, raw, badge) = w.read_counters(Some(JANE)).unwrap();
+        w.read_ledger.reconcile(&[(Some(JANE), token, raw, badge)]);
+        w.payment(&paid(100, GIFT, JANE, AGENT, 20, "incoming"));
+        let incoming = w.read_ledger.state(Some(JANE)).unwrap();
+        assert_eq!((incoming.unread, incoming.incoming), (1, 1));
+        w.payment(&paid(101, GIFT, AGENT, JANE, 10, "outgoing"));
+        assert_eq!(w.social.ims[0].unread, 1);
+        assert_eq!(w.read_ledger.state(Some(JANE)), Some(incoming));
+        assert_eq!(cards(&w, JANE).len(), 2);
+        w.mark_conversation_read(Some(JANE));
+        w.payment(&paid(102, GIFT, JANE, AGENT, 20, "replacement"));
+        let replacement = w.read_ledger.state(Some(JANE)).unwrap();
+        assert_eq!(replacement.unread, incoming.unread);
+        assert!(replacement.incoming > incoming.incoming && replacement.revision > incoming.revision);
+    }
 }

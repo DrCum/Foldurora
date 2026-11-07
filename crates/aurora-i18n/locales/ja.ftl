@@ -13378,9 +13378,10 @@ photo-interface-aspect = インターフェースを含めるには、「ウィ�
 photo-canvas-changed = ウィンドウまたはインターフェースの拡大率が変更されました。もう一度撮影してください。
 
 host-chat-native-unread = 未読：{ $count }
-host-chat-mark-read = 会話を既読にする
+host-chat-mark-read = 既読にする
 host-chat-read-pending = 会話を既読にしています…
 host-chat-read-uncertain = 結果が不明です。元の操作を確認中です。再実行はしません。
 host-chat-read-unavailable = 既読にできません。元の操作は再実行しません。
 host-chat-read-applied = 会話を既読にしました。
 host-chat-read-stale = 会話が更新されました。現在の未読数を確認して、もう一度クリックしてください。
+host-chat-read-help = この会話と未読カードをビューアーで既読にします。オファーには回答しません。

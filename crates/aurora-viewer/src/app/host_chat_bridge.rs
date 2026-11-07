@@ -15,6 +15,10 @@ fn reply_room(pending: usize) -> bool {
     pending <= MAX_PENDING - MAX_REPLY
 }
 
+fn take_command(incoming: &mut VecDeque<ChatPacket>, pending_replies: usize) -> Option<ChatPacket> {
+    if reply_room(pending_replies) { incoming.pop_front() } else { None }
+}
+
 #[derive(Default)]
 pub(super) struct Driver {
     native: WorkerChat,
@@ -70,9 +74,7 @@ impl Driver {
             // a native mutation because a previous response filled the queue.
             self.incoming.extend(bridge.chat_commands());
         }
-        if reply_room(self.outgoing.len())
-            && let Some(packet) = self.incoming.pop_front()
-        {
+        if let Some(packet) = take_command(&mut self.incoming, self.outgoing.len()) {
             if authority() != Some(packet.source) {
                 return;
             }
@@ -114,8 +116,35 @@ mod tests {
     use super::*;
     #[test]
     fn host_chat_driver_reserves_full_reply_before_taking_a_fifo_command() {
-        assert!(reply_room(5));
-        assert!(!reply_room(6));
-        assert!(!reply_room(MAX_PENDING));
+        use aurora_session::chat::{ChatCommand, ChatMessage, VERSION};
+        use aurora_session::{AccountKey, GridKey, HostId, InstallationId, SessionId, SessionIdentity, WorkerId, WorkerIdentity};
+        let source = ChatSource {
+            worker: WorkerIdentity {
+                installation: InstallationId::from_bytes([1; 32]).unwrap(),
+                host: HostId::from_bytes([2; 16]).unwrap(),
+                worker: WorkerId::from_bytes([3; 16]).unwrap(),
+            },
+            session: SessionIdentity {
+                session: SessionId::from_bytes([4; 16]).unwrap(),
+                account: AccountKey::from_bytes([5; 32]).unwrap(),
+                grid: GridKey::from_bytes([6; 32]).unwrap(),
+                generation: 1,
+            },
+            lease_epoch: 1,
+        };
+        let packet = |sequence| ChatPacket {
+            version: VERSION,
+            source,
+            sequence,
+            reply_to: 0,
+            message: ChatMessage::Command(ChatCommand::Poll { after_event: 0 }),
+        };
+        let mut incoming = VecDeque::from([packet(1), packet(2)]);
+        assert_eq!(take_command(&mut incoming, 6), None);
+        assert_eq!(incoming.len(), 2);
+        assert_eq!(take_command(&mut incoming, 5).unwrap().sequence, 1);
+        assert_eq!(take_command(&mut incoming, MAX_PENDING), None);
+        assert_eq!(incoming.front().unwrap().sequence, 2);
+        assert_eq!(take_command(&mut incoming, 0).unwrap().sequence, 2);
     }
 }

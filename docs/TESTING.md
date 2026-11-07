@@ -45,9 +45,10 @@ cargo test --workspace shared_chat_cpu_visual_fixture -- --ignored --test-thread
 ```
 
 The fixture uses the production `SharedChat`, real egui input and the same CPU
-painter as `SoftwareWindow`. Ten PNG/JSON pairs cover normal and narrow/150%
+painter as `SoftwareWindow`. Sixteen PNG/JSON pairs cover normal and narrow/150%
 identity, five duplicate-label source rows, pending admission, policy loss while
-closed followed by a fresh context, and an unavailable selected sender. Its
+closed followed by a fresh context, an unavailable selected sender, and native
+read pending/stale/uncertain outcomes. Its
 manifest records painted labels and popup/control bounds. All sources and text
 are synthetic; no native window, controller, profile, socket, grid or GPU is
 created. Passing these checks does not establish native Windows focus/ownership

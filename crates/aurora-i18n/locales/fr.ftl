@@ -13401,9 +13401,10 @@ photo-interface-aspect = Pour inclure l’interface, choisissez Fenêtre ou un f
 photo-canvas-changed = La fenêtre ou l’échelle de l’interface a changé. Reprenez la photo.
 
 host-chat-native-unread = Non lus : { $count }
-host-chat-mark-read = Marquer la conversation comme lue
+host-chat-mark-read = Marquer comme lu
 host-chat-read-pending = Marquage de la conversation comme lue…
 host-chat-read-uncertain = Résultat incertain. Vérification de l’opération initiale, sans nouvel envoi.
 host-chat-read-unavailable = Lecture indisponible. L’opération initiale ne sera pas répétée.
 host-chat-read-applied = Conversation marquée comme lue.
 host-chat-read-stale = La conversation a changé. Vérifiez le nombre de messages non lus et cliquez à nouveau.
+host-chat-read-help = Marquer cette conversation comme lue dans sa fenêtre native, y compris les cartes non lues. Cela ne répond pas aux offres.

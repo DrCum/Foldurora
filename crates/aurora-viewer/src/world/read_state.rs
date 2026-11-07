@@ -82,6 +82,10 @@ impl ReadLedger {
         });
     }
 
+    pub fn interested(&self, key: Conversation) -> bool {
+        self.entries.contains_key(&key)
+    }
+
     pub fn state(&self, key: Conversation) -> Option<ReadState> {
         self.entries.get(&key)?.state
     }
@@ -105,6 +109,9 @@ impl World {
     }
 
     pub(super) fn record_read_change(&mut self, key: Conversation, incoming: bool) {
+        if !self.read_ledger.interested(key) {
+            return;
+        }
         if let Some((token, raw, badge)) = self.read_counters(key) {
             self.read_ledger.record(key, token, raw, badge, incoming);
         }

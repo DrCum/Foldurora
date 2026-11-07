@@ -274,6 +274,43 @@ impl Peer {
         }
     }
 
+    fn retain_read_operation(&mut self, operation: ReadOperation) {
+        if self.read_operations.len() == MAX_READ_RECEIPTS {
+            // A blocked old uncertain identity may be older than many local
+            // rejections. Never evict it to report one of those rejections.
+            let active = self.read_pending.as_ref().map(|pending| pending.request);
+            if let Some(index) = self.read_operations.iter().position(|old| Some(old.request) != active) {
+                self.read_operations.remove(index);
+            } else {
+                return;
+            }
+        }
+        self.read_operations.push_back(operation);
+    }
+
+    pub fn reject_read(&mut self, request: MarkReadRequest) {
+        if self.source == Some(request.key.source)
+            && !self
+                .read_operations
+                .iter()
+                .any(|operation| operation.request.request == request.request)
+        {
+            self.retain_read_operation(ReadOperation {
+                request,
+                status: ReadStatus::Unavailable,
+            });
+            self.publish();
+        }
+    }
+
+    pub fn admit_read(&mut self, request: MarkReadRequest, now: Instant) -> Result<(), HostError> {
+        let result = self.mark_read(request, now);
+        if result.is_err() {
+            self.reject_read(request);
+        }
+        result
+    }
+
     pub fn mark_read(&mut self, request: MarkReadRequest, now: Instant) -> Result<(), HostError> {
         if self.read_pending.is_some() {
             return Err(HostError::Busy);
@@ -310,12 +347,7 @@ impl Peer {
             }
         })?;
         self.sent = sequence;
-        // Only final operations can reach the eviction boundary: an uncertain
-        // operation retains the single active identity until queried/revoked.
-        if self.read_operations.len() == MAX_READ_RECEIPTS {
-            self.read_operations.pop_front();
-        }
-        self.read_operations.push_back(ReadOperation {
+        self.retain_read_operation(ReadOperation {
             request,
             status: ReadStatus::Pending,
         });
@@ -475,6 +507,15 @@ impl Peer {
                     return Err(ChatError::FinalReceipt);
                 }
                 self.update_read_status(request, status);
+                // This receipt can invalidate only its own observed metadata.
+                // Never clear a newer arrival's metadata with an old receipt.
+                if self
+                    .reads
+                    .get(&request.key.conversation)
+                    .is_some_and(|read| read.observed == request.observed && read.unread_revision == request.unread_revision)
+                {
+                    self.reads.remove(&request.key.conversation);
+                }
                 if self.read_pending.as_ref().is_some_and(|pending| pending.request == request) {
                     self.read_pending = None;
                 }
@@ -819,6 +860,156 @@ mod tests {
         peer.set_control(None, false);
         let ended = peer.snapshot().unwrap();
         assert!(!ended.live && !ended.authenticated && ended.conversations.is_empty() && ended.lines.is_empty());
+    }
+    fn read_row(source: ChatSource, revision: u64, through: u64) -> aurora_session::chat::ReadStateRow {
+        let info = policy(source, revision, true);
+        aurora_session::chat::ReadStateRow {
+            conversation: Conversation::Nearby,
+            title: info.title,
+            policy_revision: revision,
+            lease_current: true,
+            ready: true,
+            can_send: true,
+            can_read: true,
+            read: Some(ReadMetadata {
+                unread: through,
+                unread_revision: through + 1,
+                observed: aurora_session::chat::ObservedIncoming { epoch: 1, through },
+                can_mark_read: true,
+            }),
+        }
+    }
+    fn read_request(row: &aurora_session::chat::ReadStateRow, number: u64) -> MarkReadRequest {
+        let read = row.read.unwrap();
+        MarkReadRequest {
+            key: ChatKey {
+                source: source(),
+                conversation: row.conversation,
+            },
+            request: number,
+            policy_revision: row.policy_revision,
+            observed: read.observed,
+            unread_revision: read.unread_revision,
+        }
+    }
+
+    #[test]
+    fn chat_broker_read_admission_race_publishes_terminal_exact_ticket_without_native_enqueue() {
+        let (mut peer, _worker) = connected();
+        let first = read_row(source(), 1, 1);
+        peer.observe(&event(source(), 1, ChatEvent::ReadBatch(vec![first.clone()])))
+            .unwrap();
+        let request = read_request(&first, 40); // host FIFO ticket already returned to the UI
+        peer.observe(&event(source(), 2, ChatEvent::ReadBatch(vec![read_row(source(), 1, 2)])))
+            .unwrap();
+        let sent = peer.sent;
+        assert_eq!(peer.admit_read(request, Instant::now()), Err(HostError::Unavailable));
+        let snapshot = peer.snapshot().unwrap();
+        assert_eq!(
+            snapshot.read_operations,
+            vec![ReadOperation {
+                request,
+                status: ReadStatus::Unavailable
+            }]
+        );
+        assert!(peer.read_pending.is_none());
+        assert_eq!(peer.sent, sent, "rejected ticket never enters native transport");
+    }
+
+    #[test]
+    fn chat_broker_read_timeout_queries_only_and_protects_active_identity_from_local_rejections() {
+        let (mut peer, mut worker) = connected();
+        let row = read_row(source(), 1, 1);
+        peer.observe(&event(source(), 1, ChatEvent::ReadBatch(vec![row.clone()]))).unwrap();
+        let request = read_request(&row, 40);
+        let now = Instant::now();
+        peer.admit_read(request, now).unwrap();
+        assert!(peer.poll_read_receipt(now + RECEIPT_WAIT));
+        assert_eq!(peer.read_operations[0].status, ReadStatus::Uncertain);
+        assert_eq!(peer.admit_read(read_request(&row, 41), now), Err(HostError::Busy));
+        for number in 42..=120 {
+            peer.reject_read(read_request(&row, number));
+        }
+        assert_eq!(peer.read_operations.len(), MAX_READ_RECEIPTS);
+        assert!(peer.read_operations.iter().any(|operation| operation.request == request));
+        // Drive only owned in-memory loopback IO. No World, network grid or
+        // native mutation is installed in this test.
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut commands = Vec::new();
+        while commands.len() < 2 {
+            if let Some(io) = &mut peer.io {
+                io.poll().unwrap();
+            }
+            commands.extend(worker.poll().unwrap());
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            commands
+                .iter()
+                .filter(|packet| matches!(packet.message, ChatMessage::Command(ChatCommand::MarkRead(_))))
+                .count(),
+            1
+        );
+        assert!(
+            commands
+                .iter()
+                .any(|packet| matches!(packet.message, ChatMessage::Command(ChatCommand::QueryReadReceipt(_))))
+        );
+        peer.disconnect();
+        assert!(peer.reads.is_empty());
+        assert_eq!(
+            peer.read_pending.as_ref().unwrap().request,
+            request,
+            "socket reconnect retains lookup identity only"
+        );
+        peer.set_control(None, false);
+        assert!(peer.read_pending.is_none() && peer.read_operations.is_empty());
+    }
+
+    #[test]
+    fn chat_broker_read_batch_policy_precedes_metadata_and_old_receipt_cannot_restore_it() {
+        let (mut peer, _worker) = connected();
+        let row = read_row(source(), 1, 1);
+        peer.observe(&event(source(), 1, ChatEvent::ReadBatch(vec![row.clone()]))).unwrap();
+        let request = read_request(&row, 40);
+        peer.admit_read(request, Instant::now()).unwrap();
+        peer.observe(&event(source(), 2, ChatEvent::Gap { through_event: 1 })).unwrap();
+        assert!(peer.reads.is_empty() && peer.conversations.is_empty());
+        let mut denied = read_row(source(), 2, 2);
+        denied.can_read = false;
+        denied.read = None;
+        peer.observe(&event(source(), 3, ChatEvent::ReadBatch(vec![denied]))).unwrap();
+        let receipt = aurora_session::chat::ReadReceipt {
+            key: request.key,
+            request: request.request,
+            observed: request.observed,
+            unread_revision: request.unread_revision,
+            outcome: ReadOutcome::Applied,
+        };
+        peer.observe(&event(
+            source(),
+            4,
+            ChatEvent::ReadReceipt(aurora_session::chat::ReadReceiptReply {
+                query: ReadReceiptQuery {
+                    key: request.key,
+                    request: request.request,
+                },
+                receipt: Some(receipt),
+            }),
+        ))
+        .unwrap();
+        peer.publish();
+        let snapshot = peer.snapshot().unwrap();
+        assert!(snapshot.reads.is_empty());
+        assert!(!snapshot.conversations[0].policy.can_read);
+        let received = peer.received;
+        assert_eq!(
+            peer.observe(&event(source(), 1000, ChatEvent::ReadBatch(vec![row]))),
+            Err(ChatError::StalePolicy)
+        );
+        assert_eq!(peer.received, received);
+        assert!(peer.reads.is_empty());
     }
 }
 

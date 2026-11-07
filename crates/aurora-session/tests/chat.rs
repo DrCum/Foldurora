@@ -353,3 +353,129 @@ fn drafts_have_exact_conversation_identity_and_a_hard_catalogue_bound() {
     drafts.set(overflow, ChatText::new("Now there is room").unwrap()).unwrap();
     assert_eq!(drafts.retained_count(), MAX_CONVERSATIONS);
 }
+
+fn read_request(key: ChatKey, request: u64) -> MarkReadRequest {
+    MarkReadRequest {
+        key,
+        request,
+        policy_revision: 1,
+        observed: ObservedIncoming { epoch: 7, through: 9 },
+        unread_revision: 11,
+    }
+}
+
+#[test]
+fn chat_v2_read_codec_maximal_rows_receipts_and_closed_schema_fit_packets() {
+    let mut source = source(255, u64::MAX);
+    source.lease_epoch = u64::MAX;
+    for title in ["\"\\".repeat(64), "界".repeat(42)] {
+        let rows: Vec<_> = (1..=MAX_READ_ROWS)
+            .map(|index| ReadStateRow {
+                conversation: Conversation::Direct(ConversationId::from_bytes([index as u8; 16]).unwrap()),
+                title: Label::new(&title).unwrap(),
+                policy_revision: u64::MAX,
+                lease_current: true,
+                ready: true,
+                can_send: false,
+                can_read: true,
+                read: Some(ReadMetadata {
+                    unread: u64::MAX,
+                    unread_revision: u64::MAX,
+                    observed: ObservedIncoming {
+                        epoch: u64::MAX,
+                        through: u64::MAX,
+                    },
+                    can_mark_read: false,
+                }),
+            })
+            .collect();
+        let mut packet = ChatPacket {
+            version: VERSION,
+            source,
+            sequence: u64::MAX,
+            reply_to: u64::MAX,
+            message: ChatMessage::Event(ChatEvent::ReadBatch(rows.clone())),
+        };
+        let encoded = encode(&packet).unwrap();
+        assert!(encoded.len() <= 3840, "compact source-relative maximum: {}", encoded.len());
+        assert_eq!(decode(&encoded), Ok(packet.clone()));
+        packet.version = 1;
+        assert_eq!(decode(&serde_json::to_vec(&packet).unwrap()), Err(ChatError::Version));
+        packet.version = VERSION;
+        let mut unknown: serde_json::Value = serde_json::from_slice(&encoded).unwrap();
+        unknown["message"]["body"]["data"][0]["read"]["export_event"] = 99.into();
+        assert_eq!(decode(&serde_json::to_vec(&unknown).unwrap()), Err(ChatError::Malformed));
+        packet.message = ChatMessage::Event(ChatEvent::ReadBatch(vec![rows[0].clone(); 2]));
+        assert_eq!(packet.validate(), Err(ChatError::Invalid));
+        packet.message = ChatMessage::Event(ChatEvent::ReadBatch(vec![rows[0].clone(); MAX_READ_ROWS + 1]));
+        assert_eq!(packet.validate(), Err(ChatError::Capacity));
+        let mut denied = rows[0].clone();
+        denied.can_read = false;
+        packet.message = ChatMessage::Event(ChatEvent::ReadBatch(vec![denied.clone()]));
+        assert_eq!(packet.validate(), Err(ChatError::Denied));
+        denied.read = None;
+        packet.message = ChatMessage::Event(ChatEvent::ReadBatch(vec![denied]));
+        assert!(encode(&packet).is_ok());
+    }
+    let mut request = read_request(key(source, Conversation::Nearby), u64::MAX);
+    request.observed = ObservedIncoming {
+        epoch: u64::MAX,
+        through: u64::MAX,
+    };
+    request.unread_revision = u64::MAX;
+    request.policy_revision = u64::MAX;
+    let mut ledger = ReadReceiptLedger::new(source);
+    assert_eq!(ledger.reserve(request), Ok(None));
+    let receipt = ledger.finish(request, ReadOutcome::Applied).unwrap();
+    let query = ReadReceiptQuery {
+        key: request.key,
+        request: request.request,
+    };
+    let reply = ledger.query(query).unwrap();
+    assert_eq!(reply.receipt, Some(receipt));
+    for message in [
+        ChatMessage::Command(ChatCommand::MarkRead(request)),
+        ChatMessage::Command(ChatCommand::QueryReadReceipt(query)),
+        ChatMessage::Event(ChatEvent::ReadReceipt(reply)),
+    ] {
+        let reply_to = if matches!(message, ChatMessage::Command(_)) { 0 } else { u64::MAX };
+        let packet = ChatPacket {
+            version: VERSION,
+            source,
+            sequence: u64::MAX,
+            reply_to,
+            message,
+        };
+        let encoded = encode(&packet).unwrap();
+        assert_eq!(decode(&encoded), Ok(packet));
+        assert!(!String::from_utf8(encoded).unwrap().contains("unread_count"));
+    }
+}
+
+#[test]
+fn chat_read_receipts_are_immutable_exact_bounded_and_evicted_requests_never_reapply() {
+    let source = source(4, 1);
+    let key = key(source, Conversation::Nearby);
+    let mut ledger = ReadReceiptLedger::new(source);
+    let first = read_request(key, 1);
+    assert_eq!(ledger.reserve(first), Ok(None));
+    assert_eq!(ledger.reserve(read_request(key, 2)), Err(ChatError::Busy));
+    let receipt = ledger.finish(first, ReadOutcome::Applied).unwrap();
+    assert_eq!(ledger.reserve(first), Ok(Some(receipt)));
+    assert_eq!(ledger.finish(first, ReadOutcome::StaleObservation), Err(ChatError::FinalReceipt));
+    let changed = MarkReadRequest {
+        unread_revision: 12,
+        ..first
+    };
+    assert_eq!(ledger.reserve(changed), Err(ChatError::RequestChanged));
+    for number in 2..=MAX_READ_RECEIPTS as u64 + 1 {
+        let request = read_request(key, number);
+        assert_eq!(ledger.reserve(request), Ok(None));
+        ledger.finish(request, ReadOutcome::AlreadyRead).unwrap();
+    }
+    assert_eq!(ledger.reserve(first), Err(ChatError::StaleRequest));
+    assert_eq!(ledger.query(ReadReceiptQuery { key, request: 1 }).unwrap().receipt, None);
+    let mut wrong = key;
+    wrong.source.session.generation += 1;
+    assert_eq!(ledger.query(ReadReceiptQuery { key: wrong, request: 1 }), Err(ChatError::Binding));
+}

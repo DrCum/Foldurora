@@ -150,6 +150,9 @@ impl WorkerChat {
     fn refresh(&mut self, native: &impl NativeChat, conversation: Conversation) -> Result<(), ChatError> {
         let source = self.context(native)?;
         let snapshot = native.snapshot(conversation).ok_or(ChatError::Unavailable)?;
+        if !self.states.contains_key(&conversation) && self.states.len() == MAX_CONVERSATIONS {
+            return Err(ChatError::Capacity);
+        }
         let read = if snapshot.ready && snapshot.can_read {
             native.read_metadata(conversation)
         } else {
@@ -382,6 +385,10 @@ impl WorkerChat {
                     return Err(ChatError::Binding);
                 }
                 self.received = packet.sequence;
+                // Prioritize a fresh native observation on the next Poll,
+                // independently of the immutable operation receipt.
+                self.read_dirty.retain(|key| *key != request.key.conversation);
+                self.read_dirty.push_front(request.key.conversation);
                 // Fresh metadata follows on Poll; receipt carries no old body.
                 Ok(vec![self.packet(
                     packet.sequence,
@@ -936,7 +943,9 @@ mod tests {
             })
             .expect("host retained a real exported line");
         let mut catch_up = poll(source(1), 2);
-        catch_up.message = ChatMessage::Command(ChatCommand::Poll { after_event: 4 });
+        catch_up.message = ChatMessage::Command(ChatCommand::Poll {
+            after_event: 8 - POLL_LINES as u64,
+        });
         let second = backend.handle(&mut native, &catch_up).unwrap();
         let after_event = second
             .iter()
@@ -1027,5 +1036,145 @@ mod tests {
                 .any(|packet| matches!(packet.message, ChatMessage::Event(ChatEvent::Line(_))))
         );
         assert!(replies.len() <= 11);
+    }
+    struct ReadCatalogue {
+        revision: u64,
+        reads: Cell<usize>,
+    }
+    impl NativeChat for ReadCatalogue {
+        fn source(&self) -> Option<ChatSource> {
+            Some(source(1))
+        }
+        fn catalogue(&self) -> Vec<Conversation> {
+            std::iter::once(Conversation::Nearby)
+                .chain((1..64).map(|i| Conversation::Direct(ConversationId::from_bytes([i; 16]).unwrap())))
+                .collect()
+        }
+        fn snapshot(&self, _: Conversation) -> Option<NativeSnapshot> {
+            Some(NativeSnapshot {
+                title: Label::new("Synthetic").unwrap(),
+                stamp: [0; 4],
+                ready: true,
+                can_send: true,
+                can_read: true,
+                initial: NativeCursor::default(),
+            })
+        }
+        fn lines(&self, _: Conversation, cursor: NativeCursor, _: usize) -> NativePage {
+            NativePage {
+                cursor,
+                gap: false,
+                lines: Vec::new(),
+            }
+        }
+        fn submit_literal(&mut self, _: ChatKey, _: &str) -> SendOutcome {
+            panic!("metadata never sends")
+        }
+        fn read_metadata(&self, _: Conversation) -> Option<ReadMetadata> {
+            self.reads.set(self.reads.get() + 1);
+            Some(ReadMetadata {
+                unread: 1,
+                unread_revision: self.revision,
+                observed: aurora_session::chat::ObservedIncoming {
+                    epoch: 1,
+                    through: self.revision,
+                },
+                can_mark_read: true,
+            })
+        }
+    }
+
+    #[test]
+    fn host_chat_read_metadata_fairness_and_true_maximum_reply_budget_are_bounded() {
+        let mut native = ReadCatalogue {
+            revision: 1,
+            reads: Cell::new(0),
+        };
+        let mut backend = WorkerChat::default();
+        let mut seen = BTreeSet::new();
+        for sequence in 1..=32 {
+            native.revision += 1; // all conversations continuously dirty
+            let packets = backend.handle(&mut native, &poll(source(1), sequence)).unwrap();
+            assert!(packets.len() <= MAX_REPLY);
+            for packet in packets {
+                if let ChatMessage::Event(ChatEvent::ReadBatch(rows)) = packet.message {
+                    assert!(rows.len() <= MAX_READ_ROWS);
+                    seen.extend(rows.into_iter().map(|row| row.conversation));
+                }
+            }
+            assert!(backend.read_cache.len() <= MAX_CONVERSATIONS && backend.read_dirty.len() <= MAX_CONVERSATIONS);
+        }
+        assert_eq!(seen.len(), MAX_CONVERSATIONS, "fair cursor survives constant dirty traffic");
+        // Populate exactly three distinct line policies, different from the
+        // rotating policy, plus a gap and an existing send receipt.
+        backend.metadata = 0;
+        backend.gap_through = 1;
+        backend.lines.clear();
+        let keys = native.catalogue();
+        for (offset, conversation) in keys.iter().copied().skip(1).take(3).enumerate() {
+            backend.refresh(&native, conversation).unwrap();
+            let policy = backend.states[&conversation].policy;
+            backend.lines.push_back(ChatLine {
+                key: policy.key,
+                event: offset as u64 + 2,
+                policy_revision: policy.revision,
+                sender: Label::new("Synthetic").unwrap(),
+                text: ChatText::new(&"\"".repeat(MAX_TEXT_BYTES)).unwrap(),
+                kind: LineKind::Incoming,
+                truncated: false,
+            });
+        }
+        backend.receipt = Some(SendReceipt {
+            key: backend.states[&Conversation::Nearby].policy.key,
+            request: 1,
+            outcome: SendOutcome::Uncertain,
+        });
+        let packets = backend.handle(&mut native, &poll(source(1), 33)).unwrap();
+        assert_eq!(
+            packets.len(),
+            10,
+            "gap1 + policy1 + 3*(policy1+line1) + read batch1 + send receipt1"
+        );
+        assert!(packets.iter().all(|packet| aurora_session::chat::encode(packet).is_ok()));
+        assert!(matches!(packets[0].message, ChatMessage::Event(ChatEvent::Gap { .. })));
+        let mut policies = BTreeSet::new();
+        for packet in packets {
+            match packet.message {
+                ChatMessage::Event(ChatEvent::Conversation(info)) => {
+                    policies.insert(info.policy.key.conversation);
+                }
+                ChatMessage::Event(ChatEvent::Line(line)) => assert!(policies.contains(&line.key.conversation)),
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn host_chat_read_sequence_capacity_is_reserved_before_native_counter_mutation() {
+        let mut native = Native::new();
+        let mut backend = WorkerChat::default();
+        backend.sync(&native).unwrap();
+        let policy = backend.states[&Conversation::Nearby].policy;
+        let request = MarkReadRequest {
+            key: policy.key,
+            request: 1,
+            policy_revision: policy.revision,
+            observed: aurora_session::chat::ObservedIncoming { epoch: 1, through: 0 },
+            unread_revision: 1,
+        };
+        backend.outgoing = u64::MAX - MAX_REPLY as u64 + 1;
+        let packet = ChatPacket {
+            version: VERSION,
+            source: source(1),
+            sequence: 1,
+            reply_to: 0,
+            message: ChatMessage::Command(ChatCommand::MarkRead(request)),
+        };
+        assert_eq!(backend.handle(&mut native, &packet), Err(ChatError::Sequence));
+        assert_eq!(
+            backend.reads.as_mut().unwrap().reserve(request),
+            Ok(None),
+            "capacity rejection occurs before even reserving a mutation identity"
+        );
     }
 }
