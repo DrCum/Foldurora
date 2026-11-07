@@ -278,11 +278,51 @@ impl WorkerBridge {
     pub(crate) fn chat_ready(&self) -> bool {
         self.chat.as_ref().is_some_and(|chat| chat.ready())
     }
-    pub(crate) fn chat_commands(&self) -> Vec<aurora_session::chat::ChatPacket> {
+    pub(crate) fn chat_commands(&self) -> Vec<super::chat_io::ReceivedCommand> {
         self.chat.as_ref().map_or_else(Vec::new, |chat| chat.commands())
     }
     pub(crate) fn chat_send(&self, packet: &aurora_session::chat::ChatPacket) -> Result<(), super::chat_transport::LaneError> {
         self.chat.as_ref().ok_or(super::chat_transport::LaneError::NotReady)?.send(packet)
+    }
+
+    /// GUI review has no standalone/unsupported input fallbacks. Core Active
+    /// alone precedes native grant completion and cannot authorize this effect.
+    pub(crate) fn review_authorized(
+        &self,
+        source: aurora_session::chat::ChatSource,
+        activation: u64,
+        window: &winit::window::Window,
+    ) -> Result<(), aurora_session::chat::ReviewOutcome> {
+        use aurora_session::chat::ReviewOutcome;
+        let current = self
+            .bound_session()
+            .and_then(|binding| aurora_session::chat::ChatSource::try_from(binding).ok());
+        let facts = ReviewAuthority {
+            current,
+            activation: self.guard.activation(),
+            managed: !self.detached && self.supported && self.admitted,
+            active: self.guard.mode() == WorkerMode::Active,
+            display_active: matches!(self.gate, DisplayGate::Active),
+            render_owned: self.guard.render_owned(),
+            input_owned: self.guard.input_owned(),
+            blocked: self.status.blocked,
+            native_matches: self.window != 0 && native_window(window) == self.window && self.status.native_window == self.window,
+        };
+        if !facts.accepts(source, activation) {
+            return Err(ReviewOutcome::RejectedNative);
+        }
+        let viewport = self.guard.viewport().ok_or(ReviewOutcome::RejectedNative)?;
+        if !matches!(
+            self.presentation.state(window, viewport, self.config.host_pid),
+            Ok(NativeState::Ready)
+        ) {
+            return Err(ReviewOutcome::RejectedNative);
+        }
+        #[cfg(windows)]
+        if native::review_foreground(viewport.host_window, self.window, self.config.host_pid) {
+            return Ok(());
+        }
+        Err(ReviewOutcome::NotForeground)
     }
 
     pub fn world_allowed(&self) -> bool {
@@ -677,6 +717,34 @@ fn receipt_is_current(received: Option<Instant>, now: Instant) -> bool {
         .is_some_and(|age| age < std::time::Duration::from_millis(aurora_session::LEASE_MILLIS))
 }
 
+struct ReviewAuthority {
+    current: Option<aurora_session::chat::ChatSource>,
+    activation: u64,
+    managed: bool,
+    active: bool,
+    display_active: bool,
+    render_owned: bool,
+    input_owned: bool,
+    blocked: bool,
+    native_matches: bool,
+}
+
+impl ReviewAuthority {
+    fn accepts(&self, source: aurora_session::chat::ChatSource, activation: u64) -> bool {
+        source.validate().is_ok()
+            && self.current == Some(source)
+            && activation != 0
+            && activation == self.activation
+            && self.managed
+            && self.active
+            && self.display_active
+            && self.render_owned
+            && self.input_owned
+            && !self.blocked
+            && self.native_matches
+    }
+}
+
 fn final_display_effects(mut effects: WorkerEffects, mode: WorkerMode) -> WorkerEffects {
     // A newer revoke can supersede a queued Prepare/Grant in the same UI tick.
     // Input release is cumulative; presentation authority is only final-state.
@@ -822,9 +890,9 @@ mod native {
         Graphics::Gdi::ClientToScreen,
         UI::WindowsAndMessaging::{
             GW_HWNDNEXT, GW_OWNER, GWL_EXSTYLE, GWL_STYLE, GetClientRect, GetForegroundWindow, GetWindow, GetWindowLongPtrW, GetWindowRect,
-            GetWindowThreadProcessId, IsWindow, IsZoomed, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
-            SetWindowLongPtrW, SetWindowPos, WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
-            WS_OVERLAPPEDWINDOW, WS_POPUP, WS_VISIBLE,
+            GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible, IsZoomed, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
+            SWP_NOSIZE, SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
+            WS_EX_APPWINDOW, WS_EX_TOOLWINDOW, WS_OVERLAPPEDWINDOW, WS_POPUP, WS_VISIBLE,
         },
     };
     use winit::{dpi::LogicalSize, platform::windows::WindowExtWindows, window::Window};
@@ -957,6 +1025,38 @@ mod native {
         // SAFETY: read actual foreground and native owners only. Every allowed
         // tool window must belong to this exact controller PID and owner root.
         let foreground = unsafe { GetForegroundWindow() } as u64;
+        super::workspace_family_foreground(foreground, host, worker, host_pid, |window| unsafe {
+            let mut pid = 0;
+            if GetWindowThreadProcessId(window as HWND, &mut pid) == 0 {
+                return None;
+            }
+            Some((pid, GetWindow(window as HWND, GW_OWNER) as u64))
+        })
+    }
+
+    pub(super) fn review_foreground(host: u64, worker: u64, host_pid: u32) -> bool {
+        let visible_owner = |window: u64, expected: u32| {
+            let mut pid = 0;
+            // SAFETY: query only live HWND properties; no foreign mutation.
+            unsafe {
+                window != 0
+                    && expected != 0
+                    && IsWindow(window as HWND) != 0
+                    && IsWindowVisible(window as HWND) != 0
+                    && IsIconic(window as HWND) == 0
+                    && GetWindowThreadProcessId(window as HWND, &mut pid) != 0
+                    && pid == expected
+            }
+        };
+        if !visible_owner(host, host_pid) || !visible_owner(worker, std::process::id()) {
+            return false;
+        }
+        // SAFETY: actual foreground, with visibility checked before trusting
+        // the existing bounded exact-PID/owned-window family relationship.
+        let foreground = unsafe { GetForegroundWindow() } as u64;
+        if foreground == 0 || unsafe { IsWindowVisible(foreground as HWND) == 0 || IsIconic(foreground as HWND) != 0 } {
+            return false;
+        }
         super::workspace_family_foreground(foreground, host, worker, host_pid, |window| unsafe {
             let mut pid = 0;
             if GetWindowThreadProcessId(window as HWND, &mut pid) == 0 {
@@ -1317,5 +1417,47 @@ mod tests {
             },
         );
         assert!(effects.quiesce && effects.release_input && effects.restore_window);
+    }
+
+    #[test]
+    fn native_review_strict_authority_rejects_every_permissive_input_fallback_and_incomplete_grant() {
+        let (guard, _) = guard_and_command();
+        let source = aurora_session::chat::ChatSource::try_from((guard.binding(), 1)).unwrap();
+        let valid = || ReviewAuthority {
+            current: Some(source),
+            activation: 7,
+            managed: true,
+            active: true,
+            display_active: true,
+            render_owned: true,
+            input_owned: true,
+            blocked: false,
+            native_matches: true,
+        };
+        assert!(valid().accepts(source, 7));
+        for case in 0..10 {
+            let mut facts = valid();
+            match case {
+                0 => facts.current = None,         // stale lease/login source
+                1 => facts.managed = false,        // detached or unsupported ordinary-input fallback
+                2 => facts.active = false,         // Standby/Preparing
+                3 => facts.display_active = false, // core Active before native grant/GeometryPending
+                4 => facts.render_owned = false,
+                5 => facts.input_owned = false,
+                6 => facts.blocked = true,
+                7 => facts.native_matches = false,
+                8 => facts.activation = 8,
+                9 => facts.activation = 0,
+                _ => unreachable!(),
+            }
+            assert!(!facts.accepts(source, 7), "strict case {case}");
+        }
+        let mut changed = source;
+        changed.session.generation += 1;
+        assert!(!valid().accepts(changed, 7));
+        changed = source;
+        changed.lease_epoch += 1;
+        assert!(!valid().accepts(changed, 7));
+        assert!(!valid().accepts(source, 0));
     }
 }

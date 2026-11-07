@@ -46,6 +46,14 @@ struct Connection {
 struct Queued {
     connection: Connection,
     packet: ChatPacket,
+    received_at: Instant,
+}
+
+/// Local IO arrival time travels with the command through every App queue.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ReceivedCommand {
+    pub packet: ChatPacket,
+    pub received_at: Instant,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -181,6 +189,7 @@ impl State {
         self.outgoing.push_back(Queued {
             connection,
             packet: packet.clone(),
+            received_at: Instant::now(),
         });
         Ok(())
     }
@@ -212,7 +221,12 @@ impl State {
         self.current_revision(revision).then_some(CAPACITY - self.incoming.len())
     }
 
+    #[cfg(test)]
     fn incoming(&mut self, connection: Connection, packets: Vec<ChatPacket>) -> Result<(), LaneError> {
+        self.incoming_at(connection, packets, Instant::now())
+    }
+
+    fn incoming_at(&mut self, connection: Connection, packets: Vec<ChatPacket>, received_at: Instant) -> Result<(), LaneError> {
         if !self.matches(connection) {
             return Ok(());
         }
@@ -228,12 +242,16 @@ impl State {
             if self.incoming.len() == CAPACITY {
                 return Err(LaneError::Busy);
             }
-            self.incoming.push_back(Queued { connection, packet });
+            self.incoming.push_back(Queued {
+                connection,
+                packet,
+                received_at,
+            });
         }
         Ok(())
     }
 
-    fn commands(&mut self) -> Vec<ChatPacket> {
+    fn commands(&mut self) -> Vec<ReceivedCommand> {
         let mut commands = Vec::with_capacity(COMMANDS_PER_CALL);
         while commands.len() < COMMANDS_PER_CALL {
             let Some(queued) = self.incoming.pop_front() else { break };
@@ -241,7 +259,10 @@ impl State {
                 && Some(queued.packet.source) == self.source
                 && matches!(queued.packet.message, ChatMessage::Command(_))
             {
-                commands.push(queued.packet);
+                commands.push(ReceivedCommand {
+                    packet: queued.packet,
+                    received_at: queued.received_at,
+                });
             }
         }
         commands
@@ -385,7 +406,7 @@ impl WorkerChannel {
 
     /// One command per CPU frame allows the adapter's complete policy/line/
     /// receipt response batch to fit without dropping a native mutation.
-    pub fn commands(&self) -> Vec<ChatPacket> {
+    pub fn commands(&self) -> Vec<ReceivedCommand> {
         if !self.ready() {
             return Vec::new();
         }
@@ -537,12 +558,13 @@ fn run(port: u16, permit: Permit, shared: Arc<Shared>) {
                 };
                 match polled {
                     Ok(packets) => {
+                        let received_at = Instant::now();
                         if socket.ready() && connection.is_none() {
                             connection = shared.authenticated(revision);
                         }
                         if let Some(connection) = connection
                             && !shared.stop.load(Ordering::Acquire)
-                            && shared.state().incoming(connection, packets).is_err()
+                            && shared.state().incoming_at(connection, packets, received_at).is_err()
                         {
                             failed = true;
                         }
@@ -652,7 +674,7 @@ mod tests {
             .expect("bounded input");
         let commands = state.commands();
         assert_eq!(commands.len(), 1);
-        assert_eq!(commands[0].sequence, 1);
+        assert_eq!(commands[0].packet.sequence, 1);
         assert_eq!(state.outgoing(&packet(wrong, 1, true)), Err(LaneError::Binding));
         assert_eq!(state.outgoing(&packet(source, 1, false)), Err(LaneError::Direction));
         assert_eq!(state.outgoing(&packet(source, 0, true)), Err(LaneError::Sequence));
@@ -698,7 +720,7 @@ mod tests {
         for sequence in 1..=CAPACITY as u64 {
             let commands = state.commands();
             assert_eq!(commands.len(), 1);
-            assert_eq!(commands[0].sequence, sequence);
+            assert_eq!(commands[0].packet.sequence, sequence);
             assert_eq!(state.receive_capacity(connection.revision), Some(sequence as usize));
         }
         assert!(state.commands().is_empty());
@@ -853,5 +875,19 @@ mod tests {
         assert!(!channel.ready());
         assert!(channel.commands().is_empty());
         assert_eq!(channel.send(&packet(source, 1, true)), Err(LaneError::NotReady));
+    }
+
+    #[test]
+    fn worker_chat_io_arrival_stamp_survives_queue_wait_and_one_command_drain() {
+        let (mut state, source, _, connection) = state();
+        let received_at = Instant::now();
+        state
+            .incoming_at(connection, vec![packet(source, 1, false), packet(source, 2, false)], received_at)
+            .unwrap();
+        let first = state.commands().pop().unwrap();
+        assert_eq!(first.received_at, received_at);
+        let second = state.commands().pop().unwrap();
+        assert_eq!(second.packet.sequence, 2);
+        assert_eq!(second.received_at, received_at, "never restamp at App dequeue");
     }
 }

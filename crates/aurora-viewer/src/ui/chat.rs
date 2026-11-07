@@ -357,6 +357,25 @@ impl ChatUi {
         self.contacts = false;
     }
 
+    /// Show an already validated native conversation, following
+    /// `Kind::ReviewChat` (indra/newview/fssessionworker.cpp, pinned abbe3cb0).
+    /// This changes presentation only: callers own existing-session checks.
+    pub(crate) fn review_existing(&mut self, ctx: &egui::Context, conversation: Option<uuid::Uuid>, open: &mut bool) {
+        if self.popped.raise(conversation, true) {
+            return;
+        }
+        if popout::opens_in_own_window(&self.popped, conversation, self.own_windows) {
+            self.popped.pop_out(conversation, self.members_open, self.stage_mini, true);
+            if !self.main_open {
+                *open = false;
+            }
+            return;
+        }
+        self.select_tab(conversation);
+        self.reveal = conversation;
+        super::notifications::open_conversations(ctx, open);
+    }
+
     /// Ask how long to snooze a group chat, `minutes` proposed (the
     /// SnoozeDuration notification).
     pub fn ask_snooze(&mut self, group: uuid::Uuid, minutes: u32) {
@@ -5669,5 +5688,155 @@ mod tests {
         });
         assert!(tooltip_shown(&texts, LONG));
         assert!(texts.iter().any(|t| t.source == USERNAME));
+    }
+}
+
+#[cfg(test)]
+mod review_tests {
+    use super::*;
+    use crate::ui::widgets::elide_tests::Frames;
+
+    fn retains_undo_checkpoint(ctx: &egui::Context, field: egui::Id, text: &str) -> bool {
+        let Some(state) = egui::text_edit::TextEditState::load(ctx, field) else {
+            return false;
+        };
+        let mut undo = state.undoer();
+        let mut current = (state.cursor.char_range().unwrap_or_default(), text.to_owned());
+        for _ in 0..4 {
+            let Some(previous) = undo.undo(&current).cloned() else {
+                return false;
+            };
+            if previous.1 == "Undo checkpoint" {
+                return true;
+            }
+            current = previous;
+        }
+        false
+    }
+
+    #[test]
+    fn native_review_show_only_preserves_drafts_and_existing_sessions_across_styles_and_popout_preferences() {
+        for style in [
+            crate::settings::ChatStyle::Aurora,
+            crate::settings::ChatStyle::Compact,
+            crate::settings::ChatStyle::Bubbles,
+            crate::settings::ChatStyle::Legacy,
+        ] {
+            for target in [None, Some(uuid::Uuid::from_u128(10))] {
+                for own_windows in [false, true] {
+                    for detached in [false, true] {
+                        let mut frames = Frames::new();
+                        let ctx = frames.ctx.clone();
+                        let theme = crate::theme::Theme::default();
+                        theme.apply(&ctx, 1.0);
+                        let p = theme.palette();
+                        let icons = crate::ui::icons::Icons::load(&ctx, None);
+                        let mut emoji = crate::ui::emoji::Emoji::load();
+                        let pics = HashMap::new();
+                        let mut world = World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+                        let peer = uuid::Uuid::from_u128(10);
+                        let other = uuid::Uuid::from_u128(11);
+                        world.social.session_mut(peer).unread = 3;
+                        world.social.session_mut(other).unread = 7;
+                        let mut st = ChatUi {
+                            style,
+                            own_windows,
+                            selected: Some(other),
+                            contacts: true,
+                            show_profile: true,
+                            input: "Bar draft".into(),
+                            ..Default::default()
+                        };
+                        st.draft_mut(None).push_str("Nearby draft");
+                        st.draft_mut(Some(peer)).push_str("Exact IM draft");
+                        st.draft_mut(Some(other)).push_str("Other IM draft");
+                        let drafts = st.drafts.clone();
+                        let field = egui::Id::unique(("conv_input", target));
+                        let text = drafts[&target].clone();
+                        let range = egui::text::CCursorRange::one(egui::text::CCursor::new(text.chars().count()));
+                        let mut editor = egui::text_edit::TextEditState::default();
+                        editor.cursor.set_char_range(Some(range));
+                        let mut undo = editor.undoer();
+                        undo.feed_state(0.0, &(range, "Undo checkpoint".to_owned()));
+                        undo.feed_state(1.0, &(range, text.clone()));
+                        undo.feed_state(2.0, &(range, text.clone()));
+                        editor.set_undoer(undo);
+                        editor.store(&ctx, field);
+                        if detached {
+                            st.demo_pop_out(&ctx, target, egui::pos2(20.0, 20.0), egui::vec2(520.0, 450.0));
+                            st.popped.set_hidden(target, true);
+                            crate::ui::widgets::minimize_floater(&ctx, &popout::floater_id(target));
+                        }
+                        crate::ui::widgets::minimize_floater(&ctx, "conversations");
+                        let mut open = false;
+                        st.review_existing(&ctx, target, &mut open);
+                        st.review_existing(&ctx, target, &mut open); // never toggle an already shown target
+                        assert_eq!(world.social.ims.len(), 2);
+                        assert_eq!(
+                            world.social.ims.iter().map(|im| im.unread).collect::<Vec<_>>(),
+                            vec![3, 7],
+                            "Review itself never reads"
+                        );
+                        assert_eq!(st.drafts, drafts);
+                        assert_eq!(st.input, "Bar draft");
+                        assert!(retains_undo_checkpoint(&ctx, field, &text));
+                        let apart = detached || (own_windows && target.is_some());
+                        assert_eq!(st.popped.contains(target), apart);
+                        if apart {
+                            assert!(st.popped.shown(target));
+                            assert!(!open, "Review preserves a closed main window for detached targets");
+                        } else {
+                            assert!(open && !st.contacts && !st.show_profile);
+                            assert_eq!(st.selected, target);
+                            assert!(!crate::ui::widgets::floater_minimized(&ctx, "conversations"));
+                        }
+                        let mut contacts = crate::ui::contacts::ContactsUi::default();
+                        let mut contacts_settings = crate::ui::contacts::ContactsSettings::default();
+                        let gestures = crate::gestures::Manager::default();
+                        for _ in 0..4 {
+                            frames.run(Vec::new(), |ui| {
+                                let actions = show(
+                                    ui.ctx(),
+                                    &p,
+                                    &icons,
+                                    &mut emoji,
+                                    &pics,
+                                    &pics,
+                                    &mut world,
+                                    &gestures,
+                                    &mut st,
+                                    &mut contacts,
+                                    &mut contacts_settings,
+                                    false,
+                                    None,
+                                    &mut open,
+                                );
+                                assert!(
+                                    !actions
+                                        .iter()
+                                        .any(|action| matches!(action, ConvAction::Local(_) | ConvAction::Im { .. }))
+                                );
+                            });
+                        }
+                        assert_eq!(
+                            st.drafts, drafts,
+                            "{style:?} target {target:?} detached {detached} own {own_windows}"
+                        );
+                        assert_eq!(st.input, "Bar draft");
+                        assert!(
+                            retains_undo_checkpoint(&ctx, field, &text),
+                            "{style:?}: retained native editor Undo"
+                        );
+                        assert_eq!(world.social.ims.len(), 2);
+                        if apart {
+                            assert!(!crate::ui::widgets::floater_minimized(&ctx, &popout::floater_id(target)));
+                        } else {
+                            assert_eq!(st.selected, target);
+                        }
+                        assert!(world.social.focus_im.is_none(), "no deferred World focus marker");
+                    }
+                }
+            }
+        }
     }
 }

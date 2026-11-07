@@ -7,7 +7,9 @@ use aurora_session::chat::{
     MAX_CONVERSATIONS, MAX_RETAINED_LINES, NativeChatPolicy, SendAdmission, SendLedger, SendOutcome, SendReceipt, VERSION,
 };
 use aurora_session::chat::{MAX_READ_ROWS, MarkReadRequest, ReadMetadata, ReadOutcome, ReadReceiptLedger, ReadReceiptQuery, ReadStateRow};
+use aurora_session::chat::{ReviewConversationRequest, ReviewOutcome, ReviewReceiptLedger, ReviewReceiptQuery, ReviewReceiptReply};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::time::{Duration, Instant};
 
 const SCAN_CONVERSATIONS: usize = 4;
 pub(crate) const SCAN_LINES: usize = 8;
@@ -57,6 +59,9 @@ pub(crate) trait NativeChat {
     fn mark_read(&mut self, _request: MarkReadRequest) -> ReadOutcome {
         ReadOutcome::RejectedNative
     }
+    fn review_conversation(&mut self, _request: ReviewConversationRequest) -> ReviewOutcome {
+        ReviewOutcome::RejectedNative
+    }
 }
 
 struct ConversationState {
@@ -71,6 +76,7 @@ pub(crate) struct WorkerChat {
     retired: Option<ChatSource>,
     ledger: Option<SendLedger>,
     reads: Option<ReadReceiptLedger>,
+    reviews: Option<ReviewReceiptLedger>,
     read_cache: BTreeMap<Conversation, Option<ReadMetadata>>,
     read_dirty: VecDeque<Conversation>,
     read_fair: usize,
@@ -103,6 +109,7 @@ impl WorkerChat {
         }
         self.ledger = None;
         self.reads = None;
+        self.reviews = None;
         self.read_cache.clear();
         self.read_dirty.clear();
         self.read_fair = 0;
@@ -135,6 +142,7 @@ impl WorkerChat {
         self.source = Some(source);
         self.ledger = Some(SendLedger::new(source)?);
         self.reads = Some(ReadReceiptLedger::new(source));
+        self.reviews = Some(ReviewReceiptLedger::new(source)?);
         Ok(source)
     }
 
@@ -335,7 +343,29 @@ impl WorkerChat {
         Ok(rows)
     }
 
+    #[cfg(test)]
     pub fn handle(&mut self, native: &mut impl NativeChat, packet: &ChatPacket) -> Result<Vec<ChatPacket>, ChatError> {
+        // Unstamped callers cannot grant a delayed GUI effect.
+        self.handle_at(native, packet, None, Instant::now())
+    }
+
+    pub fn handle_received(
+        &mut self,
+        native: &mut impl NativeChat,
+        packet: &ChatPacket,
+        received_at: Instant,
+        now: Instant,
+    ) -> Result<Vec<ChatPacket>, ChatError> {
+        self.handle_at(native, packet, Some(received_at), now)
+    }
+
+    fn handle_at(
+        &mut self,
+        native: &mut impl NativeChat,
+        packet: &ChatPacket,
+        received_at: Option<Instant>,
+        now: Instant,
+    ) -> Result<Vec<ChatPacket>, ChatError> {
         packet.validate()?;
         let source = self.context(native)?;
         if packet.source != source {
@@ -351,6 +381,60 @@ impl WorkerChat {
         // constructing its reply afterward. The driver reserves queue space.
         self.outgoing.checked_add(MAX_REPLY as u64).ok_or(ChatError::Sequence)?;
         match command {
+            ChatCommand::ReviewConversation(request) => {
+                self.require_read_authority(native, request.target.key)?;
+                let duplicate = self.reviews.as_mut().ok_or(ChatError::Unavailable)?.reserve(*request)?;
+                let receipt = if let Some(receipt) = duplicate {
+                    receipt
+                } else {
+                    let policy = self
+                        .states
+                        .get(&request.target.key.conversation)
+                        .ok_or(ChatError::Unavailable)?
+                        .policy;
+                    let observed = native.read_metadata(request.target.key.conversation).map(|read| read.observed);
+                    let age = received_at.and_then(|received| now.checked_duration_since(received));
+                    let outcome = if age.is_none_or(|age| age > Duration::from_secs(2)) {
+                        ReviewOutcome::Expired
+                    } else if policy.revision != request.target.policy_revision
+                        || observed.is_none_or(|current| {
+                            current.epoch != request.target.observed.epoch || current.through < request.target.observed.through
+                        })
+                    {
+                        ReviewOutcome::StaleTarget
+                    } else if self.context(native)? != source {
+                        ReviewOutcome::RejectedNative
+                    } else {
+                        native.review_conversation(*request)
+                    };
+                    self.reviews.as_mut().ok_or(ChatError::Unavailable)?.finish(*request, outcome)?
+                };
+                if self.context(native)? != source {
+                    return Err(ChatError::Binding);
+                }
+                self.received = packet.sequence;
+                Ok(vec![self.packet(
+                    packet.sequence,
+                    ChatEvent::ReviewReceipt(ReviewReceiptReply {
+                        query: ReviewReceiptQuery {
+                            key: request.target.key,
+                            request: request.request,
+                        },
+                        receipt: Some(receipt),
+                    }),
+                )?])
+            }
+            ChatCommand::QueryReviewReceipt(query) => {
+                // Receipt recovery is read-only and intentionally works in
+                // Standby; it never obtains or waits for an Active grant.
+                self.require_read_authority(native, query.key)?;
+                let reply = self.reviews.as_ref().ok_or(ChatError::Unavailable)?.query(*query)?;
+                if self.context(native)? != source {
+                    return Err(ChatError::Binding);
+                }
+                self.received = packet.sequence;
+                Ok(vec![self.packet(packet.sequence, ChatEvent::ReviewReceipt(reply))?])
+            }
             ChatCommand::MarkRead(request) => {
                 self.require_read_authority(native, request.key)?;
                 let duplicate = self.reads.as_mut().ok_or(ChatError::Unavailable)?.reserve(*request)?;
@@ -1176,5 +1260,214 @@ mod tests {
             Ok(None),
             "capacity rejection occurs before even reserving a mutation identity"
         );
+    }
+
+    struct ReviewNative {
+        inner: Native,
+        read: ReadMetadata,
+        opens: Vec<ReviewConversationRequest>,
+        outcome: ReviewOutcome,
+    }
+    impl ReviewNative {
+        fn new() -> Self {
+            Self {
+                inner: Native::new(),
+                read: ReadMetadata {
+                    unread: 1,
+                    unread_revision: 1,
+                    observed: aurora_session::chat::ObservedIncoming { epoch: 1, through: 1 },
+                    can_mark_read: false,
+                },
+                opens: Vec::new(),
+                outcome: ReviewOutcome::OpenedLocally,
+            }
+        }
+    }
+    impl NativeChat for ReviewNative {
+        fn source(&self) -> Option<ChatSource> {
+            self.inner.source()
+        }
+        fn catalogue(&self) -> Vec<Conversation> {
+            self.inner.catalogue()
+        }
+        fn snapshot(&self, conversation: Conversation) -> Option<NativeSnapshot> {
+            let mut snapshot = self.inner.snapshot(conversation)?;
+            snapshot.can_send = false;
+            Some(snapshot)
+        }
+        fn lines(&self, conversation: Conversation, cursor: NativeCursor, limit: usize) -> NativePage {
+            self.inner.lines(conversation, cursor, limit)
+        }
+        fn read_metadata(&self, _: Conversation) -> Option<ReadMetadata> {
+            Some(self.read)
+        }
+        fn submit_literal(&mut self, _: ChatKey, _: &str) -> SendOutcome {
+            panic!("Review cannot send")
+        }
+        fn mark_read(&mut self, _: MarkReadRequest) -> ReadOutcome {
+            panic!("Review cannot acknowledge Read")
+        }
+        fn review_conversation(&mut self, request: ReviewConversationRequest) -> ReviewOutcome {
+            self.opens.push(request);
+            self.outcome
+        }
+    }
+    fn review_request(backend: &WorkerChat, native: &ReviewNative) -> ReviewConversationRequest {
+        let policy = backend.states[&Conversation::Nearby].policy;
+        ReviewConversationRequest {
+            target: aurora_session::chat::ReviewCapture {
+                key: policy.key,
+                policy_revision: policy.revision,
+                observed: native.read.observed,
+            },
+            request: 1,
+            activation: 7,
+        }
+    }
+    fn review_packet(request: ReviewConversationRequest, sequence: u64) -> ChatPacket {
+        ChatPacket {
+            version: VERSION,
+            source: request.target.key.source,
+            sequence,
+            reply_to: 0,
+            message: ChatMessage::Command(ChatCommand::ReviewConversation(request)),
+        }
+    }
+    fn review_outcome(packets: &[ChatPacket]) -> ReviewOutcome {
+        match &packets[0].message {
+            ChatMessage::Event(ChatEvent::ReviewReceipt(reply)) => reply.receipt.unwrap().outcome,
+            _ => panic!("typed Review receipt"),
+        }
+    }
+
+    #[test]
+    fn host_review_worker_opens_once_and_receipt_query_never_requires_foreground_or_reopens() {
+        let mut native = ReviewNative::new();
+        let mut backend = WorkerChat::default();
+        backend.sync(&native).unwrap();
+        let request = review_request(&backend, &native);
+        let now = Instant::now();
+        assert_eq!(
+            review_outcome(&backend.handle_received(&mut native, &review_packet(request, 1), now, now).unwrap()),
+            ReviewOutcome::OpenedLocally
+        );
+        native.outcome = ReviewOutcome::NotForeground;
+        assert_eq!(
+            review_outcome(
+                &backend
+                    .handle_received(&mut native, &review_packet(request, 2), now, now + Duration::from_secs(9))
+                    .unwrap()
+            ),
+            ReviewOutcome::OpenedLocally
+        );
+        let packet = ChatPacket {
+            sequence: 3,
+            message: ChatMessage::Command(ChatCommand::QueryReviewReceipt(ReviewReceiptQuery {
+                key: request.target.key,
+                request: 1,
+            })),
+            ..review_packet(request, 1)
+        };
+        assert_eq!(
+            review_outcome(&backend.handle(&mut native, &packet).unwrap()),
+            ReviewOutcome::OpenedLocally
+        );
+        assert_eq!(native.opens, vec![request]);
+        assert_eq!(native.inner.submits, 0);
+    }
+
+    #[test]
+    fn host_review_worker_io_age_and_unstamped_entry_expire_terminally_without_opening() {
+        for unstamped in [false, true] {
+            let mut native = ReviewNative::new();
+            let mut backend = WorkerChat::default();
+            backend.sync(&native).unwrap();
+            let request = review_request(&backend, &native);
+            let now = Instant::now();
+            let packet = review_packet(request, 1);
+            let result = if unstamped {
+                backend.handle(&mut native, &packet)
+            } else {
+                backend.handle_received(&mut native, &packet, now, now + Duration::from_millis(2001))
+            };
+            assert_eq!(review_outcome(&result.unwrap()), ReviewOutcome::Expired);
+            assert_eq!(backend.received, 1);
+            assert_eq!(
+                review_outcome(&backend.handle_received(&mut native, &review_packet(request, 2), now, now).unwrap()),
+                ReviewOutcome::Expired
+            );
+            assert!(native.opens.is_empty());
+        }
+    }
+
+    #[test]
+    fn host_review_worker_observation_allows_arrivals_and_native_read_but_rejects_replacement_or_policy_change() {
+        for change in 0..5 {
+            let mut native = ReviewNative::new();
+            let mut backend = WorkerChat::default();
+            backend.sync(&native).unwrap();
+            let request = review_request(&backend, &native);
+            match change {
+                0 => {
+                    native.read.unread = 0;
+                    native.read.unread_revision += 1;
+                }
+                1 => {
+                    native.read.observed.through += 1;
+                    native.read.unread += 1;
+                    native.read.unread_revision += 1;
+                }
+                2 => native.read.observed.epoch += 1,
+                3 => native.read.observed.through = 0,
+                4 => native.inner.revision += 1,
+                _ => unreachable!(),
+            }
+            let now = Instant::now();
+            let outcome = review_outcome(&backend.handle_received(&mut native, &review_packet(request, 1), now, now).unwrap());
+            assert_eq!(
+                outcome,
+                if change < 2 {
+                    ReviewOutcome::OpenedLocally
+                } else {
+                    ReviewOutcome::StaleTarget
+                }
+            );
+            assert_eq!(native.opens.len(), usize::from(change < 2));
+        }
+    }
+
+    #[test]
+    fn host_review_worker_reserves_sequence_and_immutable_identity_before_native_effect() {
+        let mut native = ReviewNative::new();
+        let mut backend = WorkerChat::default();
+        backend.sync(&native).unwrap();
+        let request = review_request(&backend, &native);
+        let now = Instant::now();
+        backend.outgoing = u64::MAX - MAX_REPLY as u64 + 1;
+        assert_eq!(
+            backend.handle_received(&mut native, &review_packet(request, 1), now, now),
+            Err(ChatError::Sequence)
+        );
+        assert!(native.opens.is_empty());
+        assert_eq!(backend.received, 0);
+        backend.outgoing = 0;
+        backend.handle_received(&mut native, &review_packet(request, 1), now, now).unwrap();
+        let changed = ReviewConversationRequest { activation: 8, ..request };
+        assert_eq!(
+            backend.handle_received(&mut native, &review_packet(changed, 2), now, now),
+            Err(ChatError::RequestChanged)
+        );
+        assert_eq!(native.opens.len(), 1);
+        assert_eq!(backend.received, 1);
+        native.inner.readable = false;
+        let query = ChatPacket {
+            message: ChatMessage::Command(ChatCommand::QueryReviewReceipt(ReviewReceiptQuery {
+                key: request.target.key,
+                request: 1,
+            })),
+            ..review_packet(request, 2)
+        };
+        assert_eq!(backend.handle(&mut native, &query), Err(ChatError::Denied));
+        assert_eq!(native.opens.len(), 1);
     }
 }

@@ -3,30 +3,33 @@
 
 use super::{App, Screen};
 use crate::session_host::chat::{NativeChat, NativeCursor, NativeLine, NativePage, NativeSnapshot, SCAN_LINES, WorkerChat};
+use crate::session_host::worker::WorkerBridge;
 use crate::world::{ChatKind, Origin, World};
 use aurora_net::{ChatType, NetCommand};
 use aurora_session::chat::{
     ChatError, ChatKey, ChatPacket, ChatSource, ChatText, Conversation, LineKind, MAX_CONVERSATIONS, MAX_TEXT_BYTES, SendOutcome,
 };
 use aurora_session::{AccountKey, ConversationId, Label};
+use std::time::Instant;
 use uuid::Uuid;
 
 impl App {
-    pub(super) fn host_chat_sync(&mut self, backend: &mut WorkerChat, authority: &dyn Fn() -> Option<ChatSource>) -> Result<(), ChatError> {
+    pub(super) fn host_chat_sync(&mut self, backend: &mut WorkerChat, bridge: &WorkerBridge) -> Result<(), ChatError> {
         self.configure_host_chat_rules();
         self.reconcile_host_read_interest();
-        backend.sync(&AppChat { app: self, authority })
+        backend.sync(&AppChat { app: self, bridge })
     }
 
     pub(super) fn host_chat_packet(
         &mut self,
         backend: &mut WorkerChat,
-        authority: &dyn Fn() -> Option<ChatSource>,
+        bridge: &WorkerBridge,
         packet: &ChatPacket,
+        received_at: Instant,
     ) -> Result<Vec<ChatPacket>, ChatError> {
         self.configure_host_chat_rules();
         self.reconcile_host_read_interest();
-        backend.handle(&mut AppChat { app: self, authority }, packet)
+        backend.handle_received(&mut AppChat { app: self, bridge }, packet, received_at, Instant::now())
     }
 
     fn reconcile_host_read_interest(&mut self) {
@@ -40,21 +43,25 @@ impl App {
     }
 }
 
+pub(super) fn source(app: &App, bridge: &WorkerBridge) -> Option<ChatSource> {
+    let source = bridge.bound_session().and_then(|binding| ChatSource::try_from(binding).ok())?;
+    if !matches!(app.screen, Screen::World) || app.world.agent_id.is_nil() {
+        return None;
+    }
+    let uri = app.settings.login_uri();
+    let account = AccountKey::parse_hex(&crate::characters::identity(&uri, &app.settings.username)).ok()?;
+    let grid = crate::session_host::transport::grid_key(&uri).ok()?;
+    (source.session.account == account && source.session.grid == grid).then_some(source)
+}
+
 struct AppChat<'a> {
     app: &'a mut App,
-    authority: &'a dyn Fn() -> Option<ChatSource>,
+    bridge: &'a WorkerBridge,
 }
 
 impl NativeChat for AppChat<'_> {
     fn source(&self) -> Option<ChatSource> {
-        let source = (self.authority)()?;
-        if !matches!(self.app.screen, Screen::World) || self.app.world.agent_id.is_nil() {
-            return None;
-        }
-        let uri = self.app.settings.login_uri();
-        let account = AccountKey::parse_hex(&crate::characters::identity(&uri, &self.app.settings.username)).ok()?;
-        let grid = crate::session_host::transport::grid_key(&uri).ok()?;
-        (source.session.account == account && source.session.grid == grid).then_some(source)
+        source(self.app, self.bridge)
     }
     fn catalogue(&self) -> Vec<Conversation> {
         catalogue(&self.app.world)
@@ -81,10 +88,13 @@ impl NativeChat for AppChat<'_> {
         if self.source() != Some(request.key.source) {
             return aurora_session::chat::ReadOutcome::RejectedNative;
         }
-        let authority = self.authority;
+        let bridge = self.bridge;
         mark_native_read(&mut self.app.world, request, !self.app.exit_prompt.open, &|| {
-            authority() == Some(request.key.source)
+            bridge.bound_session().and_then(|binding| ChatSource::try_from(binding).ok()) == Some(request.key.source)
         })
+    }
+    fn review_conversation(&mut self, request: aurora_session::chat::ReviewConversationRequest) -> aurora_session::chat::ReviewOutcome {
+        self.app.review_existing_conversation(self.bridge, request)
     }
     fn submit_literal(&mut self, key: ChatKey, text: &str) -> SendOutcome {
         if self.source() != Some(key.source) {
@@ -161,7 +171,7 @@ fn mark_native_read(
     }
 }
 
-fn native_read_key(conversation: Conversation) -> Option<Option<Uuid>> {
+pub(super) fn native_read_key(conversation: Conversation) -> Option<Option<Uuid>> {
     match conversation {
         Conversation::Nearby => Some(None),
         Conversation::Direct(peer) => Some(Some(uuid(peer))),
@@ -169,7 +179,7 @@ fn native_read_key(conversation: Conversation) -> Option<Option<Uuid>> {
     }
 }
 
-fn read_metadata(world: &World, conversation: Conversation, ui_ready: bool) -> Option<aurora_session::chat::ReadMetadata> {
+pub(super) fn read_metadata(world: &World, conversation: Conversation, ui_ready: bool) -> Option<aurora_session::chat::ReadMetadata> {
     let policy = snapshot(world, conversation, ui_ready)?;
     if !policy.ready || !policy.can_read {
         return None;
@@ -229,7 +239,7 @@ fn native_lines(
     }
 }
 
-fn snapshot(world: &World, conversation: Conversation, ui_ready: bool) -> Option<NativeSnapshot> {
+pub(super) fn snapshot(world: &World, conversation: Conversation, ui_ready: bool) -> Option<NativeSnapshot> {
     let (entries, clock) = native_lines(world, conversation)?;
     let r = &world.rlva;
     // Native UI can mask these at draw time. Fail closed here rather than
@@ -477,6 +487,9 @@ mod tests {
         fn mark_read(&mut self, request: aurora_session::chat::MarkReadRequest) -> aurora_session::chat::ReadOutcome {
             let source = self.source;
             mark_native_read(&mut self.world, request, true, &|| source == Some(request.key.source))
+        }
+        fn review_conversation(&mut self, request: aurora_session::chat::ReviewConversationRequest) -> aurora_session::chat::ReviewOutcome {
+            self.app.review_existing_conversation(self.bridge, request)
         }
         fn submit_literal(&mut self, key: ChatKey, text: &str) -> SendOutcome {
             if self.source() != Some(key.source) {

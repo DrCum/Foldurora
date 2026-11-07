@@ -86,6 +86,7 @@ mod grid_status;
 mod group_titles;
 mod host_chat;
 mod host_chat_bridge;
+mod host_review;
 mod host_session;
 pub(crate) use host_session::grid_label as host_grid_label;
 mod hover_height;
@@ -391,6 +392,7 @@ pub struct App {
     /// When the GPU device was lost lately (gpu_recovery.rs `loss_step`).
     gpu_losses: std::collections::VecDeque<Instant>,
     egui_ctx: egui::Context,
+    review_input: host_review::ReviewInput,
     logo: Option<egui::TextureHandle>,
     logo_rx: Option<crossbeam_channel::Receiver<LogoData>>,
     /// The window's icon, kept for a window a GPU recovery opens.
@@ -1468,6 +1470,7 @@ impl App {
             retired_window: None,
             gpu_losses: Default::default(),
             egui_ctx,
+            review_input: Default::default(),
             logo: None,
             logo_rx: Some(rx),
             window_icon: None,
@@ -10584,6 +10587,7 @@ impl App {
         }
         ui::fonts::preview::release_unused(&self.egui_ctx);
         let mut raw = gfx.egui_state.take_egui_input(&gfx.window);
+        self.review_input.filter(&mut raw);
         raw.events.extend(self.alt_text.drain(..).map(egui::Event::Text));
         self.demo_script_input(&mut raw);
         if self.demo && std::env::var("AURORA_DEMO_OPTIONS").is_ok_and(|mode| mode == "1:scale-keys") {
@@ -20373,6 +20377,9 @@ impl ApplicationHandler for App {
         // the window of a lost device, on screen until its successor has
         // presented: its redraws and sizes are not the new renderer's
         if self.retired_window.as_ref().is_some_and(|w| w.id() == id) && !matches!(event, WindowEvent::CloseRequested) {
+            return;
+        }
+        if self.review_input.observe(&event) {
             return;
         }
         // The system's view of the keys when the focus comes back is no key

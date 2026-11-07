@@ -1,8 +1,9 @@
 //! Bounded native chat work on the owning App thread. Socket IO and codecs
-//! remain on a dedicated worker; no world activation or native focus is changed.
+//! remain on a dedicated worker. Explicit Review alone may open native chat.
 
 use super::App;
 use crate::session_host::chat::{MAX_REPLY, WorkerChat};
+use crate::session_host::chat_io::ReceivedCommand;
 use crate::session_host::chat_transport::LaneError;
 use crate::session_host::worker::WorkerBridge;
 use aurora_session::chat::{ChatPacket, ChatSource};
@@ -15,7 +16,7 @@ fn reply_room(pending: usize) -> bool {
     pending <= MAX_PENDING - MAX_REPLY
 }
 
-fn take_command(incoming: &mut VecDeque<ChatPacket>, pending_replies: usize) -> Option<ChatPacket> {
+fn take_command(incoming: &mut VecDeque<ReceivedCommand>, pending_replies: usize) -> Option<ReceivedCommand> {
     if reply_room(pending_replies) { incoming.pop_front() } else { None }
 }
 
@@ -23,7 +24,7 @@ fn take_command(incoming: &mut VecDeque<ChatPacket>, pending_replies: usize) -> 
 pub(super) struct Driver {
     native: WorkerChat,
     outgoing: VecDeque<ChatPacket>,
-    incoming: VecDeque<ChatPacket>,
+    incoming: VecDeque<ReceivedCommand>,
 }
 
 impl Driver {
@@ -56,7 +57,7 @@ impl Driver {
         }
         // A socket reconnect never clears the native submission ledger. It
         // retains uncertain receipts and global sequences for this source.
-        if app.host_chat_sync(&mut self.native, &authority).is_err() {
+        if app.host_chat_sync(&mut self.native, bridge).is_err() {
             self.outgoing.clear();
             return;
         }
@@ -74,12 +75,13 @@ impl Driver {
             // a native mutation because a previous response filled the queue.
             self.incoming.extend(bridge.chat_commands());
         }
-        if let Some(packet) = take_command(&mut self.incoming, self.outgoing.len()) {
+        if let Some(command) = take_command(&mut self.incoming, self.outgoing.len()) {
+            let packet = command.packet;
             if authority() != Some(packet.source) {
                 return;
             }
             let previous = self.native.outgoing_sequence();
-            if let Ok(replies) = app.host_chat_packet(&mut self.native, &authority, &packet) {
+            if let Ok(replies) = app.host_chat_packet(&mut self.native, bridge, &packet, command.received_at) {
                 let ordered = replies
                     .iter()
                     .try_fold(previous, |previous, reply| {
@@ -139,12 +141,15 @@ mod tests {
             reply_to: 0,
             message: ChatMessage::Command(ChatCommand::Poll { after_event: 0 }),
         };
-        let mut incoming = VecDeque::from([packet(1), packet(2)]);
+        let mut incoming = VecDeque::from([packet(1), packet(2)].map(|packet| ReceivedCommand {
+            packet,
+            received_at: std::time::Instant::now(),
+        }));
         assert_eq!(take_command(&mut incoming, 6), None);
         assert_eq!(incoming.len(), 2);
-        assert_eq!(take_command(&mut incoming, 5).unwrap().sequence, 1);
+        assert_eq!(take_command(&mut incoming, 5).unwrap().packet.sequence, 1);
         assert_eq!(take_command(&mut incoming, MAX_PENDING), None);
-        assert_eq!(incoming.front().unwrap().sequence, 2);
-        assert_eq!(take_command(&mut incoming, 0).unwrap().sequence, 2);
+        assert_eq!(incoming.front().unwrap().packet.sequence, 2);
+        assert_eq!(take_command(&mut incoming, 0).unwrap().packet.sequence, 2);
     }
 }
