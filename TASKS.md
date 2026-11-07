@@ -43,6 +43,9 @@
   and source/lease/recovery loss fail closed. Capture-only changes preserve all
   export epochs and the source activation watermark; composed SourceImages tests
   check retained admitted history, rejected late frames and permanent purge.
+  Actual renderer surface epochs map into policy stamps; a 9-to-1 reset requires
+  a new physical witness and advanced native render generation, while same-
+  witness regression/unknown boundaries deny claims without inventing epoch 1.
   Pure/native-World tests are authored,
   not executed. Explicit OpenMonitor binding will own internal RememberActive
   demand later; current production demand is absent. No endpoint, image request,

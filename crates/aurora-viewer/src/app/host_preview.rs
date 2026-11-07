@@ -92,6 +92,19 @@ struct PhysicalStamp {
     device: u64,
     generation: u64,
     size: (u32, u32),
+    surface: u64,
+}
+
+impl PhysicalStamp {
+    fn valid(self) -> bool {
+        self.instance != 0 && self.device != 0 && self.generation != 0 && self.surface != 0 && self.size.0 != 0 && self.size.1 != 0
+    }
+    fn witness(self) -> (u64, u64, u64) {
+        (self.instance, self.device, self.generation)
+    }
+    fn render_domain(self) -> ((u64, u64, u64), (u32, u32)) {
+        (self.witness(), self.size)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -139,8 +152,9 @@ struct Observation {
     remembered: bool,
 }
 
-/// No pixels or unbounded collections. All export counters are local checked
-/// epochs, rather than wrapping World counters or control FrameProof values.
+/// No pixels or unbounded collections. Export counters are local checked epochs;
+/// surface is the actual checked renderer epoch within that render domain.
+/// Neither wrapping World counters nor control FrameProof values are adopted.
 #[derive(Default)]
 pub(super) struct HostPreview {
     observed: Option<Observation>,
@@ -150,6 +164,7 @@ pub(super) struct HostPreview {
     render: u64,
     viewport: u64,
     surface: u64,
+    last_physical: Option<PhysicalStamp>,
     exhausted: bool,
     observed_at: Option<Instant>,
 }
@@ -164,6 +179,19 @@ impl HostPreview {
             return true;
         }
         self.observed_at = Some(now);
+        let physical = facts.physical.filter(|stamp| stamp.valid());
+        if physical
+            .zip(self.last_physical)
+            .is_some_and(|(next, old)| next.witness() == old.witness() && next.surface < old.surface)
+        {
+            // A missing observation, source change or local retire cannot
+            // license a backward epoch in the same physical renderer domain.
+            // Keep the last witness, deny all claims, and require a new policy
+            // if that domain recovers or a genuinely new witness replaces it.
+            self.policy = None;
+            self.observed = None;
+            return true;
+        }
         let scope = facts.scope.filter(|scope| scope.expires_at > now);
         let source = scope.map(|scope| scope.source);
         // Active is optional while parked; the last acknowledged activation is
@@ -180,8 +208,10 @@ impl HostPreview {
                     && authority.scope.expires_at > now
                     && authority.activation != 0
                     && authority.activation >= activation
-                    && facts.physical.is_some_and(|physical| {
-                        physical.device == authority.boundary.device_epoch() && physical.size == authority.boundary.size()
+                    && physical.is_some_and(|physical| {
+                        physical.device == authority.boundary.device_epoch()
+                            && physical.size == authority.boundary.size()
+                            && physical.surface == authority.boundary.surface_epoch()
                     })
                     && (authority.viewport.rect.width, authority.viewport.rect.height) == authority.boundary.size()
             })
@@ -189,8 +219,7 @@ impl HostPreview {
         let retention_ready = source.is_some()
             && facts.lifecycle_ready
             && facts.world.allows_retention()
-            && facts.physical.is_some()
-            && facts.physical.zip(facts.viewport).is_some_and(|(physical, view)| {
+            && physical.zip(facts.viewport).is_some_and(|(physical, view)| {
                 view.width != 0
                     && view.height != 0
                     && view.x.checked_add(view.width).is_some_and(|right| right <= physical.size.0)
@@ -199,7 +228,7 @@ impl HostPreview {
         let next = Observation {
             source,
             world: facts.world,
-            physical: facts.physical,
+            physical,
             viewport: facts.viewport,
             active,
             capture_generation: facts.capture_generation,
@@ -216,15 +245,17 @@ impl HostPreview {
             && old.is_some_and(|old| old.capture_generation == next.capture_generation);
         let source_changed = old.is_none_or(|old| old.source != next.source);
         let privacy_changed = old.is_none_or(|old| old.world != next.world || old.retention_ready != next.retention_ready);
-        let physical_changed = source_changed || old.is_none_or(|old| old.physical != next.physical);
+        let physical_changed = source_changed
+            || old.is_none_or(|old| old.physical.map(PhysicalStamp::render_domain) != next.physical.map(PhysicalStamp::render_domain));
+        let surface_changed = physical.is_some_and(|physical| physical.surface != self.surface);
         let viewport_changed = source_changed || old.is_none_or(|old| old.viewport != next.viewport);
         // PreviewEpochs, including revision, invalidate already-admitted
         // history in SourceImages. Capture-only transitions use access fields
         // and renderer/native capture fences instead of an export epoch.
-        let export_changed = source_changed || privacy_changed || physical_changed || viewport_changed;
+        let export_changed = source_changed || privacy_changed || physical_changed || viewport_changed || surface_changed;
         if (export_changed && !advance(&mut self.revision))
             || (privacy_changed && !advance(&mut self.privacy))
-            || (physical_changed && (!advance(&mut self.render) || !advance(&mut self.surface)))
+            || (physical_changed && !advance(&mut self.render))
             || (viewport_changed && !advance(&mut self.viewport))
         {
             self.exhausted = true;
@@ -232,6 +263,13 @@ impl HostPreview {
             self.observed = None;
             return true;
         }
+        if let Some(physical) = physical {
+            self.surface = physical.surface;
+            self.last_physical = Some(physical);
+        }
+        // Before any actual boundary is known, surface stays zero and the
+        // checked policy constructor below returns unavailable. A denied policy
+        // may retain the last known surface, but cannot issue a capture claim.
         let capture = retention_ready
             && active.is_some()
             && facts.capture_ready
@@ -312,14 +350,17 @@ impl App {
             let gfx = gfx?;
             self.host_session.as_ref()?.preview_authority(&gfx.window, &gfx.renderer)
         });
+        let boundary = gfx.and_then(|gfx| gfx.renderer.viewport_capture_boundary().ok());
         let physical = gfx
             .and_then(|gfx| gfx.renderer.viewport_capture_retention_guard())
-            .filter(|guard| guard.current())
-            .map(|guard| PhysicalStamp {
+            .zip(boundary)
+            .filter(|(guard, boundary)| guard.current() && guard.device_epoch() == boundary.device_epoch())
+            .map(|(guard, boundary)| PhysicalStamp {
                 instance: guard.instance(),
                 device: guard.device_epoch(),
                 generation: guard.generation(),
-                size: gfx.map_or((0, 0), |gfx| gfx.renderer.size()),
+                size: boundary.size(),
+                surface: boundary.surface_epoch(),
             });
         let viewport = gfx.map(|gfx| self.world_viewport_for_size(gfx.renderer.size(), gfx.renderer.vr_engaged()));
         let photo = PhotoPolicy {
@@ -428,6 +469,7 @@ mod tests {
                 device: 41,
                 generation: 1,
                 size: (1280, 720),
+                surface: 9,
             }),
             viewport: Some(WorldViewport::full((1280, 720))),
             capture_generation: 1,
@@ -984,5 +1026,153 @@ mod tests {
             "publication generation is a separate capture fence"
         );
         assert_eq!(native.observed.unwrap().capture_generation, 2);
+    }
+
+    #[test]
+    fn preview_native_actual_surface9_parks_then_new_physical1_advances_render_and_never_revives_history() {
+        use aurora_session::preview_image::{ImageError, PreviewStamp};
+        let world = world();
+        let now = Instant::now();
+        let (mut native, mut images, budget, held9, geometry) = admitted_history(&world, now);
+        let actual9 = native.policy.unwrap();
+        assert_eq!(
+            actual9.epochs().surface(),
+            9,
+            "publish the actual renderer surface, not a local counter"
+        );
+        assert_eq!(held9.stamp().surface_epoch(), 9);
+        let mut parked = facts(&world, now);
+        parked.authority = None;
+        parked.capture_ready = false;
+        parked.capture_generation = 2;
+        native.sync(parked, now + Duration::from_millis(20));
+        let parked = native.policy.unwrap();
+        assert_eq!(parked.epochs(), actual9.epochs());
+        images.sync(parked, 20).unwrap();
+        assert!(held9.current(20));
+        let mut active9 = facts(&world, now);
+        active9.capture_generation = 2;
+        native.sync(active9, now + Duration::from_millis(21));
+        images.sync(native.policy.unwrap(), 21).unwrap();
+        let pending9 = images.request(1, 1, geometry, 22).unwrap();
+        let late9 = PreviewStamp::new(pending9, 2, 9, 2, geometry).unwrap();
+        let replacement = || {
+            let mut next = facts(&world, now);
+            next.physical = Some(PhysicalStamp {
+                instance: 43,
+                device: 42,
+                generation: 1,
+                size: (1280, 720),
+                surface: 1,
+            });
+            next.authority.as_mut().unwrap().activation = 9;
+            next.authority.as_mut().unwrap().boundary = aurora_render::viewport_capture::CaptureBoundary::new(42, 1, (1280, 720)).unwrap();
+            next.capture_generation = 3;
+            next
+        };
+        native.sync(replacement(), now + Duration::from_millis(23));
+        let actual1 = native.policy.unwrap();
+        assert_eq!(actual1.epochs().surface(), 1);
+        assert!(actual1.epochs().render() > actual9.epochs().render());
+        images.sync(actual1, 23).unwrap();
+        assert!(!held9.current(23));
+        assert!(images.retained(23).unwrap().is_none());
+        assert!(matches!(
+            images.admit(late9, budget.reserve(geometry).unwrap(), 24),
+            Err(ImageError::Stale)
+        ));
+        let fresh = images.request(1, 1, geometry, 25).unwrap();
+        assert_eq!(fresh.epochs().surface(), 1);
+        assert!(
+            PreviewStamp::new(fresh, 3, 9, 3, geometry).is_err(),
+            "old actual surface cannot stamp the new claim"
+        );
+        let stamp1 = PreviewStamp::new(fresh, 3, 1, 3, geometry).unwrap();
+        let held1 = images.admit(stamp1, budget.reserve(geometry).unwrap(), 26).unwrap();
+        assert!(held1.current(26));
+        assert!(!held9.current(26));
+        assert_eq!(images.sync(actual9, 27), Err(ImageError::Stale));
+        native.sync(replacement(), now + Duration::from_millis(28));
+        images.sync(native.policy.unwrap(), 28).unwrap();
+        assert!(
+            !held9.current(28) && !held1.current(28),
+            "stale policy restoration never revives old held images"
+        );
+    }
+
+    #[test]
+    fn preview_native_same_witness_surface_regression_is_denied_across_unknown_and_retire() {
+        let world = world();
+        let now = Instant::now();
+        let mut direct = HostPreview::default();
+        direct.sync(facts(&world, now), now);
+        let render = direct.render;
+        let mut backwards = facts(&world, now);
+        backwards.physical.as_mut().unwrap().surface = 1;
+        backwards.authority.as_mut().unwrap().boundary = aurora_render::viewport_capture::CaptureBoundary::new(41, 1, (1280, 720)).unwrap();
+        direct.sync(backwards, now);
+        assert!(direct.policy.is_none());
+        assert_eq!(direct.render, render, "a raw regression cannot mint a new render domain for itself");
+        let (mut native, mut images, _, held, _) = admitted_history(&world, now);
+        let mut unknown = facts(&world, now);
+        unknown.physical = None;
+        native.sync(unknown, now + Duration::from_millis(20));
+        let denied = native.policy.unwrap();
+        assert!(!denied.access().capture_active && !denied.access().retain_last_active);
+        assert_eq!(
+            denied.epochs().surface(),
+            9,
+            "denied state may carry only the last known actual boundary"
+        );
+        images.sync(denied, 20).unwrap();
+        assert!(!held.current(20));
+        for millis in [21, 22] {
+            let mut backwards = facts(&world, now);
+            backwards.physical.as_mut().unwrap().surface = 1;
+            backwards.authority.as_mut().unwrap().boundary =
+                aurora_render::viewport_capture::CaptureBoundary::new(41, 1, (1280, 720)).unwrap();
+            assert!(native.sync(backwards, now + Duration::from_millis(millis)));
+            assert!(
+                native.policy.is_none(),
+                "same witness cannot reset actual surface, even after a missing observation/local render bump"
+            );
+            assert_eq!(native.surface, 9);
+            native.retire();
+        }
+        // A source owner must retire history on unavailable output; no claim is
+        // minted from an invented epoch while the native boundary is unknown.
+        images.retire();
+        assert!(!held.current(22));
+    }
+
+    #[test]
+    fn preview_native_unknown_boundary_never_fabricates_surface_authority() {
+        let world = world();
+        let now = Instant::now();
+        let mut native = HostPreview::default();
+        for surface in [None, Some(0)] {
+            let mut unknown = facts(&world, now);
+            if let Some(surface) = surface {
+                unknown.physical.as_mut().unwrap().surface = surface;
+            } else {
+                unknown.physical = None;
+            }
+            native.sync(unknown, now);
+            assert!(native.policy.is_none());
+            assert_eq!(native.surface, 0);
+        }
+        native.sync(facts(&world, now), now);
+        let policy = native.policy.unwrap();
+        assert_eq!(policy.epochs().surface(), 9);
+        assert!(policy.access().capture_active);
+        let mut wrong_grant = facts(&world, now);
+        wrong_grant.authority.as_mut().unwrap().boundary =
+            aurora_render::viewport_capture::CaptureBoundary::new(41, 8, (1280, 720)).unwrap();
+        native.sync(wrong_grant, now);
+        assert!(
+            !native.policy.unwrap().access().capture_active,
+            "grant and actual physical surface must agree"
+        );
+        assert_eq!(native.policy.unwrap().epochs(), policy.epochs());
     }
 }
