@@ -129,3 +129,51 @@ fn preview_layout_rejects_unknown_fields_zero_epochs_and_overflowing_crop() {
         );
     }
 }
+
+#[test]
+fn preview_actual_surface_epoch_resets_only_under_advanced_render_and_never_revives_old_claims_or_history() {
+    let budget = ImageBudget::new(2 * MAX_IMAGE_BYTES).unwrap();
+    let mut model = SourceImages::new(source(), budget.clone()).unwrap();
+    let actual = PreviewPolicy::new(source(), PreviewEpochs::new(1, 1, 1, 1, 9).unwrap(), policy().access()).unwrap();
+    model.sync_observed(actual, 0, 0).unwrap();
+    let claim9 = model.request(1, 1, geometry(), 1).unwrap();
+    let stamp9 = PreviewStamp::new(claim9, 1, 9, 1, geometry()).unwrap();
+    let held9 = model.admit(stamp9, budget.reserve(geometry()).unwrap(), 2).unwrap();
+    let parked = PreviewPolicy::new(
+        source(),
+        actual.epochs(),
+        PreviewAccess {
+            active: false,
+            capture_active: false,
+            ..actual.access()
+        },
+    )
+    .unwrap();
+    model.sync_observed(parked, 3, 3).unwrap();
+    assert!(held9.current(3), "normal park preserves actual-surface history");
+    model.sync_observed(actual, 4, 4).unwrap();
+    let pending9 = model.request(1, 2, geometry(), 5).unwrap();
+    let late9 = PreviewStamp::new(pending9, 2, 9, 2, geometry()).unwrap();
+    let unadvanced = PreviewPolicy::new(source(), PreviewEpochs::new(2, 1, 1, 1, 1).unwrap(), actual.access()).unwrap();
+    assert_eq!(model.sync_observed(unadvanced, 6, 6), Err(ImageError::Stale));
+    assert!(!held9.current(6));
+    assert!(model.admit(late9, budget.reserve(geometry()).unwrap(), 7).is_err());
+    let replacement = PreviewPolicy::new(source(), PreviewEpochs::new(2, 1, 2, 1, 1).unwrap(), actual.access()).unwrap();
+    model.sync_observed(replacement, 8, 8).unwrap();
+    assert!(model.retained(8).unwrap().is_none());
+    assert!(!held9.current(8));
+    let new_claim = model.request(1, 3, geometry(), 9).unwrap();
+    assert_eq!(new_claim.epochs().surface(), 1);
+    assert_eq!(new_claim.epochs().render(), 2);
+    assert!(model.admit(late9, budget.reserve(geometry()).unwrap(), 10).is_err());
+    let new_stamp = PreviewStamp::new(new_claim, 3, 1, 3, geometry()).unwrap();
+    let fresh = model.admit(new_stamp, budget.reserve(geometry()).unwrap(), 11).unwrap();
+    assert!(fresh.current(11));
+    assert!(!held9.current(11));
+    assert_eq!(model.sync_observed(actual, 12, 12), Err(ImageError::Stale));
+    assert!(!fresh.current(12));
+    model.sync_observed(replacement, 13, 13).unwrap();
+    assert!(!held9.current(13));
+    assert!(!fresh.current(13));
+    assert!(model.retained(13).unwrap().is_none());
+}
