@@ -13481,3 +13481,5 @@ board-blocked = ジェスチャーの再生が制限されています。
 board-duplicate = この持ち物アイテムは既にボードにあります。
 board-kind-gesture = ジェスチャー
 board-name-placeholder = ボード名を入力
+board-name-invalid = 前後の空白や制御文字を含まない短い名前を入力してください。
+board-limit = ボードは最大16個、各ボードのタイルは最大1,024個です。
