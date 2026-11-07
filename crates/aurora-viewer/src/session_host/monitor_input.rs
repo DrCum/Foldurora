@@ -33,7 +33,8 @@ impl MonitorKeys {
                     if command_focused { ModifiersState::empty() } else { self.modifiers },
                 ) || (command_focused && synthetic)
             }
-            Key::Named(NamedKey::Space) => {
+            // egui-winit maps both logical spellings to the same Space key.
+            key if matches!(key, Key::Named(NamedKey::Space)) || matches!(key, Key::Character(value) if value.as_str() == " ") => {
                 let held = self
                     .space
                     .suppress(&Key::Named(NamedKey::Enter), state, repeat, synthetic, ModifiersState::empty());
@@ -48,8 +49,11 @@ impl MonitorKeys {
 mod tests {
     use super::*;
     fn edge(keys: &mut MonitorKeys, key: NamedKey, down: bool, repeat: bool, synthetic: bool, command: bool) -> bool {
+        edge_key(keys, &Key::Named(key), down, repeat, synthetic, command)
+    }
+    fn edge_key(keys: &mut MonitorKeys, key: &Key, down: bool, repeat: bool, synthetic: bool, command: bool) -> bool {
         keys.suppress(
-            &Key::Named(key),
+            key,
             if down { ElementState::Pressed } else { ElementState::Released },
             repeat,
             synthetic,
@@ -58,24 +62,45 @@ mod tests {
     }
     #[test]
     fn monitor_native_space_tracks_composer_hold_before_toolbar_refocus_without_eating_text() {
-        let mut keys = MonitorKeys::default();
-        keys.focused(true);
-        assert!(!edge(&mut keys, NamedKey::Space, true, false, false, false));
-        assert!(
-            !edge(&mut keys, NamedKey::Space, true, true, false, false),
-            "composer repeat remains text"
-        );
-        assert!(!edge(&mut keys, NamedKey::Space, false, false, true, false));
-        keys.focused(false);
-        keys.focused(true);
-        assert!(
-            edge(&mut keys, NamedKey::Space, true, false, false, true),
-            "first real refocus event can have repeat=false"
-        );
-        assert!(edge(&mut keys, NamedKey::Space, true, true, false, true));
-        assert!(edge(&mut keys, NamedKey::Space, true, true, false, true));
-        assert!(!edge(&mut keys, NamedKey::Space, false, false, false, true));
-        assert!(!edge(&mut keys, NamedKey::Space, true, false, false, true));
+        // egui-winit accepts both representations as egui::Key::Space. Match
+        // the actual Windows (before Focused) and X11 (after Focused) snapshots;
+        // a missing held-key snapshot correctly means released outside focus.
+        for space in [Key::Named(NamedKey::Space), Key::Character(" ".into())] {
+            for snapshot_before_focus in [true, false] {
+                let mut keys = MonitorKeys::default();
+                keys.focused(true);
+                assert!(!edge_key(&mut keys, &space, true, false, false, false));
+                assert!(
+                    !edge_key(&mut keys, &space, true, true, false, false),
+                    "composer repeat remains text"
+                );
+                assert!(!edge_key(&mut keys, &space, false, false, true, false));
+                keys.focused(false);
+                if snapshot_before_focus {
+                    assert!(!edge_key(&mut keys, &space, true, false, true, false));
+                }
+                keys.focused(true);
+                if !snapshot_before_focus {
+                    assert!(!edge_key(&mut keys, &space, true, false, true, false));
+                }
+                assert!(
+                    edge_key(&mut keys, &space, true, false, false, true),
+                    "first real refocus event can have repeat=false"
+                );
+                assert!(edge_key(&mut keys, &space, true, true, false, true));
+                assert!(edge_key(&mut keys, &space, true, true, false, true));
+                assert!(
+                    edge_key(&mut keys, &space, false, false, true, true),
+                    "synthetic release cannot activate a command"
+                );
+                assert!(
+                    edge_key(&mut keys, &space, true, false, false, true),
+                    "synthetic release cannot rearm a held command"
+                );
+                assert!(!edge_key(&mut keys, &space, false, false, false, true));
+                assert!(!edge_key(&mut keys, &space, true, false, false, true));
+            }
+        }
     }
     #[test]
     fn monitor_native_enter_keeps_multiline_and_independent_space_fence() {

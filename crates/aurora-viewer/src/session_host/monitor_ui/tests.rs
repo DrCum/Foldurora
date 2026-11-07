@@ -1138,7 +1138,12 @@ fn monitor_body_accessibility_uses_committed_exact_binding_and_edit_prefix_keeps
 fn monitor_native_retirement_flush_keeps_delivered_edit_prefix_and_undo_on_original_canonical_source() {
     let mut f = Frames::new([680.0, 680.0], 1.0);
     f.type_text(1, "Before retirement");
-    f.composer(1);
+    // type_text already focused the real editor. Another rapid mouse click can
+    // select its last word; explicitly establish the append caret with a key.
+    assert!(
+        f.show(1, vec![key(Key::End, true, Modifiers::NONE), key(Key::End, false, Modifiers::NONE)])
+            .is_none()
+    );
     let view = View::Fixed1;
     let old = f.model.binding(view).unwrap();
     let context = f.contexts[1].clone();
