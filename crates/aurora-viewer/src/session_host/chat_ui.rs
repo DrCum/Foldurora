@@ -760,6 +760,11 @@ impl ChatUi {
             let mut composition_committed = false;
             let mut commit_before_preedit = false;
             let mut saw_commit = false;
+            // Only the exact focused TextEdit receives IME events. A late
+            // old-window event must not even set a new view's composing flag.
+            if editable && ui.ctx().memory(|memory| memory.owns_ime_events(editor_id))
+                && (mode == InputMode::Closing || (focused && !focus_changed))
+            {
             ui.input(|input| {
                 for event in &input.events {
                     if let egui::Event::Ime(event) = event {
@@ -785,6 +790,7 @@ impl ChatUi {
                     }
                 }
             });
+            }
             let can_shortcut = mode == InputMode::Live
                 && focused
                 && !focus_changed

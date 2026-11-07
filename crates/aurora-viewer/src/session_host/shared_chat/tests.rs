@@ -1367,7 +1367,10 @@ fn shared_chat_uncommitted_ime_rolls_back_on_two_context_focus_or_surface_close_
             frames.model.surface_closed(ChatSurface::Shared);
         }
         frames.focus(1);
-        assert_eq!(frames.click(1, "host_chat_send_rect").unwrap().text.as_str(), "Committed prefix");
+        assert_eq!(
+            frames.click(1, "host_chat_send_rect").unwrap().text.as_str(),
+            "Committed prefix plus stable edit"
+        );
         assert!(frames.click(1, "host_chat_input_rect").is_none());
         assert!(frames.show(1, vec![key(Key::Z, true, false, Modifiers::CTRL)]).is_none());
         frames.show(1, vec![key(Key::Z, false, false, Modifiers::CTRL)]);
@@ -1542,6 +1545,12 @@ fn shared_chat_true_ime_commit_is_shared_but_closed_views_late_ime_cannot_retarg
     );
     assert_eq!(frames.draft(0, source(2)), "");
     assert_eq!(frames.draft(1, source(1)), "Prefix committed");
+    frames.type_text(0, "Fresh destination");
+    assert_eq!(
+        frames.click(0, "host_chat_send_rect").unwrap().text.as_str(),
+        "Fresh destination",
+        "late IME cannot strand the new view's composing flag"
+    );
 }
 
 #[test]
