@@ -1,5 +1,10 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Native Shared Chat CPU input fixture (2026-11-07): isolated Linux ignored
+  test using actual ChatWindow/egui-winit input with synthetic snapshots and
+  recorded intents only. Source preparation does not validate OS input; root
+  compilation, an owned native run and exact driver assertions remain pending.
+
 - 🔧 Native unread and explicit Shared Chat read (2026-11-07; no issue):
   isolated follow-up to the frozen Shared Chat candidate. Separate chat V2
   transports native Nearby/existing resident-IM badge counts and native incoming/

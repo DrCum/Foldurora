@@ -54,6 +54,65 @@ are synthetic; no native window, controller, profile, socket, grid or GPU is
 created. Passing these checks does not establish native Windows focus/ownership
 or real-grid routing. Japanese captures require the installed CJK fallback font.
 
+**Native Linux Shared Chat CPU input fixture.**
+
+| Variable | Effect |
+|---|---|
+| `AURORA_SHARED_CHAT_NATIVE_DIR=<directory>` | Fresh, owned 0700 batch directory for native test state/control files |
+| `AURORA_SHARED_CHAT_NATIVE_DISPLAY=<display>` | Must equal the separately owned X11 `DISPLAY` |
+
+Both variables exist only in Linux test builds. The ignored
+`shared_chat_native_os_fixture` creates the real `ChatWindow`, egui-winit and
+software painter, with an in-process synthetic controller snapshot and bounded
+typed intent inbox. It starts no broker, profile, socket, worker or World.
+All policies, identities, text and completion receipts are synthetic. It tests
+Linux OS input delivery, not authentication, message delivery, native unread
+mutation, Windows ownership/IME or grid acceptance. Frozen product binaries are
+unchanged by adding this ignored test.
+
+Run alone in an authenticated, separately owned Xvfb display with TCP disabled:
+
+```bash
+cargo test --workspace shared_chat_native_os_fixture -- --ignored --test-threads=1 --nocapture
+```
+
+A native XTest driver is required. Before launch set private `XDG_CONFIG_HOME`,
+`XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_RUNTIME_DIR` (0700) and `XAUTHORITY` (0600),
+all directly below the batch, with no symlinks. Do not override `HOME`, `home` or
+`CODEX_HOME`. The driver verifies child PID/start time, exact title, window ID,
+display and authentication path before every action; it never injects RawInput
+or writes editor state. Optional real minimize requires an owned private dbus
+session/WM with compositor off and observed Iconic/WM_STATE evidence; otherwise
+record it as untested. Real IME remains manual unless actual IME events occur.
+
+The atomic `state.json` contains `pid`, `owner`, `chat`, `model`, native `events`
+and typed `intents`. Title is `Test shared-chat-native-os [AUTOMATION - DO NOT
+TOUCH] <pid>`. Chat `rects` keys input/send/read/source/conversation and popup row
+rects are logical `[left,top,right,bottom]`; apply `pixels_per_point` and
+`client_origin`. `model.sources` exposes only synthetic retained drafts, full
+keys/policies, actual editor focus/enabled state and pending/read metadata.
+After native WM_DELETE_WINDOW, `chat` is null while the canonical model remains.
+
+Write atomic 0600 `control.json` with an increasing `serial` and a short `phase`.
+Optional fields are `blocked` (existing modal argument), `complete` (synthetic
+RejectedNative completion), `reopen`, `replace_source` (1–5, synthetic generation
+replacement) and `finish`. Unknown fields and files over 4096 bytes fail. Source
+replacement cannot complete an old source's intent or select its replacement.
+Only the driver sends keyboard/mouse/focus/close events. The fixture allows at
+most 512 recorded events, 64 intents, 256 KiB state and 420 seconds; reserve the
+last 120 seconds for evidence and owned-process cleanup.
+
+Begin with repeat coverage before any intent: unblock to focus/type a synthetic
+draft, block the initial held Enter, lose focus to the owned owner window, then
+unblock/refocus the composer while still holding Enter. Require a non-synthetic
+OS `repeat=true` event after focus loss, with the editor focused/enabled, Shift
+up and no earlier intent. No Send may result. Release/fresh Enter must Send.
+Then check Shift+Enter, Ctrl+Enter, delivered text before source/conversation
+navigation, captured Read/no Send or activation, held Read source replacement,
+and close/reopen retention. Driver assertions must compare exact intent sources,
+text, observations and counts. `finish` additionally requires that repeat
+evidence, focus loss, native close/reopen, at least three Sends and one Read.
+
 **CPU chat component captures.**
 
 | Variable | Effect |

@@ -15,6 +15,9 @@ use winit::window::{Window, WindowId};
 
 const MIN_FRAME: Duration = Duration::from_millis(33);
 
+#[cfg(all(test, target_os = "linux"))]
+mod native_fixture;
+
 pub(super) struct ChatWindow {
     surface: SoftwareWindow,
     context: egui::Context,

@@ -161,6 +161,12 @@ impl SharedChat {
             .and_then(|state| state.ui.composer_rect(ctx))
     }
 
+    #[cfg(all(test, target_os = "linux"))]
+    pub(super) fn native_fixture_status(&self, ctx: Option<&egui::Context>) -> serde_json::Value {
+        serde_json::json!({"selected": self.selected, "sources": self.states.iter()
+            .map(|state| state.ui.native_fixture_status(ctx)).collect::<Vec<_>>()})
+    }
+
     pub fn take_read_action(&mut self) -> Option<ReadDraft> {
         self.states
             .iter_mut()
@@ -296,6 +302,11 @@ fn source_selector(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(all(test, target_os = "linux"))]
+pub(super) fn native_fixture_host() -> HostSnapshot {
+    tests::host()
+}
 
 #[cfg(test)]
 mod visual;

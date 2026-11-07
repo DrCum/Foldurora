@@ -191,6 +191,24 @@ impl ChatUi {
         self.source
     }
 
+    #[cfg(all(test, target_os = "linux"))]
+    pub(super) fn native_fixture_status(&self, ctx: Option<&egui::Context>) -> serde_json::Value {
+        let response = ctx.and_then(|ctx| ctx.read_response(self.editor_id()));
+        let drafts: Vec<_> = self
+            .drafts
+            .iter()
+            .map(|(conversation, draft)| {
+                serde_json::json!({
+                    "conversation": conversation, "text": draft.text, "incarnation": draft.incarnation,
+                })
+            })
+            .collect();
+        serde_json::json!({"key": self.key(), "policy": self.policy, "available": self.available,
+            "draft": self.draft(), "drafts": drafts, "editable": response.as_ref().map(egui::Response::enabled),
+            "focused": response.as_ref().map(egui::Response::has_focus), "send_receipt": self.receipt,
+            "read_metadata": self.read_metadata, "read_busy": self.read_busy})
+    }
+
     /// Called on every snapshot update, including while minimized. Lost
     /// authority purges text immediately, rather than waiting for a repaint.
     pub fn sync(&mut self, snapshot: Option<&HostChatSnapshot>) {

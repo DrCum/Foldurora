@@ -140,6 +140,12 @@ cancellation fence navigation, catalogue changes, focus loss and popup/modal
 input. Enter sends once, Shift+Enter inserts a line, and command-Enter remains
 supported; repeat and IME-confirmation keys do not send.
 
+The Linux-only ignored `session_host/chat_window/native_fixture.rs` runs the
+unchanged native `ChatWindow`/egui-winit/software surface against cfg(test)-only
+synthetic controller data and a bounded Send/Read inbox, without starting broker
+IO or workers. Its private X11/XDG driver contract and evidence limits are in
+`docs/TESTING.md`; it cannot establish native authentication or grid delivery.
+
 The test-only `session_host/chat_ui/visual.rs` drives that same popout body with
 real egui input and paints through `crash::software::Painter`, as
 `SoftwareWindow` does. Its ignored, explicitly configured EN/FR/JA fixture

@@ -151,6 +151,130 @@ pub(crate) struct HostController {
     foreground: Arc<AtomicBool>,
 }
 
+/// In-process synthetic data and an intent inbox, exclusively for the ignored
+/// native CPU-window test. No broker thread, profile, socket or worker starts.
+#[cfg(all(test, target_os = "linux"))]
+pub(super) mod native_fixture {
+    use super::*;
+    use crate::session_host::chat_broker::{ReadOperation, ReadStatus};
+    use aurora_session::chat::{ReadOutcome, SendOutcome, SendReceipt};
+
+    #[derive(Clone, Debug, Serialize)]
+    pub(crate) enum Intent {
+        Send {
+            ticket: u64,
+            key: ChatKey,
+            policy_revision: u64,
+            text: ChatText,
+        },
+        Read {
+            ticket: u64,
+            request: MarkReadRequest,
+        },
+    }
+
+    pub(crate) struct Inbox {
+        receiver: Receiver<HostRequest>,
+        snapshot: Arc<Mutex<Arc<HostSnapshot>>>,
+    }
+
+    pub(crate) fn controller(snapshot: HostSnapshot) -> (HostController, Inbox) {
+        let (sender, receiver) = bounded(MAX_QUEUE);
+        let snapshot = Arc::new(Mutex::new(Arc::new(snapshot)));
+        let controller = HostController {
+            requests: Mutex::new(RequestSender { sender, next: 1 }),
+            snapshot: snapshot.clone(),
+            stop: Arc::new(AtomicBool::new(false)),
+            stopped: Arc::new(AtomicBool::new(false)),
+            foreground: Arc::new(AtomicBool::new(false)),
+        };
+        (controller, Inbox { receiver, snapshot })
+    }
+
+    impl Inbox {
+        pub(crate) fn drain(&self) -> Vec<Intent> {
+            self.receiver
+                .try_iter()
+                .map(|request| match request.intent {
+                    HostIntent::ChatSend {
+                        key,
+                        policy_revision,
+                        text,
+                    } => Intent::Send {
+                        ticket: request.ticket,
+                        key,
+                        policy_revision,
+                        text,
+                    },
+                    HostIntent::ChatRead(mut read) => {
+                        read.request = request.ticket;
+                        Intent::Read {
+                            ticket: request.ticket,
+                            request: read,
+                        }
+                    }
+                    _ => panic!("native chat fixture must never activate, open, detach or manage a worker"),
+                })
+                .collect()
+        }
+
+        /// Synthetic terminal rejection only; never execute or replay an intent.
+        pub(crate) fn complete(&self, intents: &[Intent]) {
+            let mut shared = self.snapshot.lock().unwrap();
+            let snapshot = Arc::make_mut(&mut shared);
+            for intent in intents {
+                let (key, ticket) = match intent {
+                    Intent::Send { key, ticket, .. } => (*key, *ticket),
+                    Intent::Read { request, ticket } => (request.key, *ticket),
+                };
+                let Some(chat) = snapshot.chat.iter_mut().find(|chat| chat.source == key.source) else {
+                    continue;
+                };
+                let chat = Arc::make_mut(chat);
+                match intent {
+                    Intent::Send { .. } if !chat.receipts.iter().any(|receipt| receipt.request == ticket) => {
+                        chat.receipts.push(SendReceipt {
+                            key,
+                            request: ticket,
+                            outcome: SendOutcome::RejectedNative,
+                        });
+                    }
+                    Intent::Read { request, .. } if !chat.read_operations.iter().any(|operation| operation.request == *request) => {
+                        chat.read_operations.push(ReadOperation {
+                            request: *request,
+                            status: ReadStatus::Completed(ReadOutcome::RejectedNative),
+                        });
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        pub(crate) fn replace_source(&self, number: u8) {
+            assert!((1..=5).contains(&number));
+            let mut shared = self.snapshot.lock().unwrap();
+            let snapshot = Arc::make_mut(&mut shared);
+            let chat = Arc::make_mut(&mut snapshot.chat[usize::from(number - 1)]);
+            let old = chat.source;
+            chat.source.session.generation = old.session.generation.checked_add(1).unwrap();
+            for info in &mut chat.conversations {
+                info.policy.key.source = chat.source;
+            }
+            chat.receipts.clear();
+            chat.read_operations.clear();
+            for read in chat.reads.values_mut() {
+                read.observed.epoch = read.observed.epoch.checked_add(1).unwrap();
+            }
+            snapshot
+                .workers
+                .iter_mut()
+                .find(|worker| worker.binding == old.binding())
+                .unwrap()
+                .binding = chat.source.binding();
+        }
+    }
+}
+
 impl HostController {
     pub fn start() -> anyhow::Result<Self> {
         let (tx, rx) = bounded(MAX_QUEUE);
