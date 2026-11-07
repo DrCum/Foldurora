@@ -588,6 +588,22 @@ fn board_native_demo_real_login_fixture_has_only_explicit_standalone_memory_iden
     assert!(login_identity(&login, login.agent_id, true, true, 1).is_none());
     assert!(login_identity(&login, login.agent_id, true, false, 0).is_none());
     assert!(login_identity(&login, Uuid::from_u128(99), true, false, 1).is_none());
+    let mut state = actor();
+    let data = Catalogue::empty(login.agent_id, facts().grid)
+        .unwrap()
+        .apply(Change::Create {
+            id: BoardId::new(),
+            name: "Demo edits".into(),
+        })
+        .unwrap();
+    state.snapshot = Some(store::Snapshot::memory(data.clone()));
+    state.loaded = true;
+    state.close_snapshot(true);
+    assert!(state.loaded);
+    assert_eq!(*state.snapshot.as_ref().unwrap().data, data);
+    state.close_snapshot(false);
+    assert!(!state.loaded);
+    assert!(state.snapshot.is_none());
     let mut real = (*login).clone();
     real.session_id = Uuid::from_u128(77);
     assert_eq!(login_identity(&real, real.agent_id, false, true, 1), Some(real.session_id));

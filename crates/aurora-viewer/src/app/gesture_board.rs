@@ -132,6 +132,14 @@ impl State {
         self.cancel_job();
     }
 
+    fn close_snapshot(&mut self, demo: bool) {
+        // Real stores reload after close, including external CAS conflicts.
+        // The explicit offline demo has no disk backing to reload from.
+        if !demo {
+            self.snapshot = None;
+            self.loaded = false;
+        }
+    }
     fn proof(&self, native: Option<NativeActionScope>, now: Instant) -> Option<Proof> {
         Some(Proof {
             instance: self.instance,
@@ -170,8 +178,7 @@ impl State {
             self.cancel_actions();
             let _ = self.runtime.window(self.open);
             if !self.open {
-                self.snapshot = None;
-                self.loaded = false;
+                self.close_snapshot(app.demo);
             }
         }
         self.runtime.expire(Instant::now());
