@@ -13522,3 +13522,4 @@ board-kind-gesture = ジェスチャー
 board-name-placeholder = ボード名を入力
 board-name-invalid = 前後の空白や制御文字を含まない短い名前を入力してください。
 board-limit = ボードは最大16個、各ボードのタイルは最大1,024個です。
+board-store-identity = このボードファイルは別のアカウントまたはグリッドのものです。変更せず保持します。

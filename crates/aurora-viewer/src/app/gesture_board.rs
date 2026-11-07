@@ -380,6 +380,8 @@ impl State {
         self.cancel_play_actions();
         self.snapshot = None;
         self.status = match error {
+            store::Error::Original(model::Error::Identity) => "board-store-identity",
+            store::Error::Original(_) => "board-invalid",
             store::Error::Cancelled => "board-cancelled",
             store::Error::Conflict => "board-conflict",
             store::Error::Model(model::Error::Exhausted) => "board-unavailable",
