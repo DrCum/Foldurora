@@ -53,6 +53,7 @@ pub(crate) struct WorkerSummary {
 pub(crate) struct HostSnapshot {
     pub slots: Vec<SlotSummary>,
     pub registry_error: Option<String>,
+    pub attention_preferences: super::attention_prefs::PreferenceState,
     pub accounts: Vec<SavedAccount>,
     pub workers: Vec<WorkerSummary>,
     pub opening: Vec<AccountKey>,
@@ -86,6 +87,7 @@ impl std::error::Error for HostError {}
 enum HostIntent {
     Open(Option<AccountKey>, Option<SlotId>),
     RenameSlot(SlotId, SlotLabel),
+    SaveAttentionPreferences(super::attention_prefs::Preferences),
     Activate(WorkerId, HostedViewport),
     Viewport(HostedViewport),
     Park,
@@ -101,7 +103,7 @@ enum HostIntent {
 impl HostIntent {
     fn controls_presentation(&self) -> bool {
         match self {
-            Self::ChatSend { .. } | Self::ChatRead(_) | Self::RenameSlot(_, _) => false,
+            Self::ChatSend { .. } | Self::ChatRead(_) | Self::RenameSlot(_, _) | Self::SaveAttentionPreferences(_) => false,
             Self::Open(_, _) | Self::Activate(_, _) | Self::Viewport(_) | Self::Park | Self::Detach(_) => true,
         }
     }
@@ -315,6 +317,10 @@ impl HostController {
 
     pub fn rename_slot(&self, slot: SlotId, label: SlotLabel) -> Result<u64, HostError> {
         self.send(HostIntent::RenameSlot(slot, label))
+    }
+
+    pub fn save_attention_preferences(&self, preferences: super::attention_prefs::Preferences) -> Result<u64, HostError> {
+        self.send(HostIntent::SaveAttentionPreferences(preferences))
     }
 
     pub fn activate(&self, worker: WorkerId, viewport: HostedViewport) -> Result<u64, HostError> {
@@ -1076,6 +1082,9 @@ impl Broker {
             HostIntent::RenameSlot(slot, label) => {
                 self.registry.rename(slot, label)?;
             }
+            HostIntent::SaveAttentionPreferences(preferences) => {
+                self.registry.save_attention_preferences(ticket, preferences);
+            }
             HostIntent::Activate(worker, viewport) => {
                 let effects = self.coordinator.activate(worker, Some(viewport), now)?;
                 self.viewport = Some(viewport);
@@ -1435,6 +1444,7 @@ impl Broker {
         opening.dedup();
         HostSnapshot {
             registry_error: self.registry_error.clone(),
+            attention_preferences: self.registry.attention_preferences().clone(),
             slots: SlotId::all()
                 .map(|id| SlotSummary {
                     id,
@@ -1795,6 +1805,38 @@ mod tests {
         }
         assert_eq!(broker.opens.len(), MAX_WORKERS);
         assert!(broker.intent(HostIntent::Open(None, None), 5, 0).is_err());
+
+        // Preference IO is a separate metadata operation: a failed save has a
+        // terminal exact-ticket outcome and survives unrelated host requests.
+        let preference_path = super::super::profile::host_root()
+            .unwrap()
+            .join("registries")
+            .join(installation.to_string())
+            .join("attention-preferences.json");
+        super::super::profile::private_dir(&preference_path).unwrap();
+        let attempted = super::super::attention_prefs::Preferences {
+            nearby: true,
+            ..Default::default()
+        };
+        let intent = HostIntent::SaveAttentionPreferences(attempted);
+        assert!(!intent.controls_presentation());
+        broker.intent(intent, 6, 0).unwrap();
+        let failed = broker.snapshot(&[], false).attention_preferences;
+        assert_eq!(failed.preferences, super::super::attention_prefs::Preferences::default());
+        let operation = failed.operation.as_ref().unwrap();
+        assert_eq!(operation.ticket, 6);
+        assert_eq!(operation.preferences, attempted);
+        assert!(operation.error.is_some());
+        broker
+            .intent(
+                HostIntent::RenameSlot(slot, SlotLabel::new("Synthetic changed label").unwrap()),
+                7,
+                0,
+            )
+            .unwrap();
+        broker.intent(HostIntent::Park, 8, 0).unwrap();
+        assert_eq!(broker.snapshot(&[], false).attention_preferences, failed);
+        std::fs::remove_dir(preference_path).unwrap();
     }
 
     #[test]

@@ -105,6 +105,7 @@ pub(super) struct Registry {
     installation: InstallationId,
     path: PathBuf,
     stored: Stored,
+    attention_preferences: super::attention_prefs::Store,
     _lock: File,
 }
 
@@ -135,16 +136,28 @@ impl Registry {
         };
         stored.controller = controller;
         save(&path, &stored)?;
+        // A corrupt optional preference file must not disable profile launches
+        // or alter the rollback-compatible character registry schema.
+        let attention_preferences = super::attention_prefs::Store::open(&directory);
         Ok(Self {
             installation,
             path,
             stored,
+            attention_preferences,
             _lock: lock,
         })
     }
 
     pub fn label(&self, slot: SlotId) -> &SlotLabel {
         &self.stored.labels[slot.index()]
+    }
+
+    pub fn attention_preferences(&self) -> &super::attention_prefs::PreferenceState {
+        self.attention_preferences.state()
+    }
+
+    pub fn save_attention_preferences(&mut self, ticket: u64, preferences: super::attention_prefs::Preferences) {
+        self.attention_preferences.save(ticket, preferences);
     }
 
     pub fn rename(&mut self, slot: SlotId, label: SlotLabel) -> anyhow::Result<()> {
@@ -186,16 +199,32 @@ pub(super) fn validate_controller(installation: &str, controller: HostId) -> any
 }
 
 fn save(path: &Path, stored: &Stored) -> io::Result<()> {
+    write_json(path, stored, MAX_BYTES)
+}
+
+/// Bounded private metadata publication shared with the independent Attention
+/// preference file. The caller owns the controller registry lock throughout.
+pub(super) fn write_json(path: &Path, stored: &impl Serialize, limit: usize) -> io::Result<()> {
+    write_json_with_rename(path, stored, limit, |from, to| std::fs::rename(from, to))
+}
+
+fn write_json_with_rename(
+    path: &Path,
+    stored: &impl Serialize,
+    limit: usize,
+    mut rename: impl FnMut(&Path, &Path) -> io::Result<()>,
+) -> io::Result<()> {
     match std::fs::symlink_metadata(path) {
         Ok(_) => profile::validate_private_file(path)?,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => return Err(error),
     }
     let bytes = serde_json::to_vec(stored).map_err(io::Error::other)?;
-    if bytes.len() > MAX_BYTES {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "character registry exceeds its bound"));
+    if bytes.len() > limit {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "host metadata exceeds its bound"));
     }
     let parent = path.parent().ok_or_else(|| io::Error::other("character registry has no parent"))?;
+    profile::private_dir(parent)?;
     let temporary = parent.join(format!(".{}.tmp", uuid::Uuid::new_v4()));
     let result = (|| {
         let mut file = profile::create_private_file(&temporary)?;
@@ -204,7 +233,7 @@ fn save(path: &Path, stored: &Stored) -> io::Result<()> {
         drop(file);
         profile::validate_private_file(&temporary)?;
         for attempt in 0..=5 {
-            match std::fs::rename(&temporary, path) {
+            match rename(&temporary, path) {
                 Err(error) if error.kind() == io::ErrorKind::PermissionDenied && attempt < 5 => {
                     std::thread::sleep(std::time::Duration::from_millis(1 << attempt));
                 }
@@ -242,6 +271,60 @@ mod tests {
         assert!(SlotLabel::new("line\nbreak").is_err());
         assert_eq!(SlotLabel::new("  ../A character  ").unwrap().as_str(), "../A character");
         assert_eq!(SlotLabel::new(&"é".repeat(32)).unwrap().as_str().len(), 64);
+    }
+
+    #[test]
+    fn failed_attention_load_keeps_controller_registry_usable_without_rewriting_preferences() {
+        let (install, host) = identity();
+        let registry = Registry::open(install, host).unwrap();
+        let directory = registry.path.parent().unwrap().to_path_buf();
+        let path = directory.join("attention-preferences.json");
+        assert!(!path.exists(), "opening slots does not eagerly save Attention defaults");
+        drop(registry);
+        let mut file = profile::create_private_file(&path).unwrap();
+        file.write_all(b"malformed synthetic preferences").unwrap();
+        drop(file);
+        let mut registry = Registry::open(install, host).unwrap();
+        assert!(!registry.attention_preferences().writable);
+        assert!(registry.attention_preferences().error.is_some());
+        assert!(SlotId::all().all(|slot| !registry.attention_preferences().preferences.includes(slot)));
+        let slot = SlotId::try_from(2).unwrap();
+        registry.rename(slot, SlotLabel::new("Synthetic renamed slot").unwrap()).unwrap();
+        assert_eq!(registry.label(slot).as_str(), "Synthetic renamed slot");
+        validate_controller(&install.to_string(), host).unwrap();
+        registry.save_attention_preferences(81, super::super::attention_prefs::Preferences::default());
+        assert!(registry.attention_preferences().operation.as_ref().unwrap().error.is_some());
+        assert_eq!(std::fs::read(&path).unwrap(), b"malformed synthetic preferences");
+        let stored: serde_json::Value = serde_json::from_slice(&std::fs::read(&registry.path).unwrap()).unwrap();
+        assert_eq!(stored["version"], VERSION);
+        assert_eq!(stored.as_object().unwrap().len(), 3, "slots schema remains rollback-compatible");
+        drop(registry);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn atomic_metadata_publication_failure_preserves_previous_file_and_removes_temporary() {
+        let (install, host) = identity();
+        let registry = Registry::open(install, host).unwrap();
+        let directory = registry.path.parent().unwrap().to_path_buf();
+        let path = directory.join("attention-preferences.json");
+        let before = serde_json::json!({"synthetic": "retained"});
+        write_json(&path, &before, 512).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        let next = serde_json::json!({"synthetic": "changed"});
+        let mut temporary = None;
+        let result = write_json_with_rename(&path, &next, 512, |from, to| {
+            assert_eq!(to, path.as_path());
+            assert_eq!(std::fs::read(from).unwrap(), serde_json::to_vec(&next).unwrap());
+            assert_eq!(std::fs::read(to).unwrap(), bytes, "old file survives until atomic publication");
+            temporary = Some(from.to_path_buf());
+            Err(io::Error::other("synthetic atomic publication failure"))
+        });
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        assert!(!temporary.unwrap().exists());
+        drop(registry);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
