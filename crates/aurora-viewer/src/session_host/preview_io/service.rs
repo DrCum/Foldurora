@@ -1125,7 +1125,8 @@ mod resource_tests {
         assert_eq!((m.commands.len(), m.outcomes.len()), (QUEUE, QUEUE));
         assert!(m.frame.is_some());
         assert!(m.demands.allocated_bytes() > 0);
-        let storage = m.demands.allocated_bytes()
+        let storage = crate::session_host::worker::NATIVE_PREVIEW_METADATA_BYTES
+            + m.demands.allocated_bytes()
             + lane::worker_storage_ceiling()
             + std::mem::size_of::<Shared<WorkerMailbox>>()
             + std::mem::size_of::<WorkerMailbox>()
