@@ -6,8 +6,8 @@ use super::transport::{HostChatSnapshot, HostError};
 use crate::theme::Palette;
 use crate::ui::widgets::{self, ActionKind};
 use aurora_session::chat::{
-    ChatKey, ChatSource, ChatText, Conversation, MAX_CONVERSATIONS, MAX_RECEIPTS, MAX_RETAINED_LINES, MAX_TEXT_BYTES, NativeChatPolicy,
-    SendOutcome, SendReceipt,
+    ChatKey, ChatSource, ChatText, Conversation, ConversationInfo, MAX_CONVERSATIONS, MAX_RECEIPTS, MAX_RETAINED_LINES, MAX_TEXT_BYTES,
+    NativeChatPolicy, SendOutcome, SendReceipt,
 };
 use egui::{Id, RichText, TextEdit, vec2};
 use std::collections::BTreeMap;
@@ -37,6 +37,55 @@ enum Warning {
     Queue(HostError),
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum InputMode {
+    Live,
+    /// A selection changed this pass: show its state without interpreting
+    /// input that began in the preceding conversation or character.
+    Navigating,
+    /// Drain queued edits before disposing a native surface. Navigation and
+    /// sends are impossible even if Enter or a button release was queued.
+    Closing,
+}
+
+pub(super) fn source_id(source: ChatSource) -> Id {
+    Id::unique((
+        "host_chat_source",
+        (source.worker.installation, source.worker.host, source.worker.worker),
+        (
+            source.session.session,
+            source.session.account,
+            source.session.grid,
+            source.session.generation,
+            source.lease_epoch,
+        ),
+    ))
+}
+
+fn policy_id(policy: NativeChatPolicy) -> Id {
+    source_id(policy.key.source).with((
+        policy.key.conversation,
+        policy.revision,
+        policy.lease_current,
+        policy.ready,
+        policy.can_send,
+        policy.can_read,
+    ))
+}
+
+/// A held pointer/key is never permission to act on a newly selected target.
+/// This is context input only; it sends no worker or world command.
+pub(super) fn cancel_input(ctx: &egui::Context) {
+    egui::Popup::close_all(ctx);
+    ctx.stop_dragging();
+    ctx.input_mut(|input| {
+        input.pointer = Default::default();
+        input
+            .events
+            .retain(|event| !matches!(event, egui::Event::Key { key: egui::Key::Enter, .. }));
+    });
+}
+
 pub(super) struct ChatUi {
     source: ChatSource,
     conversation: Conversation,
@@ -49,6 +98,10 @@ pub(super) struct ChatUi {
     available: bool,
     warning: Option<Warning>,
     receipt: Option<SendReceipt>,
+    catalogue: Vec<ConversationInfo>,
+    interaction: u64,
+    changed: bool,
+    ime_composing: bool,
 }
 
 pub(super) fn eligible(snapshot: &HostChatSnapshot) -> bool {
@@ -86,6 +139,10 @@ impl ChatUi {
             available: false,
             warning: None,
             receipt: None,
+            catalogue: Vec::new(),
+            interaction: 0,
+            changed: false,
+            ime_composing: false,
         }
     }
 
@@ -97,6 +154,19 @@ impl ChatUi {
     /// authority purges text immediately, rather than waiting for a repaint.
     pub fn sync(&mut self, snapshot: Option<&HostChatSnapshot>) {
         let current = snapshot.filter(|snapshot| snapshot.source == self.source && eligible(snapshot));
+        let catalogue = current.map_or_else(Vec::new, |snapshot| {
+            snapshot
+                .conversations
+                .iter()
+                .take(MAX_CONVERSATIONS)
+                .filter(|info| info.policy.key.source == self.source && supported(info.policy.key.conversation))
+                .cloned()
+                .collect()
+        });
+        if self.catalogue != catalogue {
+            self.catalogue = catalogue;
+            self.cancel_gesture();
+        }
         self.available = current.is_some();
         let mut cleared_text = false;
         self.drafts.retain(|conversation, draft| {
@@ -146,6 +216,12 @@ impl ChatUi {
             source: self.source,
             conversation: self.conversation,
         }
+    }
+
+    pub fn cancel_gesture(&mut self) {
+        self.interaction = self.interaction.saturating_add(1);
+        self.changed = true;
+        self.ime_composing = false;
     }
 
     fn draft(&self) -> &str {
@@ -204,6 +280,7 @@ impl ChatUi {
         }
         self.policy = None;
         self.conversation = conversation;
+        self.cancel_gesture();
         self.warning = ChatText::new(self.draft()).is_err().then_some(Warning::Invalid);
         if self.receipt.is_some_and(|receipt| receipt.outcome != SendOutcome::Pending) {
             self.receipt = None;
@@ -236,6 +313,7 @@ impl ChatUi {
         self.warning = Some(Warning::Queue(error));
     }
 
+    #[cfg(test)]
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
@@ -244,10 +322,34 @@ impl ChatUi {
         account: &str,
         grid: &str,
     ) -> Option<SendDraft> {
+        self.show_in_mode(ui, p, snapshot, account, grid, InputMode::Live)
+    }
+
+    pub fn show_in_mode(
+        &mut self,
+        ui: &mut egui::Ui,
+        p: &Palette,
+        snapshot: Option<&HostChatSnapshot>,
+        account: &str,
+        grid: &str,
+        mode: InputMode,
+    ) -> Option<SendDraft> {
         self.sync(snapshot);
+        let popup_open = egui::Popup::is_any_open(ui.ctx());
+        let mut navigating = mode == InputMode::Navigating || std::mem::take(&mut self.changed);
+        if navigating {
+            cancel_input(ui.ctx());
+        }
+        let focused = ui.input(|input| input.focused);
+        let focus_changed = ui.input(|input| input.events.iter().any(|event| matches!(event, egui::Event::WindowFocused(_))));
+        if (!focused || focus_changed) && mode != InputMode::Closing {
+            cancel_input(ui.ctx());
+            self.ime_composing = false;
+        }
+        let source_id = source_id(self.source);
         let mut action = None;
         let frame = widgets::overlay_frame(ui.ctx(), p);
-        egui::Panel::top("host_chat_identity").frame(frame).show(ui, |ui| {
+        egui::Panel::top(source_id.with("identity")).frame(frame).show(ui, |ui| {
             ui.label(RichText::new(aurora_i18n::tr!("host-chat-identity", account = account, grid = grid)).strong());
             ui.label(RichText::new(aurora_i18n::tr!("host-chat-bound-help")).small().color(p.muted));
             let current = snapshot.filter(|snapshot| snapshot.source == self.source && self.available);
@@ -262,7 +364,7 @@ impl ChatUi {
                 .map(|info| info.title.as_str())
                 .unwrap_or(aurora_i18n::tr!("host-chat-no-conversation"));
             let mut picked = self.conversation;
-            let combo = egui::ComboBox::from_id_salt("host_chat_conversation")
+            let combo = egui::ComboBox::from_id_salt((source_id, "conversation", self.interaction))
                 .selected_text(selected)
                 .width(ui.available_width())
                 .show_ui(ui, |ui| {
@@ -274,7 +376,14 @@ impl ChatUi {
                                 && info.policy.lease_current
                                 && info.policy.ready
                         }) {
-                            let response = ui.selectable_value(&mut picked, info.policy.key.conversation, info.title.as_str());
+                            let response = ui
+                                .add_enabled_ui(mode == InputMode::Live, |ui| {
+                                    ui.push_id(policy_id(info.policy), |ui| {
+                                        ui.selectable_value(&mut picked, info.policy.key.conversation, info.title.as_str())
+                                    })
+                                    .inner
+                                })
+                                .inner;
                             #[cfg(test)]
                             ui.ctx().data_mut(|data| {
                                 data.insert_temp(Id::unique(("host_chat_pick", info.policy.key.conversation)), response.rect)
@@ -294,7 +403,11 @@ impl ChatUi {
         // Navigation restores only this exact conversation's retained draft;
         // recheck every parked draft's authority before any input is handled.
         self.sync(snapshot);
-        egui::Panel::bottom("host_chat_compose").frame(frame).show(ui, |ui| {
+        navigating |= std::mem::take(&mut self.changed);
+        if navigating {
+            cancel_input(ui.ctx());
+        }
+        egui::Panel::bottom(source_id.with("compose")).frame(frame).show(ui, |ui| {
             if !self.available {
                 ui.label(RichText::new(aurora_i18n::tr!("host-chat-unavailable")).color(p.warn));
             }
@@ -325,10 +438,48 @@ impl ChatUi {
                 .unwrap_or_default();
             let previous_undo = previous_editor.undoer();
             TextEdit::store_state(ui.ctx(), editor_id, previous_editor.clone());
+            let was_composing = self.ime_composing;
+            let mut ime_event = false;
+            ui.input(|input| {
+                for event in &input.events {
+                    if let egui::Event::Ime(event) = event {
+                        ime_event = true;
+                        match event {
+                            egui::ImeEvent::Preedit { text, .. } => self.ime_composing = !text.is_empty(),
+                            egui::ImeEvent::Commit(_) => self.ime_composing = false,
+                            _ => {}
+                        }
+                    }
+                }
+            });
+            let can_shortcut = mode == InputMode::Live
+                && focused
+                && !focus_changed
+                && !navigating
+                && !popup_open
+                && !egui::Popup::is_any_open(ui.ctx())
+                && !was_composing
+                && !self.ime_composing
+                && !ime_event
+                && ui.ctx().memory(|memory| memory.has_focus(editor_id));
+            let shortcut = can_shortcut
+                && ui.input(|input| input.events.iter().any(|event| {
+                    matches!(event, egui::Event::Key {
+                        key: egui::Key::Enter, pressed: true, repeat: false, modifiers, ..
+                    } if !modifiers.shift && !modifiers.alt)
+                }));
+            // Enter sends, Shift+Enter inserts a newline. Remove repeated or
+            // suppressed send keys too, so they cannot mutate a later draft.
+            if !was_composing && !self.ime_composing && !ime_event || mode == InputMode::Closing {
+                ui.ctx().input_mut(|input| input.events.retain(|event| {
+                    !matches!(event, egui::Event::Key { key: egui::Key::Enter, modifiers, .. } if !modifiers.shift || mode == InputMode::Closing)
+                }));
+            }
             let output = ui
                 .add_enabled_ui(editable && self.drafts.contains_key(&self.conversation), |ui| {
                     TextEdit::multiline(&mut text)
                         .id(editor_id)
+                        .return_key(Some(egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::Enter)))
                         .hint_text(aurora_i18n::tr!("host-chat-input"))
                         .desired_rows(3)
                         .desired_width(f32::INFINITY)
@@ -340,6 +491,8 @@ impl ChatUi {
             // minimized/closed policy pruning immediate and context-independent.
             ui.ctx().data_mut(|data| data.remove::<egui::text_edit::TextEditState>(editor_id));
             let input = output.response;
+            #[cfg(not(test))]
+            let _ = input;
             let mut editor = output.state;
             #[cfg(test)]
             ui.ctx()
@@ -365,19 +518,18 @@ impl ChatUi {
                 let ready = editable && text.is_some();
                 // Empty icon deliberately avoids the process-global icon
                 // registry: each CPU popout has its own egui texture space.
-                let send = widgets::action_button_if(
+                let send = ui.push_id((editor_id, self.interaction, "send"), |ui| widgets::action_button_if(
                     ui,
                     p,
                     "",
                     aurora_i18n::tr!("host-chat-send"),
                     ActionKind::Primary,
                     vec2(0.0, 30.0),
-                    ready,
-                );
+                    ready && mode == InputMode::Live && focused && !focus_changed && !navigating && !popup_open && !self.ime_composing && !ime_event,
+                )).inner;
                 #[cfg(test)]
                 ui.ctx()
                     .data_mut(|data| data.insert_temp(Id::unique("host_chat_send_rect"), send.rect));
-                let shortcut = input.has_focus() && ui.input(|input| input.modifiers.command && input.key_pressed(egui::Key::Enter));
                 if ready
                     && (send.clicked() || shortcut)
                     && let (Some(policy), Some(text)) = (self.policy, text)
@@ -402,7 +554,7 @@ impl ChatUi {
                     .is_some_and(|policy| policy.ready && policy.lease_current && policy.can_read);
                 let mut shown = 0;
                 egui::ScrollArea::vertical()
-                    .id_salt(("host_chat_lines", self.conversation))
+                    .id_salt((source_id, "lines", self.conversation))
                     .stick_to_bottom(true)
                     .auto_shrink([false; 2])
                     .show(ui, |ui| {
@@ -987,11 +1139,7 @@ mod tests {
     }
 
     #[test]
-    fn host_chat_popout_closed_cache_roundtrip_retains_drafts_selection_and_final_receipt_without_replay() {
-        use super::super::chat_window::ChatUiCache;
-        use super::super::transport::HostSnapshot;
-        use std::sync::Arc;
-
+    fn host_chat_retained_model_roundtrip_retains_drafts_selection_and_final_receipt_without_replay() {
         let mut snapshot = snapshot(source());
         let mut frames = Frames::new();
         frames.type_text(&snapshot, "Parked Nearby draft");
@@ -1012,20 +1160,14 @@ mod tests {
             request: 42,
             outcome: SendOutcome::Pending,
         });
-        let mut host = HostSnapshot {
-            chat: vec![Arc::new(snapshot.clone())],
-            ..Default::default()
-        };
-        let mut cache = ChatUiCache::default();
-        cache.remember(frames.ui, &host, false);
+        let mut retained = frames.ui;
 
         // Delivery became uncertain while the native surface was closed.
         // Reopening uses a fresh context, not the destroyed window's memory.
         snapshot.receipts[0].outcome = SendOutcome::Uncertain;
-        host.chat = vec![Arc::new(snapshot.clone())];
-        cache.sync(&host, false);
+        retained.sync(Some(&snapshot));
         let mut reopened = Frames::new();
-        reopened.ui = cache.take(source(), &host, false).unwrap();
+        reopened.ui = retained;
         assert_eq!(reopened.ui.conversation, direct());
         assert_eq!(reopened.ui.receipt.unwrap().outcome, SendOutcome::Uncertain);
         assert!(reopened.show(Some(&snapshot), Vec::new()).is_none());
@@ -1046,21 +1188,19 @@ mod tests {
 
         reopened.navigate(&snapshot, direct());
         reopened.type_text(&snapshot, "Keep this resident draft");
-        cache.remember(reopened.ui, &host, false);
+        let mut retained = reopened.ui;
         snapshot.conversations[0].policy.revision += 1;
-        host.chat = vec![Arc::new(snapshot.clone())];
-        cache.sync(&host, false);
+        retained.sync(Some(&snapshot));
         let mut reopened = Frames::new();
-        reopened.ui = cache.take(source(), &host, false).unwrap();
+        reopened.ui = retained;
         assert_eq!(reopened.ui.draft(), "Keep this resident draft");
         reopened.navigate(&snapshot, Conversation::Nearby);
         reopened.undo(&snapshot);
         assert!(reopened.ui.draft().is_empty());
-        cache.remember(reopened.ui, &host, false);
+        let mut retained = reopened.ui;
         snapshot.authenticated = false;
-        host.chat = vec![Arc::new(snapshot)];
-        cache.sync(&host, false);
-        assert!(cache.take(source(), &host, false).is_none());
+        retained.sync(Some(&snapshot));
+        assert!(retained.drafts.is_empty());
     }
 
     #[test]

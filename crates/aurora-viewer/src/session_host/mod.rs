@@ -9,6 +9,7 @@ mod chat_ui;
 mod chat_window;
 mod native;
 pub(crate) mod profile;
+mod shared_chat;
 pub(crate) mod slots;
 mod software;
 pub(crate) mod startup;
@@ -59,8 +60,9 @@ pub fn run() -> anyhow::Result<()> {
         snapshot,
         ui: HostUi::default(),
         surface: None,
-        chat_windows: Vec::new(),
-        closed_chats: chat_window::ChatUiCache::default(),
+        chat_window: None,
+        shared_chat: shared_chat::SharedChat::default(),
+        chat_changed: true,
         error: None,
         next_poll: now,
         repaint: Some(now),
@@ -93,8 +95,9 @@ struct Shell {
     snapshot: Arc<HostSnapshot>,
     ui: HostUi,
     surface: Option<SoftwareWindow>,
-    chat_windows: Vec<chat_window::ChatWindow>,
-    closed_chats: chat_window::ChatUiCache,
+    chat_window: Option<chat_window::ChatWindow>,
+    shared_chat: shared_chat::SharedChat,
+    chat_changed: bool,
     error: Option<String>,
     next_poll: Instant,
     repaint: Option<Instant>,
@@ -133,8 +136,8 @@ impl Shell {
             },
             Action::Detach(worker) => self.controller.detach(worker),
             Action::Close => {
-                self.chat_windows.clear();
-                self.closed_chats.clear();
+                self.chat_window = None;
+                self.shared_chat.clear();
                 self.close_region();
                 self.controller.shutdown();
                 self.closing = Some(Instant::now());
@@ -166,32 +169,23 @@ impl Shell {
     }
 
     fn open_chat(&mut self, event_loop: &ActiveEventLoop, source: aurora_session::chat::ChatSource) {
-        if let Some(window) = self.chat_windows.iter().find(|window| window.source() == source) {
+        self.shared_chat.sync(&self.controller.snapshot(), self.closing.is_some());
+        if let Some(window) = &mut self.chat_window {
+            // Native text can be queued after the preceding redraw. Keep it
+            // with the old sender before this explicit navigation changes it.
+            window.flush_edits(&self.controller, &mut self.shared_chat);
+            self.shared_chat.select(source);
+            self.shared_chat.cancel_gestures();
             window.focus();
             return;
         }
-        let snapshot = self.controller.snapshot();
+        self.shared_chat.select(source);
         let result = (|| {
-            anyhow::ensure!(self.chat_windows.len() < aurora_session::MAX_WORKERS, "chat window limit reached");
             let owner = self.surface.as_ref().ok_or_else(|| anyhow::anyhow!("host window is unavailable"))?;
-            let chat = snapshot
-                .chat
-                .iter()
-                .find(|chat| chat.source == source && chat_ui::eligible(chat))
-                .ok_or_else(|| anyhow::anyhow!("chat source is unavailable"))?;
-            let worker = snapshot
-                .workers
-                .iter()
-                .find(|worker| worker.binding == source.binding())
-                .ok_or_else(|| anyhow::anyhow!("chat worker is unavailable"))?;
-            chat_window::ChatWindow::new(event_loop, &owner.window, worker, chat.clone(), || {
-                self.closed_chats
-                    .take(source, &snapshot, self.closing.is_some())
-                    .unwrap_or_else(|| chat_ui::ChatUi::new(source))
-            })
+            chat_window::ChatWindow::new(event_loop, &owner.window)
         })();
         match result {
-            Ok(window) => self.chat_windows.push(window),
+            Ok(window) => self.chat_window = Some(window),
             Err(error) => {
                 log::warn!("session host: could not open owned chat window: {error}");
                 self.ui.notice = Some(Notice::Error(transport::HostError::Unavailable));
@@ -251,7 +245,7 @@ impl Shell {
             self.repaint = Some(now);
         }
         self.snapshot = snapshot;
-        self.closed_chats.sync(&self.snapshot, self.closing.is_some());
+        self.chat_changed |= self.shared_chat.sync(&self.snapshot, self.closing.is_some());
         if self
             .notice_at
             .is_some_and(|at| now.saturating_duration_since(at) >= Duration::from_secs(4))
@@ -294,7 +288,7 @@ impl Shell {
             })
         });
         self.controller.set_workspace_foreground(
-            surface.window.has_focus() || worker_focused || self.chat_windows.iter().any(|window| window.focused()),
+            surface.window.has_focus() || worker_focused || self.chat_window.as_ref().is_some_and(|window| window.focused()),
         );
         let viewport = surface.viewport(self.world, self.context.pixels_per_point());
         let visible = surface.window.is_visible() == Some(true) && surface.window.is_minimized() == Some(false);
@@ -420,19 +414,16 @@ impl ApplicationHandler for Shell {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
-        if let Some(index) = self.chat_windows.iter().position(|window| window.id() == id) {
-            match self.chat_windows[index].event(event_loop, &event, &self.controller) {
+        if let Some(window) = self.chat_window.as_mut().filter(|window| window.id() == id) {
+            match window.event(event_loop, &event, &self.controller, &mut self.shared_chat, self.ui.modal_open()) {
                 Ok(false) => {}
                 Ok(true) => {
-                    let window = self.chat_windows.swap_remove(index);
-                    if matches!(event, WindowEvent::CloseRequested) {
-                        let snapshot = self.controller.snapshot();
-                        self.closed_chats.remember(window.into_ui(), &snapshot, self.closing.is_some());
-                    }
+                    self.chat_window = None;
                 }
                 Err(error) => {
                     log::warn!("session host: owned chat surface closed after native error: {error}");
-                    self.chat_windows.swap_remove(index);
+                    self.shared_chat.cancel_gestures();
+                    self.chat_window = None;
                     self.ui.notice = Some(Notice::Error(transport::HostError::Unavailable));
                     self.notice_at = Some(Instant::now());
                     self.request_repaint();
@@ -522,8 +513,8 @@ impl ApplicationHandler for Shell {
             return;
         }
         let mut next = self.next_poll;
-        for window in &mut self.chat_windows {
-            if let Some(repaint) = window.poll(&self.snapshot, self.closing.is_some(), now) {
+        if let Some(window) = &mut self.chat_window {
+            if let Some(repaint) = window.poll(std::mem::take(&mut self.chat_changed), self.ui.modal_open(), now) {
                 next = next.min(repaint);
             }
         }
@@ -545,8 +536,8 @@ impl ApplicationHandler for Shell {
         self.close_region();
         self.controller.shutdown();
         // Drop clipboard/surface while the platform connection still lives.
-        self.chat_windows.clear();
-        self.closed_chats.clear();
+        self.chat_window = None;
+        self.shared_chat.clear();
         self.surface = None;
     }
 }
