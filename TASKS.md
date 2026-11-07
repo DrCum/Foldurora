@@ -1,5 +1,14 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Explicit native Review from Attention (2026-11-07; no issue): a separately
+  fenced action captures an existing Nearby/Direct conversation for the broker’s
+  exact activation transaction. Retained request status survives ordinary unread
+  changes; navigation/close cancels only its original request, and lost source or
+  privacy authority purges the target even while closed. EN/FR/JA labels and
+  actual-egui source tests are authored. Independent review, compiled checks, CPU
+  captures, native and human acceptance remain pending. Passive Open/Dismiss and
+  existing native read-on-draw timing are unchanged.
+
 - 🔧 Native conversation Review protocol and receipts (2026-11-07; no issue):
   closed body-free captures/requests/receipts and a separate bounded immutable
   ledger bind the original chat source, policy, native observation and exact

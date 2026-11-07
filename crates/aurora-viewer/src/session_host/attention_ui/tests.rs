@@ -901,3 +901,362 @@ fn attention_filter_cells_keep_bounded_geometry_and_all_settings_reachable() {
         }
     }
 }
+
+// These exercise production egui gesture/status behavior with synthetic host
+// snapshots. A returned Action is an intent, not proof of broker grant/native
+// opening; those boundaries have their own independent transaction tests.
+fn review_fixture() -> Frames {
+    let mut f = Frames::new();
+    f.host.can_activate = true;
+    let key = ChatKey {
+        source: source(1),
+        conversation: direct(),
+    };
+    let chat = Arc::make_mut(&mut f.host.chat[0]);
+    chat.conversations
+        .iter_mut()
+        .find(|info| info.policy.key == key)
+        .unwrap()
+        .policy
+        .can_send = false;
+    chat.reads.get_mut(&direct()).unwrap().can_mark_read = false;
+    f.choose(key);
+    f
+}
+
+fn queued_review(f: &mut Frames, request: u64) -> ReviewCapture {
+    let Some(Action::Review(ticket)) = f.click(Id::unique("attention_review")) else {
+        panic!("fresh explicit production Review click");
+    };
+    let target = f.model.review_capture(ticket).unwrap();
+    f.body.review_queued(request, target);
+    target
+}
+
+fn review_operation(f: &mut Frames, target: ReviewCapture, request: u64, status: Status) {
+    f.host.review_operations = vec![review::Operation {
+        target,
+        request,
+        activation: Some(7),
+        status,
+    }];
+}
+
+#[test]
+fn attention_review_is_explicit_read_only_capacity_and_passive_controls_remain_separate() {
+    let mut f = review_fixture();
+    let before = f.host.chat[0].reads.clone();
+    let key = f.model.selected().unwrap();
+    let Some(Action::Review(ticket)) = f.click(Id::unique("attention_review")) else {
+        panic!("Review action")
+    };
+    assert_eq!(f.model.review_capture(ticket).unwrap().key, key);
+    assert_eq!(f.host.chat[0].reads, before, "UI emits no native Read or Send");
+    assert!(f.host.review_operations.is_empty(), "click alone supplies no broker completion");
+    assert!(matches!(f.click(Id::unique("attention_open")), Some(Action::OpenChat(_))));
+    assert!(matches!(
+        f.click(Id::unique(("attention_action", "next"))),
+        Some(Action::OpenChat(_))
+    ));
+    assert!(matches!(f.click(Id::unique("attention_dismiss")), Some(Action::Dismiss(_))));
+}
+
+#[test]
+fn attention_review_stale_press_policy_observation_source_and_reopen_cannot_retarget() {
+    for change in 0..5 {
+        let mut f = review_fixture();
+        let at = f.rect(Id::unique("attention_review")).center();
+        assert!(f.pointer(at, true).is_none());
+        let chat = Arc::make_mut(&mut f.host.chat[0]);
+        match change {
+            0 => {
+                chat.conversations
+                    .iter_mut()
+                    .find(|info| info.policy.key.conversation == direct())
+                    .unwrap()
+                    .policy
+                    .revision += 1
+            }
+            1 => chat.reads.get_mut(&direct()).unwrap().unread_revision += 1,
+            2 => chat.authenticated = false,
+            3 => {
+                f.model.select(ChatKey {
+                    source: source(2),
+                    conversation: direct(),
+                });
+            }
+            _ => f.body.cancel_gestures(),
+        }
+        assert!(f.pointer(at, false).is_none());
+        assert!(f.host.review_operations.is_empty());
+    }
+    let mut f = review_fixture();
+    let ticket = f.model.capture(f.model.selected().unwrap()).unwrap();
+    Arc::make_mut(&mut f.host.chat[0])
+        .reads
+        .get_mut(&direct())
+        .unwrap()
+        .observed
+        .through += 1;
+    f.model.sync(&f.host, &f.host.attention_preferences.preferences);
+    assert!(
+        f.model.review_capture(ticket).is_none(),
+        "click accessor never refreshes a stale observation"
+    );
+}
+
+#[test]
+fn attention_review_keyboard_and_accessibility_bind_last_painted_ticket_and_block_held_ime() {
+    for access in [false, true] {
+        let mut f = review_fixture();
+        let id = Id::unique("attention_review");
+        f.rect(id);
+        let widget = f.context.data(|data| data.get_temp::<Id>(id.with("widget"))).unwrap();
+        f.context.memory_mut(|memory| memory.request_focus(widget));
+        f.settle();
+        let action = if access {
+            f.show(vec![Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+                action: egui::accesskit::Action::Click,
+                target_tree: egui::accesskit::TreeId::ROOT,
+                target_node: widget.accesskit_id(),
+                data: None,
+            })])
+        } else {
+            assert!(f.show(vec![key_event(Key::Space, true, true)]).is_none());
+            assert!(f.show(vec![key_event(Key::Space, false, false)]).is_none());
+            assert!(f.show(vec![key_event(Key::Space, true, false)]).is_none());
+            f.show(vec![key_event(Key::Space, false, false)])
+        };
+        let Some(Action::Review(ticket)) = action else {
+            panic!("focused explicit Review gesture")
+        };
+        assert_eq!(ticket.key(), f.model.selected().unwrap());
+        assert!(
+            f.show(vec![
+                Event::Ime(egui::ImeEvent::Preedit {
+                    text: "あ".into(),
+                    active_range_chars: None
+                }),
+                key_event(Key::Enter, true, false)
+            ])
+            .is_none()
+        );
+        assert!(f.show(vec![key_event(Key::Enter, false, false)]).is_none());
+    }
+}
+
+#[test]
+fn attention_review_preference_and_focus_fences_disable_stale_review_without_completing_it() {
+    for save in [false, true] {
+        let mut f = review_fixture();
+        let target = queued_review(&mut f, 42);
+        let at = f.rect(Id::unique("attention_open")).center();
+        assert!(f.pointer(at, true).is_none());
+        if save {
+            f.body.queued(51, f.host.attention_preferences.preferences);
+            f.host.attention_preferences.operation = Some(PreferenceOperation {
+                ticket: 51,
+                preferences: f.host.attention_preferences.preferences,
+                error: None,
+            });
+        } else {
+            f.host.attention_preferences.writable = false;
+        }
+        assert!(f.pointer(at, false).is_none());
+        assert_eq!(f.body.reviewing.as_ref().unwrap().target, Some(target));
+        assert_eq!(f.body.reviewing.as_ref().unwrap().status, Status::WaitingForGrant);
+    }
+    let mut f = review_fixture();
+    let at = f.rect(Id::unique("attention_review")).center();
+    f.pointer(at, true);
+    assert!(f.pass(vec![Event::WindowFocused(false)], InputMode::Closing, false).is_none());
+    assert!(f.pass(vec![pointer_event(at, false)], InputMode::Live, true).is_none());
+}
+
+#[test]
+fn attention_review_unread_disappearance_or_advance_does_not_cancel_captured_request() {
+    let mut f = review_fixture();
+    let target = queued_review(&mut f, 42);
+    let read = Arc::make_mut(&mut f.host.chat[0]).reads.get_mut(&direct()).unwrap();
+    read.unread = 0;
+    read.unread_revision += 1;
+    read.observed.through += 3;
+    f.settle();
+    assert!(!f.model.rows().iter().any(|row| row.key == target.key));
+    assert_eq!(f.body.reviewing.as_ref().unwrap().target, Some(target));
+    assert!(f.body.reviewing.as_ref().unwrap().cancellation.is_none());
+    review_operation(&mut f, target, 42, Status::Dispatched);
+    f.settle();
+    assert!(f.has("host-attention-review-dispatched"));
+    review_operation(&mut f, target, 42, Status::Completed(ReviewOutcome::OpenedLocally));
+    f.settle();
+    assert!(f.has("host-attention-review-opened"));
+    assert!(f.body.review_to_cancel().is_none());
+}
+
+#[test]
+fn attention_review_navigation_and_cancel_capture_original_request_without_claiming_prevention() {
+    let mut f = review_fixture();
+    let target = queued_review(&mut f, 42);
+    let second = ChatKey {
+        source: source(2),
+        conversation: direct(),
+    };
+    let Some(Action::Select(ticket)) = f.click(row_id(&f.model, second)) else {
+        panic!("pending navigation crosses Shell cancellation boundary")
+    };
+    assert_eq!(ticket.key(), second);
+    assert_eq!(f.model.selected(), Some(target.key), "Shell cancels before changing selection");
+    assert_eq!(f.body.review_to_cancel(), Some(42));
+    f.body.review_cancelled(42, true);
+    assert!(f.model.select(ticket.key()));
+    f.settle();
+    assert!(f.has("host-attention-review-cancelling"));
+    assert_eq!(
+        f.body.reviewing.as_ref().unwrap().status,
+        Status::WaitingForGrant,
+        "local FIFO admission is not cancellation proof"
+    );
+    review_operation(&mut f, target, 42, Status::Uncertain);
+    f.settle();
+    assert!(f.has("host-attention-review-uncertain"));
+    assert!(!f.has("host-attention-review-cancelled"));
+    review_operation(&mut f, target, 42, Status::Completed(ReviewOutcome::OpenedLocally));
+    f.settle();
+    assert!(f.has("host-attention-review-opened"));
+}
+
+#[test]
+fn attention_review_cancel_button_and_failed_queue_keep_exact_request_and_truthful_status() {
+    let mut f = review_fixture();
+    let target = queued_review(&mut f, 42);
+    let Some(Action::CancelReview(request)) = f.click(Id::unique(("attention_review_cancel", 42_u64))) else {
+        panic!("explicit Cancel")
+    };
+    assert_eq!(request, 42);
+    f.body.review_cancelled(request, false);
+    f.settle();
+    assert!(f.has("host-attention-review-cancel-failed"));
+    assert_eq!(f.body.reviewing.as_ref().unwrap().status, Status::WaitingForGrant);
+    review_operation(&mut f, target, 42, Status::Cancelled);
+    f.settle();
+    assert!(f.has("host-attention-review-cancelled"));
+    assert!(!f.has("host-attention-review-cancel-failed"));
+    f.body.review_queued(43, target);
+    f.body.review_cancelled(42, true);
+    assert!(
+        f.body.reviewing.as_ref().unwrap().cancellation.is_none(),
+        "old Cancel cannot affect a newer request"
+    );
+}
+
+#[test]
+fn attention_review_hidden_authority_loss_purges_target_and_late_receipt_cannot_revive_it() {
+    for loss in 0..13 {
+        let mut f = review_fixture();
+        let target = queued_review(&mut f, 42);
+        review_operation(&mut f, target, 42, Status::Dispatched);
+        f.body.sync_review(&f.host);
+        f.body.cancel_gestures(); // closed native surface: no egui pass
+        let chat = Arc::make_mut(&mut f.host.chat[0]);
+        match loss {
+            0 => chat.authenticated = false,
+            1 => chat.live = false,
+            2 => {
+                chat.conversations
+                    .iter_mut()
+                    .find(|info| info.policy.key == target.key)
+                    .unwrap()
+                    .policy
+                    .can_read = false
+            }
+            3 => {
+                chat.conversations
+                    .iter_mut()
+                    .find(|info| info.policy.key == target.key)
+                    .unwrap()
+                    .policy
+                    .revision += 1
+            }
+            4 => chat.reads.get_mut(&direct()).unwrap().observed.epoch += 1,
+            5 => chat.reads.get_mut(&direct()).unwrap().observed.through -= 1,
+            6 => f.host.workers[0].reachable = false,
+            7 => chat.source.session.account = AccountKey::from_bytes([21; 32]).unwrap(),
+            8 => chat.source.session.grid = GridKey::from_bytes([22; 32]).unwrap(),
+            9 => chat.source.session.generation += 1,
+            10 => chat.source.session.session = SessionId::from_bytes([23; 16]).unwrap(),
+            11 => chat.source.lease_epoch += 1,
+            _ => {
+                chat.conversations
+                    .iter_mut()
+                    .find(|info| info.policy.key == target.key)
+                    .unwrap()
+                    .policy
+                    .lease_current = false
+            }
+        }
+        assert!(f.body.sync_review(&f.host));
+        assert!(f.body.reviewing.as_ref().unwrap().target.is_none());
+        assert_eq!(f.body.reviewing.as_ref().unwrap().status, Status::Uncertain);
+        // Restore identical authority and supply an old positive receipt. The
+        // closed UI's revoked capture stays purged; it cannot reappear on open.
+        let old = host();
+        f.host.chat[0] = old.chat[0].clone();
+        f.host.workers[0] = old.workers[0].clone();
+        review_operation(&mut f, target, 42, Status::Completed(ReviewOutcome::OpenedLocally));
+        f.settle();
+        assert!(f.body.reviewing.as_ref().unwrap().target.is_none());
+        assert!(f.has("host-attention-review-uncertain"));
+        assert!(!f.has("host-attention-review-opened"));
+    }
+}
+
+#[test]
+fn attention_review_unrelated_receipts_and_unsupported_platform_snapshot_supply_no_authority() {
+    let mut f = review_fixture();
+    let target = queued_review(&mut f, 42);
+    review_operation(&mut f, target, 41, Status::Completed(ReviewOutcome::OpenedLocally));
+    f.settle();
+    assert_eq!(f.body.reviewing.as_ref().unwrap().status, Status::WaitingForGrant);
+    let mut other = target;
+    other.key.source = source(2);
+    review_operation(&mut f, other, 42, Status::Completed(ReviewOutcome::OpenedLocally));
+    f.settle();
+    assert_eq!(f.body.reviewing.as_ref().unwrap().status, Status::WaitingForGrant);
+    f.host.can_activate = false;
+    f.settle();
+    assert!(!f.has("host-attention-review"), "unsupported broker publishes no Review affordance");
+    assert!(f.has("host-attention-open"));
+}
+
+#[test]
+fn attention_review_old_cancel_release_after_reopen_cannot_cancel_a_new_review() {
+    let mut f = review_fixture();
+    let target = queued_review(&mut f, 42);
+    let at = f.rect(Id::unique(("attention_review_cancel", 42_u64))).center();
+    assert!(f.pointer(at, true).is_none());
+    f.body.cancel_gestures();
+    f.body.review_queued(43, target);
+    assert!(f.pointer(at, false).is_none());
+    assert_eq!(f.body.review_to_cancel(), Some(43));
+    assert!(f.body.reviewing.as_ref().unwrap().cancellation.is_none());
+}
+
+#[test]
+fn attention_review_cancel_remains_available_during_preference_load_or_save_failure() {
+    for unavailable in [false, true] {
+        let mut f = review_fixture();
+        queued_review(&mut f, 42);
+        if unavailable {
+            f.host.attention_preferences.writable = false;
+            f.host.attention_preferences.error = Some("Synthetic preference failure".into());
+        } else {
+            f.body.queued(51, f.host.attention_preferences.preferences);
+        }
+        let Some(Action::CancelReview(request)) = f.click(Id::unique(("attention_review_cancel", 42_u64))) else {
+            panic!("preference IO must not disable cancellation of the captured Review");
+        };
+        assert_eq!(request, 42);
+        assert_eq!(f.body.reviewing.as_ref().unwrap().status, Status::WaitingForGrant);
+    }
+}

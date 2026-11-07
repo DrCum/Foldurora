@@ -11,7 +11,7 @@
 use super::attention_prefs::Preferences;
 use super::slots::SlotId;
 use super::transport::HostSnapshot;
-use aurora_session::chat::{ChatKey, Conversation, MAX_CONVERSATIONS, NativeChatPolicy, ReadMetadata};
+use aurora_session::chat::{ChatKey, Conversation, MAX_CONVERSATIONS, NativeChatPolicy, ReadMetadata, ReviewCapture};
 use aurora_session::{Label, MAX_WORKERS};
 use std::collections::VecDeque;
 
@@ -256,6 +256,20 @@ impl Attention {
             && self.rows.iter().any(|row| {
                 row.key == ticket.key && row.policy == ticket.policy && row.read == ticket.read && row.observation == ticket.observation
             })
+    }
+
+    /// The click retains the original policy/observation, never a refreshed
+    /// selected row. Across handoff, the broker independently validates the
+    /// catalogue incarnation rather than Attention's transient unread filter.
+    /// Port of reviewChat (tools/session-host/main.cpp, pinned above).
+    pub fn review_capture(&self, ticket: Ticket) -> Option<ReviewCapture> {
+        self.validate(ticket)
+            .then_some(ReviewCapture {
+                key: ticket.key,
+                policy_revision: ticket.policy.revision,
+                observed: ticket.read.observed,
+            })
+            .filter(|target| target.validate().is_ok())
     }
 
     /// Returns only an exact canonical Shared Chat target for Shell to open.

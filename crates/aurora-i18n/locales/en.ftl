@@ -13440,3 +13440,20 @@ host-attention-count = { $count ->
    *[other] { $count } unread conversations
     }
 host-attention-filters = Filters
+
+host-attention-review = Review in viewer
+host-attention-review-help = Activates this profile and opens its existing conversation in the viewer. The native view keeps its normal read behavior.
+host-attention-review-cancel = Cancel review
+host-attention-review-cancel-help = Cancels a pending review. Cancelling cannot undo a conversation that already opened.
+host-attention-review-waiting = Waiting for the captured profile to become active…
+host-attention-review-cancelling = Cancellation requested; waiting for the result…
+host-attention-review-dispatched = Review requested; waiting for the viewer’s result…
+host-attention-review-uncertain = The review result is unknown. It will not be repeated automatically.
+host-attention-review-opened = The conversation opened locally in the viewer.
+host-attention-review-foreground = Review did not open because the viewer was not in front.
+host-attention-review-expired = The review request expired.
+host-attention-review-unavailable = The captured conversation is no longer available for review.
+host-attention-review-cancelled = Review was cancelled before opening the conversation.
+host-attention-review-busy = Another viewer handoff or review is in progress.
+host-attention-review-failed = The review request could not be queued.
+host-attention-review-cancel-failed = Cancellation could not be queued. The review may still proceed.

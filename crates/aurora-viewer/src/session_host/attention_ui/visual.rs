@@ -356,6 +356,61 @@ fn short_layout(output: &Path) -> Vec<Value> {
     records
 }
 
+// Snapshot statuses are synthetic presentation fixtures. They prove no grant,
+// native opening, cancellation ordering or native read behavior.
+fn review_layout(output: &Path, name: &str, logical: [u32; 2], scale: f32) -> Vec<Value> {
+    let mut f = Fixture::new(logical, scale);
+    f.host.can_activate = true;
+    let mut records = vec![f.capture(
+        output,
+        &format!("{name}-review-01-ready"),
+        &[
+            aurora_i18n::tr!("host-attention-review"),
+            aurora_i18n::tr!("host-attention-open"),
+            SELECTED_TITLE,
+        ],
+        &[],
+    )];
+    let target = f
+        .model
+        .review_capture(f.model.capture(f.model.selected().unwrap()).unwrap())
+        .unwrap();
+    f.body.review_queued(42, target);
+    f.host.review_operations = vec![review::Operation {
+        target,
+        request: 42,
+        activation: Some(7),
+        status: Status::WaitingForGrant,
+    }];
+    records.push(f.capture(
+        output,
+        &format!("{name}-review-02-waiting"),
+        &[
+            aurora_i18n::tr!("host-attention-review-waiting"),
+            aurora_i18n::tr!("host-attention-review-cancel"),
+        ],
+        &[],
+    ));
+    f.body.review_cancelled(42, true);
+    records.push(f.capture(
+        output,
+        &format!("{name}-review-03-cancelling"),
+        &[aurora_i18n::tr!("host-attention-review-cancelling")],
+        &[aurora_i18n::tr!("host-attention-review-cancelled")],
+    ));
+    f.host.review_operations[0].status = Status::Uncertain;
+    records.push(f.capture(
+        output,
+        &format!("{name}-review-04-uncertain"),
+        &[
+            aurora_i18n::tr!("host-attention-review-uncertain"),
+            aurora_i18n::tr!("host-attention-open"),
+        ],
+        &[aurora_i18n::tr!("host-attention-review-cancelled")],
+    ));
+    records
+}
+
 #[test]
 #[ignore = "explicit synthetic CPU capture; run alone with AURORA_ATTENTION_VISUAL_DIR and AURORA_ATTENTION_VISUAL_LANGUAGE"]
 fn attention_cpu_visual_fixture() {
@@ -385,6 +440,9 @@ fn attention_cpu_visual_fixture() {
     let mut captures = layout(&output, "normal", [540, 580], 1.0);
     captures.extend(layout(&output, "narrow-150pct", [380, 580], 1.5));
     captures.extend(short_layout(&output));
+    captures.extend(review_layout(&output, "normal", [540, 580], 1.0));
+    captures.extend(review_layout(&output, "short", [380, 420], 1.0));
+    captures.extend(review_layout(&output, "narrow-150pct", [380, 580], 1.5));
     let manifest = json!({"fixture": "production AttentionUi + SoftwareWindow CPU painter, synthetic data", "locale": language, "native_window_acceptance": false, "network_or_grid": false, "no_transcript_or_draft_copy": true, "captures": captures});
     std::fs::write(output.join("manifest.json"), serde_json::to_vec_pretty(&manifest).unwrap()).unwrap();
 }

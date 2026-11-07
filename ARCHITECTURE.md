@@ -129,8 +129,14 @@ published values and exact attempted-operation status. `attention_ui.rs` binds
 input to last-painted identities and native release fences. Shell retains its
 model/UI across the disposable owned `attention_window.rs` CPU surface. Passive
 Open/Next/Previous flush delivered edits before `SharedChat::select_key` selects
-an exact existing conversation without fallback or worker commands. Native Review,
-offers, automatic reading and preview monitors remain separate increments.
+an exact existing conversation without fallback or worker commands. Explicit
+Review uses a separately validated Ticket capture and the broker's exact-grant
+transaction. Shell immediately covers the world after admission; retained UI
+status follows only that capture/request, independently of unread-row visibility.
+Navigation and closing cancel the exact original request, without claiming a
+post-dispatch cancellation succeeded. Source/policy/incarnation loss purges the
+retained target even while closed. Offers, automatic reading and preview monitors
+remain separate increments; Review source integration needs compiled/native checks.
 
 `ChatUi` owns a bounded policy-stamped draft map, including each editor's Undo
 state. A pass moves editor state into egui only for its exact source/conversation/

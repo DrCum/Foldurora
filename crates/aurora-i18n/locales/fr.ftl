@@ -13436,3 +13436,20 @@ host-attention-count = { $count ->
    *[other] { $count } conversations non lues
     }
 host-attention-filters = Filtres
+
+host-attention-review = Consulter dans le viewer
+host-attention-review-help = Active ce profil et ouvre sa conversation existante dans le viewer. La vue native conserve son comportement habituel de lecture.
+host-attention-review-cancel = Annuler la consultation
+host-attention-review-cancel-help = Annule une consultation en attente. Une conversation déjà ouverte ne peut pas être refermée par cette action.
+host-attention-review-waiting = En attente de l’activation du profil choisi…
+host-attention-review-cancelling = Annulation demandée ; en attente du résultat…
+host-attention-review-dispatched = Consultation demandée ; en attente du résultat du viewer…
+host-attention-review-uncertain = Le résultat de la consultation est inconnu. Elle ne sera pas relancée automatiquement.
+host-attention-review-opened = La conversation a été ouverte localement dans le viewer.
+host-attention-review-foreground = La consultation n’a pas abouti car le viewer n’était pas au premier plan.
+host-attention-review-expired = La demande de consultation a expiré.
+host-attention-review-unavailable = La conversation choisie n’est plus disponible pour consultation.
+host-attention-review-cancelled = La consultation a été annulée avant l’ouverture de la conversation.
+host-attention-review-busy = Une autre activation ou consultation est en cours.
+host-attention-review-failed = La demande de consultation n’a pas pu être mise en attente.
+host-attention-review-cancel-failed = L’annulation n’a pas pu être mise en attente. La consultation peut encore avoir lieu.

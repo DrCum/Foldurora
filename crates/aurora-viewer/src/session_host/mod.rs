@@ -153,6 +153,7 @@ impl Shell {
             },
             Action::Detach(worker) => self.controller.detach(worker),
             Action::Close => {
+                self.cancel_attention_review();
                 self.chat_window = None;
                 self.shared_chat.clear();
                 self.attention_window = None;
@@ -225,6 +226,10 @@ impl Shell {
                 .sync(&self.snapshot, &self.snapshot.attention_preferences.preferences);
         }
         self.attention_ui.sync(&self.attention, &self.snapshot.attention_preferences);
+        if self.attention_ui.sync_review(&self.snapshot) {
+            self.attention_changed = true;
+            self.request_repaint();
+        }
         self.ui.attention_count = self.attention.rows().len();
     }
 
@@ -263,6 +268,14 @@ impl Shell {
         }
     }
 
+    fn cancel_attention_review(&mut self) {
+        if let Some(request) = self.attention_ui.review_to_cancel() {
+            let queued = self.controller.cancel_review(request).is_ok();
+            self.attention_ui.review_cancelled(request, queued);
+            self.attention_changed = true;
+        }
+    }
+
     fn attention_action(&mut self, event_loop: &ActiveEventLoop, action: attention_ui::Action) {
         self.refresh_attention();
         if self.closing.is_some() || self.snapshot.stopped || self.ui.modal_open() {
@@ -272,10 +285,47 @@ impl Shell {
             return;
         }
         match action {
+            attention_ui::Action::Select(ticket) => {
+                if self.attention.validate(ticket) {
+                    self.cancel_attention_review();
+                    self.attention.select(ticket.key());
+                }
+            }
+            attention_ui::Action::Review(ticket) => {
+                let target = self.attention.review_capture(ticket);
+                let viewport = self.surface.as_ref().and_then(|surface| {
+                    review_viewport(
+                        &self.snapshot,
+                        surface.viewport(self.world, self.context.pixels_per_point()),
+                        surface.window.is_visible() == Some(true) && surface.window.is_minimized() == Some(false),
+                        self.layout_dirty || self.geometry_dirty || self.transition.waiting() || self.attention_ui.review_busy(),
+                    )
+                });
+                if let (Some(target), Some(viewport)) = (target, viewport) {
+                    match self.controller.review_conversation(target, viewport) {
+                        Ok(request) => {
+                            self.attention_ui.review_queued(request, target);
+                            // Admission is not an activation acknowledgment.
+                            // Cover immediately before an old snapshot can paint.
+                            self.transition.sent(request);
+                            self.close_region();
+                        }
+                        Err(_) => self.attention_ui.review_failed(),
+                    }
+                } else {
+                    self.attention_ui.review_failed();
+                }
+            }
+            attention_ui::Action::CancelReview(request) => {
+                if self.attention_ui.review_to_cancel() == Some(request) {
+                    self.cancel_attention_review();
+                }
+            }
             attention_ui::Action::OpenChat(ticket) => {
                 if !self.attention.validate(ticket) {
                     return;
                 }
+                self.cancel_attention_review();
                 // Drain edits already delivered to the old composer before the
                 // explicit source/conversation change; this pass cannot send.
                 if let Some(window) = &mut self.chat_window {
@@ -289,6 +339,9 @@ impl Shell {
                 }
             }
             attention_ui::Action::Dismiss(ticket) => {
+                if self.attention.validate(ticket) {
+                    self.cancel_attention_review();
+                }
                 if self.attention.dismiss(ticket) {
                     self.ui.attention_count = self.attention.rows().len();
                 }
@@ -460,6 +513,20 @@ impl Shell {
     }
 }
 
+/// Admission needs current native geometry, not the old acknowledged hole.
+/// The broker independently verifies the captured source and exact new grant.
+fn review_viewport(
+    snapshot: &HostSnapshot,
+    viewport: Option<aurora_session::HostedViewport>,
+    visible: bool,
+    blocked: bool,
+) -> Option<aurora_session::HostedViewport> {
+    if blocked || !visible || snapshot.stopped || !snapshot.can_activate || snapshot.pending.is_some() || snapshot.error.is_some() {
+        return None;
+    }
+    viewport.filter(|viewport| viewport.validate().is_ok())
+}
+
 fn presented_worker(
     snapshot: &HostSnapshot,
     viewport: Option<aurora_session::HostedViewport>,
@@ -543,14 +610,15 @@ impl ApplicationHandler for Shell {
             match result {
                 Ok((closed, action)) => {
                     if closed {
+                        self.cancel_attention_review();
                         self.attention_window = None;
-                    }
-                    if let Some(action) = action {
+                    } else if let Some(action) = action {
                         self.attention_action(event_loop, action);
                     }
                 }
                 Err(error) => {
                     log::warn!("session host: owned Attention surface closed after native error: {error}");
+                    self.cancel_attention_review();
                     self.attention_ui.surface_failed();
                     self.attention_window = None;
                     self.ui.notice = Some(Notice::Error(transport::HostError::Unavailable));
@@ -689,6 +757,7 @@ impl ApplicationHandler for Shell {
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        self.cancel_attention_review();
         self.close_region();
         self.controller.shutdown();
         // Drop clipboard/surface while the platform connection still lives.
@@ -704,6 +773,48 @@ impl ApplicationHandler for Shell {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn review_admission_needs_visible_current_native_geometry_without_competing_handoff() {
+        use aurora_session::{HostedViewport, PhysicalRect};
+        let viewport = HostedViewport {
+            host_window: 7,
+            rect: PhysicalRect {
+                x: -1600,
+                y: 80,
+                width: 1000,
+                height: 700,
+            },
+        };
+        let mut snapshot = HostSnapshot {
+            can_activate: true,
+            ..Default::default()
+        };
+        assert_eq!(review_viewport(&snapshot, Some(viewport), true, false), Some(viewport));
+        assert!(review_viewport(&snapshot, Some(viewport), false, false).is_none());
+        assert!(review_viewport(&snapshot, Some(viewport), true, true).is_none());
+        assert!(review_viewport(&snapshot, None, true, false).is_none());
+        assert!(
+            review_viewport(
+                &snapshot,
+                Some(HostedViewport {
+                    host_window: 0,
+                    ..viewport
+                }),
+                true,
+                false
+            )
+            .is_none()
+        );
+        snapshot.pending = Some(aurora_session::WorkerId::from_bytes([2; 16]).unwrap());
+        assert!(review_viewport(&snapshot, Some(viewport), true, false).is_none());
+        snapshot.pending = None;
+        snapshot.can_activate = false;
+        assert!(review_viewport(&snapshot, Some(viewport), true, false).is_none());
+        snapshot.can_activate = true;
+        snapshot.stopped = true;
+        assert!(review_viewport(&snapshot, Some(viewport), true, false).is_none());
+    }
 
     #[test]
     fn queued_local_intent_cannot_reopen_previous_acknowledged_world() {

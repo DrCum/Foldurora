@@ -1,20 +1,26 @@
 //! Owned CPU-window body for conversation reminders. Port of the Attention
-//! controls in tools/session-host/main.cpp; native Review is deliberately not
-//! exposed until its worker boundary is implemented. No transcript or draft
-//! belongs here: opening chat only navigates the canonical SharedChat model.
+//! controls in tools/session-host/main.cpp (abbe3cb0ca66ee2484f277219f6a27706fab7fc6).
+//! Passive opening only navigates SharedChat. Explicit native Review captures
+//! one target for the broker's exact-grant transaction; no transcript or draft
+//! belongs here, and this UI cannot itself activate, read or send.
 
 use super::attention::{Attention, Direction, Ticket};
 use super::attention_prefs::{PreferenceState, Preferences};
 use super::chat_ui::{self, InputMode};
+use super::review::{self, Status};
 use super::slots::SlotId;
 use super::transport::HostSnapshot;
 use crate::theme::Palette;
 use crate::ui::widgets;
+use aurora_session::chat::{ReviewCapture, ReviewOutcome};
 use egui::{Id, Key, RichText, vec2};
 
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Action {
     OpenChat(Ticket),
+    Select(Ticket),
+    Review(Ticket),
+    CancelReview(u64),
     Dismiss(Ticket),
     Preferences(Preferences),
 }
@@ -23,6 +29,8 @@ pub(super) enum Action {
 enum Intent {
     Select(Ticket),
     Open(Ticket),
+    Review(Ticket),
+    CancelReview(u64),
     Dismiss(Ticket),
     Preferences { base: Preferences, desired: Preferences },
 }
@@ -30,7 +38,8 @@ enum Intent {
 impl Intent {
     fn valid(self, model: &Attention, state: &PreferenceState) -> bool {
         match self {
-            Self::Select(ticket) | Self::Open(ticket) | Self::Dismiss(ticket) => model.validate(ticket),
+            Self::Select(ticket) | Self::Open(ticket) | Self::Review(ticket) | Self::Dismiss(ticket) => model.validate(ticket),
+            Self::CancelReview(request) => request != 0,
             Self::Preferences { base, .. } => state.writable && state.preferences == base,
         }
     }
@@ -65,6 +74,21 @@ enum Save {
     Queued { ticket: u64, preferences: Preferences },
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Cancellation {
+    Queued,
+    Failed,
+}
+
+struct Reviewing {
+    // Purged on source/policy/incarnation loss even while closed; a late
+    // receipt cannot restore revoked target authority or private identity.
+    target: Option<ReviewCapture>,
+    request: u64,
+    status: Status,
+    cancellation: Option<Cancellation>,
+}
+
 #[derive(Default)]
 pub(super) struct AttentionUi {
     gesture: Option<Gesture>,
@@ -75,9 +99,121 @@ pub(super) struct AttentionUi {
     painting: Vec<PaintedControl>,
     input_frame: Option<u64>,
     filters_open: bool,
+    reviewing: Option<Reviewing>,
+    review_failed: bool,
 }
 
 impl AttentionUi {
+    pub fn review_queued(&mut self, request: u64, target: ReviewCapture) {
+        self.reviewing = Some(Reviewing {
+            target: Some(target),
+            request,
+            status: Status::WaitingForGrant,
+            cancellation: None,
+        });
+        self.review_failed = false;
+        self.cancel_gestures();
+    }
+
+    pub fn review_failed(&mut self) {
+        self.review_failed = true;
+        self.cancel_gestures();
+    }
+
+    /// Neither a newer host intent nor a matching unread row acknowledges this
+    /// operation. Counts can advance or disappear during normal native paint.
+    pub fn sync_review(&mut self, snapshot: &HostSnapshot) -> bool {
+        let Some(current) = &mut self.reviewing else { return false };
+        let before = (current.target, current.status);
+        if let Some(target) = current.target {
+            let chat = snapshot.chat.iter().find(|chat| chat.source == target.key.source);
+            let valid = !snapshot.stopped
+                && snapshot
+                    .workers
+                    .iter()
+                    .any(|worker| worker.reachable && worker.binding == target.key.source.binding())
+                && chat.is_some_and(|chat| {
+                    review::current_target(
+                        target,
+                        Some(chat.source),
+                        chat.live,
+                        chat.authenticated,
+                        chat.conversations
+                            .iter()
+                            .take(aurora_session::chat::MAX_CONVERSATIONS)
+                            .find(|info| info.policy.key == target.key)
+                            .map(|info| info.policy),
+                        chat.reads.get(&target.key.conversation).copied(),
+                    )
+                });
+            if valid {
+                if let Some(operation) = snapshot
+                    .review_operations
+                    .iter()
+                    .take(review::MAX_OPERATIONS)
+                    .find(|operation| operation.request == current.request && operation.target == target)
+                {
+                    current.status = operation.status;
+                    if !matches!(current.status, Status::WaitingForGrant | Status::Dispatched | Status::Uncertain) {
+                        current.cancellation = None;
+                    }
+                }
+            } else {
+                current.target = None;
+                current.status = match current.status {
+                    Status::WaitingForGrant => Status::Unavailable,
+                    Status::Dispatched | Status::Uncertain => Status::Uncertain,
+                    status => status,
+                };
+                self.cancel_gestures();
+            }
+        }
+        self.reviewing
+            .as_ref()
+            .is_some_and(|current| before != (current.target, current.status))
+    }
+
+    pub fn review_busy(&self) -> bool {
+        self.reviewing
+            .as_ref()
+            .is_some_and(|current| matches!(current.status, Status::WaitingForGrant | Status::Dispatched))
+    }
+
+    pub fn review_to_cancel(&self) -> Option<u64> {
+        self.reviewing
+            .as_ref()
+            .filter(|current| matches!(current.status, Status::WaitingForGrant | Status::Dispatched | Status::Uncertain))
+            .map(|current| current.request)
+    }
+
+    pub fn review_cancelled(&mut self, request: u64, queued: bool) {
+        if let Some(current) = self.reviewing.as_mut().filter(|current| current.request == request) {
+            // FIFO admission cannot prove that cancellation beat native dispatch.
+            current.cancellation = Some(if queued { Cancellation::Queued } else { Cancellation::Failed });
+        }
+        self.cancel_gestures();
+    }
+
+    fn review_status(&self) -> Option<&'static str> {
+        let Some(current) = self.reviewing.as_ref() else {
+            return self.review_failed.then_some("host-attention-review-failed");
+        };
+        Some(match current.status {
+            Status::WaitingForGrant if current.cancellation == Some(Cancellation::Queued) => "host-attention-review-cancelling",
+            Status::WaitingForGrant => "host-attention-review-waiting",
+            Status::Dispatched => "host-attention-review-dispatched",
+            Status::Uncertain => "host-attention-review-uncertain",
+            Status::Completed(ReviewOutcome::OpenedLocally) => "host-attention-review-opened",
+            Status::Completed(ReviewOutcome::NotForeground) => "host-attention-review-foreground",
+            Status::Completed(ReviewOutcome::Expired) | Status::Expired => "host-attention-review-expired",
+            Status::Completed(ReviewOutcome::RejectedNative | ReviewOutcome::StaleTarget) | Status::Unavailable => {
+                "host-attention-review-unavailable"
+            }
+            Status::Cancelled => "host-attention-review-cancelled",
+            Status::Busy => "host-attention-review-busy",
+        })
+    }
+
     /// Shell calls this on native focus loss, modality and surface disposal,
     /// including when no egui pass will run before reopening.
     pub fn cancel_gestures(&mut self) {
@@ -127,8 +263,16 @@ impl AttentionUi {
     pub fn sync(&mut self, model: &Attention, state: &PreferenceState) {
         self.sync_preferences(state);
         if !state.writable || self.save.is_some() {
-            self.gesture = None;
-            self.controls.clear();
+            // Preference IO cannot strand an already admitted Review. Cancel
+            // carries its original request and needs no row/filter authority.
+            if self
+                .gesture
+                .as_ref()
+                .is_some_and(|gesture| !matches!(gesture.intent, Intent::CancelReview(_)))
+            {
+                self.gesture = None;
+            }
+            self.controls.retain(|control| matches!(control.intent, Intent::CancelReview(_)));
         } else {
             if self.gesture.as_ref().is_some_and(|gesture| !gesture.intent.valid(model, state)) {
                 self.gesture = None;
@@ -148,6 +292,7 @@ impl AttentionUi {
     ) -> Option<Action> {
         let state = &snapshot.attention_preferences;
         self.sync(model, state);
+        self.sync_review(snapshot);
         let available = state.writable && !snapshot.stopped;
         let focused = ui.input(|input| input.focused);
         let focus_changed = ui.input(|input| input.events.iter().any(|event| matches!(event, egui::Event::WindowFocused(_))));
@@ -171,19 +316,21 @@ impl AttentionUi {
         if !focused || focus_changed || mode == InputMode::Closing {
             self.cancel_gestures();
         }
-        let live = available
-            && self.save.is_none()
-            && mode == InputMode::Live
+        let input_live = mode == InputMode::Live
             && focused
             && !focus_changed
             && !was_composing
             && !self.ime_composing
             && !ime_event
             && !egui::Popup::is_any_open(ui.ctx());
-        if !live || self.gesture.as_ref().is_some_and(|gesture| !gesture.intent.valid(model, state)) {
+        let live = available && self.save.is_none() && input_live;
+        let cancel_live = !snapshot.stopped && input_live;
+        if self.gesture.as_ref().is_some_and(|gesture| {
+            !gesture.intent.valid(model, state) || !(live || (cancel_live && matches!(gesture.intent, Intent::CancelReview(_))))
+        }) {
             self.gesture = None;
         }
-        self.capture_press(ui, model, state, live);
+        self.capture_press(ui, model, state, live, cancel_live);
         self.painting.clear();
         let mut activated = None;
         egui::Panel::top(Id::unique("attention_filters"))
@@ -348,6 +495,25 @@ impl AttentionUi {
                         live,
                         &mut activated,
                     );
+                    // can_activate is published only by the supported hosted
+                    // platform. Unsupported hosts expose no inert Review feature.
+                    if snapshot.can_activate {
+                        let enabled = ticket.is_some() && snapshot.pending.is_none() && !self.review_busy();
+                        let response = ui
+                            .push_id("attention_review", |ui| {
+                                ui.add_enabled(enabled, egui::Button::new(aurora_i18n::tr!("host-attention-review")))
+                                    .on_hover_text(aurora_i18n::tr!("host-attention-review-help"))
+                            })
+                            .inner;
+                        self.control(
+                            ui,
+                            response,
+                            Id::unique("attention_review"),
+                            ticket.map(Intent::Review),
+                            live,
+                            &mut activated,
+                        );
+                    }
                     ui.horizontal_wrapped(|ui| {
                         for (name, direction, label) in [
                             ("previous", Direction::Previous, aurora_i18n::tr!("host-attention-previous")),
@@ -376,6 +542,48 @@ impl AttentionUi {
                         );
                     });
                 });
+                if let Some(key) = self.review_status() {
+                    ui.label(RichText::new(aurora_i18n::text(key)).small().color(p.muted));
+                }
+                if self.review_failed && self.reviewing.is_some() {
+                    ui.label(
+                        RichText::new(aurora_i18n::tr!("host-attention-review-failed"))
+                            .small()
+                            .color(p.warn),
+                    );
+                }
+                if self
+                    .reviewing
+                    .as_ref()
+                    .is_some_and(|current| current.cancellation == Some(Cancellation::Failed))
+                {
+                    ui.label(
+                        RichText::new(aurora_i18n::tr!("host-attention-review-cancel-failed"))
+                            .small()
+                            .color(p.warn),
+                    );
+                }
+                if let Some(request) = self.review_to_cancel() {
+                    let enabled = cancel_live
+                        && self
+                            .reviewing
+                            .as_ref()
+                            .is_some_and(|current| current.cancellation != Some(Cancellation::Queued));
+                    let response = ui
+                        .push_id(("attention_review_cancel", request), |ui| {
+                            ui.add_enabled(enabled, egui::Button::new(aurora_i18n::tr!("host-attention-review-cancel")))
+                                .on_hover_text(aurora_i18n::tr!("host-attention-review-cancel-help"))
+                        })
+                        .inner;
+                    self.control(
+                        ui,
+                        response,
+                        Id::unique(("attention_review_cancel", request)),
+                        Some(Intent::CancelReview(request)),
+                        enabled,
+                        &mut activated,
+                    );
+                }
                 ui.label(
                     RichText::new(aurora_i18n::tr!("host-attention-passive-help"))
                         .small()
@@ -440,12 +648,15 @@ impl AttentionUi {
         if let Some(intent) = activated.filter(|intent| intent.valid(model, state)) {
             self.gesture = None;
             return match intent {
+                Intent::Select(ticket) if self.review_to_cancel().is_some() => Some(Action::Select(ticket)),
                 Intent::Select(ticket) => {
                     model.select(ticket.key());
                     ui.ctx().request_repaint();
                     None
                 }
                 Intent::Open(ticket) => Some(Action::OpenChat(ticket)),
+                Intent::Review(ticket) => Some(Action::Review(ticket)),
+                Intent::CancelReview(request) => Some(Action::CancelReview(request)),
                 Intent::Dismiss(ticket) => Some(Action::Dismiss(ticket)),
                 Intent::Preferences { desired, .. } => {
                     self.save = Some(Save::Admitting);
@@ -556,7 +767,7 @@ impl AttentionUi {
         }
     }
 
-    fn capture_press(&mut self, ui: &egui::Ui, model: &Attention, state: &PreferenceState, live: bool) {
+    fn capture_press(&mut self, ui: &egui::Ui, model: &Attention, state: &PreferenceState, live: bool, cancel_live: bool) {
         // A native press can arrive before a new snapshot replaces what was
         // painted. Resolve it against those previous pixels and their exact
         // ticket, then validate against current authority. Never lend an old
@@ -568,7 +779,7 @@ impl AttentionUi {
             return;
         }
         self.input_frame = Some(frame);
-        if !live || self.gesture.is_some() {
+        if !(live || cancel_live) || self.gesture.is_some() {
             return;
         }
         let press = ui.input(|input| {
@@ -628,7 +839,9 @@ impl AttentionUi {
                     .map(|control| (0, Trigger::Accessibility, control))
             })
         };
-        if let Some((press_index, trigger, control)) = captured.filter(|(_, _, control)| control.intent.valid(model, state)) {
+        if let Some((press_index, trigger, control)) = captured.filter(|(_, _, control)| {
+            control.intent.valid(model, state) && (live || (cancel_live && matches!(control.intent, Intent::CancelReview(_))))
+        }) {
             self.gesture = Some(Gesture {
                 widget: control.id,
                 trigger,
