@@ -803,13 +803,24 @@ mod tests {
         let mut backend = WorkerChat::default();
         reconcile_read_interest(&mut native.world);
         let original = native.world.read_ledger.state(None).unwrap();
+        native.world.apply(aurora_net::NetEvent::Chat(aurora_net::ChatMessage {
+            from_name: "Synthetic Owner".into(),
+            source_id: OWNER,
+            owner_id: OWNER,
+            source_type: aurora_net::ChatSourceType::Agent,
+            chat_type: ChatType::Normal,
+            position: glam::Vec3::ZERO,
+            message: "own nearby echo".into(),
+        }));
+        assert_eq!(native.world.read_ledger.state(None).unwrap().incoming, original.incoming);
+        assert!(native.world.read_ledger.state(None).unwrap().revision > original.revision);
         native.world.system_message("local notice");
         assert_eq!(native.world.read_ledger.state(None).unwrap().incoming, original.incoming);
         native.world.quiet_automated_chat = true;
         let badge = native.world.chat_badge;
         native.world.system_message("quiet local notice");
         assert_eq!(native.world.chat_badge, badge);
-        assert_eq!(native.world.chat_unread, 2);
+        assert_eq!(native.world.chat_unread, 3);
         let observed = capture_read(&mut native, &mut backend, Conversation::Nearby, 1);
         assert_eq!(native.read_metadata(Conversation::Nearby).unwrap().unread, badge as u64);
         apply_read(&mut native, &mut backend, observed, 11);

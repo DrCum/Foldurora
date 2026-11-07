@@ -531,7 +531,7 @@ impl WorkerChat {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aurora_session::chat::{ChatDrafts, ChatHistory, LineKind, SendRequest};
+    use aurora_session::chat::{ChatDrafts, ChatHistory, LineKind, MAX_TEXT_BYTES, SendRequest};
     use aurora_session::{
         AccountKey, ConversationId, GridKey, HostId, InstallationId, SessionId, SessionIdentity, WorkerId, WorkerIdentity,
     };
