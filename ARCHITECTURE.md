@@ -329,7 +329,11 @@ publication and reserve its own credited copies.
 PreviewLayout and narrow CaptureClaim accessors expose checked geometry/policy
 agreement without minting capture authority. SourceImages::sync_observed uses
 the original authenticated host receipt time, so rereading a cached policy never
-renews its deadline. Future host service work must use one 32 MiB raw pool,
+renews its deadline. SourceImages::cancel_capture consumes only an exactly
+matching captured pending claim, including its owner instance and full source/
+policy/connection/demand/request/geometry identity. It clears no retained image,
+authority, credit or high-water mark and sends no peer cancellation; wrong claims
+have no effect. Its pure regression module is preview_image/cancel_tests.rs. Future host service work must use one 32 MiB raw pool,
 reserve 24 MiB for credited UI copies and 8 MiB for framing/allocator headroom;
 worker work must keep the existing shared renderer pool within 7 MiB and all
 framing/auth/commands within the remaining 1 MiB of its 8 MiB total. Already-

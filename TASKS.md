@@ -151,6 +151,13 @@
     are authored but unrun. Both service and transport stay cfg(test); no App,
     Broker scheduling, bootstrap endpoint or UI/capture enablement is connected.
 
+- 🔧 Exact pending-image cancellation prerequisite (2026-11-07; no issue):
+  SourceImages accepts the immutable full CaptureClaim to clear only that local
+  unadmitted request. Stale/foreign owner request1 and individual scope mismatches
+  preserve fresh pending work; exact cancellation keeps admitted history, policy,
+  credit and request/sequence/connection/demand high-water marks. Pure tests are
+  authored and unrun; no native command, endpoint or producer is enabled.
+
 - 🔧 Monitor image prerequisites (2026-11-07; no issue): pure bounded capture
   geometry, callback/request identities and byte credits; exact source/policy
   metadata admits current Active captures and retains only already-admitted

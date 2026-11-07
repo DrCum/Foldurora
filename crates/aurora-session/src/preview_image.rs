@@ -15,6 +15,8 @@ mod layout;
 pub use layout::PreviewLayout;
 
 #[cfg(test)]
+mod cancel_tests;
+#[cfg(test)]
 mod prerequisite_tests;
 
 pub const MAX_IMAGE_BYTES: usize = 640 * 360 * 4;
@@ -764,6 +766,18 @@ impl SourceImages {
         self.next_request = next;
         self.pending = Some(Pending { claim, sent: now });
         Ok(claim)
+    }
+
+    /// Cancel only the exact captured local pending request. This clears no
+    /// retained history or authority and does not stop already-issued peer work.
+    /// No clock is advanced: a stale cancellation cannot expire unrelated work.
+    pub fn cancel_capture(&mut self, claim: CaptureClaim) -> bool {
+        if self.pending.as_ref().is_some_and(|pending| pending.claim == claim) {
+            self.pending = None;
+            true
+        } else {
+            false
+        }
     }
 
     /// Metadata admission follows authenticated payload verification. Credit
