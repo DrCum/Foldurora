@@ -143,6 +143,11 @@ pub(super) struct PrivateFrame {
     output: egui::FullOutput,
 }
 impl PrivateFrame {
+    /// Inspect shapes/text/ordinary atlas deltas for CPU fixtures. Private
+    /// pixels and the sealed presentation ticket are never exposed here.
+    pub(super) fn output(&self) -> &egui::FullOutput {
+        &self.output
+    }
     fn into_parts(mut self) -> (PrivateFrameTicket, egui::FullOutput) {
         // This sealed move-only frame is consumed once; the copied local fields
         // cannot be used after this method returns. Context clones carry no pixels.

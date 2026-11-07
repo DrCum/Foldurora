@@ -113,6 +113,7 @@ fn private_cpu_painter_borrows_real_pixels_without_cache_or_texture_manager_entr
     let budget = UiPixelBudget::new();
     let mut slot = slot(&budget);
     let (context, frame) = frame(&mut slot);
+    assert!(!frame.output().shapes.is_empty());
     let (ticket, mut output) = frame.into_parts();
     assert!(!output.textures_delta.set.contains_key(&slot.texture));
     assert!(context.tex_manager().read().meta(slot.texture).is_none());
