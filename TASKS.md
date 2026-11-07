@@ -1,5 +1,16 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Disabled monitor foundations integration (2026-11-07; no issue): combine
+  reviewed renderer publication/physical-retention guards, CPU-only native policy
+  observations, checked optional bootstrap/schema and owned sender prerequisites,
+  and the test-only monitor binding model. Combined source checks and independent
+  integration review do not establish compilation or runtime acceptance; all new
+  foundation regressions remain unrun in this checkpoint. The immutable 024
+  validation and earlier evidence retain their separate scope. New launch configs
+  keep preview=None, native remembered demand stays false, and transport/model
+  registration stays cfg(test). No image endpoint/service, native capture request,
+  monitor body/window, CPU image surface or inactive GPU rendering is enabled.
+
 - 🔧 Pure monitor binding prerequisite (2026-11-07; no issue): four fixed
   views plus cycling, exact typed source/slot mapping to canonical ChatSurface,
   explicit current-Active Open, checked binding/input identities, captured
@@ -25,10 +36,11 @@
   original policy-receipt expiry, optional private bootstrap size/fallback checks,
   a moved renderer-allocation sender and fresh role attachment. Its private fake
   publication fixtures prove framing/resources only; actual render guards remain
-  renderer-owned. Independent source review is pending for this increment.
+  renderer-owned. Component source review cleared this increment; combined
+  compilation, execution and integration review remain separate.
   Transport registration remains cfg(test), new launches keep preview absent:
-  no endpoint, service thread, native adapter, image surface, capture enablement
-  or inactive rendering is shipped. Future service integration must implement
+  no endpoint, service thread, native capture producer, image surface, capture
+  enablement or inactive rendering is shipped. Future service integration must implement
   exact stop/ACK/single-worker-close ordering, source/view/intent fences and the
   host 32/24/8 MiB plus worker 7/1 MiB partitions; auth loss purges history.
 
@@ -38,18 +50,22 @@
   last-active history. Source loss/privacy/expiry invalidate held metadata,
   while four fixed plus cycling views deduplicate into up to five inactive
   demands under the existing 10 FPS aggregate budget. Fake-backend/model tests
-  are authored; execution and independent review remain pending. No renderer,
-  App, image IPC, native command or parked rendering path is enabled.
+  are authored; component source review is clear and combined execution remains
+  pending. No App capture requester, image service, native image command or
+  parked rendering path is enabled.
   - 🔧 Render-owner capture prerequisite: explicit requests can sample a tiny
     target from a supported ordinary frame without the blocking photo path.
     Nonblocking map maintenance, token/generation fences and bounded byte
     lifetimes are authored, with fake-owner tests and an ignored synthetic GPU
-    color/crop fixture. Source review, compilation and GPU execution remain
-    pending; no native export authority or host monitor is enabled.
+    color/crop fixture. Component source review is clear; combined compilation
+    and positive GPU validation remain separate. Earlier exact 7cd execution
+    exposed a repeated-unmap validation abort; the source-reviewed mapping fix
+    is preserved from 024. No native capture producer or host monitor is enabled.
     Matching-layout target/staging reuse waits for unmapping and exact submitted
     work retirement; physical cache credit is independent of request tokens.
     All photo modes and tiled contexts veto capture. Fake allocation/retirement
-    tests and four-format synthetic GPU coverage are authored, not executed.
+    tests and four-format synthetic GPU coverage are authored; matching positive
+    execution is not claimed by this combined source checkpoint.
 
 - 🔧 Native LastActive permit prerequisite (2026-11-07; no issue): shared strict
   managed source/grant authority, optional actual renderer boundary association,

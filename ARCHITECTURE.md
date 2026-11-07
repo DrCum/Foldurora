@@ -232,27 +232,51 @@ worker work must keep the existing shared renderer pool within 7 MiB and all
 framing/auth/commands within the remaining 1 MiB of its 8 MiB total. Already-
 admitted history uses retention fences, never current Active/capture fences.
 
+The combined monitor foundation remains disabled at its production boundaries:
+new_config leaves optional preview bootstrap absent, native remembered demand
+is false, and preview_transport plus monitor_model are cfg(test)-only. No image
+service, monitor body/window or CPU image surface is registered. CPU-only native
+policy observation is present; no App call requests a viewport capture or emits
+pixels. Component source reviews and historical baseline validation do not
+establish compiled/runtime acceptance of this combined checkpoint.
+
+Renderer publication guards retain only atomic fences and the original result
+deadline, exact queue/device/token identity and latest-ticket fence. Physical
+retention has a separate atomic witness; ordinary cancel/fence/XR exclusion does
+not retire admitted history. The read-only physical-boundary query exposes the
+actual frontend surface epoch/size independently of strict capture support.
+Physical resize/reconfiguration/loss/failure and frontend destruction revoke
+retention; helper backend destruction does not own that frontend authority.
+Stage2 mapping release is tracked independently of map request/completion:
+packing, cancellation and Drop release a live/pending map once, and never unmap
+an idle cache. Submitted-work/map callback credit and reuse fences stay intact.
+The prior 7cd synthetic GPU abort and the root-owned 024 positive-validation
+attempt have separate receipts; this integration reports no runtime result.
+
 `aurora-render::viewport_capture` provides pure checked geometry, nonreused
 request/callback identities and byte-credit lifetimes for a future asynchronous
 readback. `aurora-session::preview_image` models exact-source image metadata,
 Active-only admission, already-admitted last-active retention, expiry and
 revocation. Its deduplicated preview budget can represent five inactive sources
-when no world is Active. These models perform no capture, socket or GPU work;
-renderer/App integration, authenticated image delivery and native validation
-remain separate prerequisites. They do not enable parked world rendering.
+when no world is Active. These pure models perform no capture, socket or GPU
+work. Renderer hooks and CPU-only native observations are integrated as source
+prerequisites; authenticated service/image delivery and compiled/native
+validation remain separate. They do not enable parked world rendering.
 
 The source-only `viewport_capture_gpu` integration shares that single queue
 between the renderer frontend and render owner through nonblocking state access
 and an atomic revocation generation. Explicit requests attach only to an
 ordinary frame and sample a bounded target before labels/HUD/UI; map completion
 uses separate maintenance jobs and the capacity-one queue outcome. A submitted
-work callback retains resource credit after map cancellation. No App/native
-permission adapter or image lane enables captures yet. Existing synchronous
-photo APIs remain separate; physical GPU/color/driver checks are pending.
+work callback retains resource credit after map cancellation. The native CPU
+permission adapter observes policy only; no App requester or image lane enables
+captures. Existing synchronous photo APIs remain separate; physical
+GPU/color/driver validation remains separately scoped.
 Renderer replacement shares the process's worker image-credit pool, so an old
 callback or image cannot evade the bound by outliving its renderer.
-The future native adapter must observe the capture generation on CPU ticks,
-including without pending images, to propagate backend surface-loss revocation.
+The CPU-only native adapter observes capture publication and physical retention
+separately on CPU ticks, including without pending images. Continuous IO-side
+composition and actual image delivery still require their later service owner.
 One matching target/staging pair, uniform and sampler remain cached after
 unmapping and exact GPU submission retirement. A token-independent allocation
 lease charges that physical cache and submitted/map callbacks; each new capture
