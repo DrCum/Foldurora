@@ -201,14 +201,17 @@ impl HostUi {
                                 let opening = snapshot.opening.contains(&account.key);
                                 let response = ui
                                     .add_enabled_ui(!closing && !snapshot.stopped && !opening && login_slot.is_some(), |ui| {
-                                        widgets::action_button(
-                                            ui,
-                                            p,
-                                            "login-2",
-                                            aurora_i18n::tr!("host-open-login"),
-                                            ActionKind::Flat,
-                                            vec2(0.0, 28.0),
-                                        )
+                                        ui.push_id(("host_account_open", login_slot), |ui| {
+                                            widgets::action_button(
+                                                ui,
+                                                p,
+                                                "login-2",
+                                                aurora_i18n::tr!("host-open-login"),
+                                                ActionKind::Flat,
+                                                vec2(0.0, 28.0),
+                                            )
+                                        })
+                                        .inner
                                     })
                                     .inner;
                                 #[cfg(test)]
@@ -1077,6 +1080,47 @@ mod tests {
         assert_eq!(
             frames.click(&snapshot, Id::unique(("host_open", account)), true),
             Some(Action::OpenLogin(Some(account), Some(SlotId::try_from(0).unwrap())))
+        );
+        let at = frames
+            .ctx
+            .data(|data| data.get_temp::<Rect>(Id::unique(("host_open", account))))
+            .unwrap()
+            .center();
+        frames.show(&snapshot, vec![egui::Event::PointerMoved(at)], true);
+        assert_eq!(
+            frames.show(
+                &snapshot,
+                vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                true
+            ),
+            None
+        );
+        let other_slot = SlotId::try_from(4).unwrap();
+        frames.ui.selected_slot = Some(other_slot);
+        frames.ui.selected = None;
+        frames.show(&snapshot, Vec::new(), true);
+        assert_eq!(
+            frames.show(
+                &snapshot,
+                vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                true
+            ),
+            None,
+            "a pending saved-account launch gesture must not select a replacement profile"
+        );
+        assert_eq!(
+            frames.click(&snapshot, Id::unique(("host_open", account)), true),
+            Some(Action::OpenLogin(Some(account), Some(other_slot)))
         );
         snapshot.opening.push(account);
         assert_eq!(frames.click(&snapshot, Id::unique(("host_open", account)), true), None);
