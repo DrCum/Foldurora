@@ -1,5 +1,16 @@
 # Aurora Viewer architecture
 
+`settings/profile_seed.rs` and its strict JSON reader are a cfg(test)-only
+selective-profile prerequisite: four closed typed presentation/control families,
+explicit field lists, current native defaults, duplicate/depth/node/byte limits,
+selected-field refusal and semantic preservation of unselected target JSON values.
+The seed retains no raw source, path, account, unknown value or native authority;
+Debug and summaries contain counters/enums only. `settings/presentation.rs` shares
+the existing ordinary normalization ranges without changing their call order.
+No profile IO, management button, first-open prompt, login or copy operation is
+enabled by this prerequisite. The actual stopped-profile adapter/Manage consumer
+and its one-worker lifetime/resource inventory follow independent source review.
+
 `keybinds::Input` persists Middle/Back/Forward mouse identities independently of
 UI locale. Serde accepts earlier EN/FR/JA token aliases and emits the stable
 existing English tokens; constructors and native defaults use those same values.
