@@ -1,6 +1,6 @@
 # Aurora Viewer — task tracking
 
-- 🔧 Viewfinder dock and input (human report, 2026-11-07; task
+- 🔧 Viewfinder dock and input (human report, 2026-11-07; task `camera-input-dock`; no issue): keep the vertical dock at the selected control canvas's right edge, bound header mouse areas, keep guide/ring input independent, and preserve exact toolbar restriction scope. Actual egui tests reproduced the oversized old header, blocked guide, and simultaneous lens/container wheel action; all six initial integrated checks pass after the fixes. Very short canvases retain positive scroll bounds and clipped decoration; ring/value/pad wheel belongs to the controls, with scrollbar/touch access retained. Final full-workspace checks, the expanded header-width matrix, normal build and native Windows/camera acceptance remain pending. See [the candidate guide](docs/FOLDURORA.md).
   `camera-input-dock`; no issue): constrain the centred dock column to the
   shutter's width so its foreground area no longer covers world input. Anchor
   it at the right edge of the selected control canvas, retaining unrestricted

@@ -1,5 +1,51 @@
 # Foldurora workspace and character preview
 
+## Photo viewfinder interaction follow-up
+
+The `fix/camera-controls-integration` candidate follows frozen `388b299c`; it is
+separate from that verified upstream package and the earlier `f5ae21d5` photo
+package. Use the exact commit and version in the new build's manifest. Validation
+belongs to that source; the sections below retain earlier checkpoints.
+
+The reported right-half scene remains bounded. This follow-up gives the vertical
+dock its own narrow area at the selected control canvas's right edge, bounds the
+status header to its actual row, and keeps the guide button and lens ring out of
+other controls' mouse areas. Small canvases scroll rather than form negative
+bounds. Decorative controls are clipped to their selected canvas; scene guides
+and AF overlays still follow the world. The existing toolbar restriction setting
+continues to choose world-only or full-workspace controls.
+
+Wheel input over the lens ring, bottom values and camera pad belongs to those
+controls. Their outer containers retain scrollbars/touch access without also
+scrolling for the same wheel gesture. The dock and ordinary drawers keep their
+own scrolling. No camera movement, focal/aperture semantics, renderer, photo
+source/output aspect or worker authority is changed.
+
+For the native retest:
+
+1. Use ordinary camera mode with **Free camera** off. In the viewfinder, **Tab**
+   opens the quick menu containing that toggle; it defaults off. Over the scene,
+   plain wheel should move the ordinary camera, while Alt+wheel adjusts the
+   underlined bottom value. Select a middle focal length such as 50 mm so limits
+   do not hide a change. Plain wheel retains its existing free-camera exception.
+2. Select the focal value, then try wheel over the ring and its minus/plus
+   buttons. Open/close Settings, change aperture/focus/a look, then reselect focal
+   and repeat. The selected underlined value determines the ring's function.
+3. Change the guide from the upper-left control. The upper-right status row must
+   not intercept it. Narrow windows may put status on a separate row.
+4. Take/save a photo, wait for preview work to finish, and repeat the controls.
+   Check both toolbar restriction choices, the right-half world and UI scaling.
+   Other floaters continue to use the native workspace.
+
+Automated coverage uses the actual egui viewfinder with duplicate layout passes,
+real pointer/wheel events, narrow and very short canvases, fractional DPI/zoom,
+drawer/dial changes, control clipping, and restoration after a short viewport.
+The corrected regression fails against the old production header's oversized
+mouse area; separate checks reproduced the blocked guide and simultaneous
+ring/container wheel action before their fixes. Final compiled/runtime results
+are recorded in the coordination ledger and candidate receipts, not inherited
+from earlier packages. Native Windows and human grid acceptance remain pending.
+
 ## Selective upstream catch-up — 7 November 2026 UTC
 
 Author branch `sync/upstream-hud-alpha-20261107` follows exact pushed candidate
