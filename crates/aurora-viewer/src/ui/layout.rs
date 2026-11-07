@@ -1565,7 +1565,18 @@ mod tests {
         let baseline = workspace_capture(&ctx);
         let original = ctx.memory(|m| m.area_rect(Id::unique("inventory"))).unwrap();
         workspace_preview(&ctx, Some(baseline));
-        let from = original.min + Vec2::new(170.0, 16.0);
+        let mut target = baseline;
+        target[0].as_mut().unwrap().offset[0] += 80.0;
+        workspace_apply(&ctx, &target);
+        for n in 5..8 {
+            workspace_native_frame(&ctx, n, &mut draft);
+        }
+        let preview = ctx.memory(|m| m.area_rect(Id::unique("inventory"))).unwrap();
+        assert!(
+            (preview.left() - original.left()).abs() > 50.0,
+            "actual Preview placement precedes the drag"
+        );
+        let from = preview.min + Vec2::new(170.0, 16.0);
         let to = from + Vec2::new(240.0, 60.0);
         let press = |pos, pressed| egui::Event::PointerButton {
             pos,
@@ -1573,25 +1584,29 @@ mod tests {
             pressed,
             modifiers: egui::Modifiers::NONE,
         };
-        workspace_native_frame_events(&ctx, 5, &mut draft, vec![egui::Event::PointerMoved(from), press(from, true)]);
-        for n in 6..10 {
+        workspace_native_frame_events(&ctx, 8, &mut draft, vec![egui::Event::PointerMoved(from), press(from, true)]);
+        for n in 9..13 {
             workspace_native_frame_events(&ctx, n, &mut draft, vec![egui::Event::PointerMoved(to)]);
         }
         assert!(ctx.dragged_id().is_some());
         assert!(ctx.input(|i| i.pointer.primary_down()));
         assert!((ctx.memory(|m| m.area_rect(Id::unique("inventory"))).unwrap().left() - original.left()).abs() > 100.0);
+        assert!(
+            (ctx.memory(|m| m.area_rect(Id::unique("inventory"))).unwrap().left() - preview.left()).abs() > 100.0,
+            "held drag moves beyond the settled Preview"
+        );
         ctx.memory_mut(|m| m.request_focus(Id::unique("workspace_untouched_editor")));
         workspace_cancel_gesture(&ctx);
         workspace_restore(&ctx);
         workspace_preview(&ctx, None);
         assert!(ctx.dragged_id().is_none());
         assert!(ctx.memory(|m| m.has_focus(Id::unique("workspace_untouched_editor"))));
-        for n in 10..14 {
+        for n in 13..17 {
             workspace_native_frame_events(&ctx, n, &mut draft, vec![egui::Event::PointerMoved(to + Vec2::new(150.0, 0.0))]);
         }
         let actual = ctx.memory(|m| m.area_rect(Id::unique("inventory"))).unwrap();
         assert!((actual.min - original.min).abs().max_elem() < 1.0);
-        workspace_native_frame_events(&ctx, 14, &mut draft, vec![press(to, false)]);
+        workspace_native_frame_events(&ctx, 17, &mut draft, vec![press(to, false)]);
         assert_eq!(draft, "keep draft");
     }
 
