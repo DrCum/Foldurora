@@ -46,7 +46,7 @@ impl LocationContext {
             region: world
                 .main()
                 .map(|region| (region.handle, region.info.as_ref().map(|info| info.region_id))),
-            privacy: (world.rlva.enabled(), world.rlva.revision(), world.rlva.has("showloc")),
+            privacy: (world.rlva.enabled(), world.rlva.revision, world.rlva.has("showloc")),
             ready: live
                 && !world.agent_id.is_nil()
                 && !session.is_nil()
