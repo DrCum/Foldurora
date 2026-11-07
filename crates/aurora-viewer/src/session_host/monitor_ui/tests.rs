@@ -1208,7 +1208,7 @@ fn monitor_native_drained_ime_prefix_retires_toolbar_confirmation_but_preserves_
             1,
             vec![Event::Ime(egui::ImeEvent::Preedit {
                 text: "candidate".into(),
-                cursor: None
+                active_range_chars: None
             })]
         )
         .is_none()
@@ -1228,7 +1228,7 @@ fn monitor_native_drained_ime_prefix_retires_toolbar_confirmation_but_preserves_
             1,
             vec![Event::Ime(egui::ImeEvent::Preedit {
                 text: "accepted".into(),
-                cursor: None
+                active_range_chars: None
             })]
         )
         .is_none()
