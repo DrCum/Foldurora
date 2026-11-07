@@ -5,8 +5,9 @@
 use crate::WorldViewport;
 use crate::pipeline_cache::CachedPipelines;
 use crate::viewport_capture::{
-    CaptureBoundary, CaptureBudget, CaptureCap, CaptureError, CaptureLayout, CaptureOutcome, CapturePixels, CaptureQueue, CaptureRequest,
-    CaptureResources, CaptureToken, CapturedViewport, MapCallback, WORKER_CAPTURE_BYTES,
+    CaptureBoundary, CaptureBudget, CaptureCap, CaptureError, CaptureLayout, CaptureOutcome, CapturePixels, CapturePublicationGuard,
+    CaptureQueue, CaptureRequest, CaptureResources, CaptureRetentionGuard, CaptureToken, CapturedViewport, MapCallback,
+    WORKER_CAPTURE_BYTES,
 };
 use bytemuck::{Pod, Zeroable};
 use parking_lot::{Mutex, MutexGuard};
@@ -14,7 +15,7 @@ use std::sync::{
     Arc, OnceLock,
     atomic::{AtomicBool, AtomicU64, Ordering},
 };
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 static NEXT_DEVICE: AtomicU64 = AtomicU64::new(1);
 static WORKER_BUDGET: OnceLock<CaptureBudget> = OnceLock::new();
@@ -28,12 +29,17 @@ pub(crate) struct FrameCapture {
 struct State {
     queue: CaptureQueue,
     generation: u64,
+    publication_token: Option<CaptureToken>,
 }
 
 pub(crate) struct Shared {
     state: Mutex<State>,
     budget: CaptureBudget,
-    generation: AtomicU64,
+    generation: Arc<AtomicU64>,
+    ticket: Arc<AtomicU64>,
+    physical: Arc<AtomicU64>,
+    lost: Arc<AtomicBool>,
+    instance: u64,
     device: u64,
     began: Instant,
     #[cfg(test)]
@@ -45,28 +51,40 @@ impl Shared {
         self.generation.load(Ordering::Acquire)
     }
     pub fn generation_current(&self, frame: &FrameCapture) -> bool {
-        frame.generation != 0 && frame.generation == self.generation.load(Ordering::Acquire)
+        frame.generation != 0 && frame.generation == self.generation.load(Ordering::Acquire) && !self.lost.load(Ordering::Acquire)
     }
-    pub fn new(size: (u32, u32)) -> Result<Arc<Self>, CaptureError> {
+    pub fn new(size: (u32, u32), lost: Arc<AtomicBool>) -> Result<Arc<Self>, CaptureError> {
         // Renderer/device replacement does not mint fresh image credit while
         // the old driver/callback/results still retain physical allocations.
         let budget =
             WORKER_BUDGET.get_or_init(|| CaptureBudget::new(WORKER_CAPTURE_BYTES).expect("fixed positive worker capture bound is valid"));
-        Self::with_budget(size, budget.clone())
+        Self::with_budget_and_loss(size, budget.clone(), lost)
     }
 
+    #[cfg(test)]
     fn with_budget(size: (u32, u32), budget: CaptureBudget) -> Result<Arc<Self>, CaptureError> {
+        Self::with_budget_and_loss(size, budget, Arc::new(AtomicBool::new(false)))
+    }
+
+    fn with_budget_and_loss(size: (u32, u32), budget: CaptureBudget, lost: Arc<AtomicBool>) -> Result<Arc<Self>, CaptureError> {
         let device = NEXT_DEVICE
             .try_update(Ordering::AcqRel, Ordering::Acquire, |next| next.checked_add(1))
             .map_err(|_| CaptureError::Exhausted)?;
         let boundary = CaptureBoundary::new(device, 1, size)?;
+        let queue = CaptureQueue::new(boundary, budget.clone())?;
+        let instance = queue.instance();
         Ok(Arc::new(Self {
             state: Mutex::new(State {
-                queue: CaptureQueue::new(boundary, budget.clone())?,
+                queue,
                 generation: 1,
+                publication_token: None,
             }),
             budget,
-            generation: AtomicU64::new(1),
+            generation: Arc::new(AtomicU64::new(1)),
+            ticket: Arc::new(AtomicU64::new(0)),
+            physical: Arc::new(AtomicU64::new(1)),
+            lost,
+            instance,
             device,
             began: Instant::now(),
             #[cfg(test)]
@@ -87,20 +105,25 @@ impl Shared {
     }
 
     fn lock(&self) -> Result<MutexGuard<'_, State>, CaptureError> {
+        if self.lost.load(Ordering::Acquire) {
+            return Err(CaptureError::DeviceLost);
+        }
         let mut state = self.state.try_lock().ok_or(CaptureError::Busy)?;
         let generation = self.generation.load(Ordering::Acquire);
-        if generation == 0 {
+        if generation == 0 || self.physical.load(Ordering::Acquire) == 0 {
             return Err(CaptureError::Exhausted);
         }
         if state.generation != generation {
             state.queue.invalidate()?;
             state.generation = generation;
+            state.publication_token = None;
         }
         Ok(state)
     }
 
     /// Logical revocation never waits for a contended queue or render job.
     pub fn invalidate(&self) {
+        self.ticket.store(0, Ordering::Release);
         if self
             .generation
             .try_update(Ordering::AcqRel, Ordering::Acquire, |value| {
@@ -112,11 +135,70 @@ impl Shared {
         }
     }
 
+    /// Real resize/configuration/surface failure retires historical physical
+    /// identity as well as publication. It never waits for queue contention.
+    pub fn invalidate_physical(&self) {
+        self.invalidate();
+        if self
+            .physical
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |value| {
+                value.checked_add(1).filter(|_| value != 0)
+            })
+            .is_err()
+        {
+            self.physical.store(0, Ordering::Release);
+        }
+    }
+
+    /// Frontend ownership is distinct from helper backend lifetime. No later
+    /// queue/device with repeated numeric dimensions can revive these atomics.
+    pub fn retire_owner(&self) {
+        self.ticket.store(0, Ordering::Release);
+        self.generation.store(0, Ordering::Release);
+        self.physical.store(0, Ordering::Release);
+    }
+
+    pub fn retention_guard(&self) -> Option<CaptureRetentionGuard> {
+        CaptureRetentionGuard::new(self.instance, self.device, self.physical.clone(), self.lost.clone())
+    }
+
+    pub fn publication_guard(&self, result: &CapturedViewport) -> Option<CapturePublicationGuard> {
+        let state = self.lock().ok()?;
+        let generation = state.generation;
+        if state.publication_token != Some(result.request().token()) || !state.queue.can_publish(result, self.now()) {
+            return None;
+        }
+        // The request deadline is measured from this Shared's original clock,
+        // not guard creation or IO enqueue. checked_add fails closed.
+        let deadline = self.began.checked_add(Duration::from_millis(result.deadline_millis()))?;
+        CapturePublicationGuard::new(
+            result.request().token(),
+            generation,
+            self.generation.clone(),
+            self.ticket.clone(),
+            self.retention_guard()?,
+            deadline,
+        )
+    }
+
     pub fn request(&self, boundary: CaptureBoundary, viewport: WorldViewport, cap: CaptureCap) -> Result<FrameCapture, CaptureError> {
         let mut state = self.lock()?;
+        // Frontend physical changes revoke synchronously before this request.
+        // Queue reconciliation must not bump physical identity a second time
+        // after the native adapter has already captured its new witness.
         state.queue.synchronize_boundary(boundary)?;
-        let request = state.queue.request_metadata(viewport, cap, self.now())?;
+        let request = match state.queue.request_metadata(viewport, cap, self.now()) {
+            Ok(request) => request,
+            Err(error) => {
+                if matches!(error, CaptureError::Clock | CaptureError::Exhausted) {
+                    self.invalidate();
+                }
+                return Err(error);
+            }
+        };
         let generation = state.generation;
+        state.publication_token = Some(request.token());
+        self.ticket.store(request.token().ticket(), Ordering::Release);
         if generation != self.generation.load(Ordering::Acquire) {
             return Err(CaptureError::Cancelled);
         }
@@ -125,7 +207,12 @@ impl Shared {
 
     pub fn cancel(&self, token: CaptureToken) -> Result<(), CaptureError> {
         let mut state = self.lock()?;
-        state.queue.cancel(token)?;
+        if state.publication_token != Some(token) {
+            return Err(CaptureError::Stale);
+        }
+        // A consumed result can still be held by IO. Revoke its exact token;
+        // an old cancellation must never retire a newer issued capture.
+        state.queue.invalidate()?;
         self.invalidate();
         Ok(())
     }
@@ -135,7 +222,10 @@ impl Shared {
             return Ok(false);
         }
         let mut state = self.lock()?;
-        state.queue.poll_map(self.now())?;
+        if let Err(error) = state.queue.poll_map(self.now()) {
+            self.invalidate();
+            return Err(error);
+        }
         Ok(state.queue.request_current(&frame.request) && frame.generation == self.generation.load(Ordering::Acquire))
     }
 
@@ -171,7 +261,13 @@ impl Shared {
     pub fn take(&self) -> Result<Option<CaptureOutcome>, CaptureError> {
         let mut state = self.lock()?;
         let generation = state.generation;
-        let result = state.queue.take_result(self.now())?;
+        let result = match state.queue.take_result(self.now()) {
+            Ok(result) => result,
+            Err(error) => {
+                self.invalidate();
+                return Err(error);
+            }
+        };
         if generation != self.generation.load(Ordering::Acquire) {
             return Err(CaptureError::Cancelled);
         }
@@ -183,7 +279,15 @@ impl Shared {
             return false;
         };
         let generation = state.generation;
-        state.queue.can_publish(result, self.now()) && generation == self.generation.load(Ordering::Acquire)
+        state.publication_token == Some(result.request().token())
+            && state.queue.can_publish(result, self.now())
+            && generation == self.generation.load(Ordering::Acquire)
+    }
+}
+
+impl Drop for Shared {
+    fn drop(&mut self) {
+        self.retire_owner();
     }
 }
 
@@ -622,6 +726,20 @@ impl GpuCapture {
         self.shared.invalidate();
         self.release_pending(true);
     }
+    pub fn invalidate_physical(&mut self) {
+        self.shared.invalidate_physical();
+        self.release_pending(true);
+    }
+    /// Occlusion/minimization and temporary acquisition timeout stop new
+    /// captures without destroying historical physical identity. All other
+    /// acquisition failures are physical or unknown and fail closed.
+    pub fn surface_unavailable(&mut self, reason: wgpu::CurrentSurfaceTexture) {
+        if matches!(reason, wgpu::CurrentSurfaceTexture::Occluded | wgpu::CurrentSurfaceTexture::Timeout) {
+            self.invalidate();
+        } else {
+            self.invalidate_physical();
+        }
+    }
     pub fn has_pending(&self) -> bool {
         self.pending.is_some() || self.pair.needs_maintenance(self.shared.generation())
     }
@@ -721,6 +839,192 @@ mod tests {
             pixel.copy_from_slice(&[23, 47, 91, 255]);
         }
         pixels.finish().unwrap()
+    }
+
+    fn ready_image(shared: &Shared) -> CapturedViewport {
+        let frame = request(shared);
+        let callback = shared.begin(&frame, frame.request.boundary(), 31).unwrap();
+        callback.complete(true);
+        shared.finish(&frame, fake_pixels(shared, &frame)).unwrap();
+        let Some(CaptureOutcome::Ready(image)) = shared.take().unwrap() else {
+            panic!("checked synthetic map result");
+        };
+        image
+    }
+
+    #[test]
+    fn viewport_guard_uses_exact_token_and_original_result_deadline_without_retaining_pixels_or_queue() {
+        let shared = shared();
+        shared.clock_override.store(25, Ordering::Release);
+        let image = ready_image(&shared);
+        shared.clock_override.store(1000, Ordering::Release);
+        let guard = shared.publication_guard(&image).unwrap();
+        assert_eq!(guard.token(), image.request().token());
+        assert_eq!(guard.token().instance(), shared.instance);
+        assert_eq!(guard.deadline(), shared.began + Duration::from_millis(1025));
+        assert!(guard.current_at(shared.began + Duration::from_millis(1024)));
+        assert!(!guard.current_at(shared.began + Duration::from_millis(1025)));
+        assert!(
+            !guard.current_at(shared.began - Duration::from_millis(1)),
+            "a guard cannot be queried before it was issued"
+        );
+        let queue_lock = shared.state.try_lock().unwrap();
+        assert!(guard.current(), "IO never needs the contended queue mutex");
+        drop(queue_lock);
+        shared.clock_override.store(1025, Ordering::Release);
+        assert!(
+            shared.publication_guard(&image).is_none(),
+            "late guard creation cannot renew the old request"
+        );
+        drop(image);
+        assert_eq!(shared.budget.used(), 0, "a guard retains no image allocation credit");
+        let weak = Arc::downgrade(&shared);
+        drop(shared);
+        assert!(weak.upgrade().is_none(), "a guard retains no Shared/queue owner");
+        assert!(!guard.current());
+    }
+
+    #[test]
+    fn viewport_guard_next_request_and_stale_cancel_cannot_share_or_retarget_publication() {
+        let shared = shared();
+        let image = ready_image(&shared);
+        let old = shared.publication_guard(&image).unwrap();
+        let physical = shared.retention_guard().unwrap();
+        let next = request(&shared);
+        assert_ne!(old.token(), next.request.token());
+        assert!(!old.current());
+        assert!(shared.publication_guard(&image).is_none());
+        assert!(matches!(shared.cancel(old.token()), Err(CaptureError::Stale)));
+        assert_eq!(shared.current(&next), Ok(true));
+        assert!(physical.current());
+    }
+
+    #[test]
+    fn viewport_guard_cancel_and_session_stop_preserve_history_but_physical_change_retires_it() {
+        let shared = shared();
+        let image = ready_image(&shared);
+        let published = shared.publication_guard(&image).unwrap();
+        let retained = shared.retention_guard().unwrap();
+        shared.cancel(image.request().token()).unwrap();
+        assert!(!published.current(), "cancel also fences an already consumed result");
+        assert!(retained.current());
+        let next = ready_image(&shared);
+        let published = shared.publication_guard(&next).unwrap();
+        let locked = shared.state.try_lock().unwrap();
+        shared.invalidate(); // The same production path as fence/stop/privacy.
+        assert!(!published.current());
+        assert!(retained.current(), "capture revocation cannot retire parked historical pixels");
+        shared.invalidate_physical();
+        assert!(!retained.current(), "physical invalidation needs no queue mutex");
+        drop(locked);
+        assert!(shared.retention_guard().unwrap().generation() > retained.generation());
+    }
+
+    #[test]
+    fn viewport_guard_frontend_retirement_revokes_held_guards_while_helper_drop_does_not() {
+        let shared = shared();
+        let image = ready_image(&shared);
+        let published = shared.publication_guard(&image).unwrap();
+        let retained = shared.retention_guard().unwrap();
+        drop(GpuCapture::new(shared.clone()));
+        assert!(published.current());
+        assert!(retained.current(), "an unrelated XR helper is not the frontend owner");
+        let helper = GpuCapture::new(shared.clone());
+        shared.retire_owner(); // Exact atomic path called by Renderer::drop.
+        assert!(!published.current());
+        assert!(!retained.current());
+        assert!(shared.retention_guard().is_none());
+        assert!(matches!(shared.take(), Err(CaptureError::Exhausted)));
+        drop(helper);
+    }
+
+    #[test]
+    fn viewport_guard_replacement_same_surface_size_uses_distinct_instance_and_device() {
+        let first = shared();
+        let image = ready_image(&first);
+        let published = first.publication_guard(&image).unwrap();
+        let retained = first.retention_guard().unwrap();
+        let boundary = image.request().boundary();
+        drop(first);
+        let replacement = shared();
+        let current = replacement.retention_guard().unwrap();
+        assert_eq!(replacement.boundary(1, (640, 360)).unwrap().size(), boundary.size());
+        assert_eq!(
+            replacement.boundary(1, (640, 360)).unwrap().surface_epoch(),
+            boundary.surface_epoch()
+        );
+        assert_ne!(current.instance(), retained.instance());
+        assert_ne!(current.device_epoch(), retained.device_epoch());
+        assert_eq!(current.generation(), retained.generation());
+        assert!(!retained.current());
+        assert!(!published.current());
+        assert!(replacement.publication_guard(&image).is_none());
+    }
+
+    #[test]
+    fn viewport_guard_physical_loss_without_pending_capture_is_immediately_visible() {
+        let shared = shared();
+        let retained = shared.retention_guard().unwrap();
+        assert!(shared.take().unwrap().is_none());
+        shared.invalidate_physical();
+        assert!(!retained.current());
+        let retained = shared.retention_guard().unwrap();
+        let locked = shared.state.try_lock().unwrap();
+        // This is the same atomic held by the actual DeviceLost callback;
+        // there is no App tick, capture, device poll or queue lock acquisition.
+        shared.lost.store(true, Ordering::Release);
+        assert!(!retained.current());
+        assert!(shared.retention_guard().is_none());
+        drop(locked);
+    }
+
+    #[test]
+    fn viewport_guard_surface_occlusion_and_timeout_preserve_history_while_loss_or_unknown_error_retires_it() {
+        for reason in [wgpu::CurrentSurfaceTexture::Occluded, wgpu::CurrentSurfaceTexture::Timeout] {
+            let shared = shared();
+            let image = ready_image(&shared);
+            let published = shared.publication_guard(&image).unwrap();
+            let retained = shared.retention_guard().unwrap();
+            GpuCapture::new(shared.clone()).surface_unavailable(reason);
+            assert!(!published.current());
+            assert!(retained.current());
+        }
+        for reason in [
+            wgpu::CurrentSurfaceTexture::Outdated,
+            wgpu::CurrentSurfaceTexture::Lost,
+            wgpu::CurrentSurfaceTexture::Validation,
+        ] {
+            let shared = shared();
+            let retained = shared.retention_guard().unwrap();
+            assert!(shared.take().unwrap().is_none());
+            GpuCapture::new(shared.clone()).surface_unavailable(reason);
+            assert!(
+                !retained.current(),
+                "physical acquisition loss also retires with no pending capture"
+            );
+        }
+    }
+
+    #[test]
+    fn viewport_guard_publication_and_physical_counter_exhaustion_never_revive_old_witnesses() {
+        let shared = shared();
+        let image = ready_image(&shared);
+        let published = shared.publication_guard(&image).unwrap();
+        let retained = shared.retention_guard().unwrap();
+        shared.generation.store(u64::MAX, Ordering::Release);
+        shared.invalidate();
+        shared.invalidate();
+        assert_eq!(shared.generation(), 0);
+        assert!(!published.current());
+        assert!(retained.current(), "capture-only exhaustion does not invent a physical loss");
+        shared.physical.store(u64::MAX, Ordering::Release);
+        let last = shared.retention_guard().unwrap();
+        shared.invalidate_physical();
+        shared.invalidate_physical();
+        assert_eq!(shared.physical.load(Ordering::Acquire), 0);
+        assert!(!last.current());
+        assert!(shared.retention_guard().is_none());
+        assert!(matches!(shared.take(), Err(CaptureError::Exhausted)));
     }
 
     #[test]
@@ -1086,7 +1390,7 @@ mod tests {
             wgpu::TextureFormat::Bgra8Unorm,
             wgpu::TextureFormat::Bgra8UnormSrgb,
         ] {
-            let shared = Shared::new((64, 64)).unwrap();
+            let shared = Shared::new((64, 64), Arc::new(AtomicBool::new(false))).unwrap();
             shared.clock_override.store(0, Ordering::Release);
             let viewport = WorldViewport {
                 x: 8,

@@ -177,6 +177,12 @@ impl DeviceLost {
         self.lost.load(Ordering::Acquire)
     }
 
+    /// Read-only capture witnesses retain just the callback's atomic loss bit,
+    /// never DeviceLost's work-history mutex or any GPU object.
+    pub(crate) fn flag(&self) -> Arc<AtomicBool> {
+        self.lost.clone()
+    }
+
     /// A submission of frame `frame` is about to be made: noted before
     /// `queue.submit`, which can itself find the loss or block across a
     /// reset, and without the lock held across it ([`submit_tracked`]).

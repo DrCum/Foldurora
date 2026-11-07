@@ -620,7 +620,7 @@ impl Renderer {
         )
         .filter(|_| !crate::device_lost::DEMO_HANG_TAKEN.swap(true, std::sync::atomic::Ordering::Relaxed))
         .map(|frame| (frame, queue.clone()));
-        let viewport_capture = crate::viewport_capture_gpu::Shared::new((width.max(1), height.max(1))).ok();
+        let viewport_capture = crate::viewport_capture_gpu::Shared::new((width.max(1), height.max(1)), lost.flag()).ok();
         let backend = Backend::new(BackendInit {
             viewport_capture: viewport_capture.clone(),
             vr: vr.clone(),
@@ -985,7 +985,7 @@ impl Renderer {
             return;
         }
         if self.size != (width, height) {
-            self.invalidate_viewport_capture();
+            self.invalidate_viewport_capture_physical();
             self.surface_epoch = crate::session_fence::next_surface_epoch(self.surface_epoch);
             self.size = (width, height);
         }
@@ -1080,7 +1080,7 @@ impl Renderer {
 
     pub fn set_vsync(&mut self, vsync: bool) {
         if self.vsync != vsync {
-            self.invalidate_viewport_capture();
+            self.invalidate_viewport_capture_physical();
             self.surface_epoch = crate::session_fence::next_surface_epoch(self.surface_epoch);
             self.vsync = vsync;
         }
@@ -1242,7 +1242,7 @@ impl Renderer {
     }
 
     fn fail(&mut self) {
-        self.invalidate_viewport_capture();
+        self.invalidate_viewport_capture_physical();
         if !std::mem::replace(&mut self.failed, true) {
             log::error!("the render thread is gone: nothing can be drawn any more");
         }
@@ -1331,7 +1331,7 @@ impl Renderer {
             log::error!("GPU work at the loss: {}", self.lost.work_at_loss());
         }
         if self.lost.get() {
-            self.invalidate_viewport_capture();
+            self.invalidate_viewport_capture_physical();
             // nothing reaches a lost device: no frame is built, the photo
             // asked is answered as failed, the clicks as on nothing
             self.writes.clear();
@@ -1711,6 +1711,28 @@ impl Renderer {
         self.viewport_capture.as_ref().map_or(0, |shared| shared.generation())
     }
 
+    /// Frame-free physical identity for retention under separately proven
+    /// native source/privacy/lease authority. Session fences and capture stops
+    /// preserve it; device callback loss invalidates it without an App tick.
+    pub fn viewport_capture_retention_guard(&self) -> Option<crate::viewport_capture::CaptureRetentionGuard> {
+        if self.failed || self.lost.get() || self.surface_epoch == 0 {
+            return None;
+        }
+        self.viewport_capture.as_ref()?.retention_guard()
+    }
+
+    /// One exact result's original bounded publication lease, with no renderer,
+    /// queue or GPU ownership retained by its IO consumer.
+    pub fn viewport_capture_guard(
+        &self,
+        result: &crate::viewport_capture::CapturedViewport,
+    ) -> Option<crate::viewport_capture::CapturePublicationGuard> {
+        if self.viewport_capture_boundary().ok()? != result.request().boundary() {
+            return None;
+        }
+        self.viewport_capture.as_ref()?.publication_guard(result)
+    }
+
     /// Freeze one small request for the next ordinary frame. There is no App
     /// adapter yet; callers must independently prove native export authority.
     /// No GPU allocation, copy, device poll or IO occurs on this thread.
@@ -1761,6 +1783,14 @@ impl Renderer {
         }
     }
 
+    fn invalidate_viewport_capture_physical(&mut self) {
+        self.viewport_capture_pending = None;
+        self.viewport_capture_watch = None;
+        if let Some(shared) = &self.viewport_capture {
+            shared.invalidate_physical();
+        }
+    }
+
     /// Maintain only map completion; it never requests a world frame. Handoff
     /// fences win admission, and every handoff/queue access is nonblocking.
     pub fn poll_viewport_capture(
@@ -1768,7 +1798,11 @@ impl Renderer {
     ) -> Result<Option<crate::viewport_capture::CaptureOutcome>, crate::viewport_capture::CaptureError> {
         use crate::viewport_capture::CaptureError;
         if let Err(error) = self.viewport_capture_boundary() {
-            self.invalidate_viewport_capture();
+            if error == CaptureError::DeviceLost {
+                self.invalidate_viewport_capture_physical();
+            } else {
+                self.invalidate_viewport_capture();
+            }
             return Err(error);
         }
         if self.viewport_capture_watch.as_ref().is_some_and(|frame| {
@@ -2020,6 +2054,16 @@ impl Renderer {
 
     pub fn clear_color_default() -> Vec4 {
         Vec4::new(0.03, 0.04, 0.12, 1.0)
+    }
+}
+
+impl Drop for Renderer {
+    fn drop(&mut self) {
+        // Frontend ownership ends before the render owner/GPU fields drop.
+        // An unrelated XR helper Backend Drop must never perform this revoke.
+        if let Some(shared) = &self.viewport_capture {
+            shared.retire_owner();
+        }
     }
 }
 

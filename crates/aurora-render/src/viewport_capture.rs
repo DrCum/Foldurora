@@ -1,16 +1,21 @@
-//! Pure bounded state for a future asynchronous viewport readback. This module
-//! performs no rendering, mapping, polling, waits or IO and grants no session
+//! Bounded state and read-only guards for an asynchronous viewport readback.
+//! This module performs no rendering, mapping, polling, waits or IO and grants no session
 //! ownership. Geometry follows `fssessionpreview.h::fittedPreview` (Legacy
 //! Viewer); an eventual backend must separately prove composition and color.
 
 use crate::WorldViewport;
 use std::sync::{
     Arc,
-    atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering},
 };
+use std::time::Instant;
 
 pub const MAX_CAPTURE_BYTES: usize = 640 * 360 * 4;
-pub const WORKER_CAPTURE_BYTES: usize = 8 * 1024 * 1024;
+/// Process-wide target/staging/packed-pixel pool. The remaining fixed MiB is
+/// withheld for worker image IO/auth/framing, never another pixel pool.
+pub const WORKER_CAPTURE_BYTES: usize = 7 * 1024 * 1024;
+pub const WORKER_CAPTURE_IO_HEADROOM_BYTES: usize = 1024 * 1024;
+pub const WORKER_CAPTURE_TOTAL_BYTES: usize = WORKER_CAPTURE_BYTES + WORKER_CAPTURE_IO_HEADROOM_BYTES;
 pub const CAPTURE_TIMEOUT_MILLIS: u64 = 1000;
 static NEXT_QUEUE: AtomicU64 = AtomicU64::new(1);
 
@@ -169,6 +174,9 @@ pub struct CaptureToken {
 }
 
 impl CaptureToken {
+    pub fn instance(self) -> u64 {
+        self.instance
+    }
     pub fn device_epoch(self) -> u64 {
         self.device
     }
@@ -177,6 +185,107 @@ impl CaptureToken {
     }
     pub fn ticket(self) -> u64 {
         self.ticket
+    }
+}
+
+/// Frame-free physical renderer witness. These atomics retain no renderer,
+/// queue, mutex, callback, pixel allocation or GPU resource. Normal capture
+/// cancellation/session fencing does not retire already admitted history.
+#[derive(Clone, Debug)]
+pub struct CaptureRetentionGuard {
+    instance: u64,
+    device: u64,
+    generation: u64,
+    physical: Arc<AtomicU64>,
+    lost: Arc<AtomicBool>,
+}
+impl CaptureRetentionGuard {
+    pub(crate) fn new(instance: u64, device: u64, physical: Arc<AtomicU64>, lost: Arc<AtomicBool>) -> Option<Self> {
+        let guard = Self {
+            instance,
+            device,
+            generation: physical.load(Ordering::Acquire),
+            physical,
+            lost,
+        };
+        guard.current().then_some(guard)
+    }
+    pub fn instance(&self) -> u64 {
+        self.instance
+    }
+    pub fn device_epoch(&self) -> u64 {
+        self.device
+    }
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+    pub fn current(&self) -> bool {
+        self.instance != 0
+            && self.device != 0
+            && self.generation != 0
+            && !self.lost.load(Ordering::Acquire)
+            && self.physical.load(Ordering::Acquire) == self.generation
+            && !self.lost.load(Ordering::Acquire)
+    }
+}
+
+/// Read-only publication lease for one exact result. Construction is confined
+/// to the renderer after current boundary/token checks. IO only loads atomics
+/// and the same-process clock; it cannot refresh the original capture deadline.
+#[derive(Clone, Debug)]
+pub struct CapturePublicationGuard {
+    token: CaptureToken,
+    generation: u64,
+    publication: Arc<AtomicU64>,
+    ticket: Arc<AtomicU64>,
+    retention: CaptureRetentionGuard,
+    issued: Instant,
+    deadline: Instant,
+}
+impl CapturePublicationGuard {
+    pub(crate) fn new(
+        token: CaptureToken,
+        generation: u64,
+        publication: Arc<AtomicU64>,
+        ticket: Arc<AtomicU64>,
+        retention: CaptureRetentionGuard,
+        deadline: Instant,
+    ) -> Option<Self> {
+        let guard = Self {
+            token,
+            generation,
+            publication,
+            ticket,
+            retention,
+            issued: Instant::now(),
+            deadline,
+        };
+        guard.current().then_some(guard)
+    }
+    pub fn token(&self) -> CaptureToken {
+        self.token
+    }
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+    pub fn deadline(&self) -> Instant {
+        self.deadline
+    }
+    pub fn current(&self) -> bool {
+        self.current_at(Instant::now())
+    }
+    pub(crate) fn current_at(&self, now: Instant) -> bool {
+        self.generation != 0
+            && self.token.epoch != 0
+            && self.token.ticket != 0
+            && self.token.instance == self.retention.instance
+            && self.token.device == self.retention.device
+            && self.retention.current()
+            && now >= self.issued
+            && now < self.deadline
+            && self.publication.load(Ordering::Acquire) == self.generation
+            && self.ticket.load(Ordering::Acquire) == self.token.ticket
+            && self.retention.current()
     }
 }
 
@@ -238,8 +347,9 @@ impl CaptureBudget {
             _credit: Arc::new(self.reserve(layout.payload_bytes + layout.staging_bytes)?),
         })
     }
-    /// One shared pool per worker capture service. Replacement queues reuse it
-    /// while old backend requests, callbacks or image clones remain retained.
+    /// One process-wide pool for targets/staging/packed pixels, bounded to
+    /// seven MiB so the worker's fixed one-MiB IO headroom stays inside eight.
+    /// Replacement queues reuse it while old callbacks/images remain held.
     pub fn new(limit: usize) -> Result<Self, CaptureError> {
         if limit == 0 || limit > WORKER_CAPTURE_BYTES {
             return Err(CaptureError::Capacity);
@@ -334,6 +444,9 @@ pub struct CapturedViewport {
     deadline: u64,
 }
 impl CapturedViewport {
+    pub(crate) fn deadline_millis(&self) -> u64 {
+        self.deadline
+    }
     pub fn request(&self) -> &CaptureRequest {
         &self.request
     }
@@ -393,6 +506,9 @@ pub struct CaptureQueue {
 }
 
 impl CaptureQueue {
+    pub(crate) fn instance(&self) -> u64 {
+        self.instance
+    }
     pub(crate) fn request_current(&self, request: &CaptureRequest) -> bool {
         self.epoch != 0
             && request.boundary == self.boundary
@@ -650,6 +766,19 @@ impl CaptureQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn viewport_capture_pool_withholds_worker_io_headroom_even_when_all_capture_credit_is_held() {
+        assert_eq!(WORKER_CAPTURE_TOTAL_BYTES, 8 * 1024 * 1024);
+        assert_eq!(WORKER_CAPTURE_IO_HEADROOM_BYTES, 1024 * 1024);
+        assert!(matches!(CaptureBudget::new(WORKER_CAPTURE_BYTES + 1), Err(CaptureError::Capacity)));
+        let budget = CaptureBudget::new(WORKER_CAPTURE_BYTES).unwrap();
+        let held = budget.reserve(WORKER_CAPTURE_BYTES).unwrap();
+        assert!(matches!(budget.reserve(1), Err(CaptureError::Capacity)));
+        assert_eq!(budget.used(), WORKER_CAPTURE_TOTAL_BYTES - WORKER_CAPTURE_IO_HEADROOM_BYTES);
+        drop(held);
+        assert_eq!(budget.used(), 0);
+    }
 
     fn boundary() -> CaptureBoundary {
         CaptureBoundary::new(1, 1, (1920, 1080)).unwrap()

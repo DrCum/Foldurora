@@ -5973,17 +5973,30 @@ impl Backend {
             })))
         } else {
             match self.surface.get_current_texture() {
-                wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => Some(FrameTarget::Surface(t)),
-                wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
+                wgpu::CurrentSurfaceTexture::Success(t) => Some(FrameTarget::Surface(t)),
+                wgpu::CurrentSurfaceTexture::Suboptimal(t) => {
                     if let Some(capture) = &mut self.viewport_capture {
-                        capture.invalidate();
+                        capture.invalidate_physical();
+                    }
+                    Some(FrameTarget::Surface(t))
+                }
+                reason @ (wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost) => {
+                    if let Some(capture) = &mut self.viewport_capture {
+                        capture.surface_unavailable(reason);
                     }
                     if !self.external {
                         crate::present::configure(&self.surface, &self.device, &self.config);
                     }
                     None
                 }
-                _ => None,
+                reason => {
+                    // Known occlusion/timeout stops only new capture; unknown
+                    // physical acquisition failure also retires history.
+                    if let Some(capture) = &mut self.viewport_capture {
+                        capture.surface_unavailable(reason);
+                    }
+                    None
+                }
             }
         };
         let Some(surface_tex) = surface_tex else {
@@ -9093,7 +9106,7 @@ impl Backend {
         self.lost.poll(&self.device);
         if let Some(capture) = &mut self.viewport_capture {
             if self.lost.get() {
-                capture.invalidate();
+                capture.invalidate_physical();
             } else {
                 capture.maintain();
             }
