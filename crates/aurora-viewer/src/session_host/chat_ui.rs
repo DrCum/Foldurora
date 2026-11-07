@@ -47,6 +47,17 @@ pub(super) struct SendDraft {
     draft_stamp: (u64, u64, u64),
 }
 
+/// One source-owned rollback checkpoint, never a second surface composer.
+/// egui puts preedit candidates in TextEdit text/Undo before an IME Commit.
+/// Keep the committed baseline until the owning view commits or loses focus.
+struct Composition {
+    owner: ChatSurface,
+    view_incarnation: u64,
+    text: String,
+    cursor: egui::text_selection::TextCursorState,
+    undoer: egui::util::undoer::Undoer<(egui::text::CCursorRange, String)>,
+}
+
 struct RetainedDraft {
     policy: NativeChatPolicy,
     // Strings also retain a bounded invalid draft so navigation cannot silently
@@ -55,6 +66,7 @@ struct RetainedDraft {
     editor: egui::text_edit::TextEditState,
     incarnation: u64,
     revision: u64,
+    composition: Option<Composition>,
 }
 
 #[derive(Clone, Copy)]
@@ -410,7 +422,23 @@ impl ChatUi {
         }
     }
 
+    fn cancel_compositions(&mut self, owner: ChatSurface) {
+        for draft in self.drafts.values_mut() {
+            if draft.composition.as_ref().is_some_and(|composition| composition.owner == owner) {
+                let composition = draft.composition.take().expect("checked source-owned composition");
+                draft.text = composition.text;
+                // Default resets egui's private IME cursor purpose as well as
+                // removing provisional Undo entries, without sharing its Arc.
+                draft.editor = Default::default();
+                draft.editor.cursor = composition.cursor;
+                draft.editor.set_undoer(composition.undoer);
+                draft.revision = draft.revision.saturating_add(1);
+            }
+        }
+    }
+
     pub fn cancel_gesture(&mut self) {
+        self.cancel_compositions(self.surface);
         self.retire_view();
         self.view.read_action = None;
         self.view.interaction = self.view.interaction.saturating_add(1);
@@ -422,8 +450,18 @@ impl ChatUi {
         }
     }
 
+    fn draft_for(&self, surface: ChatSurface, conversation: Conversation) -> &str {
+        self.drafts.get(&conversation).map_or("", |draft| {
+            draft
+                .composition
+                .as_ref()
+                .filter(|composition| composition.owner != surface)
+                .map_or(draft.text.as_str(), |composition| composition.text.as_str())
+        })
+    }
+
     fn draft(&self) -> &str {
-        self.drafts.get(&self.view.conversation).map_or("", |draft| draft.text.as_str())
+        self.draft_for(self.surface, self.view.conversation)
     }
 
     // Local draft revisions restart when an authenticated source model is
@@ -450,6 +488,7 @@ impl ChatUi {
                     editor: Default::default(),
                     incarnation: self.next_incarnation,
                     revision: 0,
+                    composition: None,
                 },
             );
         }
@@ -554,7 +593,7 @@ impl ChatUi {
                 source: self.source,
                 conversation: view.conversation,
             },
-            self.drafts.get(&view.conversation).map_or("", |draft| draft.text.as_str()),
+            self.draft_for(surface, view.conversation),
             view.reading.len(),
             self.editor_id_for(surface),
         )
@@ -656,7 +695,18 @@ impl ChatUi {
         }
         let focused = ui.input(|input| input.focused);
         let focus_changed = ui.input(|input| input.events.iter().any(|event| matches!(event, egui::Event::WindowFocused(_))));
+        if focused {
+            // Actual native focus transfer retires the old composition even if
+            // its closed/minimized context never receives another egui pass.
+            // Passive painting of an unfocused view cannot take edit ownership.
+            for owner in ChatSurface::ALL {
+                if owner != self.surface {
+                    self.cancel_compositions(owner);
+                }
+            }
+        }
         if (!focused || focus_changed) && mode != InputMode::Closing {
+            self.cancel_compositions(self.surface);
             cancel_input(ui.ctx());
             self.view.ime_composing = false;
         }
@@ -706,13 +756,27 @@ impl ChatUi {
             TextEdit::store_state(ui.ctx(), editor_id, previous_editor.clone());
             let was_composing = self.view.ime_composing;
             let mut ime_event = false;
+            let mut composition_event = false;
+            let mut composition_committed = false;
+            let mut commit_before_preedit = false;
+            let mut saw_commit = false;
             ui.input(|input| {
                 for event in &input.events {
                     if let egui::Event::Ime(event) = event {
                         ime_event = true;
                         match event {
-                            egui::ImeEvent::Preedit { text, .. } => self.view.ime_composing = !text.is_empty(),
-                            egui::ImeEvent::Commit(_) => self.view.ime_composing = false,
+                            egui::ImeEvent::Preedit { text, .. } => {
+                                composition_event |= !text.is_empty();
+                                self.view.ime_composing = !text.is_empty();
+                                if !text.is_empty() { composition_committed = false; }
+                            }
+                            egui::ImeEvent::Commit(_) => {
+                                composition_committed = true;
+                                saw_commit = true;
+                                self.view.ime_composing = false;
+                            }
+                            #[allow(deprecated)]
+                            egui::ImeEvent::Disabled => self.view.ime_composing = false,
                             _ => {}
                         }
                     }
@@ -771,7 +835,7 @@ impl ChatUi {
                 .data_mut(|data| data.insert_temp(Id::unique("host_chat_input_rect"), input.rect));
             if input.changed() {
                 if text.len() > MAX_TEXT_BYTES {
-                    text = previous;
+                    text = previous.clone();
                     editor = previous_editor.clone();
                     editor.set_undoer(previous_undo.clone());
                     self.warning = Some(Warning::TooLong);
@@ -791,6 +855,36 @@ impl ChatUi {
                 self.view.owner_generation = self.edit_generation;
             }
             if owns_edit && let Some(draft) = self.drafts.get_mut(&self.view.conversation) {
+                if commit_before_preedit && self.view.ime_composing {
+                    // A single native batch can commit one segment and start
+                    // the next. Preserve that delivered Commit while excluding
+                    // only the final candidate's IME selection from rollback.
+                    if let Some(range) = editor.cursor.char_range() {
+                        let range = range.as_sorted_char_range();
+                        let baseline: String = text.chars().enumerate().filter_map(|(index, ch)|
+                            (!(range.start.0..range.end.0).contains(&index)).then_some(ch)).collect();
+                        let caret = egui::text::CCursorRange::one(egui::text::CCursor::new(range.start.0));
+                        let mut cursor = canonical_cursor.clone();
+                        cursor.set_char_range(Some(caret));
+                        let mut undoer = draft.composition.take().map_or_else(|| previous_undo.clone(), |composition| composition.undoer);
+                        undoer.feed_state(ui.input(|input| input.time), &(caret, baseline.clone()));
+                        draft.composition = Some(Composition { owner: self.surface, view_incarnation: self.view.incarnation, text: baseline, cursor, undoer });
+                    }
+                }
+                if composition_event && !composition_committed && draft.composition.is_none() {
+                    draft.composition = Some(Composition {
+                        owner: self.surface,
+                        view_incarnation: self.view.incarnation,
+                        text: previous.clone(),
+                        cursor: canonical_cursor.clone(),
+                        undoer: previous_undo.clone(),
+                    });
+                }
+                if composition_committed && draft.composition.as_ref().is_some_and(|composition|
+                    composition.owner == self.surface && composition.view_incarnation == self.view.incarnation)
+                {
+                    draft.composition = None;
+                }
                 if draft.text != text { draft.revision = draft.revision.saturating_add(1); }
                 draft.text = text;
                 // This temporary state is the only canonical Undo authority;
@@ -809,6 +903,9 @@ impl ChatUi {
                 previous_editor.set_undoer(previous_undo);
                 previous_editor.cursor = canonical_cursor;
                 draft.editor = previous_editor;
+            }
+            if owns_edit && was_composing && !self.view.ime_composing && !composition_committed {
+                self.cancel_compositions(self.surface);
             }
             ui.horizontal_wrapped(|ui| {
                 let text = ChatText::new(self.draft()).ok().filter(|text| !text.as_str().trim().is_empty());

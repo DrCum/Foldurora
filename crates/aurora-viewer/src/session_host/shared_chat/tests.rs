@@ -1237,9 +1237,15 @@ fn shared_chat_late_admission_does_not_consume_newer_same_text_after_another_sur
 fn shared_chat_late_admission_cannot_cross_exact_source_reauthentication_or_clear_in_two_contexts() {
     for clear in [false, true] {
         let mut frames = SurfaceFrames::new();
-        Arc::make_mut(&mut frames.host.chat[0]).reads.insert(Conversation::Nearby, aurora_session::chat::ReadMetadata {
-            unread: 1, unread_revision: 1, observed: aurora_session::chat::ObservedIncoming { epoch: 1, through: 1 }, can_mark_read: true,
-        });
+        Arc::make_mut(&mut frames.host.chat[0]).reads.insert(
+            Conversation::Nearby,
+            aurora_session::chat::ReadMetadata {
+                unread: 1,
+                unread_revision: 1,
+                observed: aurora_session::chat::ObservedIncoming { epoch: 1, through: 1 },
+                can_mark_read: true,
+            },
+        );
         frames.type_text(0, "Identical recreated text");
         assert!(frames.click(0, "host_chat_read_rect").is_none());
         let old_read = frames.model.take_read_action().unwrap();
@@ -1272,14 +1278,167 @@ fn shared_chat_late_admission_cannot_cross_exact_source_reauthentication_or_clea
         for (index, surface) in SurfaceFrames::SURFACES.into_iter().enumerate() {
             frames.settle(index, 3);
             assert_eq!(frames.draft(index, old.key.source), old.text.as_str());
-            let state = frames.model.states.iter().find(|state| state.ui.source() == old.key.source).unwrap();
+            let state = frames
+                .model
+                .states
+                .iter()
+                .find(|state| state.ui.source() == old.key.source)
+                .unwrap();
             assert_ne!(state.ui.retained_for(surface).3, old_ids[index]);
-            assert!(state.ui.operations().0.is_none(), "old admission cannot install new pending authority");
-            assert!(state.ui.operations().1.is_none(), "old Read callbacks cannot install new pending/failure authority");
+            assert!(
+                state.ui.operations().0.is_none(),
+                "old admission cannot install new pending authority"
+            );
+            assert!(
+                state.ui.operations().1.is_none(),
+                "old Read callbacks cannot install new pending/failure authority"
+            );
         }
         frames.model.queued(&new, 91);
-        assert_eq!(frames.draft(0, old.key.source), "", "the newly captured admission still consumes its draft");
+        assert_eq!(
+            frames.draft(0, old.key.source),
+            "",
+            "the newly captured admission still consumes its draft"
+        );
     }
+}
+
+#[test]
+fn shared_chat_uncommitted_ime_rolls_back_on_two_context_focus_or_surface_close_without_polluting_undo() {
+    for close in [false, true] {
+        let mut frames = SurfaceFrames::new();
+        frames.type_text(0, "Committed prefix");
+        frames.settle(0, 70);
+        assert!(
+            frames
+                .show(
+                    0,
+                    vec![Event::Ime(egui::ImeEvent::Preedit {
+                        text: "UNCOMMITTED".into(),
+                        active_range_chars: None,
+                    })]
+                )
+                .is_none()
+        );
+        assert!(frames.draft(0, source(1)).contains("UNCOMMITTED"));
+        assert_eq!(
+            frames.draft(1, source(1)),
+            "Committed prefix",
+            "another surface only sees committed text"
+        );
+        if close {
+            let palette = crate::theme::Theme::default().palette();
+            let raw = RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(680.0, 680.0))),
+                time: Some(20.0),
+                focused: true,
+                ..Default::default()
+            };
+            let mut output = frames.contexts[0].run_ui(raw, |ui| {
+                assert!(
+                    frames
+                        .model
+                        .show_for(ChatSurface::Shared, ui, &palette, InputMode::Closing)
+                        .is_none()
+                );
+            });
+            output.textures_delta.clear();
+            frames.model.surface_closed(ChatSurface::Shared);
+        }
+        frames.focus(1);
+        assert_eq!(frames.click(1, "host_chat_send_rect").unwrap().text.as_str(), "Committed prefix");
+        assert!(frames.click(1, "host_chat_input_rect").is_none());
+        assert!(frames.show(1, vec![key(Key::Z, true, false, Modifiers::CTRL)]).is_none());
+        frames.show(1, vec![key(Key::Z, false, false, Modifiers::CTRL)]);
+        assert!(
+            !frames.draft(1, source(1)).contains("UNCOMMITTED"),
+            "Undo cannot restore an abandoned candidate"
+        );
+    }
+}
+
+#[test]
+fn shared_chat_one_native_batch_can_commit_then_preedit_without_lending_the_next_candidate() {
+    let mut frames = SurfaceFrames::new();
+    frames.type_text(0, "Prefix ");
+    frames.show(
+        0,
+        vec![Event::Ime(egui::ImeEvent::Preedit {
+            text: "first candidate".into(),
+            active_range_chars: None,
+        })],
+    );
+    assert!(
+        frames
+            .show(
+                0,
+                vec![
+                    Event::Ime(egui::ImeEvent::Commit("committed".into())),
+                    Event::Ime(egui::ImeEvent::Preedit {
+                        text: "NEXT CANDIDATE".into(),
+                        active_range_chars: None
+                    }),
+                ]
+            )
+            .is_none()
+    );
+    frames.focus(1);
+    assert_eq!(frames.click(1, "host_chat_send_rect").unwrap().text.as_str(), "Prefix committed");
+}
+
+#[test]
+fn shared_chat_true_ime_commit_is_shared_but_closed_views_late_ime_cannot_retarget() {
+    let mut frames = SurfaceFrames::new();
+    frames.type_text(0, "Prefix ");
+    assert!(
+        frames
+            .show(
+                0,
+                vec![Event::Ime(egui::ImeEvent::Preedit {
+                    text: "provisional".into(),
+                    active_range_chars: None,
+                })]
+            )
+            .is_none()
+    );
+    assert!(
+        frames
+            .show(0, vec![Event::Ime(egui::ImeEvent::Commit("committed".into()))])
+            .is_none()
+    );
+    frames.focus(1);
+    assert_eq!(frames.click(1, "host_chat_send_rect").unwrap().text.as_str(), "Prefix committed");
+    frames.focus(0);
+    frames.click(0, "host_chat_input_rect");
+    assert!(
+        frames
+            .show(
+                0,
+                vec![Event::Ime(egui::ImeEvent::Preedit {
+                    text: " abandoned".into(),
+                    active_range_chars: None,
+                })]
+            )
+            .is_none()
+    );
+    frames.model.surface_closed(ChatSurface::Shared);
+    frames.model.select_for(ChatSurface::Shared, source(2));
+    assert!(
+        frames
+            .show(
+                0,
+                vec![
+                    Event::Ime(egui::ImeEvent::Commit("LATE OLD COMMIT".into())),
+                    Event::Ime(egui::ImeEvent::Preedit {
+                        text: "LATE OLD PREEDIT".into(),
+                        active_range_chars: None
+                    }),
+                ]
+            )
+            .is_none()
+    );
+    assert_eq!(frames.draft(0, source(2)), "");
+    assert_eq!(frames.draft(1, source(1)), "Prefix committed");
 }
 
 #[test]
