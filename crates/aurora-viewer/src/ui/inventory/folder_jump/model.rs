@@ -2,7 +2,7 @@
 //! tickets. The parent must supply current actual login/owner/privacy facts;
 //! these local correlation values confer no network or Inventory authority.
 
-use crate::world::inventory::Inventory;
+use crate::world::inventory::{Folder, Inventory};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
@@ -20,6 +20,14 @@ const MAX_QUERY_CHARS: usize = 256;
 const MAX_TOKENS: usize = 64;
 const STEPS_PER_TURN: usize = 256;
 const TURN: Duration = Duration::from_millis(2);
+
+/// Shared by the initial index and final current-parent walk. Future archive
+/// or custom-folder policy must enter this gate AND the policy revision.
+fn visible_folder(inventory: &Inventory, id: Uuid) -> Option<&Folder> {
+    let folder = inventory.folders.get(&id)?;
+    (!id.is_nil() && id != inventory.lib_root && folder.info.id == id && !folder.library && folder.info.type_default != 14)
+        .then_some(folder)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Source {
@@ -42,11 +50,7 @@ impl Source {
             && self.owner == inventory.owner
             && !self.root.is_nil()
             && self.root == inventory.root
-            && self.root != inventory.lib_root
-            && inventory
-                .folders
-                .get(&self.root)
-                .is_some_and(|folder| folder.info.id == self.root && !folder.library && folder.info.type_default != 14)
+            && visible_folder(inventory, self.root).is_some()
     }
 }
 
@@ -364,6 +368,10 @@ impl Model {
         self.source
     }
 
+    pub(super) fn widget_namespace(&self) -> u64 {
+        self.instance
+    }
+
     pub(super) fn rows(&self) -> impl ExactSizeIterator<Item = Row<'_>> {
         let best = if self.phase == Phase::Ready { self.best.as_slice() } else { &[] };
         best.iter().map(|matched| {
@@ -417,8 +425,8 @@ impl Model {
         if id.is_nil() || id == inventory.lib_root || self.seen.contains_key(&id) {
             return;
         }
-        let Some(folder) = inventory.folders.get(&id) else { return };
-        if folder.info.id != id || folder.info.parent != parent.id || folder.library || folder.info.type_default == 14 {
+        let Some(folder) = visible_folder(inventory, id) else { return };
+        if folder.info.parent != parent.id {
             return;
         }
         let depth = parent.depth + 1;
@@ -502,7 +510,7 @@ impl Model {
         }
         let mut used = 0;
         while used < steps && matches!(self.phase, Phase::Indexing | Phase::Matching) {
-            if used % 32 == 0 && expired() {
+            if used.is_multiple_of(32) && expired() {
                 break;
             }
             match self.phase {
@@ -558,12 +566,9 @@ impl Model {
         }
         for _ in 0..=MAX_DEPTH {
             let node = &self.nodes[index];
-            let Some(folder) = inventory.folders.get(&node.id) else {
+            let Some(folder) = visible_folder(inventory, node.id) else {
                 return false;
             };
-            if folder.info.id != node.id || node.id == inventory.lib_root || folder.library || folder.info.type_default == 14 {
-                return false;
-            }
             if index == 0 {
                 return node.id == ticket.source.root;
             }

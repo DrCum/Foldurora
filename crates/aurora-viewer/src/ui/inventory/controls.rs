@@ -1,4 +1,7 @@
 //! Firestorm inventory view menu and finder options, presented with Aurora widgets.
+#[cfg(test)]
+#[path = "folder_jump/classic_entry_tests.rs"]
+mod folder_jump_tests;
 use super::view::{Age, Creator, Filters, InventoryPreferences, Links, SearchField, types};
 use super::{Inventory, InventoryUi, Palette};
 use crate::ui::widgets::{self, Floater, flat_button, switch, underlined_button};
@@ -172,6 +175,9 @@ pub fn init_filters(st: &mut InventoryUi, prefs: &InventoryPreferences) {
 }
 
 fn filter_actions(ui: &mut egui::Ui, p: &Palette, st: &mut InventoryUi) {
+    if super::folder_jump::supported(st) && underlined_button(ui, p, aurora_i18n::tr!("inventory-jump-title"), false).clicked() {
+        st.jump_requested = true;
+    }
     if underlined_button(
         ui,
         p,

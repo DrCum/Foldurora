@@ -13555,3 +13555,15 @@ board-name-placeholder = Saisissez le nom du tableau
 board-name-invalid = Utilisez un nom court, non vide, sans espaces autour ni caractères de contrôle.
 board-limit = Maximum : 16 tableaux et 1 024 éléments par tableau.
 board-store-identity = Ce fichier appartient à un autre compte ou une autre grille et est conservé.
+inventory-jump-title = Aller au dossier…
+inventory-jump-query = Nom du dossier ou chemin parent
+inventory-jump-scanning = Recherche dans les dossiers chargés…
+inventory-jump-query-limit = Utilisez au maximum 64 mots de recherche.
+inventory-jump-unavailable = Cette vue d’inventaire est indisponible.
+inventory-jump-limited = Limité aux dossiers chargés indexés ici. D’autres dossiers peuvent correspondre.
+inventory-jump-first = Affichage des { $count } premiers résultats parmi les dossiers indexés.
+inventory-jump-empty = Aucun dossier chargé ne correspond.
+inventory-jump-count = { $count ->
+    [one] { $count } dossier chargé correspond
+   *[other] { $count } dossiers chargés correspondent
+    }

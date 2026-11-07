@@ -38,8 +38,7 @@ pub use embedded::save_focused as document_save_focused;
 pub(crate) mod drag;
 mod embedded;
 mod folder_colors;
-#[cfg(test)]
-mod folder_jump;
+pub(crate) mod folder_jump;
 pub use folder_colors::{demo as folder_colors_demo, demo_frame as folder_colors_demo_frame};
 mod hover;
 pub use hover::demo_events as hover_demo_events;
@@ -472,6 +471,8 @@ pub struct InventoryUi {
     /// Save live splitter changes once the pointer is released.
     pub preferences_dirty: bool,
     was_open: bool,
+    /// A local request for the separate loaded-folder chooser.
+    jump_requested: bool,
     focus_search: bool,
     bulk_permissions: bulk_permissions::State,
     menu_editor: context_customize::State,
@@ -1879,6 +1880,7 @@ fn inventory_contents(
     facts: &Facts,
     actions: &mut Vec<InvAction>,
 ) {
+    folder_jump::claim(ui, st);
     controls::toolbar(ui, p, st, prefs);
     controls::search(ui, p, inv, st, prefs, aurora_i18n::tr!("ui-inventory-filter-inventory"));
     ui.add_space(3.0);

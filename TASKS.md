@@ -23,6 +23,25 @@
   conflict handling, production owner observation and independent/runtime
   validation remain required. Index caps are a stricter bounded difference
   from Legacy's unbounded retained index, with explicit incomplete status.
+- 🔧 Loaded Inventory folder jump (2026-11-07; no issue): pinned Legacy
+  FSFloaterFolderJump leaf/path ranking, empty top-level results and best-60
+  ordering use resumable loaded metadata work with depth/name/path/node/text
+  bounds. Completed limited retained subsets remain usable and explicitly
+  incomplete. Separate themed chooser has actual main/additional full-Inventory
+  entries in both styles; current login/profile/owner/revision/RLVa and final
+  original-parent checks prevent stale gestures from selecting replacements.
+  Inventory-local Ctrl/Cmd+J respects configured/held/derived Pass Wall owners;
+  no global default shortcut is added. Existing native release fences protect
+  Enter and both logical Space forms without suppressing normal query text.
+  Genuine IME Commit is kept once, then confirmation focus retires. Existing
+  rooted windows open exact captured folders; no chooser content fetch,
+  fetch-all, move/delete/send or normal Inventory search change is introduced.
+  Twenty-one portable/actual-egui tests are authored, uncompiled and unrun;
+  independent full-UI source review and Root runtime/human validation are next.
+  Node/text caps, source-unready closure and unsupported specialized/partial/
+  Favorites/Marketplace owners are explicit stricter first-slice differences.
+  Archive/custom-view/other future folder policy must join the shared admission,
+  revision and final-parent checks before chooser support; no full parity claim.
 
 - 🔧 Actual native LastActive producer front, phase 1 (2026-11-07; no issue):
   WorkerBridge privately mints accepted Online control tokens with original

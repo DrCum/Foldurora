@@ -1,14 +1,29 @@
 # Aurora Viewer architecture
 
-`ui/inventory/folder_jump/model.rs` is a test-registered prerequisite for a
-separate loaded-folder chooser. It indexes actual personal Inventory metadata
-incrementally, keeps the best 60 name/path matches, and captures exact
-source/revision/query/selection tickets. Retained node/text limits are explicit;
-completed limited subsets remain usable with final current parent-chain checks.
-The model never queues content fetches, edits Inventory, changes normal search,
-or opens a window. Eight portable tests are authored and unrun. Real entry,
-shortcut, source observation and themed chooser integration remain disabled
-pending the pinned folder-policy mapping review and the next UI slice.
+`ui/inventory/folder_jump` implements the separate loaded-folder chooser from
+pinned Legacy FSFloaterFolderJump (abbe3cb0). Its bounded model indexes actual
+personal Inventory metadata incrementally and keeps the best 60 name/path
+matches. Completed limited retained subsets remain usable with qualified
+status and final current original-parent checks. `body.rs` uses themed controls
+and previous committed/clipped exact tickets; query edits, selection/revision/
+source changes, focus/modal and IME boundaries cannot lend a replacement row
+an old gesture. Genuine query Commit reaches its TextEdit once before terminal
+confirmation focus retires. Layout reruns retain only the original release;
+index work remains bounded once per egui frame.
+The ordinary `app/folder_jump.rs` adapter observes actual login/profile/owner/
+Inventory and RLVa state after delivered events, before input and callback.
+Main/additional full personal Inventory gets a classic control or Aurora menu
+entry; specialized/partial/Favorites/Marketplace owners are unsupported. Local
+Ctrl/Cmd+J uses the actual painted owner, with configured/held/derived Pass Wall
+precedence and no new default key binding. Native Enter/Space snapshots use the
+existing opaque release fence without changing forwarded text events. Exact
+Open only calls the existing rooted-window constructor. No chooser fetch,
+Inventory mutation, archive/custom-tab policy, asset contents or normal search
+change is introduced. Future archive/other folder policies must enter both the
+shared folder admission and revision/final-parent checks before support.
+Twenty-one portable/actual-egui tests are authored and unrun, including both
+style entries, narrow/short/150% bounds and native-key metadata traces. This is
+source implementation, not compiled, native, grid or full parity acceptance.
 
 `session_host/monitor_manager.rs` is the Shell-owned bounded binding/operation
 front for four fixed monitors and one cycling view. It depends on the separately

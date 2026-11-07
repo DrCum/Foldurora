@@ -329,6 +329,16 @@ fn folder_jump_bounds_deep_and_oversize_loaded_metadata_without_recursive_or_unb
         folder(2, 1, &"x".repeat(MAX_NAME_BYTES + 1), -1),
         folder(3, 2, "Under oversize", -1),
     ];
+    folders.push(folder(4, 1, &"🧥".repeat(MAX_NAME_BYTES / 4), -1));
+    folders.push(folder(5, 1, &"🧥".repeat(MAX_NAME_BYTES / 4 + 1), -1));
+    for depth in 1..=5 {
+        folders.push(folder(
+            1_000 + depth,
+            if depth == 1 { 1 } else { 999 + depth },
+            &"p".repeat(MAX_NAME_BYTES),
+            -1,
+        ));
+    }
     for depth in 1..=MAX_DEPTH + 2 {
         folders.push(folder(10 + depth as u128, if depth == 1 { 1 } else { 9 + depth as u128 }, "D", -1));
     }
@@ -337,6 +347,16 @@ fn folder_jump_bounds_deep_and_oversize_loaded_metadata_without_recursive_or_unb
     assert!(model.limited());
     assert!(!model.seen.contains_key(&id(2)));
     assert!(!model.seen.contains_key(&id(3)));
+    assert!(
+        model.seen.contains_key(&id(4)),
+        "name byte cap accepts the exact multibyte boundary"
+    );
+    assert!(!model.seen.contains_key(&id(5)));
+    assert!(model.seen.contains_key(&id(1_004)));
+    assert!(
+        !model.seen.contains_key(&id(1_005)),
+        "path cap excludes the whole oversized descendant branch"
+    );
     assert!(
         model
             .nodes

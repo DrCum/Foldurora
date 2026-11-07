@@ -9,6 +9,10 @@
 use super::super::view::{Age, Creator, Links, SearchField, types};
 use super::super::*;
 use super::{Layout, rights, smart_bar};
+#[cfg(test)]
+#[path = "../folder_jump/aurora_entry_tests.rs"]
+mod folder_jump_tests;
+
 use crate::ui::{menu, sheet, widgets};
 use egui::{Color32, Pos2, Rect, Sense, Vec2};
 
@@ -217,6 +221,9 @@ fn new_menu(
 /// The "Sort" menu: the order, Collapse / Expand for the tree, what the
 /// search searches, and the inventory's preferences.
 fn sort_menu(ui: &mut egui::Ui, p: &Palette, st: &mut InventoryUi, prefs: &mut InventoryPreferences, layout: Layout) {
+    if super::super::folder_jump::supported(st) && menu::item(ui, p, "folder-open-filled", aurora_i18n::tr!("inventory-jump-title")) {
+        st.jump_requested = true;
+    }
     menu::section(ui, p, aurora_i18n::tr!("inventory-sort-menu"));
     let sort = prefs.sort_for_mut(st.tab);
     if menu::check(

@@ -13559,3 +13559,15 @@ board-name-placeholder = Enter board name
 board-name-invalid = Use a short, nonempty name without surrounding spaces or control characters.
 board-limit = Maximum 16 boards and 1,024 tiles per board.
 board-store-identity = This board file belongs to another account or grid and is preserved.
+inventory-jump-title = Go to folder…
+inventory-jump-query = Folder name or parent path
+inventory-jump-scanning = Looking through loaded folders…
+inventory-jump-query-limit = Use at most 64 search words.
+inventory-jump-unavailable = This Inventory view is unavailable.
+inventory-jump-limited = Limited to the loaded folders indexed here. More folders may match.
+inventory-jump-first = Showing the first { $count } matches among indexed folders.
+inventory-jump-empty = No matching loaded folders.
+inventory-jump-count = { $count ->
+    [one] { $count } matching loaded folder
+   *[other] { $count } matching loaded folders
+    }
