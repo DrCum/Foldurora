@@ -628,6 +628,7 @@ impl<'a> Floater<'a> {
         let restore_id = window_id.with("restore_size");
         let expanded = ctx.data_mut(|d| d.get_persisted::<Vec2>(expanded_id)).unwrap_or(self.default_size);
         let restore = ctx.data_mut(|d| d.remove_temp::<bool>(restore_id)).unwrap_or(false);
+        let workspace = workspace_placement(ctx, self.id);
         let resizable = self.resizable && !minimized;
         let bounds = self.viewport_control.then(|| super::layout::toolbar_canvas(ctx)).flatten();
         let backup_id = window_id.with("viewport_control_unrestricted_rect");
@@ -726,6 +727,8 @@ impl<'a> Floater<'a> {
                 minimized_width(expanded.x),
                 if self.framed_header.is_some() { 40.0 } else { 38.0 },
             ));
+        } else if let Some((_, size)) = workspace {
+            w = w.fixed_size(size.min(work.size()).max(self.min_size));
         } else if let Some(size) = opening.as_ref().and_then(|o| o.size).filter(|_| !self.auto_height) {
             w = w.fixed_size(size);
         } else if let Some(rect) = restore_rect.filter(|_| !self.auto_height) {
@@ -789,7 +792,10 @@ impl<'a> Floater<'a> {
         } else {
             w.constrain_to(slot.limits.unwrap_or_else(|| super::layout::reach(room, size, edges)))
         };
-        if let Some(pos) = ctx.data_mut(|d| d.remove_temp::<egui::Pos2>(window_id.with(PLACE_POS))) {
+        if let Some(pos) = workspace
+            .map(|(p, _)| p)
+            .or_else(|| ctx.data_mut(|d| d.remove_temp::<egui::Pos2>(window_id.with(PLACE_POS))))
+        {
             asked = Some(pos);
             if self.cascade.is_some() {
                 cascade::placed(ctx, window_id);
@@ -1237,8 +1243,12 @@ pub(crate) fn bare_window(
         w = w.fixed_size(size);
     }
     let slot = super::layout::slot(ctx, window_id);
+    let workspace = workspace_placement(ctx, id);
+    if let Some((pos, size)) = workspace {
+        w = w.fixed_size(size.min(room.size()).max(min_size)).current_pos(pos);
+    }
     let slot = if canvas.retained { slot.keep_anchor() } else { slot };
-    if let Some(pos) = slot.pos {
+    if let Some(pos) = workspace.map(|(p, _)| p).or(slot.pos) {
         w = w.current_pos(pos);
     }
     if let Some(limits) = slot.limits {
@@ -1427,6 +1437,26 @@ pub fn place_floater(ctx: &egui::Context, id: &str, pos: egui::Pos2, size: Vec2)
         d.insert_temp(window_id.with("restore_size"), true);
         d.insert_temp(window_id.with(PLACE_POS), pos);
     });
+}
+
+pub(crate) fn workspace_expanded_size(ctx: &egui::Context, id: &str) -> Option<Vec2> {
+    saved_canvas_size(ctx, egui::Id::unique(id))
+        .or_else(|| ctx.data_mut(|d| d.get_persisted::<Vec2>(egui::Id::unique(id).with("expanded_size"))))
+}
+pub(crate) fn workspace_place(ctx: &egui::Context, id: &str, pos: egui::Pos2, size: Vec2) {
+    ctx.data_mut(|d| {
+        d.insert_persisted(egui::Id::unique(id).with("workspace_geometry"), [pos.x, pos.y, size.x, size.y]);
+        d.insert_persisted(egui::Id::unique(id).with("expanded_size"), size);
+        d.insert_persisted(egui::Id::unique(id).with("viewport_unrestricted_size"), size);
+    });
+}
+fn workspace_placement(ctx: &egui::Context, id: &str) -> Option<(egui::Pos2, Vec2)> {
+    ctx.data_mut(|d| {
+        let key = egui::Id::unique(id).with("workspace_geometry");
+        let g = d.get_persisted::<[f32; 4]>(key)?;
+        d.remove::<[f32; 4]>(key);
+        Some((egui::pos2(g[0], g[1]), egui::vec2(g[2], g[3])))
+    })
 }
 
 /// Split what is left of `ui` between a list and the footer under it (its

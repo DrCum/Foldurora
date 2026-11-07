@@ -86,7 +86,92 @@ struct Written {
 fn snapshot(ctx: &egui::Context) -> (u64, egui::Memory) {
     let room = move_area(ctx);
     windows(ctx, |w| w.refresh_anchors(room));
-    (next_generation(), ctx.memory(|m| m.clone()))
+    let mem = ctx.memory(|m| m.clone());
+    if let Some(baseline) = ctx.data(|d| d.get_temp::<WorkspaceGeometry>(Id::unique("workspace_preview_baseline"))) {
+        // Only the existing legacy layout file serializes Memory. Named records
+        // contain typed geometry; a temporary preview never leaks into this file.
+        let saved = egui::Context::default();
+        saved.memory_mut(|m| *m = mem);
+        workspace_apply_at(&saved, &baseline, room, ctx.content_rect(), false);
+        (next_generation(), saved.memory(|m| m.clone()))
+    } else {
+        (next_generation(), mem)
+    }
+}
+
+pub(crate) type WorkspaceGeometry = [Option<crate::workspace::model::Geometry>; 4];
+
+/// Capture the four native geometry roles, including known closed windows.
+pub(crate) fn workspace_capture(ctx: &egui::Context) -> WorkspaceGeometry {
+    let room = move_area(ctx);
+    windows(ctx, |w| w.refresh_anchors(room));
+    std::array::from_fn(|i| {
+        let role = crate::workspace::model::Role::ALL[i];
+        let id = Id::unique(role.id());
+        let placed = windows(ctx, |w| w.placed.get(&id.value()).copied())?;
+        let size = super::widgets::workspace_expanded_size(ctx, role.id()).unwrap_or(placed.rect.size());
+        let anchor = placed
+            .anchor
+            .unwrap_or_else(|| Anchor::nearest(placed.room.unwrap_or(placed.screen), placed.rect));
+        Some(anchor.workspace(size))
+    })
+}
+
+/// Geometry only: no visibility, minimization, keyboard focus or editor data.
+pub(crate) fn workspace_apply(ctx: &egui::Context, geometry: &WorkspaceGeometry) {
+    let room = move_area(ctx);
+    let screen = ctx.content_rect();
+    workspace_apply_at(ctx, geometry, room, screen, true);
+}
+fn workspace_apply_at(ctx: &egui::Context, geometry: &WorkspaceGeometry, room: Rect, screen: Rect, constrain: bool) {
+    for (i, g) in geometry.iter().enumerate() {
+        let Some(g) = g else { continue };
+        let Some(anchor) = Anchor::from_workspace(*g) else { continue };
+        let role = crate::workspace::model::Role::ALL[i];
+        let id = Id::unique(role.id());
+        let size = Vec2::from(g.size);
+        let requested = Rect::from_min_size(anchor.position(room, size), size);
+        let rect = if constrain {
+            let size = size.min(room.size()).max(Vec2::splat(1.0));
+            Rect::from_min_size(keep_title_in(room, requested.min, size, window_edges(ctx)), size)
+        } else {
+            requested
+        };
+        windows(ctx, |w| {
+            w.placed.insert(
+                id.value(),
+                Placed {
+                    rect,
+                    screen,
+                    room: Some(room),
+                    anchor: Some(anchor),
+                },
+            );
+            w.live.followed = None;
+            w.live.moved = None;
+            w.live.resized = None;
+            w.live.places.insert(id.value(), rect.min);
+            w.live.settle.remove(&id.value());
+            w.live.reanchor.remove(&id.value());
+            w.live.reanchor_after_show.remove(&id.value());
+        });
+        super::widgets::workspace_place(ctx, role.id(), rect.min, size);
+    }
+}
+
+/// A generation barrier supersedes snapshots already queued before a preview.
+/// Generic save/backup snapshots project the baseline while this hold is set.
+pub(crate) fn workspace_preview(ctx: &egui::Context, baseline: Option<WorkspaceGeometry>) {
+    ctx.data_mut(|d| match baseline {
+        Some(g) => {
+            d.insert_temp(Id::unique("workspace_preview_baseline"), g);
+        }
+        None => {
+            d.remove::<WorkspaceGeometry>(Id::unique("workspace_preview_baseline"));
+        }
+    });
+    let mut written = WRITTEN.lock().unwrap_or_else(PoisonError::into_inner);
+    written.generation = written.generation.max(next_generation());
 }
 
 fn next_generation() -> u64 {
@@ -145,8 +230,17 @@ pub struct Autosave {
 }
 
 impl Autosave {
+    /// Explicit workspace completion uses the ordinary debounced saver, never
+    /// a synchronous file flush from an egui gesture.
+    pub(crate) fn request(&mut self, now: Instant) {
+        self.due = Some(now + AUTOSAVE_DELAY);
+    }
     /// Call it after each egui pass.
     pub fn after_pass(&mut self, ctx: &egui::Context, now: Instant) {
+        if ctx.data(|d| d.get_temp::<WorkspaceGeometry>(Id::unique("workspace_preview_baseline")).is_some()) {
+            self.due = None;
+            return;
+        }
         let room = move_area(ctx);
         let released = ctx.input(|i| i.pointer.any_released()) && (ctx.is_pointer_over_egui() || ctx.egui_is_using_pointer());
         let resized = self.room.is_some_and(|r| r != room);
@@ -1042,6 +1136,107 @@ pub(crate) fn resizing(ctx: &egui::Context, p: &Palette, id: Id, rect: Rect, edg
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn workspace_native_frame(ctx: &egui::Context, n: usize, draft: &mut String) {
+        let p = crate::theme::Theme::default().palette();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(screen(1280.0, 800.0)),
+                time: Some(n as f64 / 60.0),
+                ..Default::default()
+            },
+            |ui| {
+                frame(ui.ctx(), &p, false);
+                super::super::widgets::Floater::new("inventory", "Inventory", egui::pos2(70.0, 90.0), egui::vec2(320.0, 220.0))
+                    .silent()
+                    .show(ui.ctx(), &p, &mut true, |ui| {
+                        ui.add(egui::TextEdit::singleline(draft).id(egui::Id::unique("workspace_untouched_editor")));
+                    });
+                super::super::widgets::bare_window(
+                    ui.ctx(),
+                    &p,
+                    "minimap",
+                    "Map",
+                    egui::Frame::NONE,
+                    Rect::from_min_size(egui::pos2(900.0, 90.0), egui::vec2(200.0, 200.0)),
+                    egui::vec2(64.0, 64.0),
+                    false,
+                    |ui| {
+                        ui.label("map");
+                    },
+                );
+            },
+        );
+        output.textures_delta.clear();
+    }
+    #[test]
+    fn workspace_geometry_preserves_native_minimization_editor_focus_and_closed_conversations() {
+        let ctx = egui::Context::default();
+        let mut draft = "unsent text".to_owned();
+        for n in 1..5 {
+            workspace_native_frame(&ctx, n, &mut draft);
+        }
+        let baseline = workspace_capture(&ctx);
+        assert!(baseline[0].is_some());
+        assert!(baseline[1].is_some());
+        assert!(baseline[3].is_none());
+        super::super::widgets::minimize_floater(&ctx, "inventory");
+        workspace_native_frame(&ctx, 5, &mut draft);
+        let before = workspace_capture(&ctx);
+        assert_eq!(before[0].unwrap().size, baseline[0].unwrap().size);
+        ctx.memory_mut(|m| m.request_focus(Id::unique("workspace_untouched_editor")));
+        let mut target = before;
+        target[0].as_mut().unwrap().offset[0] += 200.0;
+        target[0].as_mut().unwrap().size = [420.0, 300.0];
+        target[1].as_mut().unwrap().size = [240.0, 180.0];
+        workspace_apply(&ctx, &target);
+        assert!(ctx.memory(|m| m.has_focus(Id::unique("workspace_untouched_editor"))));
+        assert!(super::super::widgets::floater_minimized(&ctx, "inventory"));
+        for n in 6..9 {
+            workspace_native_frame(&ctx, n, &mut draft);
+        }
+        assert_eq!(draft, "unsent text");
+        assert!(super::super::widgets::floater_minimized(&ctx, "inventory"));
+        assert_eq!(workspace_capture(&ctx)[0].unwrap().size, [420.0, 300.0]);
+        assert!(workspace_capture(&ctx)[3].is_none());
+        let map = ctx.memory(|m| m.area_rect(Id::unique("minimap"))).unwrap();
+        assert!(map.width() > 200.0);
+    }
+    #[test]
+    fn workspace_preview_generic_backup_projects_baseline_without_mutating_live_context() {
+        let ctx = egui::Context::default();
+        let mut draft = "keep editor".to_owned();
+        for n in 1..5 {
+            workspace_native_frame(&ctx, n, &mut draft);
+        }
+        let baseline = workspace_capture(&ctx);
+        let original = ctx.memory(|m| m.area_rect(Id::unique("inventory"))).unwrap();
+        workspace_preview(&ctx, Some(baseline));
+        let mut target = baseline;
+        target[0].as_mut().unwrap().offset[0] += 260.0;
+        workspace_apply(&ctx, &target);
+        for n in 5..8 {
+            workspace_native_frame(&ctx, n, &mut draft);
+        }
+        let live = ctx.memory(|m| m.area_rect(Id::unique("inventory"))).unwrap();
+        assert!((live.left() - original.left()).abs() > 100.0);
+        let saved = text(&ctx).unwrap();
+        assert_eq!(ctx.memory(|m| m.area_rect(Id::unique("inventory"))).unwrap(), live);
+        let restored = egui::Context::default();
+        restore(&restored, &saved).unwrap();
+        for n in 10..14 {
+            workspace_native_frame(&restored, n, &mut draft);
+        }
+        let restored_rect = restored.memory(|m| m.area_rect(Id::unique("inventory"))).unwrap();
+        assert!((restored_rect.left() - original.left()).abs() < 1.0);
+        let mut autosave = Autosave::default();
+        autosave.due = Some(Instant::now());
+        autosave.after_pass(&ctx, Instant::now());
+        assert!(autosave.due.is_none());
+        workspace_apply(&ctx, &baseline);
+        workspace_preview(&ctx, None);
+        assert_eq!(draft, "keep editor");
+    }
 
     fn screen(width: f32, height: f32) -> Rect {
         Rect::from_min_size(Pos2::ZERO, Vec2::new(width, height))

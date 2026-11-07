@@ -1114,6 +1114,9 @@ pub struct Settings {
     /// written in their place.
     #[serde(skip)]
     pub photo_held: Option<crate::snapshot::quality::Held>,
+    /// Workspace-local live Preview; unrelated saves/backup retain committed fields.
+    #[serde(skip)]
+    pub(crate) workspace_held: Option<crate::workspace::model::Layout>,
     /// About Land as Firestorm's nine tabs (`ui/land`) instead of the
     /// overview and the settings grouped by intent (`ui/land/aurora`).
     pub classic_about_land: bool,
@@ -2018,6 +2021,7 @@ impl Default for Settings {
             world_map_style: WorldMapStyle::Aurora,
             photo_window: PhotoWindowStyle::Aurora,
             photo_held: None,
+            workspace_held: None,
             classic_about_land: false,
             classic_search: false,
             classic_region_estate: false,
@@ -2828,6 +2832,9 @@ impl Settings {
     /// the photo quality raises them, no user name unless remembered.
     pub(crate) fn to_saved(&self) -> Settings {
         let mut copy = self.clone();
+        if let Some(held) = copy.workspace_held.take() {
+            held.settings(&mut copy, false);
+        }
         copy.remember_hover_account();
         if let Some(mut held) = copy.photo_held.take() {
             // a setting changed since the last frame is the user's too

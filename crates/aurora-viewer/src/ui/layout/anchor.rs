@@ -11,6 +11,19 @@ pub(super) struct Anchor {
 }
 
 impl Anchor {
+    pub(super) fn workspace(self, size: Vec2) -> crate::workspace::model::Geometry {
+        crate::workspace::model::Geometry {
+            point: Self::POINTS.iter().position(|p| *p == self.point).unwrap_or(0) as u8,
+            offset: [self.offset.x, self.offset.y],
+            size: [size.x, size.y],
+        }
+    }
+    pub(super) fn from_workspace(g: crate::workspace::model::Geometry) -> Option<Self> {
+        Some(Self {
+            point: *Self::POINTS.get(g.point as usize)?,
+            offset: Vec2::from(g.offset),
+        })
+    }
     // Fixed order resolves exact ties consistently, including first launch.
     const POINTS: [Align2; 8] = [
         Align2::LEFT_TOP,

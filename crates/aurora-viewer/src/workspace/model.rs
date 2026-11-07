@@ -145,7 +145,7 @@ impl Catalogue {
     pub(crate) fn validate(&self) -> Result<(), &'static str> {
         if self.version != 1
             || self.account.is_nil()
-            || !crate::characters::valid_id(&self.grid)
+            || aurora_session::GridKey::parse_hex(&self.grid).is_err()
             || self.revision == 0
             || self.records.len() > LIMIT
         {
@@ -250,5 +250,37 @@ mod tests {
         assert!(!valid_name(" padded"));
         assert!(!valid_name("line\nbreak"));
         assert!(!valid_name(&"界".repeat(33)));
+    }
+    #[test]
+    fn workspace_preview_settings_save_and_backup_keep_baseline_and_unrelated_changes() {
+        let mut s = crate::settings::Settings::default();
+        let mut baseline = layout();
+        baseline.viewport = (&s.world_viewport).into();
+        baseline.bars = Bars {
+            classic: s.classic_bars,
+            stretch: s.place_bar_stretch,
+            rights_text: s.place_bar_rights_text,
+        };
+        let mut candidate = baseline.clone();
+        candidate.viewport.enabled = true;
+        candidate.viewport.left = 50.0;
+        candidate.bars.classic = !baseline.bars.classic;
+        s.workspace_held = Some(baseline.clone());
+        candidate.settings(&mut s, false);
+        s.show_balance = !s.show_balance;
+        let balance = s.show_balance;
+        let saved = s.to_saved();
+        assert_eq!(saved.world_viewport, (&baseline.viewport).into());
+        assert_eq!(saved.classic_bars, baseline.bars.classic);
+        assert_eq!(saved.show_balance, balance);
+        assert_eq!(s.world_viewport, (&candidate.viewport).into());
+        let json = serde_json::to_value(saved).unwrap();
+        assert!(json.get("workspace_held").is_none());
+        let viewport = s.world_viewport.clone();
+        baseline.settings(&mut s, true);
+        assert_eq!(
+            s.world_viewport, viewport,
+            "fitted host viewport remains under existing host policy"
+        );
     }
 }

@@ -351,7 +351,7 @@ impl WorkspaceDirectory {
         Ok(Some(b))
     }
     /// Caller holds store.lock and has checked the original file revision.
-    pub(crate) fn publish(&self, bytes: &[u8]) -> io::Result<()> {
+    pub(crate) fn publish(&self, bytes: &[u8], expected: Option<&[u8]>) -> io::Result<()> {
         use std::io::Write;
         self.checked()?;
         let temp = self.path.join(format!(".workspace-{}.tmp", Uuid::new_v4()));
@@ -360,6 +360,11 @@ impl WorkspaceDirectory {
             f.write_all(bytes)?;
             f.sync_all()?;
             drop(f);
+            // The caller's cooperative store lock covers read/encode/rename;
+            // also detect a non-cooperating replacement during the disk flush.
+            if self.read(crate::workspace::model::MAX_FILE)?.as_deref() != expected {
+                return Err(invalid("workspace file changed before publication"));
+            }
             crate::atomic_file::rename_retrying(&temp, &self.path.join("named-v1.json"))?;
             crate::atomic_file::sync_dir(&self.path);
             Ok(())
@@ -685,6 +690,27 @@ mod platform {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_workspace_private_store_is_exclusive_and_never_repairs_a_link_or_public_file() {
+        let d = WorkspaceDirectory::select(Uuid::new_v4(), &"a".repeat(64)).unwrap();
+        let lock = d.lock().unwrap();
+        assert!(d.lock().is_err());
+        d.publish(b"original", None).unwrap();
+        assert_eq!(d.read(64).unwrap().unwrap(), b"original");
+        drop(lock);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::{PermissionsExt, symlink};
+            let path = d.path.join("named-v1.json");
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+            assert!(d.read(64).is_err());
+            assert_eq!(std::fs::read(&path).unwrap(), b"original");
+            std::fs::remove_file(&path).unwrap();
+            symlink(d.path.join("store.lock"), &path).unwrap();
+            assert!(d.read(64).is_err());
+            std::fs::remove_file(path).unwrap();
+        }
+    }
     use std::io::Write;
 
     #[test]

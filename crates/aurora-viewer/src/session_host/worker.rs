@@ -318,6 +318,20 @@ impl WorkerBridge {
         Err(ReviewOutcome::NotForeground)
     }
 
+    /// Native layout effects reuse the complete grant/foreground boundary,
+    /// without manufacturing a chat request or authorizing any World action.
+    pub(crate) fn layout_authorized(
+        &self,
+        source: aurora_session::chat::ChatSource,
+        activation: u64,
+        window: &winit::window::Window,
+    ) -> bool {
+        self.review_authorized(source, activation, window).is_ok()
+    }
+    pub(crate) fn layout_activation(&self) -> u64 {
+        self.guard.activation()
+    }
+
     /// Cheap final gate after native queries, immediately before the App effect.
     /// Reading a fresh monotonic time here prevents an expired lease from being
     /// represented by an earlier successful HWND/foreground check.
