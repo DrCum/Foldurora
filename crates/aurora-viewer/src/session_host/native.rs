@@ -6,33 +6,105 @@ use aurora_session::HostedViewport;
 use aurora_session::PhysicalRect;
 use winit::window::Window;
 
+const MAX_OVERLAYS: usize = 8;
+
+/// Only live CPU popup pixels cover the acknowledged world. This is collected
+/// in each UI pass, before egui drains its paint lists; remembered closed Areas
+/// must not leave an invisible native hit target over a worker.
+#[derive(Default)]
+pub(super) struct Overlays {
+    rects: Vec<egui::Rect>,
+    cover_all: bool,
+}
+
+impl Overlays {
+    pub fn collect(context: &egui::Context, world: egui::Rect) -> Self {
+        let areas = context.memory(|memory| {
+            memory
+                .areas()
+                .visible_layer_ids()
+                .into_iter()
+                .filter(|layer| matches!(layer.order, egui::Order::Foreground | egui::Order::Tooltip))
+                .filter_map(|layer| Some((layer, memory.area_rect(layer.id)?)))
+                .collect::<Vec<_>>()
+        });
+        let mut result = Self::default();
+        for (layer, area) in areas {
+            let painted = context.graphics(|graphics| {
+                graphics.get(layer).map_or(egui::Rect::NOTHING, |list| {
+                    list.all_entries().fold(egui::Rect::NOTHING, |bounds, entry| {
+                        let shape = entry.transform_after_tessellation * entry.shape.visual_bounding_rect();
+                        bounds.union(shape.intersect(entry.clip_rect))
+                    })
+                })
+            });
+            if !painted.is_positive() {
+                continue;
+            }
+            let transform = context.layer_transform_to_global(layer).unwrap_or_default();
+            let rect = (transform * painted.union(area)).intersect(world);
+            if !rect.is_finite() {
+                result.cover_all = true;
+                break;
+            }
+            if rect.is_positive() {
+                result.rects.push(rect);
+            }
+            if result.rects.len() > MAX_OVERLAYS {
+                // A bounded conservative fallback, never a silently clipped
+                // menu whose pixels or input fall through to the world.
+                result.rects.clear();
+                result.cover_all = true;
+                break;
+            }
+        }
+        result.rects.sort_by(|a, b| {
+            a.left()
+                .total_cmp(&b.left())
+                .then(a.top().total_cmp(&b.top()))
+                .then(a.right().total_cmp(&b.right()))
+                .then(a.bottom().total_cmp(&b.bottom()))
+        });
+        result.rects.dedup();
+        result
+    }
+}
+
 #[derive(Default)]
 pub(super) struct Region {
     #[cfg(windows)]
-    applied: Option<Shape>,
+    applied: Option<Applied>,
 }
 
 impl Region {
     pub fn close(&mut self, window: &Window) -> anyhow::Result<bool> {
-        self.set(window, None, egui::Rect::NOTHING, 1.0)
+        self.set(window, None, egui::Rect::NOTHING, 1.0, &Overlays::default())
     }
 
     /// `viewport` is present only after the broker's exact native/GPU grant
     /// agrees with current local geometry. Removing the region never revokes
     /// or fabricates the worker's render/input ownership.
-    pub fn set(&mut self, window: &Window, viewport: Option<HostedViewport>, world: egui::Rect, scale: f32) -> anyhow::Result<bool> {
+    pub fn set(
+        &mut self,
+        window: &Window,
+        viewport: Option<HostedViewport>,
+        world: egui::Rect,
+        scale: f32,
+        overlays: &Overlays,
+    ) -> anyhow::Result<bool> {
         #[cfg(windows)]
         {
-            use windows_sys::Win32::Graphics::Gdi::{CombineRgn, CreateRectRgn, DeleteObject, RGN_DIFF, SetWindowRgn};
+            use windows_sys::Win32::Graphics::Gdi::{CombineRgn, CreateRectRgn, DeleteObject, RGN_DIFF, RGN_OR, SetWindowRgn};
             use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
             let RawWindowHandle::Win32(handle) = window.window_handle()?.as_raw() else {
                 anyhow::bail!("controller has no Win32 window");
             };
             let hwnd = handle.hwnd.get() as windows_sys::Win32::Foundation::HWND;
             let shape = viewport
-                .map(|viewport| -> anyhow::Result<Option<Shape>> {
+                .map(|viewport| -> anyhow::Result<Option<Applied>> {
                     let (outer, client) = geometry(hwnd)?;
-                    Ok(current_shape(handle.hwnd.get() as u64, outer, client, viewport, world, scale))
+                    Ok(current_shape(handle.hwnd.get() as u64, outer, client, viewport, world, scale)
+                        .and_then(|shape| protected_shape(shape, outer, client, scale, overlays)))
                 })
                 .transpose()?
                 .flatten();
@@ -42,7 +114,8 @@ impl Region {
             // SAFETY: the HWND is this controller's live owned window. No
             // foreign parent, owner, styles or global z-order are modified.
             unsafe {
-                if let Some(shape) = shape {
+                if let Some(applied) = &shape {
+                    let shape = applied.shape;
                     let full = CreateRectRgn(0, 0, shape.width, shape.height);
                     let cut = CreateRectRgn(shape.hole.x, shape.hole.y, shape.right(), shape.bottom());
                     if full.is_null() || cut.is_null() {
@@ -54,8 +127,25 @@ impl Region {
                         }
                         anyhow::bail!("could not allocate controller window region");
                     }
-                    let combined = CombineRgn(full, full, cut, RGN_DIFF);
+                    let mut combined = CombineRgn(full, full, cut, RGN_DIFF);
                     DeleteObject(cut);
+                    for overlay in &applied.overlays {
+                        if combined == 0 {
+                            break;
+                        }
+                        let island = CreateRectRgn(
+                            overlay.x,
+                            overlay.y,
+                            overlay.x + overlay.width as i32,
+                            overlay.y + overlay.height as i32,
+                        );
+                        if island.is_null() {
+                            combined = 0;
+                            break;
+                        }
+                        combined = CombineRgn(full, full, island, RGN_OR);
+                        DeleteObject(island);
+                    }
                     if combined == 0 || SetWindowRgn(hwnd, full, 1) == 0 {
                         // Ownership transfers to Windows only on success.
                         DeleteObject(full);
@@ -70,10 +160,51 @@ impl Region {
         }
         #[cfg(not(windows))]
         {
-            let _ = (window, viewport, world, scale);
+            let _ = (window, viewport, world, scale, overlays);
             Ok(false)
         }
     }
+}
+
+#[cfg(any(windows, test))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Applied {
+    shape: Shape,
+    overlays: Vec<PhysicalRect>,
+}
+
+/// Popup coverage changes only this owned HWND's shape, never the worker's
+/// acknowledged viewport or render/input grant. Round outward for hit targets;
+/// the world hole itself continues to use the inward-rounded exact grant.
+#[cfg(any(windows, test))]
+fn protected_shape(shape: Shape, outer: PhysicalRect, client: PhysicalRect, scale: f32, overlays: &Overlays) -> Option<Applied> {
+    if overlays.cover_all || !scale.is_finite() || scale <= 0.0 || overlays.rects.len() > MAX_OVERLAYS {
+        return None;
+    }
+    let edge = |value: f32, limit: u32, start: bool| {
+        let value = f64::from(value) * f64::from(scale);
+        let value = if start { value.floor() - 1.0 } else { value.ceil() + 1.0 };
+        value.clamp(0.0, f64::from(limit)) as i64
+    };
+    let mut islands = Vec::with_capacity(overlays.rects.len());
+    for rect in &overlays.rects {
+        if !rect.is_finite() || !rect.is_positive() {
+            return None;
+        }
+        let left = edge(rect.left(), client.width, true);
+        let top = edge(rect.top(), client.height, true);
+        let right = edge(rect.right(), client.width, false);
+        let bottom = edge(rect.bottom(), client.height, false);
+        let island = PhysicalRect {
+            x: i32::try_from(i64::from(client.x) - i64::from(outer.x) + left).ok()?,
+            y: i32::try_from(i64::from(client.y) - i64::from(outer.y) + top).ok()?,
+            width: u32::try_from(right - left).ok()?,
+            height: u32::try_from(bottom - top).ok()?,
+        };
+        island.validate().ok()?;
+        islands.push(island);
+    }
+    Some(Applied { shape, overlays: islands })
 }
 
 #[cfg(windows)]
@@ -186,6 +317,176 @@ fn current_shape(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn host_popup_islands_round_outward_without_changing_the_exact_world_or_caption() {
+        let outer = rect(-1928, -152, 1616, 1270);
+        let client = rect(-1920, -120, 1600, 1200);
+        let world = egui::Rect::from_min_max(egui::pos2(0.0, 38.0), egui::pos2(1066.6667, 800.0));
+        let viewport = super::super::software::physical_viewport(7, (client.x, client.y), [1600, 1200], world, 1.5).unwrap();
+        let shape = current_shape(7, outer, client, viewport, world, 1.5).unwrap();
+        let overlays = Overlays {
+            rects: vec![egui::Rect::from_min_max(egui::pos2(100.2, 40.1), egui::pos2(260.3, 210.4))],
+            cover_all: false,
+        };
+        let applied = protected_shape(shape, outer, client, 1.5, &overlays).unwrap();
+        assert_eq!(applied.shape, shape, "popup coverage cannot replace the acknowledged world");
+        assert_eq!(applied.overlays, vec![rect(157, 91, 243, 258)]);
+        let popup = applied.overlays[0];
+        assert!(popup.y >= client.y - outer.y, "native caption remains outside popup coverage");
+        assert!(popup.x + popup.width as i32 <= applied.shape.width);
+        assert!(popup.y + popup.height as i32 <= applied.shape.height);
+
+        let clipped = Overlays {
+            rects: vec![egui::Rect::from_min_max(egui::pos2(-100.0, -100.0), egui::pos2(2000.0, 2000.0))],
+            cover_all: false,
+        };
+        assert_eq!(
+            protected_shape(shape, outer, client, 1.5, &clipped).unwrap().overlays,
+            vec![rect(8, 32, 1600, 1200)],
+            "coverage stays inside this owned native client"
+        );
+        for invalid in [
+            Overlays {
+                rects: Vec::new(),
+                cover_all: true,
+            },
+            Overlays {
+                rects: vec![world; MAX_OVERLAYS + 1],
+                cover_all: false,
+            },
+            Overlays {
+                rects: vec![egui::Rect::NAN],
+                cover_all: false,
+            },
+        ] {
+            assert!(protected_shape(shape, outer, client, 1.5, &invalid).is_none());
+        }
+        assert!(protected_shape(shape, outer, client, 0.0, &overlays).is_none());
+    }
+
+    #[test]
+    fn host_popup_islands_follow_real_combo_paint_and_disappear_when_it_closes() {
+        let context = egui::Context::default();
+        context.all_styles_mut(|style| style.visuals.popup_shadow = egui::epaint::Shadow::NONE);
+        let size = egui::vec2(800.0, 600.0);
+        let world = egui::Rect::from_min_max(egui::pos2(0.0, 38.0), size.to_pos2());
+        let mut frame = 0;
+        let mut selected = 0;
+        let mut show = |events| {
+            frame += 1;
+            let mut overlays = Overlays::default();
+            let mut button = egui::Rect::NOTHING;
+            let _ = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                    time: Some(f64::from(frame) / 60.0),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::Panel::top("strip").exact_size(38.0).show(ui, |ui| {
+                        button = egui::ComboBox::from_id_salt("profiles")
+                            .selected_text("Character 1")
+                            .width(200.0)
+                            .show_ui(ui, |ui| {
+                                for index in 0..5 {
+                                    ui.selectable_value(&mut selected, index, format!("Character {}", index + 1));
+                                }
+                            })
+                            .response
+                            .rect;
+                    });
+                    overlays = Overlays::collect(ui.ctx(), world);
+                },
+            );
+            (button, overlays)
+        };
+        let mut button = egui::Rect::NOTHING;
+        for _ in 0..4 {
+            (button, _) = show(Vec::new());
+        }
+        for pressed in [true, false] {
+            show(vec![
+                egui::Event::PointerMoved(button.center()),
+                egui::Event::PointerButton {
+                    pos: button.center(),
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]);
+        }
+        let mut visible = false;
+        for _ in 0..6 {
+            let (_, overlays) = show(Vec::new());
+            assert!(!overlays.cover_all);
+            visible |= !overlays.rects.is_empty();
+            for rect in overlays.rects {
+                assert!(world.contains_rect(rect));
+                assert!(
+                    rect.width() < world.width() / 2.0,
+                    "a compact popup must preserve the surrounding live world"
+                );
+            }
+        }
+        assert!(visible, "real popup paint below the strip needs a native island");
+        egui::Popup::close_all(&context);
+        let (_, closed) = show(vec![egui::Event::PointerGone]);
+        assert!(
+            closed.rects.is_empty(),
+            "remembered closed Area is not current paint or input coverage"
+        );
+        assert!(!closed.cover_all);
+    }
+
+    #[test]
+    fn host_overlay_collection_covers_live_tooltips_and_bounds_excess_area_count() {
+        let context = egui::Context::default();
+        let world = egui::Rect::from_min_max(egui::pos2(0.0, 38.0), egui::pos2(800.0, 600.0));
+        let mut frame = 0;
+        let mut show = |count: usize, order| {
+            frame += 1;
+            let mut overlays = Overlays::default();
+            let _ = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0))),
+                    time: Some(f64::from(frame) / 60.0),
+                    ..Default::default()
+                },
+                |ui| {
+                    for index in 0..count {
+                        egui::Area::new(egui::Id::unique(("owned_overlay", index)))
+                            .order(order)
+                            .fixed_pos(egui::pos2(10.0 + index as f32 * 50.0, 80.0))
+                            .show(ui.ctx(), |ui| {
+                                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                                    ui.label("Owned hint");
+                                });
+                            });
+                    }
+                    overlays = Overlays::collect(ui.ctx(), world);
+                },
+            );
+            overlays
+        };
+        for _ in 0..4 {
+            show(1, egui::Order::Tooltip);
+        }
+        let tooltip = show(1, egui::Order::Tooltip);
+        assert_eq!(tooltip.rects.len(), 1);
+        assert!(!tooltip.cover_all);
+        assert!(show(0, egui::Order::Tooltip).rects.is_empty());
+        for _ in 0..4 {
+            show(MAX_OVERLAYS + 1, egui::Order::Foreground);
+        }
+        let excess = show(MAX_OVERLAYS + 1, egui::Order::Foreground);
+        assert!(
+            excess.cover_all,
+            "excess overlays conservatively close coverage instead of truncating a menu"
+        );
+        assert!(excess.rects.is_empty());
+    }
 
     fn rect(x: i32, y: i32, width: u32, height: u32) -> PhysicalRect {
         PhysicalRect { x, y, width, height }

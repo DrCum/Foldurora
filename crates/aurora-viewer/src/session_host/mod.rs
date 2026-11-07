@@ -42,6 +42,9 @@ pub fn run() -> anyhow::Result<()> {
         ..Default::default()
     };
     theme.apply(&context, 1.0);
+    // This CPU-owned HWND cannot alpha-blend a shadow over the separate worker
+    // window. Opaque framed popup islands preserve the surrounding live world.
+    context.all_styles_mut(|style| style.visuals.popup_shadow = egui::epaint::Shadow::NONE);
     fonts::fallback::wait();
     fonts::apply(&context, fonts::DEFAULT);
     let icons = Icons::load(&context, None);
@@ -66,6 +69,7 @@ pub fn run() -> anyhow::Result<()> {
         notice_at: None,
         world: egui::Rect::NOTHING,
         region: native::Region::default(),
+        overlays: native::Overlays::default(),
         transition: PresentationGate::default(),
         requested_viewport: None,
         park_requested: false,
@@ -99,6 +103,7 @@ struct Shell {
     notice_at: Option<Instant>,
     world: egui::Rect,
     region: native::Region,
+    overlays: native::Overlays,
     transition: PresentationGate,
     requested_viewport: Option<aurora_session::HostedViewport>,
     park_requested: bool,
@@ -213,13 +218,16 @@ impl Shell {
         let p = self.theme.palette();
         let mut action = None;
         let mut world = self.world;
+        let mut overlays = native::Overlays::default();
         let output = context.run_ui(raw, |ui| {
             let shown = self.ui.show(ui, &p, &self.snapshot, native_ready, hosted, self.closing.is_some());
             // A discarded egui pass must not duplicate a queued action.
             action = action.take().or(shown.action);
             world = shown.world;
+            overlays = native::Overlays::collect(ui.ctx(), world);
         });
         self.world = world;
+        self.overlays = overlays;
         self.layout_dirty = false;
         let viewport = surface.viewport(world, context.pixels_per_point());
         let delay = surface.present(event_loop, &context, output, p.panel)?;
@@ -303,6 +311,7 @@ impl Shell {
             confirmed.and(viewport),
             self.world,
             self.context.pixels_per_point(),
+            &self.overlays,
         )?;
         if self.closing.is_some()
             || self.snapshot.stopped
@@ -443,6 +452,19 @@ impl ApplicationHandler for Shell {
             return;
         }
         let response = surface.event(&event);
+        if matches!(event, WindowEvent::Focused(false)) {
+            // A world-hole click goes to the independent worker, outside
+            // egui's event stream. Native focus loss dismisses the old menu
+            // without capturing the worker's mouse or changing its grant.
+            egui::Popup::close_all(&self.context);
+            self.overlays = native::Overlays::default();
+            self.request_repaint();
+        }
+        if matches!(event, WindowEvent::CursorLeft { .. }) {
+            // egui-winit queued PointerGone; paint once to remove any hover
+            // island even when the worker now receives pointer movement.
+            self.request_repaint();
+        }
         if response.repaint {
             self.request_repaint();
         }

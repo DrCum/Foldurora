@@ -11,6 +11,17 @@ an unexpected worker-window change or a lost host identity. Restoration forces
 winit's cached visibility through hidden before replacing saved native styles,
 then shows the standalone window and restores its taskbar entry last.
 
+The compact controller keeps its world rectangle independent of same-window
+menus. `session_host/native.rs::Overlays` collects bounded live foreground and
+tooltip paint during the final egui pass, excluding remembered closed Areas.
+The owned Windows region unions those outward-rounded popup islands with its
+frame around the exact acknowledged world hole. This changes neither worker
+geometry nor render/input authority; genuine modal dialogs still cover the full
+world, and management-panel geometry uses the existing fenced refresh. The CPU
+host disables popup shadows because its opaque HWND cannot blend them over the
+independent worker. Focus loss dismisses a popup when a click reaches the worker
+through the world hole; pointer exit repaints away transient hover coverage.
+
 `App::effective_viewport_settings` shares the fitted-worker override between
 world rendering, toolbar placement and cursor capture. A fitted native window
 already occupies the controller's world area, so it uses full-canvas geometry;
