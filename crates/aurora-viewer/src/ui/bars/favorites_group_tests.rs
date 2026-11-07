@@ -101,7 +101,7 @@ impl Harness {
                 events,
                 ..Default::default()
             },
-            |_| {
+            |root_ui| {
                 if self.mode == 1 {
                     if let (_, Some(BarAction::Favorite(found))) = row(
                         &self.ctx,
@@ -113,7 +113,7 @@ impl Harness {
                         action = Some(found);
                     }
                 } else {
-                    egui::CentralPanel::default().show(&self.ctx, |ui| {
+                    egui::CentralPanel::default().show(root_ui, |ui| {
                         if self.mode == 0 {
                             menu_body(ui, &self.palette, &self.icons, &view, &mut action);
                         } else {
@@ -265,8 +265,8 @@ fn favorites_real_egui_grouped_end_drop_uses_full_original_list_not_last_heading
             events: pointer(position, PointerButton::Primary, false),
             ..Default::default()
         },
-        |_| {
-            egui::CentralPanel::default().show(&h.ctx, |ui| {
+        |root_ui| {
+            egui::CentralPanel::default().show(root_ui, |ui| {
                 action = drop_on(
                     ui,
                     &h.palette,
