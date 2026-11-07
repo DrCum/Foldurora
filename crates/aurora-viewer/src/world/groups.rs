@@ -370,6 +370,7 @@ impl World {
     /// (LLIMModel::sendLeaveSession), a 1:1 conversation only leaves the list
     /// (nothing is sent; the next message from that resident opens it again).
     pub fn leave_session(&mut self, session: Uuid) {
+        self.read_ledger.retire(Some(session));
         self.cancel_saved_im(session);
         self.groups.restoring.remove(&session);
         self.groups.deferred.retain(|id| *id != session);

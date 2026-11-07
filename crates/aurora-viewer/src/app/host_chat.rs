@@ -14,6 +14,7 @@ use uuid::Uuid;
 impl App {
     pub(super) fn host_chat_sync(&mut self, backend: &mut WorkerChat, authority: &dyn Fn() -> Option<ChatSource>) -> Result<(), ChatError> {
         self.configure_host_chat_rules();
+        self.reconcile_host_read_interest();
         backend.sync(&AppChat { app: self, authority })
     }
 
@@ -24,7 +25,20 @@ impl App {
         packet: &ChatPacket,
     ) -> Result<Vec<ChatPacket>, ChatError> {
         self.configure_host_chat_rules();
+        self.reconcile_host_read_interest();
         backend.handle(&mut AppChat { app: self, authority }, packet)
+    }
+
+    fn reconcile_host_read_interest(&mut self) {
+        let current: Vec<_> = catalogue(&self.world)
+            .into_iter()
+            .filter_map(|conversation| {
+                let key = native_read_key(conversation)?;
+                let (token, raw, badge) = self.world.read_counters(key)?;
+                Some((key, token, raw, badge))
+            })
+            .collect();
+        self.world.read_ledger.reconcile(&current);
     }
 
     fn configure_host_chat_rules(&mut self) {
@@ -67,6 +81,43 @@ impl NativeChat for AppChat<'_> {
         }
         lines(&self.app.world, conversation, cursor, limit)
     }
+    fn read_metadata(&self, conversation: Conversation) -> Option<aurora_session::chat::ReadMetadata> {
+        self.source()?;
+        read_metadata(&self.app.world, conversation, !self.app.exit_prompt.open)
+    }
+    fn mark_read(&mut self, request: aurora_session::chat::MarkReadRequest) -> aurora_session::chat::ReadOutcome {
+        use aurora_session::chat::ReadOutcome;
+        if self.source() != Some(request.key.source) {
+            return ReadOutcome::RejectedNative;
+        }
+        // Reconcile immediately before comparison as well as at the outer
+        // operation boundary: native draw/close/history may have intervened.
+        self.app.reconcile_host_read_interest();
+        let Some(current) = self.read_metadata(request.key.conversation) else {
+            return ReadOutcome::RejectedNative;
+        };
+        if !current.can_mark_read {
+            return ReadOutcome::RejectedNative;
+        }
+        if current.observed != request.observed || current.unread_revision != request.unread_revision {
+            return ReadOutcome::StaleObservation;
+        }
+        let Some(key) = native_read_key(request.key.conversation) else {
+            return ReadOutcome::RejectedNative;
+        };
+        if self.source() != Some(request.key.source) {
+            return ReadOutcome::RejectedNative;
+        }
+        let Some((count, _)) = self.app.world.mark_conversation_read(key) else {
+            return ReadOutcome::RejectedNative;
+        };
+        self.app.world.acknowledge_read_messages();
+        if count == 0 {
+            ReadOutcome::AlreadyRead
+        } else {
+            ReadOutcome::Applied
+        }
+    }
     fn submit_literal(&mut self, key: ChatKey, text: &str) -> SendOutcome {
         if self.source() != Some(key.source) {
             return SendOutcome::RejectedNative;
@@ -93,6 +144,31 @@ impl NativeChat for AppChat<'_> {
         // but we cannot promise acceptance or remote delivery. Never retry it.
         SendOutcome::Uncertain
     }
+}
+
+fn native_read_key(conversation: Conversation) -> Option<Option<Uuid>> {
+    match conversation {
+        Conversation::Nearby => Some(None),
+        Conversation::Direct(peer) => Some(Some(uuid(peer))),
+        _ => None,
+    }
+}
+
+fn read_metadata(world: &World, conversation: Conversation, ui_ready: bool) -> Option<aurora_session::chat::ReadMetadata> {
+    let policy = snapshot(world, conversation, ui_ready)?;
+    if !policy.ready || !policy.can_read {
+        return None;
+    }
+    let state = world.read_ledger.state(native_read_key(conversation)?)?;
+    Some(aurora_session::chat::ReadMetadata {
+        unread: state.unread,
+        unread_revision: state.revision,
+        observed: aurora_session::chat::ObservedIncoming {
+            epoch: state.epoch,
+            through: state.incoming,
+        },
+        can_mark_read: state.revision < u64::MAX,
+    })
 }
 
 fn uuid(id: ConversationId) -> Uuid {

@@ -76,6 +76,8 @@ pub(super) fn host() -> HostSnapshot {
                 .collect(),
             lines: Vec::new(),
             receipts: Vec::new(),
+            reads: Default::default(),
+            read_operations: Vec::new(),
             gap: false,
         }));
     }

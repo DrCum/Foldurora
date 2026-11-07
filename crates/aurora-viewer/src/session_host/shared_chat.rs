@@ -3,7 +3,7 @@
 //! The Legacy host selects a character/conversation without acknowledging read
 //! (tools/session-host/main.cpp); Aurora retains its own native policy fences.
 
-use super::chat_ui::{self, ChatUi, InputMode, SendDraft};
+use super::chat_ui::{self, ChatUi, InputMode, ReadDraft, SendDraft};
 use super::slots::SlotId;
 use super::transport::{HostChatSnapshot, HostError, HostSnapshot};
 use crate::theme::Palette;
@@ -159,6 +159,26 @@ impl SharedChat {
             .iter()
             .find(|state| Some(state.ui.source()) == self.selected)
             .and_then(|state| state.ui.composer_rect(ctx))
+    }
+
+    pub fn take_read_action(&mut self) -> Option<ReadDraft> {
+        self.states
+            .iter_mut()
+            .find(|state| Some(state.ui.source()) == self.selected)?
+            .ui
+            .take_read_action()
+    }
+
+    pub fn queued_read(&mut self, draft: ReadDraft, request: u64) {
+        if let Some(state) = self.states.iter_mut().find(|state| state.ui.source() == draft.key.source) {
+            state.ui.queued_read(draft, request);
+        }
+    }
+
+    pub fn read_queue_failed(&mut self, draft: ReadDraft) {
+        if let Some(state) = self.states.iter_mut().find(|state| state.ui.source() == draft.key.source) {
+            state.ui.read_queue_failed(draft);
+        }
     }
 
     pub fn queued(&mut self, draft: &SendDraft, request: u64) {

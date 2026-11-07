@@ -194,6 +194,13 @@ impl ChatWindow {
         let delay = self.surface.present(event_loop, &context, output, palette.panel)?;
         self.last_frame = Some(Instant::now());
         self.repaint = Instant::now().checked_add(delay);
+        if let Some(draft) = model.take_read_action() {
+            match controller.mark_chat_read(draft.request(0)) {
+                Ok(request) => model.queued_read(draft, request),
+                Err(_) => model.read_queue_failed(draft),
+            }
+            self.repaint = Some(Instant::now());
+        }
         if let Some(draft) = action {
             match controller.send_chat(draft.key, draft.policy_revision, draft.text.clone()) {
                 Ok(request) => model.queued(&draft, request),

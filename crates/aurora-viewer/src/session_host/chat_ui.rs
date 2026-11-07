@@ -2,6 +2,7 @@
 //! The active world is deliberately absent from this interface. Only typed
 //! literal sends leave this view; changing conversations never retargets text.
 
+use super::chat_broker::{ReadOperation, ReadStatus};
 use super::transport::{HostChatSnapshot, HostError};
 use crate::theme::Palette;
 use crate::ui::widgets::{self, ActionKind};
@@ -9,7 +10,27 @@ use aurora_session::chat::{
     ChatKey, ChatSource, ChatText, Conversation, ConversationInfo, MAX_CONVERSATIONS, MAX_RECEIPTS, MAX_RETAINED_LINES, MAX_TEXT_BYTES,
     NativeChatPolicy, SendOutcome, SendReceipt,
 };
+use aurora_session::chat::{MarkReadRequest, ReadMetadata, ReadOutcome};
 use egui::{Id, RichText, TextEdit, vec2};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct ReadDraft {
+    pub key: ChatKey,
+    pub policy_revision: u64,
+    pub metadata: ReadMetadata,
+}
+impl ReadDraft {
+    pub fn request(self, request: u64) -> MarkReadRequest {
+        MarkReadRequest {
+            key: self.key,
+            request,
+            policy_revision: self.policy_revision,
+            observed: self.metadata.observed,
+            unread_revision: self.metadata.unread_revision,
+        }
+    }
+}
+
 use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -108,6 +129,10 @@ pub(super) struct ChatUi {
     interaction: u64,
     changed: bool,
     ime_composing: bool,
+    read_metadata: Option<ReadMetadata>,
+    read_action: Option<ReadDraft>,
+    read_operation: Option<ReadOperation>,
+    read_busy: bool,
 }
 
 pub(super) fn eligible(snapshot: &HostChatSnapshot) -> bool {
@@ -155,6 +180,10 @@ impl ChatUi {
             interaction: 0,
             changed: false,
             ime_composing: false,
+            read_metadata: None,
+            read_action: None,
+            read_operation: None,
+            read_busy: false,
         }
     }
 
@@ -194,6 +223,41 @@ impl ChatUi {
             self.warning = Some(Warning::Changed);
         }
         self.policy = current.and_then(|snapshot| native_policy(snapshot, self.key()));
+        // Read presentation never enters catalogue/policy equality: arrivals
+        // preserve a valid Send gesture, composer text, Undo and IME.
+        self.read_metadata = current.and_then(|snapshot| {
+            let policy = self.policy?;
+            if !policy.can_read {
+                return None;
+            }
+            snapshot
+                .reads
+                .get(&self.conversation)
+                .copied()
+                .filter(|read| read.validate().is_ok())
+        });
+        self.read_busy = current.is_some_and(|snapshot| {
+            snapshot
+                .read_operations
+                .iter()
+                .any(|operation| matches!(operation.status, ReadStatus::Pending | ReadStatus::Uncertain))
+        });
+        if let Some(snapshot) = current {
+            if let Some(operation) = snapshot
+                .read_operations
+                .iter()
+                .filter(|operation| operation.request.key == self.key())
+                .max_by_key(|operation| operation.request.request)
+            {
+                self.read_operation = Some(*operation);
+            }
+        } else {
+            self.read_action = None;
+            self.read_operation = None;
+        }
+        self.read_busy |= self
+            .read_operation
+            .is_some_and(|operation| matches!(operation.status, ReadStatus::Pending | ReadStatus::Uncertain));
         if !self.available {
             if let Some(receipt) = &mut self.receipt
                 && receipt.outcome == SendOutcome::Pending
@@ -231,6 +295,7 @@ impl ChatUi {
     }
 
     pub fn cancel_gesture(&mut self) {
+        self.read_action = None;
         self.interaction = self.interaction.saturating_add(1);
         self.changed = true;
         self.ime_composing = false;
@@ -328,6 +393,29 @@ impl ChatUi {
         }
     }
 
+    pub fn take_read_action(&mut self) -> Option<ReadDraft> {
+        self.read_action.take()
+    }
+
+    pub fn queued_read(&mut self, draft: ReadDraft, request: u64) {
+        if draft.key.source == self.source {
+            self.read_operation = Some(ReadOperation {
+                request: draft.request(request),
+                status: ReadStatus::Pending,
+            });
+            self.read_busy = true;
+        }
+    }
+
+    pub fn read_queue_failed(&mut self, draft: ReadDraft) {
+        if draft.key.source == self.source {
+            self.read_operation = Some(ReadOperation {
+                request: draft.request(0),
+                status: ReadStatus::Unavailable,
+            });
+        }
+    }
+
     pub fn queue_failed(&mut self, error: HostError) {
         self.warning = Some(Warning::Queue(error));
     }
@@ -368,6 +456,7 @@ impl ChatUi {
         mode: InputMode,
         selector: impl FnOnce(&mut egui::Ui) -> bool,
     ) -> Option<SendDraft> {
+        self.read_action = None;
         self.sync(snapshot);
         let popup_open = egui::Popup::is_any_open(ui.ctx());
         let mut navigating = std::mem::take(&mut self.changed) || mode == InputMode::Navigating;
@@ -589,6 +678,51 @@ impl ChatUi {
             if mode == InputMode::Live {
                 self.select(picked);
             }
+            if let (Some(metadata), Some(policy)) = (self.read_metadata, self.policy) {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        RichText::new(aurora_i18n::tr!("host-chat-native-unread", count = metadata.unread.to_string()))
+                            .small()
+                            .color(p.muted),
+                    );
+                    let enabled = metadata.can_mark_read
+                        && !self.read_busy
+                        && mode == InputMode::Live
+                        && focused
+                        && !focus_changed
+                        && !navigating
+                        && !source_changed
+                        && !popup_open
+                        && !self.ime_composing;
+                    let read_id = self.editor_id().with("explicit_read");
+                    let read = ui
+                        .push_id((read_id, self.interaction, metadata), |ui| {
+                            widgets::action_button_if(
+                                ui,
+                                p,
+                                "",
+                                aurora_i18n::tr!("host-chat-mark-read"),
+                                ActionKind::Flat,
+                                vec2(0.0, 30.0),
+                                enabled,
+                            )
+                        })
+                        .inner;
+                    #[cfg(test)]
+                    ui.ctx()
+                        .data_mut(|data| data.insert_temp(Id::unique("host_chat_read_rect"), read.rect));
+                    if read.clicked() && action.is_none() {
+                        self.read_action = Some(ReadDraft {
+                            key: policy.key,
+                            policy_revision: policy.revision,
+                            metadata,
+                        });
+                    }
+                });
+            }
+            if let Some(operation) = self.read_operation.filter(|operation| operation.request.key == self.key()) {
+                ui.label(RichText::new(read_status_text(operation.status)).small().color(p.muted));
+            }
         });
         self.sync(snapshot);
         let conversation_changed = std::mem::take(&mut self.changed);
@@ -599,6 +733,7 @@ impl ChatUi {
         }
         if navigating || egui::Popup::is_any_open(ui.ctx()) {
             action = None;
+            self.read_action = None;
         }
         egui::CentralPanel::default().frame(frame).show(ui, |ui| {
             if let Some(snapshot) = snapshot.filter(|snapshot| snapshot.source == self.source && self.available) {
@@ -640,6 +775,17 @@ impl ChatUi {
             }
         });
         action
+    }
+}
+
+fn read_status_text(status: ReadStatus) -> &'static str {
+    match status {
+        ReadStatus::Pending => aurora_i18n::tr!("host-chat-read-pending"),
+        ReadStatus::Uncertain => aurora_i18n::tr!("host-chat-read-uncertain"),
+        ReadStatus::Unavailable => aurora_i18n::tr!("host-chat-read-unavailable"),
+        ReadStatus::Completed(ReadOutcome::Applied | ReadOutcome::AlreadyRead) => aurora_i18n::tr!("host-chat-read-applied"),
+        ReadStatus::Completed(ReadOutcome::StaleObservation) => aurora_i18n::tr!("host-chat-read-stale"),
+        ReadStatus::Completed(ReadOutcome::RejectedNative) => aurora_i18n::tr!("host-chat-read-unavailable"),
     }
 }
 
@@ -729,6 +875,8 @@ mod tests {
                 truncated: false,
             }],
             receipts: Vec::new(),
+            reads: Default::default(),
+            read_operations: Vec::new(),
             gap: false,
         }
     }

@@ -13399,3 +13399,11 @@ host-manage-hide = Masquer la gestion des personnages
 photo-interface-size = Cette taille de photo ne peut pas inclure l’interface. Choisissez une taille plus petite ou désactivez Interface.
 photo-interface-aspect = Pour inclure l’interface, choisissez Fenêtre ou un format correspondant, ou désactivez Interface.
 photo-canvas-changed = La fenêtre ou l’échelle de l’interface a changé. Reprenez la photo.
+
+host-chat-native-unread = Non lus : { $count }
+host-chat-mark-read = Marquer la conversation comme lue
+host-chat-read-pending = Marquage de la conversation comme lue…
+host-chat-read-uncertain = Résultat incertain. Vérification de l’opération initiale, sans nouvel envoi.
+host-chat-read-unavailable = Lecture indisponible. L’opération initiale ne sera pas répétée.
+host-chat-read-applied = Conversation marquée comme lue.
+host-chat-read-stale = La conversation a changé. Vérifiez le nombre de messages non lus et cliquez à nouveau.

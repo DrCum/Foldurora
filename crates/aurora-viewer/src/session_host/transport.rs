@@ -7,7 +7,7 @@
 
 pub(crate) use super::chat_broker::HostChatSnapshot;
 use super::slots::{Registry, SlotId, SlotLabel, SlotSummary};
-use aurora_session::chat::{ChatKey, ChatSource, ChatText};
+use aurora_session::chat::{ChatKey, ChatSource, ChatText, MarkReadRequest};
 use aurora_session::{
     AccountKey, Binding, Command, Coordinator, Effect, Envelope, Event, GridKey, HostId, HostNotice, HostedViewport, InstallationId,
     MAX_WORKERS, Message, PROTOCOL_VERSION, Phase, SessionId, SessionIdentity, WorkerId, WorkerIdentity, WorkerStatus,
@@ -90,6 +90,7 @@ enum HostIntent {
     Viewport(HostedViewport),
     Park,
     Detach(WorkerId),
+    ChatRead(MarkReadRequest),
     ChatSend {
         key: ChatKey,
         policy_revision: u64,
@@ -100,7 +101,7 @@ enum HostIntent {
 impl HostIntent {
     fn controls_presentation(&self) -> bool {
         match self {
-            Self::ChatSend { .. } | Self::RenameSlot(_, _) => false,
+            Self::ChatSend { .. } | Self::ChatRead(_) | Self::RenameSlot(_, _) => false,
             Self::Open(_, _) | Self::Activate(_, _) | Self::Viewport(_) | Self::Park | Self::Detach(_) => true,
         }
     }
@@ -242,6 +243,30 @@ impl HostController {
             policy_revision,
             text,
         })
+    }
+
+    pub fn mark_chat_read(&self, request: MarkReadRequest) -> Result<u64, HostError> {
+        let snapshot = self.snapshot();
+        let allowed = snapshot.chat.iter().any(|chat| {
+            chat.source == request.key.source
+                && chat.authenticated
+                && chat.live
+                && chat.conversations.iter().any(|info| {
+                    info.policy.key == request.key
+                        && info.policy.revision == request.policy_revision
+                        && info.policy.lease_current
+                        && info.policy.ready
+                        && info.policy.can_read
+                })
+                && chat.reads.get(&request.key.conversation).is_some_and(|read| {
+                    read.can_mark_read && read.observed == request.observed && read.unread_revision == request.unread_revision
+                })
+        });
+        if !allowed {
+            return Err(HostError::Unavailable);
+        }
+        // The broker assigns the operation ticket after FIFO admission.
+        self.send(HostIntent::ChatRead(request))
     }
 
     fn send(&self, intent: HostIntent) -> Result<u64, HostError> {
@@ -949,6 +974,24 @@ impl Broker {
             HostIntent::Detach(worker) => {
                 let effects = self.coordinator.detach(worker)?;
                 self.effects(effects)?;
+            }
+            HostIntent::ChatRead(mut request) => {
+                let key = request.key;
+                let live = self
+                    .coordinator
+                    .workers()
+                    .any(|entry| entry.live && entry.binding == key.source.binding() && entry.status.phase == Phase::Online);
+                let child = self
+                    .children
+                    .iter_mut()
+                    .find(|child| child.config.identity == key.source.worker && child.config.lease_epoch == key.source.lease_epoch)
+                    .ok_or(HostError::Unavailable)?;
+                if !live || child.detached || child.exited || child.last_seen.is_none_or(|seen| seen.elapsed() > REACHABLE) {
+                    child.chat.set_control(None, false);
+                    anyhow::bail!(HostError::Unavailable);
+                }
+                request.request = ticket;
+                child.chat.mark_read(request, Instant::now())?;
             }
             HostIntent::ChatSend {
                 key,

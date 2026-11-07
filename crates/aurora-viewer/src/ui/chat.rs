@@ -2142,18 +2142,7 @@ fn demo_selection(sel: &mut select::Selection, mode: &str, drawn: &[select::Row]
 /// The conversation shown is read: its unread count goes, and in the
 /// workspace its first unread line is kept for the "New" line.
 fn mark_read(world: &mut World, selected: Option<uuid::Uuid>) -> Option<(usize, usize)> {
-    match selected {
-        None => {
-            let unread = world.nearby_read();
-            Some((unread, world.chat.len()))
-        }
-        Some(id) => world
-            .social
-            .ims
-            .iter_mut()
-            .find(|s| s.other == id)
-            .map(|s| (std::mem::take(&mut s.unread), s.lines.len())),
-    }
+    world.mark_conversation_read(selected)
 }
 
 /// What the lines of a conversation are drawn with.

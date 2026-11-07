@@ -168,8 +168,17 @@ with compilation, synthetic captures and native acceptance still pending.
 The Shared Chat behavior follows the pinned reference's
 [`saveDraft` / `refreshChat` / `queueChat`](https://github.com/DrCum/Folderstorm/blob/abbe3cb0ca66ee2484f277219f6a27706fab7fc6/tools/session-host/main.cpp#L2980)
 and [`ComposerReturn`](https://github.com/DrCum/Folderstorm/blob/abbe3cb0ca66ee2484f277219f6a27706fab7fc6/indra/newview/fssessionchatbehavior.h#L11).
-This first stage does not offer inactive New IM, Friends, contacts, groups or
-read controls whose native transport is not implemented.
+The following read stage adds native unread counts and an explicit **Mark
+conversation read** action for Nearby and existing resident IMs. It captures the
+exact source, permission revision and native incoming/read observation. A newer
+arrival or native read rejects that old observation; the user must review the
+current count and click again. Uncertain operations are queried, never replayed.
+Reading a conversation does not answer or remove its pending offers. Its native
+UI retains its existing reading behavior in both styles; this stage adds no
+claim that all passive managed rendering is prevented from acknowledging read.
+Chat V2 peers are required; older chat peers fail closed. Inactive New IM,
+Friends, contacts, groups, automatic host reading and Attention remain absent.
+The read stage's compiled, synthetic visual and native acceptance is pending.
 
 ## Acceptance before recommending a build
 

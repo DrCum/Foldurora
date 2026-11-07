@@ -6,11 +6,13 @@ use aurora_session::chat::{
     ChatCommand, ChatError, ChatEvent, ChatKey, ChatLine, ChatMessage, ChatPacket, ChatSource, ChatText, Conversation, ConversationInfo,
     MAX_CONVERSATIONS, MAX_RETAINED_LINES, NativeChatPolicy, SendAdmission, SendLedger, SendOutcome, SendReceipt, VERSION,
 };
+use aurora_session::chat::{MAX_READ_ROWS, MarkReadRequest, ReadMetadata, ReadOutcome, ReadReceiptLedger, ReadReceiptQuery, ReadStateRow};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 const SCAN_CONVERSATIONS: usize = 4;
 pub(crate) const SCAN_LINES: usize = 8;
-const POLL_LINES: usize = 4;
+const POLL_LINES: usize = 3;
+pub(crate) const MAX_REPLY: usize = 11;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct NativeCursor {
@@ -49,6 +51,12 @@ pub(crate) trait NativeChat {
     fn snapshot(&self, conversation: Conversation) -> Option<NativeSnapshot>;
     fn lines(&self, conversation: Conversation, cursor: NativeCursor, limit: usize) -> NativePage;
     fn submit_literal(&mut self, key: ChatKey, text: &str) -> SendOutcome;
+    fn read_metadata(&self, _conversation: Conversation) -> Option<ReadMetadata> {
+        None
+    }
+    fn mark_read(&mut self, _request: MarkReadRequest) -> ReadOutcome {
+        ReadOutcome::RejectedNative
+    }
 }
 
 struct ConversationState {
@@ -62,6 +70,10 @@ pub(crate) struct WorkerChat {
     source: Option<ChatSource>,
     retired: Option<ChatSource>,
     ledger: Option<SendLedger>,
+    reads: Option<ReadReceiptLedger>,
+    read_cache: BTreeMap<Conversation, Option<ReadMetadata>>,
+    read_dirty: VecDeque<Conversation>,
+    read_fair: usize,
     states: BTreeMap<Conversation, ConversationState>,
     lines: VecDeque<ChatLine>,
     receipt: Option<SendReceipt>,
@@ -90,6 +102,10 @@ impl WorkerChat {
             self.retired = Some(source);
         }
         self.ledger = None;
+        self.reads = None;
+        self.read_cache.clear();
+        self.read_dirty.clear();
+        self.read_fair = 0;
         self.states.clear();
         self.lines.clear();
         self.receipt = None;
@@ -118,6 +134,7 @@ impl WorkerChat {
         self.clear();
         self.source = Some(source);
         self.ledger = Some(SendLedger::new(source)?);
+        self.reads = Some(ReadReceiptLedger::new(source));
         Ok(source)
     }
 
@@ -133,6 +150,17 @@ impl WorkerChat {
     fn refresh(&mut self, native: &impl NativeChat, conversation: Conversation) -> Result<(), ChatError> {
         let source = self.context(native)?;
         let snapshot = native.snapshot(conversation).ok_or(ChatError::Unavailable)?;
+        let read = if snapshot.ready && snapshot.can_read {
+            native.read_metadata(conversation)
+        } else {
+            None
+        };
+        if self.read_cache.get(&conversation) != Some(&read) {
+            self.read_cache.insert(conversation, read);
+            if !self.read_dirty.contains(&conversation) {
+                self.read_dirty.push_back(conversation);
+            }
+        }
         let existing = self.states.contains_key(&conversation);
         let changed = self.states.get(&conversation).is_none_or(|state| {
             state.snapshot.stamp != snapshot.stamp
@@ -178,6 +206,8 @@ impl WorkerChat {
         let source = self.context(native)?;
         let catalogue: Vec<_> = native.catalogue().into_iter().take(MAX_CONVERSATIONS).collect();
         let known: BTreeSet<_> = catalogue.iter().copied().collect();
+        self.read_cache.retain(|key, _| known.contains(key));
+        self.read_dirty.retain(|key| known.contains(key));
         let previous_states = self.states.len();
         self.states.retain(|conversation, _| known.contains(conversation));
         let before = self.lines.len();
@@ -237,6 +267,71 @@ impl WorkerChat {
         })
     }
 
+    fn require_read_authority(&mut self, native: &impl NativeChat, key: ChatKey) -> Result<(), ChatError> {
+        if self.context(native)? != key.source {
+            return Err(ChatError::Binding);
+        }
+        if !matches!(key.conversation, Conversation::Nearby | Conversation::Direct(_))
+            || !native
+                .catalogue()
+                .into_iter()
+                .take(MAX_CONVERSATIONS)
+                .any(|conversation| conversation == key.conversation)
+        {
+            return Err(ChatError::Unavailable);
+        }
+        self.refresh(native, key.conversation)?;
+        let policy = self.states.get(&key.conversation).ok_or(ChatError::Unavailable)?.policy;
+        if !policy.lease_current || !policy.ready || !policy.can_read {
+            return Err(ChatError::Denied);
+        }
+        if self.context(native)? != key.source {
+            return Err(ChatError::Binding);
+        }
+        Ok(())
+    }
+
+    fn read_batch(&mut self, native: &impl NativeChat) -> Result<Vec<ReadStateRow>, ChatError> {
+        let keys: Vec<_> = native.catalogue().into_iter().take(MAX_CONVERSATIONS).collect();
+        let mut chosen = Vec::new();
+        for _ in 0..2 {
+            if let Some(key) = self.read_dirty.pop_front() {
+                chosen.push(key);
+            }
+        }
+        // Two unconditional fair slots cannot be starved by a hot dirty key.
+        for _ in 0..keys.len().min(MAX_READ_ROWS) {
+            if chosen.len() == MAX_READ_ROWS || keys.is_empty() {
+                break;
+            }
+            let key = keys[self.read_fair % keys.len()];
+            self.read_fair = self.read_fair.wrapping_add(1);
+            if !chosen.contains(&key) {
+                chosen.push(key);
+            }
+        }
+        let mut rows = Vec::new();
+        for key in chosen {
+            self.refresh(native, key)?;
+            let state = self.states.get(&key).ok_or(ChatError::Unavailable)?;
+            rows.push(ReadStateRow {
+                conversation: key,
+                title: state.snapshot.title.clone(),
+                policy_revision: state.policy.revision,
+                lease_current: state.policy.lease_current,
+                ready: state.policy.ready,
+                can_send: state.policy.can_send,
+                can_read: state.policy.can_read,
+                read: if state.policy.ready && state.policy.can_read {
+                    native.read_metadata(key)
+                } else {
+                    None
+                },
+            });
+        }
+        Ok(rows)
+    }
+
     pub fn handle(&mut self, native: &mut impl NativeChat, packet: &ChatPacket) -> Result<Vec<ChatPacket>, ChatError> {
         packet.validate()?;
         let source = self.context(native)?;
@@ -249,7 +344,65 @@ impl WorkerChat {
         if packet.sequence <= self.received {
             return Err(ChatError::Sequence);
         }
+        // Reserve sequence capacity before any native mutation, not while
+        // constructing its reply afterward. The driver reserves queue space.
+        self.outgoing.checked_add(MAX_REPLY as u64).ok_or(ChatError::Sequence)?;
         match command {
+            ChatCommand::MarkRead(request) => {
+                self.require_read_authority(native, request.key)?;
+                let duplicate = self.reads.as_mut().ok_or(ChatError::Unavailable)?.reserve(*request)?;
+                let receipt = if let Some(receipt) = duplicate {
+                    receipt
+                } else {
+                    let supported = native
+                        .catalogue()
+                        .into_iter()
+                        .take(MAX_CONVERSATIONS)
+                        .any(|key| key == request.key.conversation);
+                    let outcome = if supported {
+                        self.refresh(native, request.key.conversation)?;
+                        let policy = self.states.get(&request.key.conversation).ok_or(ChatError::Unavailable)?.policy;
+                        if policy.key == request.key
+                            && policy.revision == request.policy_revision
+                            && policy.lease_current
+                            && policy.ready
+                            && policy.can_read
+                            && self.context(native)? == source
+                        {
+                            native.mark_read(*request)
+                        } else {
+                            ReadOutcome::RejectedNative
+                        }
+                    } else {
+                        ReadOutcome::RejectedNative
+                    };
+                    self.reads.as_mut().ok_or(ChatError::Unavailable)?.finish(*request, outcome)?
+                };
+                if self.context(native)? != source {
+                    return Err(ChatError::Binding);
+                }
+                self.received = packet.sequence;
+                // Fresh metadata follows on Poll; receipt carries no old body.
+                Ok(vec![self.packet(
+                    packet.sequence,
+                    ChatEvent::ReadReceipt(aurora_session::chat::ReadReceiptReply {
+                        query: ReadReceiptQuery {
+                            key: request.key,
+                            request: request.request,
+                        },
+                        receipt: Some(receipt),
+                    }),
+                )?])
+            }
+            ChatCommand::QueryReadReceipt(query) => {
+                self.require_read_authority(native, query.key)?;
+                let reply = self.reads.as_ref().ok_or(ChatError::Unavailable)?.query(*query)?;
+                if self.context(native)? != source {
+                    return Err(ChatError::Binding);
+                }
+                self.received = packet.sequence;
+                Ok(vec![self.packet(packet.sequence, ChatEvent::ReadReceipt(reply))?])
+            }
             ChatCommand::Send(request) => {
                 // Only a currently advertised native conversation can send.
                 if !native
@@ -315,6 +468,9 @@ impl WorkerChat {
                 for line in &selected {
                     self.refresh(native, line.key.conversation)?;
                 }
+                // read_batch may revoke policies. Stage it before Gap and all
+                // other data so old private caches are purged first.
+                let read_rows = self.read_batch(native)?;
                 let mut events = Vec::new();
                 let mut advertised = BTreeSet::new();
                 if *after_event < self.gap_through {
@@ -347,6 +503,7 @@ impl WorkerChat {
                         events.push(ChatEvent::Line(line));
                     }
                 }
+                events.push(ChatEvent::ReadBatch(read_rows));
                 if let Some(receipt) = self.receipt {
                     events.push(ChatEvent::Receipt(receipt));
                 }

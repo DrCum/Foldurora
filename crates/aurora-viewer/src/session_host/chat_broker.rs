@@ -8,7 +8,27 @@ use aurora_session::chat::{
     ChatCommand, ChatError, ChatEvent, ChatHistory, ChatKey, ChatLine, ChatMessage, ChatPacket, ChatSource, ChatText, Conversation,
     ConversationInfo, MAX_RECEIPTS, SendOutcome, SendReceipt, SendRequest, VERSION,
 };
+use aurora_session::chat::{MAX_READ_RECEIPTS, MarkReadRequest, ReadMetadata, ReadOutcome, ReadReceiptQuery};
 use std::collections::{BTreeMap, VecDeque};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ReadStatus {
+    Pending,
+    Uncertain,
+    Completed(ReadOutcome),
+    Unavailable,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ReadOperation {
+    pub request: MarkReadRequest,
+    pub status: ReadStatus,
+}
+struct PendingRead {
+    request: MarkReadRequest,
+    since: Instant,
+    query_at: Instant,
+}
+
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -23,6 +43,8 @@ pub(crate) struct HostChatSnapshot {
     pub conversations: Vec<ConversationInfo>,
     pub lines: Vec<ChatLine>,
     pub receipts: Vec<SendReceipt>,
+    pub reads: BTreeMap<Conversation, ReadMetadata>,
+    pub read_operations: Vec<ReadOperation>,
     pub gap: bool,
 }
 
@@ -41,6 +63,9 @@ pub(crate) struct Peer {
     history: Option<ChatHistory>,
     conversations: BTreeMap<Conversation, ConversationInfo>,
     receipts: VecDeque<SendReceipt>,
+    reads: BTreeMap<Conversation, ReadMetadata>,
+    read_operations: VecDeque<ReadOperation>,
+    read_pending: Option<PendingRead>,
     pending: Option<Pending>,
     received: u64,
     sent: u64,
@@ -61,6 +86,9 @@ impl Peer {
             history: None,
             conversations: BTreeMap::new(),
             receipts: VecDeque::new(),
+            reads: BTreeMap::new(),
+            read_operations: VecDeque::new(),
+            read_pending: None,
             pending: None,
             received: 0,
             sent: 0,
@@ -97,6 +125,9 @@ impl Peer {
             return;
         }
         if source.is_none() || !live {
+            self.read_pending = None;
+            self.read_operations.clear();
+            self.reads.clear();
             if self.live || self.io.is_some() {
                 self.disconnect();
             }
@@ -110,6 +141,8 @@ impl Peer {
             self.history = source.and_then(|source| ChatHistory::new(source).ok());
             self.conversations.clear();
             self.receipts.clear();
+            self.read_operations.clear();
+            self.read_pending = None;
             self.after_event = 0;
             self.gap = false;
             // Socket and source changes never reset producer/receiver numbers.
@@ -155,6 +188,11 @@ impl Peer {
 
     fn disconnect(&mut self) {
         self.uncertain();
+        self.reads.clear();
+        if let Some(pending) = &self.read_pending {
+            let request = pending.request;
+            self.update_read_status(request, ReadStatus::Uncertain);
+        }
         self.io = None;
         self.conversations.clear();
         self.history = self.source.and_then(|source| ChatHistory::new(source).ok());
@@ -230,6 +268,95 @@ impl Peer {
         Ok(())
     }
 
+    fn update_read_status(&mut self, request: MarkReadRequest, status: ReadStatus) {
+        if let Some(operation) = self.read_operations.iter_mut().find(|operation| operation.request == request) {
+            operation.status = status;
+        }
+    }
+
+    pub fn mark_read(&mut self, request: MarkReadRequest, now: Instant) -> Result<(), HostError> {
+        if self.read_pending.is_some() {
+            return Err(HostError::Busy);
+        }
+        let allowed = self.live
+            && self.io.is_some()
+            && self.source == Some(request.key.source)
+            && self.conversations.get(&request.key.conversation).is_some_and(|info| {
+                info.policy.key == request.key
+                    && info.policy.revision == request.policy_revision
+                    && info.policy.lease_current
+                    && info.policy.ready
+                    && info.policy.can_read
+            })
+            && self.reads.get(&request.key.conversation).is_some_and(|read| {
+                read.can_mark_read && read.observed == request.observed && read.unread_revision == request.unread_revision
+            });
+        if !allowed || request.validate().is_err() {
+            return Err(HostError::Unavailable);
+        }
+        let sequence = self.sent.checked_add(1).ok_or(HostError::Unavailable)?;
+        let packet = ChatPacket {
+            version: VERSION,
+            source: request.key.source,
+            sequence,
+            reply_to: 0,
+            message: ChatMessage::Command(ChatCommand::MarkRead(request)),
+        };
+        self.io.as_mut().ok_or(HostError::Unavailable)?.queue(&packet).map_err(|error| {
+            if error == LaneError::Busy {
+                HostError::Busy
+            } else {
+                HostError::Unavailable
+            }
+        })?;
+        self.sent = sequence;
+        // Only final operations can reach the eviction boundary: an uncertain
+        // operation retains the single active identity until queried/revoked.
+        if self.read_operations.len() == MAX_READ_RECEIPTS {
+            self.read_operations.pop_front();
+        }
+        self.read_operations.push_back(ReadOperation {
+            request,
+            status: ReadStatus::Pending,
+        });
+        self.read_pending = Some(PendingRead {
+            request,
+            since: now,
+            query_at: now + POLL,
+        });
+        self.publish();
+        Ok(())
+    }
+
+    fn poll_read_receipt(&mut self, now: Instant) -> bool {
+        let Some(pending) = &self.read_pending else { return false };
+        let request = pending.request;
+        let expired = now.saturating_duration_since(pending.since) >= RECEIPT_WAIT;
+        let due = now >= pending.query_at;
+        if expired {
+            self.update_read_status(request, ReadStatus::Uncertain);
+        }
+        if due && let (Some(sequence), Some(io)) = (self.sent.checked_add(1), self.io.as_mut()) {
+            let packet = ChatPacket {
+                version: VERSION,
+                source: request.key.source,
+                sequence,
+                reply_to: 0,
+                message: ChatMessage::Command(ChatCommand::QueryReadReceipt(ReadReceiptQuery {
+                    key: request.key,
+                    request: request.request,
+                })),
+            };
+            if io.queue(&packet).is_ok() {
+                self.sent = sequence;
+                if let Some(pending) = &mut self.read_pending {
+                    pending.query_at = now + POLL;
+                }
+            }
+        }
+        expired
+    }
+
     /// No Send is retried here. Polls recover immutable receipts/history only.
     pub fn poll(&mut self, now: Instant) {
         if !self.live {
@@ -278,9 +405,29 @@ impl Peer {
                 Err(_) => self.disconnect(),
             }
         }
+        changed |= self.poll_read_receipt(now);
         if changed {
             self.publish();
         }
+    }
+
+    fn conversation(&mut self, info: &ConversationInfo) -> Result<(), ChatError> {
+        let history = self.history.as_mut().ok_or(ChatError::Unavailable)?;
+        history.apply_policy(info.policy)?;
+        if !self.conversations.contains_key(&info.policy.key.conversation)
+            && self.conversations.len() == aurora_session::chat::MAX_CONVERSATIONS
+        {
+            return Err(ChatError::Capacity);
+        }
+        let changed = self
+            .conversations
+            .get(&info.policy.key.conversation)
+            .is_none_or(|old| old.policy != info.policy);
+        if changed || !info.policy.lease_current || !info.policy.ready || !info.policy.can_read {
+            self.reads.remove(&info.policy.key.conversation);
+        }
+        self.conversations.insert(info.policy.key.conversation, info.clone());
+        Ok(())
     }
 
     fn observe(&mut self, packet: &ChatPacket) -> Result<(), ChatError> {
@@ -296,14 +443,41 @@ impl Peer {
         };
         match event {
             ChatEvent::Conversation(info) => {
-                let history = self.history.as_mut().ok_or(ChatError::Unavailable)?;
-                history.apply_policy(info.policy)?;
-                if !self.conversations.contains_key(&info.policy.key.conversation)
-                    && self.conversations.len() == aurora_session::chat::MAX_CONVERSATIONS
-                {
-                    return Err(ChatError::Capacity);
+                self.conversation(info)?;
+            }
+            ChatEvent::ReadBatch(rows) => {
+                for row in rows {
+                    let info = row.info(packet.source);
+                    self.conversation(&info)?;
+                    if let Some(read) = row.read {
+                        self.reads.insert(row.conversation, read);
+                    } else {
+                        self.reads.remove(&row.conversation);
+                    }
                 }
-                self.conversations.insert(info.policy.key.conversation, info.clone());
+            }
+            ChatEvent::ReadReceipt(reply) => {
+                let operation = self
+                    .read_operations
+                    .iter()
+                    .find(|operation| operation.request.key == reply.query.key && operation.request.request == reply.query.request)
+                    .ok_or(ChatError::UnknownReceipt)?;
+                let request = operation.request;
+                if let Some(receipt) = reply.receipt
+                    && !receipt.matches(request)
+                {
+                    return Err(ChatError::RequestChanged);
+                }
+                let status = reply
+                    .receipt
+                    .map_or(ReadStatus::Unavailable, |receipt| ReadStatus::Completed(receipt.outcome));
+                if !matches!(operation.status, ReadStatus::Pending | ReadStatus::Uncertain) && operation.status != status {
+                    return Err(ChatError::FinalReceipt);
+                }
+                self.update_read_status(request, status);
+                if self.read_pending.as_ref().is_some_and(|pending| pending.request == request) {
+                    self.read_pending = None;
+                }
             }
             ChatEvent::Line(line) => {
                 let policy = self.conversations.get(&line.key.conversation).ok_or(ChatError::Unavailable)?.policy;
@@ -338,12 +512,14 @@ impl Peer {
                     history.note_gap(packet.source, *through_event)?;
                     self.history = Some(history);
                     self.conversations.clear();
+                    self.reads.clear();
                     self.after_event = *through_event;
                     self.gap = true;
                 }
             }
             ChatEvent::Unsupported => {
                 self.conversations.clear();
+                self.reads.clear();
                 self.history = ChatHistory::new(packet.source).ok();
                 self.uncertain();
             }
@@ -381,6 +557,12 @@ impl Peer {
             conversations,
             lines,
             receipts: self.receipts.iter().copied().collect(),
+            reads: if self.live && authenticated {
+                self.reads.clone()
+            } else {
+                BTreeMap::new()
+            },
+            read_operations: self.read_operations.iter().copied().collect(),
             gap: self.gap || self.history.as_ref().is_some_and(ChatHistory::has_gap),
         };
         if self.snapshot.as_ref().is_none_or(|previous| **previous != next) {

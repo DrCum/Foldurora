@@ -13403,3 +13403,11 @@ host-manage-hide = Hide character management
 photo-interface-size = This photo size cannot include the interface. Choose a smaller size or turn off Interface.
 photo-interface-aspect = To include the interface, choose Window or a matching aspect, or turn off Interface.
 photo-canvas-changed = The window or interface scale changed. Take the photo again.
+
+host-chat-native-unread = Unread: { $count }
+host-chat-mark-read = Mark conversation read
+host-chat-read-pending = Marking conversation read…
+host-chat-read-uncertain = Read result uncertain. Checking the original operation; no retry will be sent.
+host-chat-read-unavailable = Read unavailable. The original operation will not be replayed.
+host-chat-read-applied = Conversation marked read.
+host-chat-read-stale = Conversation changed. Check the current unread count and click again.

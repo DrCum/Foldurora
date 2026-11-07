@@ -81,6 +81,7 @@ pub mod portals;
 pub mod poser_consent;
 pub mod profiles;
 pub mod radar;
+pub(crate) mod read_state;
 pub mod received_items;
 pub mod recent;
 pub mod region_alerts;
@@ -374,6 +375,7 @@ pub struct World {
     /// Follows `chat` for the view.
     pub chat_clock: transcripts::LineClock,
     pub chat_unread: usize,
+    pub(crate) read_ledger: read_state::ReadLedger,
     /// A resident said something in nearby chat since the app last looked:
     /// it may flash the Conversations button (FSNotifyNearbyChatFlash).
     pub nearby_news: bool,
@@ -767,6 +769,7 @@ impl World {
             bubble_chat: Default::default(),
             chat_clock: Default::default(),
             chat_unread: 0,
+            read_ledger: Default::default(),
             nearby_news: false,
             chat_badge: 0,
             quiet_automated_chat: false,
@@ -1845,11 +1848,17 @@ impl World {
     }
 
     fn push_chat(&mut self, line: ChatLine) {
+        let incoming = line.origin == Origin::Live && !matches!(line.kind, ChatKind::Own(_) | ChatKind::System);
+        self.push_counted_chat(line, incoming);
+    }
+
+    fn push_counted_chat(&mut self, line: ChatLine, incoming: bool) {
         if self.alerts(line.kind) {
             self.chat_badge += 1;
         }
         self.nearby_push(line);
         self.chat_unread += 1;
+        self.record_read_change(None, incoming);
     }
 
     /// A line of this kind counts as unread and may alert (keyword sound,
@@ -1861,8 +1870,7 @@ impl World {
 
     /// The nearby chat is read.
     pub fn nearby_read(&mut self) -> usize {
-        self.chat_badge = 0;
-        std::mem::take(&mut self.chat_unread)
+        self.mark_conversation_read(None).map_or(0, |(unread, _)| unread)
     }
 
     /// Count on the Conversations button of the bottom bar: the unread IMs,
@@ -4273,14 +4281,18 @@ impl World {
                 );
             }
         }
-        self.push_chat(ChatLine {
-            time: SystemTime::now(),
-            from,
-            text: c.message,
-            kind,
-            source: c.source_id,
-            origin: Origin::Live,
-        });
+        let incoming = !matches!(kind, ChatKind::Own(_));
+        self.push_counted_chat(
+            ChatLine {
+                time: SystemTime::now(),
+                from,
+                text: c.message,
+                kind,
+                source: c.source_id,
+                origin: Origin::Live,
+            },
+            incoming,
+        );
     }
 
     fn on_im(&mut self, mut im: InstantMessage) {
@@ -5228,9 +5240,7 @@ impl World {
             _ => return None,
         };
         self.notifications.list.retain(|n| n.id != id);
-        if let Some(s) = self.social.ims.iter_mut().find(|s| s.other == session) {
-            s.unread = 0;
-        }
+        self.mark_conversation_read(Some(session));
         self.acknowledge_read_messages();
         self.social.focus_im = Some(session);
         Some(session)

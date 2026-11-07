@@ -241,6 +241,7 @@ impl World {
                 None => {}
             }
         }
+        let incoming = unread && line.origin == Origin::Live && !matches!(line.kind, ChatKind::Own(_));
         let s = self.session_lines(session);
         s.lines.push_back(line);
         s.clock.pushed_back();
@@ -248,6 +249,7 @@ impl World {
             s.unread += 1;
         }
         trim(&mut s.lines, &mut s.clock);
+        self.record_read_change(Some(session), incoming);
     }
 
     /// A line for the conversation with an avatar that has none open: only
@@ -269,13 +271,21 @@ impl World {
     /// counted as unread, like LLHandlerUtil::addNotifPanelToIM, but never
     /// written to the transcript (its text is logged by itself).
     pub(super) fn conversation_card(&mut self, session: Uuid, line: ChatLine) {
+        self.conversation_card_counted(session, line, true);
+    }
+
+    pub(super) fn conversation_card_counted(&mut self, session: Uuid, line: ChatLine, counted: bool) {
         self.session_lines(session);
         self.ensure_transcript(session);
+        let incoming = counted && line.origin == Origin::Live && !matches!(line.kind, ChatKind::Own(_));
         let s = self.session_lines(session);
         s.lines.push_back(line);
         s.clock.pushed_back();
-        s.unread += 1;
+        if counted {
+            s.unread += 1;
+        }
         trim(&mut s.lines, &mut s.clock);
+        self.record_read_change(Some(session), incoming);
     }
 
     /// A line enters the nearby chat (same bound).

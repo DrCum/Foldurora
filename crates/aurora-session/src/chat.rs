@@ -13,7 +13,10 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 
-pub const VERSION: u16 = 1;
+mod read;
+pub use read::*;
+
+pub const VERSION: u16 = 2;
 pub const MAX_PACKET_BYTES: usize = 4096;
 /// One native UDP chat/IM part (`aurora-net::message_split`), in UTF-8 bytes.
 pub const MAX_TEXT_BYTES: usize = 1023;
@@ -525,6 +528,8 @@ impl ChatDrafts {
 #[allow(clippy::large_enum_variant)] // one bounded DTO per private packet
 pub enum ChatCommand {
     Send(SendRequest),
+    MarkRead(MarkReadRequest),
+    QueryReadReceipt(ReadReceiptQuery),
     Poll { after_event: u64 },
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -534,6 +539,8 @@ pub enum ChatEvent {
     Conversation(ConversationInfo),
     Line(ChatLine),
     Receipt(SendReceipt),
+    ReadBatch(Vec<ReadStateRow>),
+    ReadReceipt(ReadReceiptReply),
     Gap { through_event: u64 },
     Unsupported,
 }
@@ -559,10 +566,14 @@ impl fmt::Debug for ChatPacket {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let kind = match &self.message {
             ChatMessage::Command(ChatCommand::Send(_)) => "send",
+            ChatMessage::Command(ChatCommand::MarkRead(_)) => "mark_read",
+            ChatMessage::Command(ChatCommand::QueryReadReceipt(_)) => "query_read_receipt",
             ChatMessage::Command(ChatCommand::Poll { .. }) => "poll",
             ChatMessage::Event(ChatEvent::Conversation(_)) => "conversation",
             ChatMessage::Event(ChatEvent::Line(_)) => "line",
             ChatMessage::Event(ChatEvent::Receipt(_)) => "receipt",
+            ChatMessage::Event(ChatEvent::ReadBatch(_)) => "read_batch",
+            ChatMessage::Event(ChatEvent::ReadReceipt(_)) => "read_receipt",
             ChatMessage::Event(ChatEvent::Gap { .. }) => "gap",
             ChatMessage::Event(ChatEvent::Unsupported) => "unsupported",
         };
@@ -589,6 +600,17 @@ impl ChatPacket {
                 if self.reply_to != 0 {
                     return Err(ChatError::Sequence);
                 }
+                if let ChatCommand::MarkRead(request) = command {
+                    request.validate()?;
+                    source = request.key.source;
+                }
+                if let ChatCommand::QueryReadReceipt(query) = command {
+                    query.key.validate()?;
+                    if query.request == 0 {
+                        return Err(ChatError::Sequence);
+                    }
+                    source = query.key.source;
+                }
                 if let ChatCommand::Send(request) = command {
                     request.validate()?;
                     source = request.key.source;
@@ -612,6 +634,34 @@ impl ChatPacket {
                         return Err(ChatError::Sequence);
                     }
                     source = receipt.key.source;
+                }
+                ChatEvent::ReadBatch(rows) => {
+                    if rows.len() > MAX_READ_ROWS {
+                        return Err(ChatError::Capacity);
+                    }
+                    let mut seen = std::collections::BTreeSet::new();
+                    for row in rows {
+                        row.validate(self.source)?;
+                        if !seen.insert(row.conversation) {
+                            return Err(ChatError::Invalid);
+                        }
+                    }
+                }
+                ChatEvent::ReadReceipt(reply) => {
+                    reply.query.key.validate()?;
+                    if reply.query.request == 0 {
+                        return Err(ChatError::Sequence);
+                    }
+                    source = reply.query.key.source;
+                    if let Some(receipt) = reply.receipt {
+                        if receipt.key != reply.query.key
+                            || receipt.request != reply.query.request
+                            || receipt.observed.epoch == 0
+                            || receipt.unread_revision == 0
+                        {
+                            return Err(ChatError::Invalid);
+                        }
+                    }
                 }
                 ChatEvent::Gap { through_event } if *through_event == 0 => return Err(ChatError::Sequence),
                 _ => {}

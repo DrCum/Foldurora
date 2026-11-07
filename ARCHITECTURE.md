@@ -106,6 +106,17 @@ active world's scheduling recognizes only its exact host PID/owned-window
 family; keyboard focus remains an independent native fact. Integrated builds,
 privacy/failure tests and native acceptance are required before publication.
 
+Chat packet V2 adds compact source-relative policy-bearing read batches (four
+rows), native badge/read observations and explicit conversation-read commands.
+`world/read_state.rs` keeps at most 64 interested native conversations, recording
+counted arrivals and effective native reads separately from transcript/export
+clocks. Native counters and both chat styles' read-on-draw behavior remain
+unchanged. `chat/read.rs` retains 64 immutable body-free operation receipts;
+queries recover the original operation without replaying a mutation. Counts do
+not enter permission revisions or composer/catalogue identity. Old chat peers
+fail closed; the control protocol and activation authority are unchanged.
+This source stage still needs compiled and native acceptance.
+
 `ChatUi` owns a bounded policy-stamped draft map, including each editor's Undo
 state. A pass moves editor state into egui only for its exact source/conversation/
 policy/incarnation and removes it afterward, so background authority changes can

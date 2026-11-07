@@ -2,20 +2,24 @@
 //! remain on a dedicated worker; no world activation or native focus is changed.
 
 use super::App;
-use crate::session_host::chat::WorkerChat;
+use crate::session_host::chat::{MAX_REPLY, WorkerChat};
 use crate::session_host::chat_transport::LaneError;
 use crate::session_host::worker::WorkerBridge;
 use aurora_session::chat::{ChatPacket, ChatSource};
 use std::collections::VecDeque;
 
 const MAX_PENDING: usize = 16;
-// One policy per line plus metadata/gap/receipt for the four-line native page.
-const MAX_REPLY: usize = 11;
+// Poll: gap1 + rotating policy1 + three*(policy1+line1) + read batch1
+// + send receipt1 = 10. Reserve 11 before each FIFO native operation.
+fn reply_room(pending: usize) -> bool {
+    pending <= MAX_PENDING - MAX_REPLY
+}
 
 #[derive(Default)]
 pub(super) struct Driver {
     native: WorkerChat,
     outgoing: VecDeque<ChatPacket>,
+    incoming: VecDeque<ChatPacket>,
 }
 
 impl Driver {
@@ -39,10 +43,12 @@ impl Driver {
         let Some(source) = authority() else {
             self.native.clear();
             self.outgoing.clear();
+            self.incoming.clear();
             return;
         };
         if self.native.current_source() != Some(source) {
             self.outgoing.clear();
+            self.incoming.clear();
         }
         // A socket reconnect never clears the native submission ledger. It
         // retains uncertain receipts and global sequences for this source.
@@ -55,12 +61,20 @@ impl Driver {
             return;
         }
         self.flush(bridge);
-        if self.outgoing.len() > MAX_PENDING - MAX_REPLY {
+        if !reply_room(self.outgoing.len()) {
             return;
         }
-        for packet in bridge.chat_commands() {
+        if self.incoming.is_empty() {
+            // chat_commands has a hard one-command-per-call bound. Retain its
+            // FIFO locally until reply capacity is reserved, never drain/drop
+            // a native mutation because a previous response filled the queue.
+            self.incoming.extend(bridge.chat_commands());
+        }
+        if reply_room(self.outgoing.len())
+            && let Some(packet) = self.incoming.pop_front()
+        {
             if authority() != Some(packet.source) {
-                continue;
+                return;
             }
             let previous = self.native.outgoing_sequence();
             if let Ok(replies) = app.host_chat_packet(&mut self.native, &authority, &packet) {
@@ -74,7 +88,7 @@ impl Driver {
                     // Never replay the mutation to recover an overflowing
                     // response. A later Poll may recover its immutable receipt.
                     self.outgoing.clear();
-                    break;
+                    return;
                 }
                 self.outgoing.extend(replies);
             }
@@ -92,5 +106,16 @@ impl App {
         driver.step(self, &bridge);
         self.host_chat = Some(driver);
         self.host_session = Some(bridge);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn host_chat_driver_reserves_full_reply_before_taking_a_fifo_command() {
+        assert!(reply_room(5));
+        assert!(!reply_room(6));
+        assert!(!reply_room(MAX_PENDING));
     }
 }

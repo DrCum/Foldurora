@@ -88,6 +88,8 @@ fn snapshot(source: ChatSource) -> HostChatSnapshot {
         conversations,
         lines,
         receipts: Vec::new(),
+        reads: Default::default(),
+        read_operations: Vec::new(),
         gap: false,
     }
 }

@@ -12250,3 +12250,11 @@ used. The loader and headset runtime are installed separately. Runtime selection
 is still performed by OpenXR (`XR_RUNTIME_JSON` may select a development manifest).
 This is also accepted during normal viewer startup; no loader is downloaded or
 bundled. See [VR setup](VR.md) for platform requirements and validation status.
+
+The native unread/explicit Shared Chat read stage uses the existing offline
+Shared Chat CPU fixture; it adds no grid login or new environment variable.
+Native arrival/read races, own/history/payment classification, policy/source
+loss, immutable receipt queries and packet/reply bounds require workspace tests.
+Both native chat styles must retain their existing read-on-draw behavior. The
+read stage remains pending compiled, CPU visual and native human validation;
+source inspection and direct formatting are not runtime acceptance.

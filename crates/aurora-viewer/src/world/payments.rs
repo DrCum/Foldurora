@@ -190,12 +190,8 @@ impl World {
             source: other,
             origin: Origin::Live,
         };
-        self.conversation_card(other, line);
-        if sent {
-            // our own doing: nothing new to read
-            let s = self.session_lines(other);
-            s.unread = s.unread.saturating_sub(1);
-        }
+        // Our own payment has no incoming unread event.
+        self.conversation_card_counted(other, line, !sent);
     }
 }
 
