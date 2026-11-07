@@ -522,7 +522,7 @@ fn preview_io_owned_loopback_full_reconnect_never_replays_old_commands_or_revive
         if now >= next_observation {
             let observed = state(io.control.clone(), io.state.capture.clone());
             assert_eq!(observed.policy, io.state.policy);
-            assert!(observed.capture == io.state.capture);
+            assert!(matches!((&observed.capture, &io.state.capture), (Some(observed), Some(original)) if observed.same(original)));
             match io.worker.publish_state(observed) {
                 Ok(()) => {
                     observations += 1;
