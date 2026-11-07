@@ -69,13 +69,12 @@ impl App {
 
     /// Projection follows the Legacy Viewer's world view rectangle,
     /// independently of Aurora's floater movement limits. Mouselook, a
-    /// hidden interface and full-frame photos use the whole window
+    /// hidden interface and clean offscreen photos use the whole window
     /// (LLViewerWindow::updateWorldViewRect, indra/newview/llviewerwindow.cpp).
     pub(super) fn hud_area(&self, size: [u32; 2]) -> Option<[f32; 4]> {
         if self.camera.mouselook()
             || self.interface.hidden
-            || self.snapshots.capturing.is_some()
-            || self.photo_full_frame()
+            || self.snapshots.capturing.is_some_and(|capture| !capture.interface)
             || !matches!(self.screen, Screen::World)
         {
             return None;

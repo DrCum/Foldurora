@@ -49,6 +49,33 @@ impl WorldViewport {
         }
     }
 
+    /// Preserve a scene's position inside an interface capture. Like egui,
+    /// scale both axes by the output/native height ratio, then round edges.
+    /// The caller admits only matching canvas proportions (integer rounding
+    /// aside); a full output target does not imply a full scene rectangle.
+    pub fn scaled(self, source: (u32, u32), output: (u32, u32)) -> Self {
+        let source = (source.0.max(1), source.1.max(1));
+        let output = (output.0.max(1), output.1.max(1));
+        let view = self.fitted(source);
+        if view == Self::full(source) {
+            return Self::full(output);
+        }
+        let edge = |value: u32, from: u32, to: u32| {
+            ((u64::from(value) * u64::from(to) + u64::from(from) / 2) / u64::from(from)).min(u64::from(u32::MAX)) as u32
+        };
+        let x = edge(view.x, source.1, output.1);
+        let y = edge(view.y, source.1, output.1);
+        let right = edge(view.x + view.width, source.1, output.1);
+        let bottom = edge(view.y + view.height, source.1, output.1);
+        Self {
+            x,
+            y,
+            width: right.saturating_sub(x),
+            height: bottom.saturating_sub(y),
+        }
+        .fitted(output)
+    }
+
     /// Margins are fractions in left, right, top, bottom order. Opposite
     /// margins scale together if needed to retain at least 5% of the view.
     pub fn from_margins(size: (u32, u32), margins: [f32; 4]) -> Self {
@@ -118,6 +145,91 @@ impl WorldViewport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn interface_photo_scales_asymmetric_world_margins_with_the_whole_canvas() {
+        let native = (5000, 3000);
+        let output = (2000, 1200);
+        let source = WorldViewport {
+            x: 1800,
+            y: 300,
+            width: 2400,
+            height: 2100,
+        };
+        let view = source.scaled(native, output);
+        assert_eq!(view.rect(), [720, 120, 960, 840]);
+        // The scene and full-canvas overlays must agree at corners and centre.
+        // Output dimensions remain the whole workspace, including its margins.
+        for p in [[-1.0, 1.0], [0.0, 0.0], [1.0, -1.0], [-0.4, 0.6]] {
+            let native_pixel = source.project(p);
+            let photo_pixel = view.project(p);
+            for axis in 0..2 {
+                assert!((photo_pixel[axis] - native_pixel[axis] * 0.4).abs() < 0.001);
+            }
+        }
+        for size in [(2000, 1200), (1, 1), (0, 0)] {
+            assert_eq!(WorldViewport::full(native).scaled(native, size), WorldViewport::full(size));
+        }
+        let corrupt = WorldViewport {
+            x: u32::MAX,
+            y: u32::MAX,
+            width: u32::MAX,
+            height: 0,
+        };
+        let fitted = corrupt.scaled((5000, 3000), (640, 480));
+        assert_eq!(fitted.rect(), [639, 479, 1, 1]);
+        // This preview has an unavoidable rounded short side. Match egui's
+        // height-based transform, rather than independently scaling X.
+        let right = WorldViewport {
+            x: 1920,
+            y: 0,
+            width: 960,
+            height: 1080,
+        };
+        assert_eq!(right.scaled((3840, 1080), (719, 202)).rect(), [359, 0, 180, 202]);
+        assert_eq!(
+            WorldViewport::full((3840, 1080)).scaled((3840, 1080), (719, 202)),
+            WorldViewport::full((719, 202))
+        );
+    }
+
+    #[test]
+    fn snapshot_scene_hint_is_bounded_and_only_changes_interface_output() {
+        let mut spec = crate::SnapshotSpec {
+            width: 2000,
+            height: 1200,
+            interface: true,
+            huds: true,
+            photo: (2000, 1200),
+            world_viewport: None,
+        };
+        assert_eq!(spec.output_viewport(), WorldViewport::full((2000, 1200)));
+        spec.world_viewport = Some(WorldViewport {
+            x: 720,
+            y: 120,
+            width: 960,
+            height: 840,
+        });
+        assert_eq!(spec.output_viewport().rect(), [720, 120, 960, 840]);
+        spec.world_viewport = Some(WorldViewport {
+            x: 1999,
+            y: u32::MAX,
+            width: u32::MAX,
+            height: 0,
+        });
+        assert_eq!(spec.output_viewport().rect(), [1999, 1199, 1, 1]);
+        spec.interface = false;
+        assert_eq!(
+            spec.output_viewport(),
+            WorldViewport::full((2000, 1200)),
+            "clean exports use all output pixels"
+        );
+        assert_eq!(
+            (spec.width, spec.height),
+            spec.photo,
+            "scene placement never changes export dimensions"
+        );
+    }
 
     #[test]
     fn offset_world_view_maps_picks_and_projection_in_the_same_physical_pixels() {

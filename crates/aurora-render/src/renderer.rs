@@ -1575,6 +1575,7 @@ pub(crate) struct Backend {
     /// The window's size while a photo frame draws at its own size in
     /// `config` (`Capture::Snapshot`); put back by `result`.
     snapshot_window: Option<(u32, u32)>,
+    snapshot_viewport: Option<crate::WorldViewport>,
     /// Video memory the size-dependent render targets took when last made,
     /// and their pixels (`RenderStats::target_bytes_per_pixel`); the TAA
     /// history, made apart, in `taa_bytes`.
@@ -3194,6 +3195,7 @@ impl Backend {
             #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
             xr_retry: (0, None),
             snapshot_window: None,
+            snapshot_viewport: None,
             target_bytes: None,
             taa_bytes: 0,
             surface_srgb,
@@ -4829,7 +4831,8 @@ impl Backend {
     fn output_viewport(&self) -> crate::WorldViewport {
         let size = (self.config.width, self.config.height);
         if self.snapshot_window.is_some() {
-            crate::WorldViewport::full(size)
+            self.snapshot_viewport
+                .map_or_else(|| crate::WorldViewport::full(size), |view| view.fitted(size))
         } else {
             self.world_viewport
                 .map_or_else(|| crate::WorldViewport::full(size), |v| v.fitted(size))
@@ -5493,6 +5496,7 @@ impl Backend {
     /// swapchain keeps the window's (it is not reconfigured).
     fn begin_snapshot(&mut self, s: SnapshotSpec) {
         self.snapshot_window = Some((self.config.width, self.config.height));
+        self.snapshot_viewport = Some(s.output_viewport());
         self.config.width = s.width;
         self.config.height = s.height;
         self.gtao.photo = Some(s.photo);
@@ -5502,6 +5506,7 @@ impl Backend {
     /// Back to the window's size after a photo frame, however it ended.
     /// True when the frame was one.
     fn end_snapshot(&mut self) -> bool {
+        self.snapshot_viewport = None;
         let Some((w, h)) = self.snapshot_window.take() else {
             return false;
         };

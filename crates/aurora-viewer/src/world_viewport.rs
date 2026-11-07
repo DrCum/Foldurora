@@ -34,10 +34,10 @@ impl ViewportSettings {
         size: (u32, u32),
         mouselook: bool,
         interface_hidden: bool,
-        snapshot: bool,
+        capture: bool,
         vr: bool,
     ) -> aurora_render::WorldViewport {
-        if snapshot || vr || (interface_hidden && !mouselook) {
+        if capture || vr || (interface_hidden && !mouselook) {
             aurora_render::WorldViewport::full(size)
         } else {
             self.viewport(size)
@@ -84,6 +84,55 @@ impl ViewportSettings {
         let min = screen.min + egui::vec2(view.x as f32, view.y as f32) * scale;
         let rect = egui::Rect::from_min_size(min, egui::vec2(view.width as f32, view.height as f32) * scale);
         rect.is_positive().then_some(rect)
+    }
+}
+
+/// Live camera geometry, frozen by a photo job separately from its output
+/// dimensions. This is ephemeral and never changes a saved viewport setting.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PhotoScene {
+    pub native: (u32, u32),
+    pub view: aurora_render::WorldViewport,
+}
+
+impl PhotoScene {
+    pub fn new(native: (u32, u32), view: aurora_render::WorldViewport) -> Self {
+        let native = (native.0.max(1), native.1.max(1));
+        Self {
+            native,
+            view: view.fitted(native),
+        }
+    }
+
+    pub fn aspect(self) -> f32 {
+        self.view.width as f32 / self.view.height as f32
+    }
+
+    pub fn output_viewport(self, output: (u32, u32)) -> aurora_render::WorldViewport {
+        self.view.scaled(self.native, output)
+    }
+
+    pub fn logical_rect(self, canvas: egui::Rect) -> egui::Rect {
+        let scale = canvas.size() / egui::vec2(self.native.0 as f32, self.native.1 as f32);
+        egui::Rect::from_min_size(
+            canvas.min + egui::vec2(self.view.x as f32, self.view.y as f32) * scale,
+            egui::vec2(self.view.width as f32, self.view.height as f32) * scale,
+        )
+    }
+
+    /// Scene-normalized AF point to absolute native pixels. Renderer picking
+    /// continues to receive native coordinates, including the viewport origin.
+    pub fn point(self, point: Option<egui::Pos2>) -> (f32, f32) {
+        let point = point.filter(|p| p.is_finite()).unwrap_or(egui::pos2(0.5, 0.5));
+        (
+            self.view.x as f32 + (point.x.clamp(0.0, 1.0) * self.view.width as f32).min(self.view.width as f32 - 0.5),
+            self.view.y as f32 + (point.y.clamp(0.0, 1.0) * self.view.height as f32).min(self.view.height as f32 - 0.5),
+        )
+    }
+
+    pub fn normalized_point(self, point: (f32, f32)) -> Option<egui::Pos2> {
+        let (x, y) = self.view.local(point.0, point.1)?;
+        Some(egui::pos2(x / self.view.width as f32, y / self.view.height as f32))
     }
 }
 
@@ -145,6 +194,94 @@ mod tests {
         let detached = settings.for_hosted_worker(false);
         assert_eq!(detached, standalone);
         assert_eq!(settings, standalone, "hosting never rewrites the saved arrangement");
+    }
+
+    #[test]
+    fn live_photo_scene_is_independent_of_control_restriction_and_keeps_explicit_overrides() {
+        let mut settings = ViewportSettings {
+            enabled: true,
+            restrict_ui: false,
+            left: 40.0,
+            right: 10.0,
+            top: 10.0,
+            bottom: 20.0,
+        };
+        let native = (5000, 3000);
+        let scene = |settings: &ViewportSettings, mouselook, hidden, vr| {
+            PhotoScene::new(native, settings.render_viewport(native, mouselook, hidden, false, vr))
+        };
+        let bounded = scene(&settings, false, false, false);
+        assert_eq!(bounded.view.rect(), [2000, 300, 2500, 2100]);
+        settings.restrict_ui = true;
+        assert_eq!(scene(&settings, false, false, false), bounded);
+        assert_eq!(scene(&settings, true, true, false), bounded, "desktop mouselook retains the scene");
+        for full in [
+            scene(&settings, false, true, false),
+            scene(&settings, false, false, true),
+            scene(&settings.for_hosted_worker(true), false, false, false),
+            scene(&ViewportSettings::default(), false, false, false),
+        ] {
+            assert_eq!(full.view, aurora_render::WorldViewport::full(native));
+        }
+        assert_eq!(
+            settings.render_viewport(native, false, false, true, false),
+            aurora_render::WorldViewport::full(native),
+            "a clean output render target is independently full-sized"
+        );
+        assert_eq!(settings.viewport(native), bounded.view, "temporary policies never rewrite margins");
+    }
+
+    #[test]
+    fn photo_focus_uses_absolute_native_pixels_and_logical_scene_offsets_at_any_ui_scale() {
+        let source = PhotoScene::new(
+            (5000, 3000),
+            aurora_render::WorldViewport {
+                x: 2000,
+                y: 300,
+                width: 2500,
+                height: 2100,
+            },
+        );
+        assert_eq!(source.point(None), (3250.0, 1350.0));
+        assert_eq!(source.point(Some(egui::pos2(f32::NAN, 0.2))), source.point(None));
+        assert_eq!(source.point(Some(egui::pos2(1.0, 1.0))), (4499.5, 2399.5));
+        for native in [(2000.0, 300.0), (3250.0, 1350.0), (4499.0, 2399.0)] {
+            let normalized = source.normalized_point(native).unwrap();
+            let reconstructed = source.point(Some(normalized));
+            assert!((native.0 - reconstructed.0).abs() < 0.001 && (native.1 - reconstructed.1).abs() < 0.001);
+            for ppp in [1.0, 1.5, 2.5] {
+                let origin = egui::pos2(17.0, 29.0);
+                let canvas = egui::Rect::from_min_size(origin, egui::vec2(5000.0, 3000.0) / ppp);
+                let scene = source.logical_rect(canvas);
+                let marker = scene.min + normalized.to_vec2() * scene.size();
+                let expected = origin + egui::vec2(native.0, native.1) / ppp;
+                assert!(
+                    marker.distance(expected) < 0.001,
+                    "AF marker and renderer pick share the world origin"
+                );
+                assert!(scene.min.distance(origin + egui::vec2(2000.0, 300.0) / ppp) < 0.001);
+            }
+        }
+        for outside in [
+            (1999.0, 1350.0),
+            (4500.0, 1350.0),
+            (3250.0, 299.0),
+            (3250.0, 2400.0),
+            (f32::NAN, 1350.0),
+        ] {
+            assert!(
+                source.normalized_point(outside).is_none(),
+                "workspace input cannot become a world AF point"
+            );
+        }
+        let output = source.output_viewport((2000, 1200));
+        assert_eq!(output.rect(), [800, 120, 1000, 840]);
+        assert_eq!(
+            source.native,
+            (5000, 3000),
+            "export size cannot change frozen source aspect or picks"
+        );
+        assert!((source.aspect() - output.width as f32 / output.height as f32).abs() < 1e-6);
     }
 
     #[test]

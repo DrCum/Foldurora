@@ -429,8 +429,16 @@ impl App {
             size,
             self.camera.mouselook(),
             self.interface.hidden,
-            self.panels.snapshot || self.snapshots.capturing.is_some(),
+            self.snapshots.capturing.is_some_and(|capture| !capture.interface),
             vr,
+        )
+    }
+
+    pub(super) fn photo_scene_for_size(&self, size: (u32, u32), vr: bool) -> crate::world_viewport::PhotoScene {
+        crate::world_viewport::PhotoScene::new(
+            size,
+            self.effective_viewport_settings()
+                .render_viewport(size, self.camera.mouselook(), self.interface.hidden, false, vr),
         )
     }
 

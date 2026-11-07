@@ -97,6 +97,31 @@ fn the_interface_needs_the_windows_proportions() {
 }
 
 #[test]
+fn interface_aspect_admits_integer_rounding_but_rejects_visible_stretch() {
+    for (native, photo) in [
+        ((3840, 1080), (720, 203)),
+        ((3840, 1080), (719, 202)),
+        ((1080, 3840), (203, 720)),
+        ((5000, 3000), (2000, 1200)),
+    ] {
+        assert!(same_proportions(photo, native), "rounded matching output: {photo:?} / {native:?}");
+    }
+    for photo in [(1902, 1080), (1920, 1070), (1920, 1082), (720, 204), (0, 1080)] {
+        assert!(
+            !same_proportions(photo, (1920, 1080)),
+            "do not stretch or crop the interface: {photo:?}"
+        );
+    }
+    assert!(!same_proportions((1920, 1080), (0, 0)));
+    let settings = Settings::default();
+    assert_eq!(settings.size((3200, 2001)), (3200, 2000));
+    assert!(
+        same_proportions(settings.size((3200, 2001)), (3200, 2001)),
+        "keep the existing even encoder dimensions"
+    );
+}
+
+#[test]
 fn one_pass_while_the_card_holds_it_tiles_otherwise() {
     let whole = Tile {
         x: 0,

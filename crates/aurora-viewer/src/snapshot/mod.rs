@@ -360,12 +360,17 @@ impl Settings {
     }
 }
 
-/// A photo of `size` has the window's proportions (to 1 %): the interface
-/// can be drawn on it (it is laid out for the window and scaled, not moved).
+/// The interface keeps the whole window's proportions. Allow only raster
+/// rounding on the short output side: nearest integer (half a pixel), then
+/// `photo_size`'s existing truncation to an even encoder size (one more pixel).
+/// A percentage tolerance stretched the scene or cropped UI in large exports.
+/// Cross products also admit rounded previews without float comparison error.
 pub fn same_proportions(size: (u32, u32), window: (u32, u32)) -> bool {
-    let photo = size.0 as f32 / size.1.max(1) as f32;
-    let win = window.0 as f32 / window.1.max(1) as f32;
-    (photo - win).abs() <= 0.01 * win
+    if size.0 == 0 || size.1 == 0 || window.0 == 0 || window.1 == 0 {
+        return false;
+    }
+    let cross = (u64::from(size.0) * u64::from(window.1)).abs_diff(u64::from(size.1) * u64::from(window.0));
+    cross <= 3 * u64::from(window.0.max(window.1)) / 2
 }
 
 fn clamp_side(v: u32) -> u32 {

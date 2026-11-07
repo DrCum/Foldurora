@@ -8,6 +8,20 @@
   Source/asset validation is recorded in `assets/branding/FOLDURORA.md`;
   integrated compilation and native icon acceptance remain pending.
 
+- 🔧 Photo scene viewport (human screenshot, 2026-11-06; no issue): keep live
+  photo rendering, guides/masks, frozen previews, AF picks and edge overlays in
+  the effective world rectangle independently of toolbar restriction. Freeze
+  source aspect/height separately from export dimensions; preserve clean tiled
+  output and full-canvas Interface captures with a bounded scene. Validate the
+  ephemeral renderer output rectangle, clear it after capture, reject unsupported
+  Interface aspect/size (including retry tiling), and cancel on canvas/UI-scale
+  changes. Preserve viewport-disabled, fitted-worker, VR and explicit hidden-UI
+  policies. Source regressions cover actual egui bounds/clipping with offsets,
+  unrestricted controls and fractional DPI, AF/native-coordinate agreement,
+  source/guide/export projection, rounded preview sizing and interface placement.
+  Direct formatting and source checks passed; compiled checks, offline visual
+  review and human Windows photo/export acceptance remain pending.
+
 - 🔧 Compact session-host controls (human request, 2026-11-06; no issue): replace
   the permanent roster and large heading with one 38-point profile/action/character
   strip, following `layoutCharacters` in `tools/session-host/main.cpp`. Keep

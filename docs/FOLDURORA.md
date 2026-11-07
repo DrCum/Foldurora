@@ -258,9 +258,17 @@ close button and controls stay reachable, even when ordinary floater settings
 permit partial offscreen placement. Snapshot output is a separate choice:
 selecting full-frame output does not move these controls outside the configured
 viewport. Desktop mouselook retains the configured world viewport, including
-when its interface is hidden. Photo output, VR and hiding the interface outside
-mouselook can render full-frame without changing the saved control-placement
-preference. Native cursor confinement/capture still requires separate acceptance.
+when its interface is hidden. Opening photo mode also keeps its live scene,
+guides, masks, frozen preview and focus marks in that world rectangle, even
+when control restriction is off. The chosen photo dimensions/aspect remain
+separate: clean exports frame the bounded live view at that output aspect;
+Interface exports keep the whole window and its workspace overlays, with the
+scene in its original relative position. Interface output needs matching window
+proportions and a size that can be drawn in one pass; incompatible requests show
+an actionable message. Resizing the native canvas or changing interface scale
+during an Interface capture cancels it so it can be retaken. VR and hiding the
+interface outside mouselook retain their explicit full-scene behavior. Native
+cursor confinement/capture still requires separate acceptance.
 Ordinary floaters
 retain full-workspace anchors and sizes, including wide geometry retained before
 the earlier blanket restriction fitted them to the viewport. An explicit manual
@@ -308,6 +316,16 @@ Check these cases in the offline demo first, then in the user's normal session:
    fit or scroll inside it while Preferences remains usable across the full
    workspace. Enable partial offscreen movement for ordinary floaters and select
    full-frame snapshot output; neither may let camera/snapshot controls escape.
+10. With control restriction both on and off, open the photo panel and
+    viewfinder. Keep ordinary chat/Inventory windows outside the world. Check
+    rule-of-thirds guides, crop masks, held previews, focus points and face
+    brackets at each world edge; none may spill into the workspace. Save clean
+    portrait and wide photos and compare their edges with the live guide.
+    Save an Interface photo with Window aspect and confirm the complete native
+    canvas, workspace floaters and bounded scene keep their proportions. Try a
+    large Interface output, a nonmatching aspect and a resize/zoom during capture;
+    expect a clear message without a partial or silently clean image. Restore
+    the default full-window viewport and repeat ordinary photography.
 
 The corrected selective scope still requires automated, offline visual and human
 native-window acceptance; the earlier blanket-interface behavior is not its

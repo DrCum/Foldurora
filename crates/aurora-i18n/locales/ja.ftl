@@ -6495,7 +6495,7 @@ photo-show-in-inventory = 表示
 photo-file-format = ファイル
 photo-jpeg-quality = JPEG品質
 photo-interface = インターフェース
-photo-interface-hint = ウィンドウの縦横比の場合のみ
+photo-interface-hint = 「ウィンドウ」または同じ縦横比を選ぶか、「インターフェース」をオフにしてください。
 photo-huds = ＨＵＤ
 photo-freeze = フレームを固定
 photo-quality = 写真の品質
@@ -13362,3 +13362,7 @@ host-profile-registry-missing = キャラクタープロファイルの登録情
 # Compact session-host controls.
 host-manage = キャラクターを管理
 host-manage-hide = キャラクター管理を閉じる
+
+photo-interface-size = この写真サイズではインターフェースを含められません。サイズを小さくするか、インターフェースをオフにしてください。
+photo-interface-aspect = インターフェースを含めるには、「ウィンドウ」または同じ縦横比を選ぶか、「インターフェース」をオフにしてください。
+photo-canvas-changed = ウィンドウまたはインターフェースの拡大率が変更されました。もう一度撮影してください。

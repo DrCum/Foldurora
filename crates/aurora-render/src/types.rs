@@ -969,6 +969,22 @@ pub struct SnapshotSpec {
     /// tiles of different sizes, at full and half resolution side by
     /// side, would differ along their border.
     pub photo: (u32, u32),
+    /// Scene placement inside a full interface capture, in output pixels.
+    /// Clean photos keep a full world target. This is an ephemeral hint,
+    /// clamped by the backend, not a saved viewport preference.
+    pub world_viewport: Option<crate::WorldViewport>,
+}
+
+impl SnapshotSpec {
+    pub fn output_viewport(self) -> crate::WorldViewport {
+        let size = (self.width, self.height);
+        if self.interface {
+            self.world_viewport
+                .map_or_else(|| crate::WorldViewport::full(size), |view| view.fitted(size))
+        } else {
+            crate::WorldViewport::full(size)
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

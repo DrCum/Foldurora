@@ -33,6 +33,27 @@ const SETTLE: Duration = Duration::from_millis(250);
 /// the frame before (a pipeline made for the photo quality, a slow part)
 /// before the photo is given up: far past any frame, short of forever.
 const PHOTO_WAIT: Duration = Duration::from_secs(30);
+
+fn same_interface_canvas(
+    source: crate::world_viewport::PhotoScene,
+    scale: f32,
+    current: crate::world_viewport::PhotoScene,
+    current_scale: f32,
+) -> bool {
+    source == current && scale.is_finite() && scale > 0.0 && scale == current_scale
+}
+
+fn preview_size(photo: (u32, u32), interface_window: Option<(u32, u32)>) -> (u32, u32) {
+    // Round an interface preview directly from the native aspect, rather than
+    // rounding a second time from an already rounded export size.
+    let source = interface_window.unwrap_or(photo);
+    let side = photo.0.max(photo.1).min(PREVIEW_SIDE) as f32;
+    let scale = side / source.0.max(source.1).max(1) as f32;
+    (
+        ((source.0 as f32 * scale).round() as u32).max(16),
+        ((source.1 as f32 * scale).round() as u32).max(16),
+    )
+}
 /// Bytes a photo may take when the driver does not report its memory.
 const DEFAULT_TARGET_BYTES: u64 = 1_600_000_000;
 
@@ -117,6 +138,11 @@ struct Job {
     hold: Option<snapshot::Hold>,
     /// The whole photo drawn small before its tiles, for their occlusion.
     context: ContextPass,
+    /// The live source geometry when the shutter/preview was requested.
+    /// Output dimensions do not replace this camera framing across tiles.
+    source: crate::world_viewport::PhotoScene,
+    /// The native UI meshes must still use the scale at the shutter.
+    ui_scale: f32,
 }
 
 /// A held photo (freeze frame) and what shows it.
@@ -128,10 +154,21 @@ struct Held {
     texture: Option<egui::TextureHandle>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct PreviewKey {
+    photo: (u32, u32),
+    interface: bool,
+    huds: bool,
+    source: crate::world_viewport::PhotoScene,
+    ui_scale: u32,
+}
+
 /// The photo frame drawn this frame: how the app lays it out.
 pub(super) struct PhotoFrame {
     /// Width over height of the whole photo.
     pub aspect: f32,
+    pub source_aspect: f32,
+    pub source_height: u32,
     /// Off-centre projection of the tile drawn (identity in one pass).
     pub tile: Mat4,
     /// The photo's height: the levels of detail are chosen for it.
@@ -153,7 +190,7 @@ pub(super) struct Snapshots {
     pub capturing: Option<SnapshotSpec>,
     preview: Option<egui::TextureHandle>,
     /// What the preview was drawn for (photo size, interface, HUDs).
-    preview_for: Option<((u32, u32), bool, bool)>,
+    preview_for: Option<PreviewKey>,
     pub(super) preview_wanted: bool,
     camera: Option<[f32; 7]>,
     camera_moved: Option<Instant>,
@@ -509,6 +546,7 @@ impl App {
 
     /// Before a frame is laid out: the photo frame it carries, if any.
     pub(super) fn photo_frame(&mut self, renderer: &mut Renderer) -> Option<PhotoFrame> {
+        self.photo_validate_canvas(renderer, self.egui_ctx.pixels_per_point());
         let s = &mut self.snapshots;
         s.capturing = None;
         let job = s.job.as_mut()?;
@@ -542,7 +580,7 @@ impl App {
             }
             job.waited += 1;
         }
-        let scale = snapshot::viewfinder_scale(job.size, renderer.size(), self.settings.render_scale_percent);
+        let scale = snapshot::viewfinder_scale(job.size, job.source.view.size(), self.settings.render_scale_percent);
         if let ContextPass::Pending((width, height)) = job.context {
             // the whole photo, for the tiles' occlusion: nothing of it is kept
             let spec = SnapshotSpec {
@@ -551,12 +589,15 @@ impl App {
                 interface: false,
                 huds: false,
                 photo: (width, height),
+                world_viewport: None,
             };
             renderer.snapshot_request = Some(spec);
             job.asked = true;
             s.capturing = Some(spec);
             return Some(PhotoFrame {
                 aspect: job.size.0 as f32 / job.size.1.max(1) as f32,
+                source_aspect: job.source.aspect(),
+                source_height: job.source.view.height,
                 tile: Mat4::IDENTITY,
                 // (the tiles' levels of detail: the same depth)
                 height: job.size.1,
@@ -567,35 +608,52 @@ impl App {
         }
         let tile = job.tiles[job.next].draw;
         let single = job.tiles.len() == 1;
+        let include_interface = job.interface;
+        let output_world = include_interface.then(|| job.source.output_viewport((tile.width, tile.height)));
         let spec = SnapshotSpec {
             width: tile.width,
             height: tile.height,
             // tiles are laid out for the whole photo: no interface or HUD,
             // which the window places on its own screen
-            interface: job.interface && single,
+            interface: include_interface,
             huds: job.huds && single,
-            photo: job.size,
+            photo: output_world.map_or(job.size, |view| view.size()),
+            world_viewport: output_world,
         };
         renderer.snapshot_request = Some(spec);
         job.asked = true;
         s.capturing = Some(spec);
         // the look in the photo's own pixels, from the corner of the part
         // drawn; the tiles share the histogram of the live view's last frame
+        let look_photo = if include_interface {
+            job.source.output_viewport(job.photo).size()
+        } else {
+            job.photo
+        };
+        let output_height = output_world.map_or(job.size.1, |view| view.height);
         let place = Placement {
             origin: [-(tile.x as f32), -(tile.y as f32)],
-            photo: job.photo,
-            scale: job.size.1 as f32 / job.photo.1.max(1) as f32,
+            photo: look_photo,
+            scale: output_height as f32 / look_photo.1.max(1) as f32,
         };
         let look = looks::frame_look(&job.looks, place, None, !single, job.focus);
         Some(PhotoFrame {
-            aspect: job.size.0 as f32 / job.size.1.max(1) as f32,
+            aspect: if include_interface {
+                job.source.aspect()
+            } else {
+                job.size.0 as f32 / job.size.1.max(1) as f32
+            },
+            source_aspect: job.source.aspect(),
+            source_height: job.source.view.height,
             tile: if single {
                 Mat4::IDENTITY
             } else {
                 snapshot::tile_matrix(job.size, tile)
             },
-            height: job.size.1,
-            scale,
+            height: output_height,
+            scale: output_world.map_or(scale, |view| {
+                snapshot::viewfinder_scale(view.size(), job.source.view.size(), self.settings.render_scale_percent)
+            }),
             look,
             context: if job.context == ContextPass::Drawn {
                 aurora_render::PhotoContext::Use
@@ -672,7 +730,14 @@ impl App {
         {
             let part = (job.next + 1, job.tiles.len());
             let size = job.size;
-            let tiles = self.photo_tiles(renderer, size);
+            let source = job.source;
+            let interface = job.interface;
+            let tiles = self.photo_tiles_from(renderer, size, source);
+            if interface && tiles.len() != 1 {
+                self.snapshots.job = None;
+                self.snapshots.message = Some((aurora_i18n::tr!("photo-interface-size").to_owned(), true));
+                return;
+            }
             log::warn!(
                 "photo: part {} of {} ({} x {}) came back black (a GPU reset, or a black part): drawn again in {} part(s)",
                 part.0,
@@ -1030,15 +1095,18 @@ impl App {
     /// Start a photo of the destination's size.
     pub(super) fn photo_job(&mut self, purpose: Purpose, renderer: &Renderer) {
         let window = renderer.size();
+        let source = self.photo_scene_for_size(window, renderer.vr_engaged());
         let full = self.photo_size(window);
         let s = &self.settings.snapshot;
+        if s.interface && !snapshot::same_proportions(full, window) {
+            let message = aurora_i18n::tr!("photo-interface-aspect");
+            self.snapshots.message = Some((message.to_owned(), true));
+            self.photo_vf_error(message);
+            return;
+        }
+        let interface = s.interface;
         let size = if purpose == Purpose::Preview {
-            let (w, h) = full;
-            let scale = (PREVIEW_SIDE as f32 / w.max(h) as f32).min(1.0);
-            (
-                ((w as f32 * scale).round() as u32).max(16),
-                ((h as f32 * scale).round() as u32).max(16),
-            )
+            preview_size(full, interface.then_some(window))
         } else {
             full
         };
@@ -1056,7 +1124,13 @@ impl App {
             self.world.photo_isolation.set_picking(false);
         }
         self.snapshots.gpu_cost.new_photo();
-        let tiles = self.photo_tiles(renderer, size);
+        let tiles = self.photo_tiles_from(renderer, size, source);
+        if interface && tiles.len() != 1 {
+            let message = aurora_i18n::tr!("photo-interface-size");
+            self.snapshots.message = Some((message.to_owned(), true));
+            self.photo_vf_error(message);
+            return;
+        }
         if purpose != Purpose::Preview {
             log::info!(
                 "photo: {} x {} planned in {} part(s), at most {} Mpx a pass (memory and GPU time; {} bytes a pixel, {})",
@@ -1072,7 +1146,6 @@ impl App {
                 }
             );
         }
-        let interface = s.interface && snapshot::same_proportions(full, window);
         // (with the ambient occlusion on: GTAO may be forced over its method)
         let context = ContextPass::plan(size, tiles.len(), self.settings.ssao > 0);
         self.snapshots.job = Some(Job {
@@ -1094,12 +1167,32 @@ impl App {
             photo: full,
             hold: None,
             context,
+            source,
+            ui_scale: self.egui_ctx.pixels_per_point(),
         });
         let stack = self.settings.snapshot.looks.clone();
         let settings = self.settings.snapshot.look_settings.clone();
         let resolved = looks::resolve_stack(&stack, &settings, self.photo_luts());
         if let Some(job) = &mut self.snapshots.job {
             job.looks = resolved;
+        }
+    }
+
+    /// DPI/zoom can change inside the egui pass, after `photo_frame`. Check
+    /// again before handing its meshes to the renderer. Desktop position is
+    /// irrelevant; only the client canvas, scene rectangle and UI scale matter.
+    pub(super) fn photo_validate_canvas(&mut self, renderer: &mut Renderer, ui_scale: f32) {
+        let source = self.photo_scene_for_size(renderer.size(), renderer.vr_engaged());
+        if self
+            .snapshots
+            .job
+            .as_ref()
+            .is_some_and(|job| job.interface && !same_interface_canvas(job.source, job.ui_scale, source, ui_scale))
+        {
+            renderer.drop_snapshot();
+            self.snapshots.capturing = None;
+            self.snapshots.job = None;
+            self.snapshots.message = Some((aurora_i18n::tr!("photo-canvas-changed").to_owned(), true));
         }
     }
 
@@ -1114,7 +1207,12 @@ impl App {
     /// window is open: the filter pointed at in a list, or the one chosen,
     /// over the photo's frame of the `window` (pixels; `ui::snapshot::fit`),
     /// with the viewfinder's before / after line.
-    pub(super) fn live_look(&mut self, window: (u32, u32), focus: Option<f32>) -> Option<aurora_render::looks::PhotoLook> {
+    pub(super) fn live_look(
+        &mut self,
+        source: crate::world_viewport::PhotoScene,
+        window: (u32, u32),
+        focus: Option<f32>,
+    ) -> Option<aurora_render::looks::PhotoLook> {
         if !self.panels.snapshot {
             return None;
         }
@@ -1128,12 +1226,18 @@ impl App {
         let settings = self.settings.snapshot.look_settings.clone();
         let layers = looks::resolve_stack(&stack, &settings, self.photo_luts());
         let photo = self.photo_size(window);
-        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(window.0 as f32, window.1 as f32));
-        let frame = crate::ui::snapshot::fit(screen, photo.0 as f32 / photo.1.max(1) as f32);
+        let include_interface = self.settings.snapshot.interface && snapshot::same_proportions(photo, window);
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(source.view.width as f32, source.view.height as f32));
+        let frame = crate::ui::snapshot::scene_frame(screen, photo, include_interface);
+        let look_photo = if include_interface {
+            source.output_viewport(photo).size()
+        } else {
+            photo
+        };
         let place = Placement {
             origin: [frame.left(), frame.top()],
-            photo,
-            scale: frame.height() / photo.1.max(1) as f32,
+            photo: look_photo,
+            scale: frame.height() / look_photo.1.max(1) as f32,
         };
         let compare = self.snapshots.ui.looks.compare.filter(|_| self.viewfinder_on());
         looks::frame_look(&layers, place, compare, false, focus)
@@ -1145,11 +1249,21 @@ impl App {
     /// farther than the screen-space passes, and the contact shadows as far
     /// as their rays reach at this photo's scale.
     fn photo_tiles(&self, renderer: &Renderer, size: (u32, u32)) -> Vec<snapshot::TilePass> {
+        let source = self.photo_scene_for_size(renderer.size(), renderer.vr_engaged());
+        self.photo_tiles_from(renderer, size, source)
+    }
+
+    fn photo_tiles_from(
+        &self,
+        renderer: &Renderer,
+        size: (u32, u32),
+        source: crate::world_viewport::PhotoScene,
+    ) -> Vec<snapshot::TilePass> {
         let bloom = if self.settings.bloom { self.settings.bloom_strength } else { 0.0 };
         let dof = self
-            .photo_dof_max_coc(size.1, renderer.size().1)
+            .photo_dof_max_coc(size.1, source.view.height)
             .map_or(0, aurora_render::dof_tile_reach);
-        let scale = snapshot::viewfinder_scale(size, renderer.size(), self.settings.render_scale_percent);
+        let scale = snapshot::viewfinder_scale(size, source.view.size(), self.settings.render_scale_percent);
         let contact = aurora_render::contact_tile_reach(self.settings.contact_shadows, scale);
         let guard = snapshot::TILE_GUARD
             .max(aurora_render::bloom_tile_reach(bloom))
@@ -1638,11 +1752,17 @@ impl App {
             return;
         }
         let window = renderer.size();
-        let key = (
-            self.photo_size(window),
-            self.settings.snapshot.interface,
-            self.settings.snapshot.huds,
-        );
+        let key = PreviewKey {
+            photo: self.photo_size(window),
+            interface: self.settings.snapshot.interface,
+            huds: self.settings.snapshot.huds,
+            source: self.photo_scene_for_size(window, renderer.vr_engaged()),
+            ui_scale: if self.settings.snapshot.interface {
+                self.egui_ctx.pixels_per_point().to_bits()
+            } else {
+                0
+            },
+        };
         let s = &mut self.snapshots;
         if s.preview_for != Some(key) {
             s.preview_wanted = true;
@@ -2166,6 +2286,7 @@ LUT_3D_SIZE {n}
                 &mut self.settings.camera.fov,
                 crate::camera::DEFAULT_FOV,
                 photo,
+                window,
             ));
         } else if self.panels.snapshot {
             let inventory = (self.snapshots.ui.destination == Destination::Inventory).then(|| self.photo_inventory_view(window));
@@ -3009,5 +3130,65 @@ fn env_view<'a>(
         sun: crate::ui::environment::azimuth_elevation(sun),
         locked: eep.rlva_locked,
         loading: eep.photo_loading(),
+    }
+}
+
+#[cfg(test)]
+mod canvas_tests {
+    use super::*;
+    use crate::world_viewport::PhotoScene;
+    use aurora_render::WorldViewport;
+
+    #[test]
+    fn interface_preview_rounds_from_native_canvas_and_preserves_requested_export_size() {
+        for native in [(3840, 1080), (1080, 3840), (5011, 3107), (1137, 859), (800, 600)] {
+            let settings = snapshot::Settings {
+                resolution: snapshot::Resolution::Uhd,
+                ..Default::default()
+            };
+            let photo = settings.size(native);
+            assert!(snapshot::same_proportions(photo, native));
+            let preview = preview_size(photo, Some(native));
+            assert!(
+                snapshot::same_proportions(preview, native),
+                "{native:?} -> {photo:?} -> {preview:?}"
+            );
+            assert_eq!(preview.0.max(preview.1), PREVIEW_SIDE);
+            assert_eq!(settings.size(native), photo, "a preview never rewrites the selected export size");
+        }
+        assert_eq!(preview_size((320, 240), None), (320, 240));
+        assert_eq!(preview_size((2000, 1000), None), (720, 360));
+    }
+
+    #[test]
+    fn interface_canvas_requires_source_geometry_and_ui_scale_but_has_no_desktop_position() {
+        let scene = PhotoScene::new(
+            (5000, 3000),
+            WorldViewport {
+                x: 2000,
+                y: 300,
+                width: 2500,
+                height: 2100,
+            },
+        );
+        assert!(same_interface_canvas(scene, 1.5, scene, 1.5));
+        assert!(!same_interface_canvas(scene, 1.5, scene, 2.0));
+        assert!(!same_interface_canvas(scene, f32::NAN, scene, f32::NAN));
+        assert!(!same_interface_canvas(scene, 0.0, scene, 0.0));
+        let resized = PhotoScene::new((5000, 3200), scene.view);
+        assert!(!same_interface_canvas(scene, 1.5, resized, 1.5));
+        let moved_scene = PhotoScene::new(scene.native, WorldViewport { x: 1800, ..scene.view });
+        assert!(!same_interface_canvas(scene, 1.5, moved_scene, 1.5));
+        // A native desktop move does not enter this client-relative contract.
+        for origin in [egui::pos2(0.0, 0.0), egui::pos2(-1200.0, 200.0)] {
+            let canvas = egui::Rect::from_min_size(origin, egui::vec2(5000.0, 3000.0) / 1.5);
+            assert!(
+                (scene.logical_rect(canvas).size() - scene.logical_rect(canvas.translate(-origin.to_vec2())).size())
+                    .abs()
+                    .max_elem()
+                    < 0.001
+            );
+            assert!(same_interface_canvas(scene, 1.5, scene, 1.5));
+        }
     }
 }

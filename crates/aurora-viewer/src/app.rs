@@ -8988,7 +8988,7 @@ impl App {
         let photo_context = photo.as_ref().map_or(aurora_render::PhotoContext::None, |f| f.context);
         let lod_height = photo.as_ref().map_or(viewport.height, |f| f.height);
         let frame_proj = |camera: &crate::camera::Camera| match &photo {
-            Some(f) => photo_tile * camera.photo_proj(f.aspect, window_aspect),
+            Some(f) => photo_tile * camera.photo_proj(f.aspect, f.source_aspect),
             None => camera.proj(aspect),
         };
 
@@ -9561,9 +9561,9 @@ impl App {
             self.world.hud_area = self.hud_area([hud_size.width, hud_size.height]);
             self.world.hud_aspect = match (self.snapshots.capturing, self.world.hud_area) {
                 // the HUD laid out for the photo's proportions
-                (Some(spec), _) => spec.width as f32 / spec.height.max(1) as f32,
-                (None, Some([left, top, right, bottom])) => (right - left) / (bottom - top).max(1.0),
-                (None, None) => hud_size.width as f32 / hud_size.height.max(1) as f32,
+                (Some(spec), _) if !spec.interface => spec.width as f32 / spec.height.max(1) as f32,
+                (_, Some([left, top, right, bottom])) => (right - left) / (bottom - top).max(1.0),
+                (_, None) => hud_size.width as f32 / hud_size.height.max(1) as f32,
             };
             if self.build.hud_selected(&self.world) && !self.huds_shown() {
                 self.build.deselect_all(&self.world);
@@ -10370,11 +10370,12 @@ impl App {
                 // the image's own vertical field of view (a photo's may be
                 // wider than the window's)
                 let lens_proj = match &photo {
-                    Some(f) => self.camera.photo_proj(f.aspect, window_aspect),
+                    Some(f) => self.camera.photo_proj(f.aspect, f.source_aspect),
                     None => self.camera.proj(aspect),
                 };
                 let fov = 2.0 * (1.0 / lens_proj.y_axis.y.max(1e-6)).atan();
-                self.dof_frame(&mut gfx.renderer, dt, fov, lod_height, viewport.height)
+                let source_height = photo.as_ref().map_or(viewport.height, |f| f.source_height);
+                self.dof_frame(&mut gfx.renderer, dt, fov, lod_height, source_height)
             },
             // the photo's isolation, "show only" on an empty background
             cutout: self.world.photo_isolation.empty_background(),
@@ -10385,7 +10386,7 @@ impl App {
         self.snapshots.look_focus = focus;
         fp.look = match &photo {
             Some(f) => f.look.clone(),
-            None => self.live_look(viewport.size(), focus),
+            None => self.live_look(self.photo_scene_for_size((w, h), gfx.renderer.vr_engaged()), (w, h), focus),
         };
         self.scene.parts.lap(Part::ParamsProbes, t_part);
 
@@ -10711,6 +10712,8 @@ impl App {
                 }
             }
             ui::layout::begin_canvas(ui.ctx(), false);
+            let source = self.photo_scene_for_size((w, h), gfx.renderer.vr_engaged());
+            ui::layout::set_world_canvas(ui.ctx(), Some(source.logical_rect(ui.ctx().viewport_rect())));
             let bounds = self.effective_viewport_settings().toolbar_rect((w, h), ui.ctx().viewport_rect());
             if ui::layout::set_toolbar_canvas(ui.ctx(), bounds) {
                 self.interface.last_room = None;
@@ -10740,6 +10743,7 @@ impl App {
             windows_ms += t.elapsed().as_secs_f32() * 1000.0;
         });
         // a capture leaves the user's layout as it is (as at exit)
+        self.photo_validate_canvas(&mut gfx.renderer, full.pixels_per_point);
         if self.capture.is_none() {
             self.layout_autosave.after_pass(&ctx, Instant::now());
         }

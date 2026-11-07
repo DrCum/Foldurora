@@ -37,14 +37,10 @@ impl App {
     }
 
     /// The AF point in window pixels: the crosshair in mouselook, else the
-    /// point chosen (the screen's centre at first).
+    /// point chosen (the live world's centre at first).
     fn vf_point_px(&self, renderer: &Renderer) -> (f32, f32) {
-        let (w, h) = renderer.size();
-        let at = match self.snapshots.vf.point {
-            Some(p) if !self.camera.mouselook() => p,
-            _ => Pos2::new(0.5, 0.5),
-        };
-        (at.x * w as f32, at.y * h as f32)
+        let scene = self.photo_scene_for_size(renderer.size(), renderer.vr_engaged());
+        scene.point(self.snapshots.vf.point.filter(|_| !self.camera.mouselook()))
     }
 
     /// Each frame, before it is laid out: the depth that came back under
@@ -180,16 +176,15 @@ impl App {
             }
             PhotoFocus::Pointer => {
                 let over_ui = self.egui_ctx.is_pointer_over_egui();
+                let source = self.photo_scene_for_size(renderer.size(), renderer.vr_engaged());
                 let (x, y) = if self.camera.mouselook() {
-                    let (w, h) = renderer.size();
-                    (w as f32 * 0.5, h as f32 * 0.5)
+                    source.point(None)
                 } else {
                     self.cursor_pos
                 };
                 if !over_ui && let Some(p) = renderer.hover_pick(x, y) {
-                    let (w, h) = renderer.size();
                     if !self.camera.mouselook() {
-                        self.snapshots.vf.point = Some(Pos2::new(x / w.max(1) as f32, y / h.max(1) as f32));
+                        self.snapshots.vf.point = source.normalized_point((x, y));
                     }
                     self.snapshots.vf.af.track(dof::distance_along(eye, at, p), now);
                 }
@@ -531,8 +526,8 @@ impl App {
             return true;
         };
         let add = self.shift && self.settings.snapshot.dof.focus == PhotoFocus::Click;
-        let (w, h) = gfx.renderer.size();
-        self.snapshots.vf.point = Some(Pos2::new(self.cursor_pos.0 / w.max(1) as f32, self.cursor_pos.1 / h.max(1) as f32));
+        let source = self.photo_scene_for_size(gfx.renderer.size(), gfx.renderer.vr_engaged());
+        self.snapshots.vf.point = source.normalized_point(self.cursor_pos);
         if !add {
             self.snapshots.vf.subjects.clear();
         }
@@ -897,8 +892,9 @@ impl App {
         view: &crate::ui::snapshot::View,
     ) {
         let now = self.vf_now();
-        let screen = ctx.content_rect();
+        let screen = crate::ui::layout::world_rect(ctx);
         let window = renderer.size();
+        let source = self.photo_scene_for_size(window, renderer.vr_engaged());
         let photo = self.photo_size(window);
         // the AF point: the subject's face, else the point chosen
         let mut point = match self.snapshots.vf.point {
@@ -986,7 +982,7 @@ impl App {
             lens.f_number,
             near,
             s.camera.fov,
-            window.1,
+            source.view.height,
         );
         let sharp = vf::sharp_zone(k, near, far);
         let ev = vf::ev_of(self.photo_exposure(), s.exposure);

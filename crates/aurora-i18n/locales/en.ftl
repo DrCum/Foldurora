@@ -6502,7 +6502,7 @@ photo-show-in-inventory = Show
 photo-file-format = File
 photo-jpeg-quality = JPEG quality
 photo-interface = Interface
-photo-interface-hint = Only with the window's proportions
+photo-interface-hint = Choose Window or a matching aspect, or turn off Interface.
 photo-huds = HUDs
 photo-freeze = Freeze frame
 photo-quality = Photo quality
@@ -13389,3 +13389,7 @@ host-profile-registry-missing = The character profile registry is missing, but p
 # Compact session-host controls.
 host-manage = Manage characters
 host-manage-hide = Hide character management
+
+photo-interface-size = This photo size cannot include the interface. Choose a smaller size or turn off Interface.
+photo-interface-aspect = To include the interface, choose Window or a matching aspect, or turn off Interface.
+photo-canvas-changed = The window or interface scale changed. Take the photo again.

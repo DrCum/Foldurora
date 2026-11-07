@@ -6507,7 +6507,7 @@ photo-show-in-inventory = Afficher
 photo-file-format = Fichier
 photo-jpeg-quality = Qualité JPEG
 photo-interface = Interface
-photo-interface-hint = Seulement aux proportions de la fenêtre
+photo-interface-hint = Choisissez Fenêtre ou un format correspondant, ou désactivez Interface.
 photo-huds = HUD
 photo-freeze = Figer l'image
 photo-quality = Qualité photo
@@ -13385,3 +13385,7 @@ host-profile-registry-missing = Le registre des profils de personnage est absent
 # Compact session-host controls.
 host-manage = Gérer les personnages
 host-manage-hide = Masquer la gestion des personnages
+
+photo-interface-size = Cette taille de photo ne peut pas inclure l’interface. Choisissez une taille plus petite ou désactivez Interface.
+photo-interface-aspect = Pour inclure l’interface, choisissez Fenêtre ou un format correspondant, ou désactivez Interface.
+photo-canvas-changed = La fenêtre ou l’échelle de l’interface a changé. Reprenez la photo.

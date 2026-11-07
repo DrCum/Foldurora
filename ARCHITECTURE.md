@@ -182,6 +182,23 @@ pointer input, popups, anchors, scaling and size restoration offline; the select
 scope correction still requires its automated and native visual checks.
 `build::geom::Cam` carries the matching origin and extent for manipulation.
 
+Photo mode uses a separate `ui::layout::world_rect`, independent of toolbar
+restriction, for its live guides, masks, frozen image and AF overlays. Native
+pointer picks remain absolute; `world_viewport::PhotoScene` converts the stored
+scene-normalized AF point and the current DPI/zoom-aware logical rectangle.
+Opening the photo panel/viewfinder no longer expands the live scene. A photo
+job freezes its source rectangle/aspect separately from the selected output
+dimensions; clean exports use a full offscreen target with the corresponding
+crop projection. Interface captures retain the whole native UI canvas, with the
+frozen scene scaled into it by the same uniform height ratio as egui.
+`SnapshotSpec::world_viewport` is a clamped, ephemeral interface-output hint,
+cleared when the backend restores its targets on completion or failure. Interface
+output requires matching canvas proportions, allowing only integer/even-encoder
+rounding; multi-pass interface output is rejected, including a blank-frame retry,
+rather than silently omitting UI. Native geometry or UI scale changes cancel an
+interface job; ordinary desktop moves do not. Fitted workers, VR and the explicit
+interface-hidden full-scene policy keep their existing behavior.
+
 `characters.rs::Manager` keeps heartbeat, discovery, focus requests and launch
 reservations on a worker. Discovery is scoped to the exact executable and saved
 account/grid identity; focus requests bind to an instance nonce and generation.

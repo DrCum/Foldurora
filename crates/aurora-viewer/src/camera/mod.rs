@@ -2126,6 +2126,50 @@ mod tests {
         // the window's own proportions: its projection
         assert!(cam.photo_proj(window, window).abs_diff_eq(cam.proj(window), 1e-6));
     }
+
+    #[test]
+    fn photo_export_projection_matches_the_bounded_live_guide_for_distinct_output_aspects() {
+        let cam = Camera::default();
+        let source = crate::world_viewport::PhotoScene::new(
+            (5000, 3000),
+            aurora_render::WorldViewport {
+                x: 2000,
+                y: 300,
+                width: 2500,
+                height: 2100,
+            },
+        );
+        let canvas = egui::Rect::from_min_size(egui::pos2(11.0, 23.0), egui::vec2(2500.0, 1500.0));
+        let scene = source.logical_rect(canvas);
+        let live = cam.proj(source.aspect());
+        for photo in [(800, 1000), (6000, 2000), (2500, 2100)] {
+            let guide = crate::ui::snapshot::scene_frame(scene, photo, false);
+            let export = cam.photo_proj(photo.0 as f32 / photo.1 as f32, source.aspect());
+            for corner in [guide.left_top(), guide.right_bottom(), guide.center()] {
+                let ndc = glam::Vec4::new(
+                    2.0 * (corner.x - scene.left()) / scene.width() - 1.0,
+                    1.0 - 2.0 * (corner.y - scene.top()) / scene.height(),
+                    0.5,
+                    1.0,
+                );
+                // A ray through a bounded live-guide corner lands on the saved
+                // image's corresponding corner, regardless of the workspace.
+                let saved = export * live.inverse() * ndc;
+                let saved = saved.truncate() / saved.w;
+                let expected = egui::vec2(
+                    2.0 * (corner.x - guide.left()) / guide.width() - 1.0,
+                    1.0 - 2.0 * (corner.y - guide.top()) / guide.height(),
+                );
+                assert!((saved.x - expected.x).abs() < 1e-5 && (saved.y - expected.y).abs() < 1e-5);
+            }
+        }
+        let interface = crate::ui::snapshot::scene_frame(scene, (2000, 1200), true);
+        assert_eq!(
+            interface, scene,
+            "interface output scales the whole scene into its workspace position"
+        );
+        assert!(cam.photo_proj(source.aspect(), source.aspect()).abs_diff_eq(live, 1e-6));
+    }
     use crate::scene::avatar::AvatarLibrary;
 
     fn hover_world(seated: bool) -> World {
