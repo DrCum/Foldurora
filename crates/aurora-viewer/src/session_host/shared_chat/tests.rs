@@ -816,6 +816,503 @@ fn install_read(frames: &mut Frames, incoming: u64) {
     );
 }
 
+/// Two real egui contexts borrow the production source model. Only the active
+/// native-style context is focused; passive rendering must never take its Undo.
+struct SurfaceFrames {
+    contexts: [egui::Context; 2],
+    model: SharedChat,
+    host: HostSnapshot,
+    active: usize,
+    frame: u64,
+}
+
+impl SurfaceFrames {
+    const SURFACES: [ChatSurface; 2] = [ChatSurface::Shared, ChatSurface::Monitor1];
+
+    fn new() -> Self {
+        let base = Frames::new();
+        let contexts = std::array::from_fn(|_| {
+            let context = egui::Context::default();
+            crate::theme::Theme {
+                panel_alpha: 255,
+                ..Default::default()
+            }
+            .apply(&context, 1.0);
+            context
+        });
+        let mut result = Self {
+            contexts,
+            model: base.model,
+            host: base.host,
+            active: 0,
+            frame: 0,
+        };
+        result.model.select_for(ChatSurface::Monitor1, source(1));
+        result
+    }
+
+    fn show(&mut self, index: usize, events: Vec<Event>) -> Option<SendDraft> {
+        self.frame += 1;
+        self.model.sync(&self.host, false);
+        let surface = Self::SURFACES[index];
+        let modifiers = events
+            .iter()
+            .rev()
+            .find_map(|event| match event {
+                Event::Key { modifiers, .. } | Event::PointerButton { modifiers, .. } => Some(*modifiers),
+                _ => None,
+            })
+            .unwrap_or_default();
+        let mut raw = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(680.0, 680.0))),
+            time: Some(self.frame as f64 / 60.0),
+            focused: self.active == index,
+            events: std::iter::once(Event::ModifiersChanged(modifiers)).chain(events).collect(),
+            ..Default::default()
+        };
+        let context = &self.contexts[index];
+        let palette = crate::theme::Theme::default().palette();
+        if let Some(edits) = edit_prefix(
+            &mut raw,
+            self.model.composer_rect_for(surface, context),
+            egui::Popup::is_any_open(context),
+        ) {
+            let mut output = context.run_ui(edits, |ui| {
+                assert!(self.model.show_for(surface, ui, &palette, InputMode::Editing).is_none());
+            });
+            output.textures_delta.clear();
+        }
+        let mut action = None;
+        let mut output = context.run_ui(raw, |ui| {
+            action = action.take().or(self.model.show_for(surface, ui, &palette, InputMode::Live));
+        });
+        assert!(output.shapes.iter().all(|shape| !matches!(&shape.shape, egui::Shape::Callback(_))));
+        output.textures_delta.clear();
+        action
+    }
+
+    fn settle(&mut self, index: usize, count: usize) {
+        for _ in 0..count {
+            assert!(self.show(index, Vec::new()).is_none());
+        }
+    }
+
+    fn focus(&mut self, index: usize) {
+        if self.active != index {
+            let old = self.active;
+            self.active = index;
+            assert!(self.show(old, vec![Event::WindowFocused(false)]).is_none());
+            assert!(self.show(index, vec![Event::WindowFocused(true)]).is_none());
+        }
+        self.settle(index, 3);
+    }
+
+    fn rect(&mut self, index: usize, name: &'static str) -> Rect {
+        self.settle(index, 3);
+        self.contexts[index]
+            .data(|data| data.get_temp::<Rect>(Id::unique(name)))
+            .expect("production control")
+    }
+
+    fn pointer(&mut self, index: usize, at: Pos2, pressed: bool) -> Option<SendDraft> {
+        self.show(
+            index,
+            vec![
+                Event::PointerMoved(at),
+                Event::PointerButton {
+                    pos: at,
+                    button: PointerButton::Primary,
+                    pressed,
+                    modifiers: Modifiers::NONE,
+                },
+            ],
+        )
+    }
+
+    fn click(&mut self, index: usize, name: &'static str) -> Option<SendDraft> {
+        self.focus(index);
+        let at = self.rect(index, name).center();
+        assert!(self.pointer(index, at, true).is_none());
+        self.pointer(index, at, false)
+    }
+
+    fn type_text(&mut self, index: usize, text: &str) {
+        assert!(self.click(index, "host_chat_input_rect").is_none());
+        assert!(self.show(index, vec![Event::Text(text.into())]).is_none());
+    }
+
+    fn draft(&self, index: usize, source: ChatSource) -> &str {
+        self.model
+            .states
+            .iter()
+            .find(|state| state.ui.source() == source)
+            .unwrap()
+            .ui
+            .retained_for(Self::SURFACES[index])
+            .1
+    }
+}
+
+#[test]
+fn shared_chat_two_contexts_keep_source_conversation_and_reading_selection_independent() {
+    let mut frames = SurfaceFrames::new();
+    let direct_key = ChatKey {
+        source: source(1),
+        conversation: direct(),
+    };
+    assert!(frames.model.select_key_for(ChatSurface::Monitor1, direct_key));
+    frames.type_text(0, "Shared Nearby");
+    frames.type_text(1, "Monitor Direct");
+    assert_eq!(frames.draft(0, source(1)), "Shared Nearby");
+    assert_eq!(frames.draft(1, source(1)), "Monitor Direct");
+    assert_eq!(frames.model.selected, Some(source(1)));
+    let state = frames.model.states.iter().find(|state| state.ui.source() == source(1)).unwrap();
+    assert_eq!(state.ui.retained_for(ChatSurface::Shared).0.conversation, Conversation::Nearby);
+    assert_eq!(state.ui.retained_for(ChatSurface::Monitor1).0, direct_key);
+    assert!(state.ui.retained_for(ChatSurface::Shared).2 > 0);
+    assert!(state.ui.retained_for(ChatSurface::Monitor1).2 > 0);
+    frames.model.select_for(ChatSurface::Monitor1, source(2));
+    frames.type_text(1, "Second duplicate-labelled source");
+    assert_eq!(frames.model.selected, Some(source(1)));
+    assert_eq!(frames.draft(0, source(1)), "Shared Nearby");
+    let sent = frames.click(1, "host_chat_send_rect").unwrap();
+    assert_eq!(sent.key.source, source(2));
+    assert_eq!(sent.text.as_str(), "Second duplicate-labelled source");
+    assert!(frames.model.take_read_action().is_none());
+    assert!(frames.model.take_read_action_for(ChatSurface::Monitor1).is_none());
+    assert!(frames.host.active.is_none(), "view selection creates no activation intent");
+}
+
+#[test]
+fn shared_chat_two_contexts_share_one_undo_and_passive_or_stale_input_cannot_replace_it() {
+    let mut frames = SurfaceFrames::new();
+    frames.type_text(0, "Canonical base");
+    frames.settle(0, 70);
+    assert!(frames.show(0, vec![Event::Text(" plus edit".into())]).is_none());
+    frames.settle(0, 70);
+    frames.settle(1, 3);
+    assert_eq!(frames.draft(1, source(1)), "Canonical base plus edit");
+    assert!(frames.click(1, "host_chat_input_rect").is_none());
+    assert!(frames.show(1, vec![key(Key::Z, true, false, Modifiers::CTRL)]).is_none());
+    frames.show(1, vec![key(Key::Z, false, false, Modifiers::CTRL)]);
+    assert_eq!(
+        frames.draft(0, source(1)),
+        "Canonical base",
+        "Undo came from the other context's canonical history"
+    );
+    assert_eq!(frames.draft(1, source(1)), "Canonical base");
+    frames.active = 0; // A delayed formerly focused context has not earned a new composer click.
+    assert!(
+        frames
+            .show(
+                0,
+                vec![
+                    Event::Text(" STALE".into()),
+                    Event::Ime(egui::ImeEvent::Commit("STALE IME".into())),
+                    key(Key::Enter, true, false, Modifiers::NONE)
+                ]
+            )
+            .is_none()
+    );
+    assert_eq!(frames.draft(1, source(1)), "Canonical base");
+    for (index, surface) in SurfaceFrames::SURFACES.into_iter().enumerate() {
+        let editor = frames.model.states[0].ui.retained_for(surface).3;
+        assert!(
+            egui::TextEdit::load_state(&frames.contexts[index], editor).is_none(),
+            "a context cannot retain its own persisted Undo authority"
+        );
+    }
+}
+
+#[test]
+fn shared_chat_two_contexts_keep_late_send_and_read_completion_on_their_captured_key() {
+    use crate::session_host::chat_broker::{ReadOperation, ReadStatus};
+    use aurora_session::chat::{ObservedIncoming, ReadMetadata, ReadOutcome};
+    let mut frames = SurfaceFrames::new();
+    Arc::make_mut(&mut frames.host.chat[0]).reads.insert(
+        Conversation::Nearby,
+        ReadMetadata {
+            unread: 2,
+            unread_revision: 3,
+            observed: ObservedIncoming { epoch: 1, through: 2 },
+            can_mark_read: true,
+        },
+    );
+    frames.type_text(0, "Captured old text");
+    let sent = frames.click(0, "host_chat_send_rect").unwrap();
+    assert!(frames.click(0, "host_chat_read_rect").is_none());
+    let read = frames.model.take_read_action().unwrap();
+    let target = ChatKey {
+        source: source(1),
+        conversation: direct(),
+    };
+    assert!(frames.model.select_key_for(ChatSurface::Monitor1, target));
+    frames.type_text(1, "Keep Direct draft");
+    frames.model.queued(&sent, 81);
+    frames.model.queued_read(read, 82);
+    assert!(
+        frames.click(1, "host_chat_send_rect").is_none(),
+        "source's pending operation is canonical"
+    );
+    let chat = Arc::make_mut(&mut frames.host.chat[0]);
+    chat.receipts.push(SendReceipt {
+        key: sent.key,
+        request: 81,
+        outcome: SendOutcome::AcceptedLocally,
+    });
+    chat.read_operations.push(ReadOperation {
+        request: read.request(82),
+        status: ReadStatus::Completed(ReadOutcome::Applied),
+    });
+    frames.model.sync(&frames.host, false);
+    frames.settle(0, 2);
+    frames.settle(1, 2);
+    let operations = frames.model.states[0].ui.operations();
+    assert_eq!(operations.0.unwrap().key, sent.key);
+    assert_eq!(operations.1.unwrap().request, read.request(82));
+    assert_eq!(frames.draft(0, source(1)), "");
+    assert_eq!(frames.draft(1, source(1)), "Keep Direct draft");
+    let next = frames.click(1, "host_chat_send_rect").unwrap();
+    assert_eq!(next.key, target);
+    assert_eq!(next.text.as_str(), "Keep Direct draft");
+}
+
+#[test]
+fn shared_chat_hidden_policy_loss_and_reopen_purge_both_context_authorities() {
+    let mut frames = SurfaceFrames::new();
+    frames.type_text(0, "PRIVATE canonical draft");
+    frames.type_text(1, " plus second surface");
+    let old_ids = [ChatSurface::Shared, ChatSurface::Monitor1].map(|surface| frames.model.states[0].ui.retained_for(surface).3);
+    // No repaint occurs while the source's policy is revoked then restored.
+    for info in &mut Arc::make_mut(&mut frames.host.chat[0]).conversations {
+        info.policy.revision += 1;
+    }
+    frames.model.sync(&frames.host, false);
+    assert_eq!(frames.draft(0, source(1)), "");
+    assert_eq!(frames.draft(1, source(1)), "");
+    for (index, surface) in [ChatSurface::Shared, ChatSurface::Monitor1].into_iter().enumerate() {
+        assert_ne!(frames.model.states[0].ui.retained_for(surface).3, old_ids[index]);
+        assert!(
+            frames
+                .show(
+                    index,
+                    vec![
+                        key(Key::Z, true, false, Modifiers::CTRL),
+                        Event::Text("OLD".into()),
+                        key(Key::Enter, true, false, Modifiers::NONE)
+                    ]
+                )
+                .is_none()
+        );
+        assert_eq!(frames.draft(index, source(1)), "");
+    }
+    frames.model.surface_closed(ChatSurface::Monitor1);
+    let closed_id = frames.model.states[0].ui.retained_for(ChatSurface::Monitor1).3;
+    assert_ne!(closed_id, old_ids[1]);
+    frames.contexts[1] = egui::Context::default();
+    assert!(frames.show(1, vec![key(Key::Enter, true, false, Modifiers::NONE)]).is_none());
+    Arc::make_mut(&mut frames.host.chat[0]).authenticated = false;
+    frames.model.sync(&frames.host, false);
+    assert!(!frames.model.states.iter().any(|state| state.ui.source() == source(1)));
+    assert_eq!(frames.model.selected, Some(source(1)), "no replacement sender is selected");
+}
+
+#[test]
+fn shared_chat_two_contexts_keep_actual_scrolled_reading_anchors_independent() {
+    use aurora_session::chat::{ChatLine, ChatText, LineKind};
+    let mut frames = SurfaceFrames::new();
+    let chat = Arc::make_mut(&mut frames.host.chat[0]);
+    let policy = chat.conversations[0].policy;
+    chat.lines = (1..=100)
+        .map(|event| ChatLine {
+            key: policy.key,
+            policy_revision: policy.revision,
+            event,
+            sender: Label::new("Synthetic sender").unwrap(),
+            text: ChatText::new(&format!(
+                "Synthetic line {event} with enough content to scroll the production transcript."
+            ))
+            .unwrap(),
+            kind: LineKind::Incoming,
+            truncated: false,
+        })
+        .collect();
+    frames.settle(0, 5);
+    frames.settle(1, 5);
+    let before = frames.model.states[0].ui.reading_for(ChatSurface::Monitor1).unwrap();
+    assert!(before.0 > 200.0 && before.1, "fixture is at the transcript tail");
+    frames.focus(0);
+    let at = frames.rect(0, "host_chat_lines_rect").center();
+    assert!(
+        frames
+            .show(
+                0,
+                vec![
+                    Event::PointerMoved(at),
+                    Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Point,
+                        phase: egui::TouchPhase::Move,
+                        source: egui::MouseWheelSource::Unknown,
+                        delta: vec2(0.0, 500.0),
+                        modifiers: Modifiers::NONE,
+                    }
+                ]
+            )
+            .is_none()
+    );
+    frames.settle(0, 8);
+    let scrolled = frames.model.states[0].ui.reading_for(ChatSurface::Shared).unwrap();
+    assert!(scrolled.0 < before.0 - 100.0 && !scrolled.1);
+    frames.settle(1, 5);
+    let other = frames.model.states[0].ui.reading_for(ChatSurface::Monitor1).unwrap();
+    assert!((other.0 - before.0).abs() < 1.0 && other.1, "another surface kept its own tail");
+    assert!(frames.model.take_read_action().is_none());
+    assert!(frames.model.take_read_action_for(ChatSurface::Monitor1).is_none());
+}
+
+#[test]
+fn shared_chat_monitor_pressed_send_and_queued_ime_cannot_retarget_after_selection_or_close() {
+    let mut frames = SurfaceFrames::new();
+    frames.type_text(1, "First monitor draft");
+    frames.model.select_for(ChatSurface::Monitor1, source(2));
+    frames.type_text(1, "Second monitor draft");
+    frames.model.select_for(ChatSurface::Monitor1, source(1));
+    frames.focus(1);
+    let at = frames.rect(1, "host_chat_send_rect").center();
+    assert!(frames.pointer(1, at, true).is_none());
+    frames.model.select_for(ChatSurface::Monitor1, source(2));
+    assert!(
+        frames
+            .show(
+                1,
+                vec![
+                    Event::PointerButton {
+                        pos: at,
+                        button: PointerButton::Primary,
+                        pressed: false,
+                        modifiers: Modifiers::NONE,
+                    },
+                    Event::Ime(egui::ImeEvent::Commit("OLD SOURCE COMMIT".into())),
+                    key(Key::Enter, true, false, Modifiers::NONE)
+                ]
+            )
+            .is_none()
+    );
+    assert_eq!(frames.draft(1, source(1)), "First monitor draft");
+    assert_eq!(frames.draft(1, source(2)), "Second monitor draft");
+    assert_eq!(frames.model.selected, Some(source(1)), "Shared sender was not cycled");
+    assert!(frames.click(1, "host_chat_input_rect").is_none());
+    frames.model.surface_closed(ChatSurface::Monitor1);
+    assert!(
+        frames
+            .show(
+                1,
+                vec![Event::Text("CLOSED CONTEXT".into()), key(Key::Enter, true, false, Modifiers::NONE)]
+            )
+            .is_none()
+    );
+    assert_eq!(frames.draft(1, source(2)), "Second monitor draft");
+}
+
+#[test]
+fn shared_chat_late_admission_does_not_consume_newer_same_text_after_another_surfaces_undo() {
+    let mut frames = SurfaceFrames::new();
+    frames.type_text(0, "Same final text");
+    frames.settle(0, 70);
+    let earlier = frames.click(0, "host_chat_send_rect").unwrap();
+    frames.type_text(1, " plus a later edit");
+    frames.settle(1, 70);
+    assert!(frames.show(1, vec![key(Key::Z, true, false, Modifiers::CTRL)]).is_none());
+    frames.show(1, vec![key(Key::Z, false, false, Modifiers::CTRL)]);
+    assert_eq!(frames.draft(1, source(1)), earlier.text.as_str());
+    frames.model.queued(&earlier, 99);
+    assert_eq!(
+        frames.draft(0, source(1)),
+        "Same final text",
+        "the captured operation cannot consume a newer canonical edit revision"
+    );
+}
+
+#[test]
+fn shared_chat_monitor_transfer_flushes_the_delivered_old_focus_prefix_before_rebinding() {
+    let mut frames = SurfaceFrames::new();
+    frames.type_text(1, "Old source");
+    let surface = ChatSurface::Monitor1;
+    let context = &frames.contexts[1];
+    let mut raw = RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(680.0, 680.0))),
+        time: Some(10.0),
+        focused: true,
+        events: vec![
+            Event::Text(" delivered suffix".into()),
+            key(Key::Enter, true, false, Modifiers::NONE),
+        ],
+        ..Default::default()
+    };
+    let edits = edit_prefix(&mut raw, frames.model.composer_rect_for(surface, context), false).unwrap();
+    let palette = crate::theme::Theme::default().palette();
+    let mut output = context.run_ui(edits, |ui| {
+        assert!(frames.model.show_for(surface, ui, &palette, InputMode::Closing).is_none());
+    });
+    output.textures_delta.clear();
+    frames.model.surface_closed(surface);
+    frames.model.select_for(surface, source(2));
+    assert_eq!(frames.draft(1, source(1)), "Old source delivered suffix");
+    assert!(frames.show(1, vec![key(Key::Enter, true, false, Modifiers::NONE)]).is_none());
+    assert_eq!(frames.draft(1, source(2)), "");
+    assert!(frames.model.take_read_action_for(surface).is_none());
+}
+
+#[test]
+fn shared_chat_two_closed_views_never_reuse_account_grid_generation_session_or_lease_authority() {
+    for changed in 0..5 {
+        let mut frames = SurfaceFrames::new();
+        frames.type_text(0, "Private earlier identity");
+        frames.type_text(1, " plus another surface");
+        let old_ids = SurfaceFrames::SURFACES.map(|surface| frames.model.states[0].ui.retained_for(surface).3);
+        frames.model.surface_closed(ChatSurface::Shared);
+        frames.model.surface_closed(ChatSurface::Monitor1);
+        let mut replacement = source(1);
+        match changed {
+            0 => replacement.session.account = AccountKey::from_bytes([21; 32]).unwrap(),
+            1 => replacement.session.grid = GridKey::from_bytes([22; 32]).unwrap(),
+            2 => replacement.session.generation += 1,
+            3 => replacement.session.session = SessionId::from_bytes([23; 16]).unwrap(),
+            _ => replacement.lease_epoch += 1,
+        }
+        let chat = Arc::make_mut(&mut frames.host.chat[0]);
+        chat.source = replacement;
+        for info in &mut chat.conversations {
+            info.policy.key.source = replacement;
+        }
+        frames.host.workers[0].binding = replacement.binding();
+        frames.model.sync(&frames.host, false);
+        assert!(!frames.model.states.iter().any(|state| state.ui.source() == source(1)));
+        let fresh = frames.model.states.iter().find(|state| state.ui.source() == replacement).unwrap();
+        for (index, surface) in SurfaceFrames::SURFACES.into_iter().enumerate() {
+            let retained = fresh.ui.retained_for(surface);
+            assert_eq!(retained.1, "");
+            assert_ne!(retained.3, old_ids[index]);
+        }
+        for index in 0..2 {
+            assert!(
+                frames
+                    .show(
+                        index,
+                        vec![Event::Text("OLD CONTEXT".into()), key(Key::Enter, true, false, Modifiers::NONE)]
+                    )
+                    .is_none()
+            );
+            assert!(frames.model.take_read_action_for(SurfaceFrames::SURFACES[index]).is_none());
+        }
+        assert_eq!(
+            frames.model.selected,
+            Some(source(1)),
+            "the unavailable Shared sender has no fallback"
+        );
+    }
+}
+
 #[test]
 fn shared_chat_read_edit_prefix_keeps_live_hit_map_and_retains_delivered_text() {
     let mut frames = Frames::new();

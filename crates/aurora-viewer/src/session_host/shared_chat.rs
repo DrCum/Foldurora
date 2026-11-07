@@ -3,7 +3,7 @@
 //! The Legacy host selects a character/conversation without acknowledging read
 //! (tools/session-host/main.cpp); Aurora retains its own native policy fences.
 
-use super::chat_ui::{self, ChatUi, InputMode, ReadDraft, SendDraft};
+use super::chat_ui::{self, ChatSurface, ChatUi, InputMode, ReadDraft, SendDraft};
 use super::slots::SlotId;
 use super::transport::{HostChatSnapshot, HostError, HostSnapshot};
 use crate::theme::Palette;
@@ -32,17 +32,92 @@ impl SourceUi {
     }
 }
 
-/// Shell owns this even while the tool is closed. A future alternate surface
-/// must borrow these same composers, never copy their drafts/undo/receipts.
+#[derive(Default)]
+struct SurfaceSelection {
+    selected: Option<ChatSource>,
+    changed: bool,
+}
+
+/// Shell retains canonical composers while disposable CPU surfaces close.
+/// Six bounded view slots borrow them; world activation is never a selection.
 #[derive(Default)]
 pub(super) struct SharedChat {
     states: Vec<SourceUi>,
     selected: Option<ChatSource>,
     changed: bool,
     next_instance: u64,
+    surface: ChatSurface,
+    other_surfaces: [SurfaceSelection; 5],
 }
 
 impl SharedChat {
+    /// MonitorChat::select owns view selection, while its draft belongs to
+    /// the source (pinned Legacy fssessionmonitorchat.h, abbe3cb0ca66).
+    fn with_surface<R>(&mut self, surface: ChatSurface, action: impl FnOnce(&mut Self) -> R) -> R {
+        let previous = self.surface;
+        self.use_surface(surface);
+        let result = action(self);
+        self.use_surface(previous);
+        result
+    }
+
+    fn use_surface(&mut self, surface: ChatSurface) {
+        if self.surface == surface {
+            return;
+        }
+        if self.surface != ChatSurface::Shared {
+            let stored = &mut self.other_surfaces[self.surface.index() - 1];
+            std::mem::swap(&mut self.selected, &mut stored.selected);
+            std::mem::swap(&mut self.changed, &mut stored.changed);
+        }
+        if surface != ChatSurface::Shared {
+            let stored = &mut self.other_surfaces[surface.index() - 1];
+            std::mem::swap(&mut self.selected, &mut stored.selected);
+            std::mem::swap(&mut self.changed, &mut stored.changed);
+        }
+        self.surface = surface;
+    }
+
+    // Reserved for the bounded monitor surfaces; Shared keeps its existing facade.
+    #[allow(dead_code)]
+    pub fn select_for(&mut self, surface: ChatSurface, source: ChatSource) {
+        self.with_surface(surface, |model| model.select(source));
+    }
+
+    // Reserved for the bounded monitor surfaces; Shared keeps its existing facade.
+    #[allow(dead_code)]
+    pub fn select_key_for(&mut self, surface: ChatSurface, key: ChatKey) -> bool {
+        self.with_surface(surface, |model| model.select_key(key))
+    }
+
+    // Reserved for the bounded monitor surfaces; Shared keeps its existing facade.
+    #[allow(dead_code)]
+    pub fn show_for(&mut self, surface: ChatSurface, ui: &mut egui::Ui, p: &Palette, mode: InputMode) -> Option<SendDraft> {
+        self.with_surface(surface, |model| model.show(ui, p, mode))
+    }
+
+    // Reserved for the bounded monitor surfaces; Shared keeps its existing facade.
+    #[allow(dead_code)]
+    pub fn take_read_action_for(&mut self, surface: ChatSurface) -> Option<ReadDraft> {
+        self.with_surface(surface, |model| model.take_read_action())
+    }
+
+    // Reserved for the bounded monitor surfaces; Shared keeps its existing facade.
+    #[allow(dead_code)]
+    pub fn surface_closed(&mut self, surface: ChatSurface) {
+        self.with_surface(surface, |model| model.cancel_gestures());
+        for state in &mut self.states {
+            state.ui.close_surface(surface);
+        }
+    }
+
+    fn all_surfaces_changed(&mut self) {
+        self.changed = true;
+        for stored in &mut self.other_surfaces {
+            stored.changed = true;
+        }
+    }
+
     /// Every retained source observes policy loss before any native event is
     /// handled, including when no chat surface exists or it is minimized.
     pub fn sync(&mut self, snapshot: &HostSnapshot, closing: bool) -> bool {
@@ -98,7 +173,12 @@ impl SharedChat {
         for (chat, slot, label, account, grid) in live {
             if let Some(state) = self.states.iter_mut().find(|state| state.ui.source() == chat.source) {
                 let identity_changed = state.slot != slot || state.label != label || state.account != account || state.grid != grid;
-                self.changed |= identity_changed;
+                if identity_changed {
+                    self.changed = true;
+                    for stored in &mut self.other_surfaces {
+                        stored.changed = true;
+                    }
+                }
                 changed |= !Arc::ptr_eq(&state.snapshot, &chat) || identity_changed;
                 state.snapshot = chat;
                 state.slot = slot;
@@ -126,7 +206,7 @@ impl SharedChat {
         self.states.sort_by_key(|state| state.slot.map(u8::from).unwrap_or(u8::MAX));
         let after: Vec<_> = self.states.iter().map(|state| state.ui.source()).collect();
         if before != after {
-            self.changed = true;
+            self.all_surfaces_changed();
         }
         changed
     }
@@ -149,7 +229,10 @@ impl SharedChat {
         let Some(state) = self.states.iter_mut().find(|state| state.ui.source() == key.source) else {
             return false;
         };
-        if !state.ui.select_existing(&state.snapshot, key.conversation) {
+        if !state
+            .ui
+            .with_surface(self.surface, |ui| ui.select_existing(&state.snapshot, key.conversation))
+        {
             return false;
         }
         self.selected = Some(key.source);
@@ -160,21 +243,39 @@ impl SharedChat {
     pub fn cancel_gestures(&mut self) {
         self.changed = true;
         for state in &mut self.states {
-            state.ui.cancel_gesture();
+            state.ui.with_surface(self.surface, ChatUi::cancel_gesture);
         }
     }
 
     pub fn clear(&mut self) {
         self.states.clear();
         self.selected = None;
-        self.changed = true;
+        self.other_surfaces = Default::default();
+        self.all_surfaces_changed();
     }
 
     pub fn composer_rect(&self, ctx: &egui::Context) -> Option<egui::Rect> {
+        self.composer_rect_for(self.surface, ctx)
+    }
+
+    pub fn composer_rect_for(&self, surface: ChatSurface, ctx: &egui::Context) -> Option<egui::Rect> {
+        let selected = if surface == self.surface {
+            self.selected
+        } else if surface == ChatSurface::Shared {
+            self.other_surfaces[self.surface.index() - 1].selected
+        } else {
+            self.other_surfaces[surface.index() - 1].selected
+        };
         self.states
             .iter()
-            .find(|state| Some(state.ui.source()) == self.selected)
-            .and_then(|state| state.ui.composer_rect(ctx))
+            .find(|state| Some(state.ui.source()) == selected)
+            .and_then(|state| {
+                if surface == ChatSurface::Shared {
+                    state.ui.composer_rect(ctx)
+                } else {
+                    state.ui.composer_rect_for(surface, ctx)
+                }
+            })
     }
 
     #[cfg(all(test, target_os = "linux"))]
@@ -188,7 +289,7 @@ impl SharedChat {
             .iter_mut()
             .find(|state| Some(state.ui.source()) == self.selected)?
             .ui
-            .take_read_action()
+            .with_surface(self.surface, ChatUi::take_read_action)
     }
 
     pub fn queued_read(&mut self, draft: ReadDraft, request: u64) {
@@ -235,9 +336,9 @@ impl SharedChat {
             } else {
                 mode
             };
-            state
-                .ui
-                .show_with_selector(ui, p, Some(&state.snapshot), &state.account, &state.grid, body_mode, selector)
+            state.ui.with_surface(self.surface, |model| {
+                model.show_with_selector(ui, p, Some(&state.snapshot), &state.account, &state.grid, body_mode, selector)
+            })
         } else {
             selector(ui);
             egui::CentralPanel::default()

@@ -268,6 +268,7 @@ impl Frames {
         let identity = aurora_i18n::tr!("host-chat-identity", account = ACCOUNT, grid = GRID);
         let expected_history: Vec<_> = self
             .chat
+            .view
             .policy
             .into_iter()
             .filter(|policy| policy.can_read && policy.ready && policy.lease_current)
@@ -316,7 +317,7 @@ impl Frames {
             "snapshot_source": snapshot.source,
             "account": ACCOUNT,
             "grid": GRID,
-            "selected_conversation": self.chat.conversation,
+            "selected_conversation": self.chat.view.conversation,
             "expected_identity": identity,
             "expected_conversation_title": title,
             "expected_visible_senders": senders,
@@ -329,7 +330,7 @@ impl Frames {
             "retained_draft_count": self.chat.drafts.len(),
             "retained_text_bytes": self.chat.drafts.values().map(|draft| draft.text.len()).sum::<usize>(),
             "available": self.chat.available,
-            "policy": self.chat.policy,
+            "policy": self.chat.view.policy,
             "receipt": self.chat.receipt,
             "ink_pixels": ink_pixels,
             "missing_or_clipped_required_text": missing_text,
@@ -441,7 +442,7 @@ fn capture_layout(output: &Path, name: &str, logical: [u32; 2], scale: f32) -> V
     restricted.gap = true;
     privacy.settle(&restricted);
     assert!(privacy.chat.draft().is_empty());
-    assert!(privacy.chat.policy.is_some_and(|policy| !policy.can_send && !policy.can_read));
+    assert!(privacy.chat.view.policy.is_some_and(|policy| !policy.can_send && !policy.can_read));
     assert!(privacy.click(&restricted, Id::unique("host_chat_send_rect")).is_none());
     records.push(privacy.capture(
         output,
