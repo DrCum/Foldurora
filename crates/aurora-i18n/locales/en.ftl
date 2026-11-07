@@ -13412,3 +13412,30 @@ host-chat-read-unavailable = Read unavailable. The original operation will not b
 host-chat-read-applied = Conversation marked read.
 host-chat-read-stale = Conversation changed. Check the current unread count and click again.
 host-chat-read-help = Mark this conversation read in its viewer, including unread native cards. This does not answer offers.
+
+# Owned controller Attention window; conversation reminders only.
+host-attention-title = Attention
+host-attention-help = Unread conversations from your saved profiles.
+host-attention-profiles = Include profiles
+host-attention-nearby = Nearby chat
+host-attention-direct = Direct messages
+host-attention-previous = Previous
+host-attention-next = Next
+host-attention-open = Open shared chat
+host-attention-dismiss = Dismiss reminder
+host-attention-passive-help = Opening chat does not mark messages as read. Dismissing only hides this reminder until new activity.
+host-attention-empty = No unread conversation reminders match these filters.
+host-attention-unavailable = The selected reminder is unavailable. Select another reminder to continue.
+host-attention-loading = Loading reminder settings…
+host-attention-load-failed = Reminder settings could not be loaded. Reminders are unavailable; shared chat remains available.
+host-attention-saving = Saving reminder settings…
+host-attention-save-failed = Reminder settings could not be saved. Your previous settings are still in use.
+host-attention-unread = { $count ->
+    [one] { $count } unread message
+   *[other] { $count } unread messages
+    }
+host-attention-show = Open Attention
+host-attention-count = { $count ->
+    [one] { $count } unread conversation
+   *[other] { $count } unread conversations
+    }

@@ -13408,3 +13408,30 @@ host-chat-read-unavailable = Lecture indisponible. L’opération initiale ne se
 host-chat-read-applied = Conversation marquée comme lue.
 host-chat-read-stale = La conversation a changé. Vérifiez le nombre de messages non lus et cliquez à nouveau.
 host-chat-read-help = Marquer cette conversation comme lue dans sa fenêtre native, y compris les cartes non lues. Cela ne répond pas aux offres.
+
+# Owned controller Attention window; conversation reminders only.
+host-attention-title = À votre attention
+host-attention-help = Conversations non lues de vos profils enregistrés.
+host-attention-profiles = Profils inclus
+host-attention-nearby = Chat à proximité
+host-attention-direct = Messages directs
+host-attention-previous = Précédent
+host-attention-next = Suivant
+host-attention-open = Ouvrir le chat partagé
+host-attention-dismiss = Masquer le rappel
+host-attention-passive-help = Ouvrir le chat ne marque aucun message comme lu. Masquer le rappel le cache jusqu’à une nouvelle activité.
+host-attention-empty = Aucun rappel de conversation non lue ne correspond aux filtres.
+host-attention-unavailable = Le rappel sélectionné est indisponible. Sélectionnez un autre rappel pour continuer.
+host-attention-loading = Chargement des réglages des rappels…
+host-attention-load-failed = Les réglages des rappels n’ont pas pu être chargés. Les rappels sont indisponibles ; le chat partagé reste accessible.
+host-attention-saving = Enregistrement des réglages des rappels…
+host-attention-save-failed = Les réglages des rappels n’ont pas pu être enregistrés. Vos réglages précédents restent utilisés.
+host-attention-unread = { $count ->
+    [one] { $count } message non lu
+   *[other] { $count } messages non lus
+    }
+host-attention-show = Ouvrir À votre attention
+host-attention-count = { $count ->
+    [one] { $count } conversation non lue
+   *[other] { $count } conversations non lues
+    }

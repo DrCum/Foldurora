@@ -13385,3 +13385,24 @@ host-chat-read-unavailable = 既読にできません。元の操作は再実行
 host-chat-read-applied = 会話を既読にしました。
 host-chat-read-stale = 会話が更新されました。現在の未読数を確認して、もう一度クリックしてください。
 host-chat-read-help = この会話と未読カードをビューアーで既読にします。オファーには回答しません。
+
+# Owned controller Attention window; conversation reminders only.
+host-attention-title = 未読のお知らせ
+host-attention-help = 保存済みプロフィールの未読の会話です。
+host-attention-profiles = 対象のプロフィール
+host-attention-nearby = 近くのチャット
+host-attention-direct = ダイレクトメッセージ
+host-attention-previous = 前へ
+host-attention-next = 次へ
+host-attention-open = 共有チャットを開く
+host-attention-dismiss = お知らせを非表示
+host-attention-passive-help = チャットを開いても既読にはなりません。非表示にしたお知らせは、新しい動きがあると再表示されます。
+host-attention-empty = この絞り込みに一致する未読の会話はありません。
+host-attention-unavailable = 選択したお知らせは利用できません。別のお知らせを選択してください。
+host-attention-loading = お知らせの設定を読み込み中…
+host-attention-load-failed = お知らせの設定を読み込めませんでした。お知らせは利用できませんが、共有チャットは引き続き利用できます。
+host-attention-saving = お知らせの設定を保存中…
+host-attention-save-failed = お知らせの設定を保存できませんでした。以前の設定が引き続き使用されます。
+host-attention-unread = 未読{ $count }件
+host-attention-show = 未読のお知らせを開く
+host-attention-count = 未読の会話{ $count }件
