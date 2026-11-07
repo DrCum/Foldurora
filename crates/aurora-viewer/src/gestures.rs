@@ -64,7 +64,7 @@ impl Default for Manager {
     fn default() -> Self {
         static NEXT_INSTANCE: AtomicU64 = AtomicU64::new(1);
         let instance = NEXT_INSTANCE
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_add(1))
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_add(1))
             .unwrap_or(0);
         Self {
             instance,
