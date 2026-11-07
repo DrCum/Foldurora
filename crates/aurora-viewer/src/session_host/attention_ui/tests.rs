@@ -721,7 +721,12 @@ fn attention_compact_filters_toggle_without_crowding_reminders_or_actions() {
             .context
             .data(|data| data.get_temp::<Rect>(Id::unique("attention_filter_scroll")))
             .unwrap();
-        assert!(filter_clip.height() <= 161.0 && canvas.contains_rect(filter_clip));
+        assert!((39.0..=161.0).contains(&filter_clip.height()) && canvas.contains_rect(filter_clip));
+        let first_slot = SlotId::try_from(0).unwrap();
+        assert!(
+            filter_clip.contains(f.rect(Id::unique(("attention_slot", first_slot))).center()),
+            "expanded filters must actually paint inside their viewport"
+        );
         let expanded = f
             .context
             .data(|data| data.get_temp::<Rect>(Id::unique("attention_list_clip")))
@@ -742,4 +747,50 @@ fn attention_compact_filters_toggle_without_crowding_reminders_or_actions() {
         assert!(!f.has("host-attention-profiles"));
         assert_eq!(f.host.attention_preferences.preferences, Preferences::default());
     }
+}
+
+#[test]
+fn attention_short_filters_scroll_to_offscreen_category_before_saving() {
+    let mut f = Frames::for_size([380.0, 420.0]);
+    assert!(f.click(Id::unique("attention_filter_toggle")).is_none());
+    f.settle();
+    let id = Id::unique(("attention_kind", "nearby"));
+    let clip = f
+        .context
+        .data(|data| data.get_temp::<Rect>(Id::unique("attention_filter_scroll")))
+        .unwrap();
+    assert!(
+        !clip.contains_rect(f.rect(id)),
+        "short window must exercise the bounded filter scroll"
+    );
+    let mut visible = false;
+    for _ in 0..8 {
+        assert!(
+            f.show(vec![
+                Event::PointerMoved(clip.center()),
+                Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    phase: egui::TouchPhase::Move,
+                    source: egui::MouseWheelSource::Wheel,
+                    delta: vec2(0.0, -100.0),
+                    modifiers: Modifiers::NONE
+                },
+            ])
+            .is_none()
+        );
+        let rect = f.rect(id);
+        if clip.contains_rect(rect) {
+            visible = true;
+            break;
+        }
+    }
+    assert!(visible, "real wheel input must bring the category fully into view");
+    let Some(Action::Preferences(desired)) = f.click(id) else {
+        panic!("visible category saves through its actual press/release");
+    };
+    assert!(desired.nearby);
+    assert!(
+        !f.host.attention_preferences.preferences.nearby,
+        "intent does not optimistically publish settings"
+    );
 }

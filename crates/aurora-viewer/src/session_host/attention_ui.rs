@@ -213,7 +213,10 @@ impl AttentionUi {
                     let scroll = egui::ScrollArea::vertical()
                         .id_salt("attention_filter_rows")
                         .max_height(height)
-                        .min_scrolled_height(0.0)
+                        // The top panel initially offers its last collapsed
+                        // height. Reserve this bounded viewport so it can grow;
+                        // accepting zero here permanently clips the filters.
+                        .min_scrolled_height(height)
                         .auto_shrink([false, true])
                         .show(ui, |ui| {
                             ui.add_enabled_ui(live, |ui| {
