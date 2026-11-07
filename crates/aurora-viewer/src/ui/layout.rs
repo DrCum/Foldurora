@@ -73,6 +73,7 @@ pub fn text(ctx: &egui::Context) -> Option<String> {
 /// so a background save finishing after the exit's never brings an older
 /// layout back.
 static ISSUED: AtomicU64 = AtomicU64::new(0);
+static WORKSPACE_BARRIER: AtomicU64 = AtomicU64::new(0);
 static WRITTEN: Mutex<Written> = Mutex::new(Written { generation: 0, text: None });
 
 struct Written {
@@ -170,8 +171,8 @@ pub(crate) fn workspace_preview(ctx: &egui::Context, baseline: Option<WorkspaceG
             d.remove::<WorkspaceGeometry>(Id::unique("workspace_preview_baseline"));
         }
     });
-    let mut written = WRITTEN.lock().unwrap_or_else(PoisonError::into_inner);
-    written.generation = written.generation.max(next_generation());
+    // Never wait for the legacy writer's mutex/fsync on the App thread.
+    WORKSPACE_BARRIER.fetch_max(next_generation(), Ordering::AcqRel);
 }
 
 fn next_generation() -> u64 {
@@ -179,10 +180,17 @@ fn next_generation() -> u64 {
 }
 
 fn write(generation: u64, mem: &egui::Memory) {
-    write_to(&WRITTEN, &path(), generation, mem);
+    write_to_guarded(&WRITTEN, &path(), generation, mem, Some(&WORKSPACE_BARRIER));
 }
 
+#[cfg(test)]
 fn write_to(state: &Mutex<Written>, p: &Path, generation: u64, mem: &egui::Memory) {
+    write_to_guarded(state, p, generation, mem, None);
+}
+fn write_to_guarded(state: &Mutex<Written>, p: &Path, generation: u64, mem: &egui::Memory, barrier: Option<&AtomicU64>) {
+    if barrier.is_some_and(|b| generation <= b.load(Ordering::Acquire)) {
+        return;
+    }
     let text = match ron::to_string(mem) {
         Ok(text) => text,
         Err(e) => {
@@ -205,8 +213,18 @@ fn write_to(state: &Mutex<Written>, p: &Path, generation: u64, mem: &egui::Memor
         return;
     }
     // write then rename: never leave a half-written file
-    match crate::atomic_file::write(p, text.as_bytes()) {
-        Ok(()) => written.text = Some(text),
+    let result = match barrier {
+        Some(b) => crate::atomic_file::write_if(p, text.as_bytes(), || generation > b.load(Ordering::Acquire)),
+        None => crate::atomic_file::write(p, text.as_bytes()).map(|()| true),
+    };
+    match result {
+        Ok(true) => {
+            if barrier.is_some() {
+                crate::disk_io::written(crate::disk_io::Origin::Other, text.len());
+            }
+            written.text = Some(text);
+        }
+        Ok(false) => {}
         Err(e) => log::warn!("ui layout not saved: {e}"),
     }
 }
@@ -1236,6 +1254,27 @@ mod tests {
         workspace_apply(&ctx, &baseline);
         workspace_preview(&ctx, None);
         assert_eq!(draft, "keep editor");
+    }
+    #[test]
+    fn workspace_atomic_generation_barrier_rejects_old_layout_without_taking_writer_mutex() {
+        let ctx = egui::Context::default();
+        let held = WRITTEN.lock().unwrap_or_else(PoisonError::into_inner);
+        // This call must not try to acquire WRITTEN, including when the
+        // background writer is stalled in its disk flush.
+        workspace_preview(&ctx, Some([None; 4]));
+        drop(held);
+        workspace_preview(&ctx, None);
+        let dir = crate::settings::config_dir().join(format!("workspace-barrier-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("layout.ron");
+        std::fs::write(&p, b"original").unwrap();
+        let state = Mutex::new(Written { generation: 0, text: None });
+        let barrier = AtomicU64::new(3);
+        write_to_guarded(&state, &p, 2, &egui::Memory::default(), Some(&barrier));
+        assert_eq!(std::fs::read(&p).unwrap(), b"original");
+        write_to_guarded(&state, &p, 4, &egui::Memory::default(), Some(&barrier));
+        assert_ne!(std::fs::read(&p).unwrap(), b"original");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     fn screen(width: f32, height: f32) -> Rect {

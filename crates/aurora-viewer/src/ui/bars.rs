@@ -25,6 +25,7 @@ use egui::{Color32, RichText, Vec2};
 
 #[derive(Default)]
 pub enum BarAction {
+    Workspaces,
     ToggleVr,
     IkEdit,
     Poser,
@@ -862,6 +863,9 @@ fn main_menus(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &StatusIn
         });
     });
     menu::submenu(ui, p, "world-filled", aurora_i18n::tr!("common-world"), true, |ui| {
+        if menu::item(ui, p, "layout", aurora_i18n::tr!("workspaces-title")) {
+            *action = BarAction::Workspaces;
+        }
         if menu::item_keys(
             ui,
             p,

@@ -144,6 +144,7 @@ mod texture_refresh;
 mod viewer_stats;
 mod viewfinder;
 mod wearable_editor;
+mod workspaces;
 mod world_click_demo;
 mod worn_demo;
 
@@ -643,6 +644,8 @@ pub struct App {
     exit_prompt: ui::exit::ExitPrompt,
     /// saves the window layout shortly after it changes (ui/layout.rs)
     layout_autosave: ui::layout::Autosave,
+    workspaces: crate::workspace::controller::Controller,
+    workspace_ui: ui::workspaces::WorkspaceUi,
     loading_stage: String,
     move_complete_at: Option<Instant>,
     /// Teleport diagnostics still to log (seconds after the arrival).
@@ -1616,6 +1619,8 @@ impl App {
             quit_at: None,
             exit_prompt: Default::default(),
             layout_autosave: Default::default(),
+            workspaces: Default::default(),
+            workspace_ui: Default::default(),
             loading_stage: String::new(),
             move_complete_at: None,
             tp_checks: Vec::new(),
@@ -2826,6 +2831,7 @@ impl App {
     // ------------------------------------------------------------------ login
 
     fn start_login(&mut self) {
+        self.workspace_cancel_preview(true);
         // a previous session of this account may still be on the grid
         if self.hold_login() {
             return;
@@ -2968,6 +2974,7 @@ impl App {
     }
 
     fn back_to_login(&mut self, error: Option<String>) {
+        self.workspace_cancel_preview(true);
         // the login screen and Preferences say "L$" again, not the last grid's money
         aurora_i18n::set_currency("");
         // Capture the layout before replacing account-specific UI state.
@@ -5945,6 +5952,7 @@ impl App {
 
     /// Log out, save the window, layout, inventory cache and settings, exit.
     fn shutdown(&mut self, event_loop: &ActiveEventLoop) {
+        self.workspace_cancel_preview(true);
         self.host_preview.retire();
         self.instances.leave();
         self.characters.leave();
@@ -8657,6 +8665,7 @@ impl App {
 
     fn frame(&mut self, event_loop: &ActiveEventLoop) {
         self.tick_host_session();
+        self.workspace_tick();
         self.tick_characters();
         // the input this frame reads came with the events just handled: its
         // time to the screen starts here (Performance › latency, pacing.rs)
@@ -8897,10 +8906,17 @@ impl App {
         }
         self.sync_chat_log();
         while !still && let Ok((sent, ev)) = self.net.events.try_recv() {
+            let workspace_boundary = matches!(&ev, NetEvent::LoggedIn(_) | NetEvent::Disconnected { .. });
+            if workspace_boundary {
+                self.workspace_cancel_preview(true);
+            }
             // (`sent`: when the session read the datagram, the time its
             // motion starts from)
             if let Some(app_ev) = self.bridge_runtime.receive(&mut self.world, ev, Instant::now(), sent) {
                 self.on_app_event(app_ev);
+            }
+            if workspace_boundary {
+                self.workspace_tick();
             }
             let now = Instant::now();
             self.net_profile.event_applied(sent, now);
@@ -10937,6 +10953,7 @@ impl App {
             }
             windows_ms += t.elapsed().as_secs_f32() * 1000.0;
         });
+        self.workspace_after_ui(actions.workspace.take(), &gfx);
         // a capture leaves the user's layout as it is (as at exit)
         self.photo_validate_canvas(&mut gfx.renderer, full.pixels_per_point);
         if self.capture.is_none() {
@@ -13522,6 +13539,7 @@ impl App {
             self.panels.appearance = true;
         }
         match a.bar {
+            BarAction::Workspaces => self.workspace_open(),
             BarAction::Characters => ui::widgets::toggle_floater(&self.egui_ctx, "characters", &mut self.characters_ui.open),
             BarAction::ImportStreamList => self.import_stream_list(),
             BarAction::ExportStreamList => self.export_stream_list(),
@@ -14721,6 +14739,12 @@ impl App {
     /// before login; only the transcripts folder belongs to an account, and
     /// its group says so until one is logged in (`chat_log_dir` stays empty).
     fn draw_options(&mut self, ctx: &egui::Context, p: &Palette, a: &mut UiActions) {
+        if self.panels.settings {
+            self.workspace_ui.open = false;
+            if self.workspaces.preview.is_some() {
+                self.workspace_cancel_preview(true);
+            }
+        }
         let mut open = self.panels.settings;
         self.options_ui.cache_usage = self.disk_cache.usage();
         self.options_ui.cache_clearing = self.disk_cache.is_clearing();
@@ -14804,6 +14828,10 @@ impl App {
         self.options_ui.flycam_active = self.joystick.active;
         let before_camera = self.settings.camera.clone();
         let mut res = ui::options::show(ctx, p, &self.skin.icons, &mut self.settings, &mut self.options_ui, &mut open);
+        if res.open_workspaces {
+            a.bar = BarAction::Workspaces;
+            open = false;
+        }
         self.sync_appearance_camera();
         self.world.rlva.preserve_camera_settings(&mut self.settings.camera, &before_camera);
         if res.toggle_flycam {
@@ -17651,6 +17679,8 @@ impl App {
             self.net.runtime(),
         );
         self.show_characters(&ctx, &p);
+        let modified = self.workspace_modified();
+        a.workspace = self.workspace_ui.show(&ctx, &p, &self.workspaces, modified);
         a.exit = self.exit_prompt.show(&ctx, &p, self.in_world());
         self.ui_parts.lap(Part::UiRest, t);
         a
@@ -17694,6 +17724,7 @@ fn name_tags_env() -> Option<NameTagsEnv> {
 
 #[derive(Default)]
 struct UiActions {
+    workspace: Option<crate::workspace::controller::Action>,
     exit: Option<ui::exit::Action>,
     update_quit: bool,
     login: LoginAction,
@@ -17728,6 +17759,7 @@ impl UiActions {
             }
         }
         first(&mut self.exit, later.exit);
+        first(&mut self.workspace, later.workspace);
         self.update_quit |= later.update_quit;
         if !matches!(later.login, LoginAction::None) {
             self.login = later.login;

@@ -5004,3 +5004,27 @@ array atlas from one to four 64-tile pages (32 to 128 MiB), preserving existing
 pictures by GPU copy. The two-capture frame budget and full-avatar limit remain
 independent. Pending or over-budget avatars draw neutral silhouette cards rather
 than disappearing; cards have a dynamically sized instance buffer.
+
+### Native named geometry workspaces
+
+`workspace::{model,controller,store}` and `app/workspaces.rs` own the native
+Workspaces & Layouts manager reached from World and Preferences Layout. The
+first slice stores at most 32 closed typed records per account/grid inside the
+selected character profile: four existing window geometry roles, viewport and
+three bar presentation fields. It preserves panel visibility/minimization and
+chat ownership; no editor, transcript, HUD/folder, toolbar command/lock, graphics,
+credential or host activation state is serialized. It is a subset of Folderstorm
+`FSWorkspaceController` at abbe3cb0, not complete Workspace parity.
+
+The private store derives fixed paths through `session_host::profile`, shares its
+owner/ACL/no-follow primitives, and keeps one IO request/result credit. Unknown or
+malformed schema remains untouched. Exact source/binding/operation and full
+proposed-write receipt matching precede current model/status mutation. Native
+geometry effects require a fresh local viewer gate; managed workers reuse the
+strict grant/foreground gate and cannot override the fitted viewport policy.
+Preview owns a typed rollback baseline. Settings saves/backups project committed
+viewport/bar fields through `to_saved`; legacy layout saves project baseline
+geometry and ordinary autosave pauses during Preview. Cancel/Switch resume the
+existing debounced layout saver. Previous is session-only and changes after
+successful placement. New tests are authored, not run by the source author;
+root compilation/offline and human native acceptance remain separate gates.

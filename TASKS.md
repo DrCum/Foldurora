@@ -3510,3 +3510,17 @@ Open-source technologies that could set Aurora apart (human request of 2026-10-1
   - ⬜ Existing linksets: verify canonical simulator link numbers independently of arrival order. ObjectUpdate supplies parents but no canonical link number; the confirmed ordering of newly linked objects is retained locally.
 
 - ✅ Preserve inventory link target icons with a shortcut overlay (human request, 2026-10-30; task `inventory-link-icons`; PR #1610). Added the human-authored shortcut layer to inventory type variants and wired cycle-safe target resolution, subtype flags, family tints and folder links across inventory views. Missing targets retain generic link icons. Added offline `link-icons` / `aurora-link-icons` scenarios and regression coverage. Full `scripts/check.ps1` green: 6,348 tests passed, zero failures, 31 ignored; formatting, PowerShell parsing and Clippy clean. Both inventory layouts captured and visually checked in offline demo mode. Validated by the human on 2026-10-30.
+
+### Native named workspaces — first vertical slice
+
+- Source implementation: World/Preferences native manager, Save as new, Rename,
+  confirmed Delete, Preview/Cancel, Switch and session-only Previous; bounded
+  32/account/grid/profile typed geometry + viewport/bar records. Four roles keep
+  visibility/minimization/chat selection; shared toolbar commands/lock preserved.
+- Closed unknown-schema-preserving private IO, full captured reply fences, strict
+  hosted native authority, fitted viewport exclusion and durable Preview baseline
+  projection are included. No automatic login/startup restore, HUD/folder/import,
+  host RPC, monitor producer, editor/transcript serialization or parity claim.
+- Root validation and independent source review pending. New pure/private-file/
+  actual-egui tests authored UNRUN by author; human Windows acceptance of both
+  styles, DPI, separate profiles, cancellation and host transitions still pending.

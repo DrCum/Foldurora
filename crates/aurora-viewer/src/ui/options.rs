@@ -595,6 +595,7 @@ impl OptionsUi {
 
 #[derive(Default)]
 pub struct OptionsResult {
+    pub open_workspaces: bool,
     pub toggle_flycam: bool,
     pub reset_anti_spam: bool,
     pub unblock_anti_spam: Option<(crate::world::anti_spam::Queue, uuid::Uuid)>,

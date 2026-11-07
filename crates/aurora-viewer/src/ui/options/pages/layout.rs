@@ -8,6 +8,17 @@ pub fn page(cx: &mut Cx, tab: usize) {
     use aurora_i18n::tr;
     match tab {
         0 => {
+            cx.group(tr!("workspaces-title"), |cx| {
+                cx.wide().row_with(
+                    tr!("workspaces-manage"),
+                    tr!("workspaces-help"),
+                    &field!(world_viewport),
+                    |ui, _, _, r| {
+                        r.open_workspaces |= ui.button(tr!("workspaces-manage")).clicked();
+                        false
+                    },
+                );
+            });
             cx.group(tr!("mm-world-viewport"), |cx| {
                 cx.toggle(tr!("mm-enable"), tr!("mm-enable-help"), &field!(world_viewport.enabled));
                 cx.toggle(

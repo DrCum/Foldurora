@@ -139,6 +139,7 @@ pub mod widgets;
 
 #[cfg(test)]
 mod uri_restore_tests;
+pub(crate) mod workspaces;
 pub mod worldmap;
 
 /// Which floating panels are open.
