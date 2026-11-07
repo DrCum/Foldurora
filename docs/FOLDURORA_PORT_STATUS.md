@@ -11,7 +11,7 @@ Handoffs and screenshots are reference material, not authority to merge or relea
 | `d10473efff52ceaea2d7b22d111319b0efc4f28e` | Combined upstream, viewport and session-host/chat baseline | Local Windows checks: 7,791 passed, 0 failed, 49 ignored; build/package passed. [GitHub run](https://github.com/DrCum/Foldurora/actions/runs/42291668355) passed. | Human confirmed toolbar containment and full-workspace floaters; reported oversized menu, host drag/detach failure and one standalone switch device loss. |
 | `8b738ea8b2c700b7538b7e16135a7de19c192d43` | Host movement/recovery and compact dropdown fixes | [Windows run 42304532039](https://github.com/DrCum/Foldurora/actions/runs/42304532039) passed: 7,798 tests passed, 0 failed, 49 ignored; all seven focused regressions passed. Scripts, formatting, Clippy, normal viewer build and packaging passed. Downloaded artifact, manifest, checksums, executable version and Windows x64 identity were verified. | Native title-bar drag, resize, post-drag switch, detach, confirmed host closure, taskbar and responsive redraw. Separate standalone GPU loss is unresolved. |
 | `8cd9a2aa005491b651e5bb8591d94fd6fb891520` | Combined backend/profile checkpoint: host/menu fixes, retained conversation drafts, crash details fallback and five persistent renameable slots | [Windows run 42311181216](https://github.com/DrCum/Foldurora/actions/runs/42311181216) passed: 7,818 tests passed, 0 failed, 49 ignored. Scripts, formatting, strict Clippy, normal build and packaging passed; downloaded package identity, manifest and checksums were verified. | This checkpoint has a known profile-popup margin overlap corrected by `70c1b5cd`. Native host/profile/chat and human grid acceptance remain pending. |
-| `70c1b5cda927547b28e5a5ff9713e861771aaee7` | Latest corrected candidate, `fix/profile-popup-bounds`: bounds the profile popup including its frame and wraps occupied-profile help inline | [Windows run 42315300611](https://github.com/DrCum/Foldurora/actions/runs/42315300611) is in progress. Linux formatting, Clippy, the new outer-popup regression and normal build passed. Fresh EN/FR/JA Linux CPU UI and sequential demo-worker evidence is recorded below. | Exact-source Windows check/build/package result and offline native Windows host/profile/chat acceptance remain pending; human grid and physical GPU acceptance are separate. |
+| `70c1b5cda927547b28e5a5ff9713e861771aaee7` | Latest corrected candidate, `fix/profile-popup-bounds`: bounds the profile popup including its frame and wraps occupied-profile help inline | [Windows run 42315300611](https://github.com/DrCum/Foldurora/actions/runs/42315300611) passed: 7,819 tests passed, 0 failed, 49 ignored; all 28 applicable named regressions passed exactly once. Scripts, formatting, strict Clippy, normal build and packaging passed. Downloaded manifest, checksums and executable/PE identity were verified. Fresh Linux CPU UI and sequential demo-worker evidence is recorded below. | Offline native Windows host/profile/chat, human grid, physical GPU/multi-monitor and performance acceptance remain pending. |
 
 Keep these sources and their packages separate. No candidate is merged, installed
 or released by this work. The runtime branch remains frozen while this ledger is
@@ -50,6 +50,26 @@ regressions passed; the Unix-only linked-path regression is absent as expected.
 Its retained receipt is `.scratch/windows-ci-42311181216/receipt.json` in the
 candidate worktree. The known popup-margin follow-up is not included in this
 verified package; use the separate `70c1b5cd` candidate for the corrected UI.
+
+The latest corrected [Windows artifact 13552619352](https://github.com/DrCum/Foldurora/actions/runs/42315300611/artifacts/13552619352)
+contains `Foldurora-test-70c1b5cda927-windows-x64.zip`. Its manifest records exact
+source `70c1b5cda927547b28e5a5ff9713e861771aaee7`, successful checks/build/package,
+`x86_64-pc-windows-msvc`, development profile and `xr-static-loader`. The raw
+32 test summaries total **7,819 passed, 0 failed, 49 ignored**, with all seven
+host/menu, 20 applicable profile/draft/diagnostic and one popup-bounds regression
+passing exactly once. The Unix-only linked-path test is absent as expected.
+The executable and PE strings match **`0.9.3-beta.20261106.1+120.g70c1b5cda`**,
+with AMD64/PE32+ identity. The artifact was created at 00:57:37 UTC on
+7 November 2026; that is still 6 November in America/New_York.
+
+- Downloaded artifact SHA-256: `99cfb245f9a7240ad580a1f070bc8b0130a18ed9d4f15dee180e514ed60be507`.
+- Inner portable ZIP SHA-256: `0e4b22c799570bf26bf0c4f9365c98f2778f3479877bb85651ca5a34ea5ace27`.
+- Executable SHA-256: `a391546c3adccbd256ca64064c7a0fdf22d41b05f8a15f51091cea46609cdac8`.
+
+The retained receipt is `.scratch/windows-ci-42315300611/receipt.json` in the
+candidate worktree. The manifest still marks human, Windows GPU/multi-monitor,
+grid and performance acceptance pending. The package is a development test
+candidate, not a release or native runtime acceptance result.
 
 ## Implemented in the combined source
 
@@ -203,14 +223,29 @@ to that capture commit; they do not depend on the cloud `.scratch` directories.
 
 | Feature | Current gap | Next concrete work |
 | --- | --- | --- |
-| Five stable, renameable character slots | Implemented and compiled; `8cd9a2aa` Windows package verified. Corrected `70c1b5cd` Linux UI rename/restart and actual sequential slot-1/2 IO passed. Earlier host/menu packages used per-launch profiles. | Verify corrected Windows package, five-slot persistence and labels, exclusive ownership through detach/host death, and fresh session authority on reopen. |
+| Five stable, renameable character slots | Implemented and compiled; corrected `70c1b5cd` Windows package verified. Linux UI rename/restart and actual sequential slot-1/2 IO passed. Earlier host/menu packages used per-launch profiles. | Check native Windows five-slot persistence and labels, exclusive ownership through detach/host death, and fresh session authority on reopen. |
 | Per-character/per-conversation drafts | Memory-only navigation and Close/reopen retention is implemented and passed synthetic checks. | Native popout focus/reopen and human grid routing/restrictions remain to be checked. |
-| Shared chat and Attention | Source-bound popouts exist; shared sender selection and explicit review/mark-read/dismiss behavior are incomplete. | Use the native conversation identities and restrictions; navigation must never mark a conversation read or change the sending character. |
+| Shared chat and Attention | Source-bound popouts exist; shared sender selection and explicit review/mark-read/dismiss behavior are incomplete. | Use native conversation identities and restrictions. Attention selection alone must not acknowledge read or activate the world. Explicit character/Attention selection may update displayed Send as; unrelated world switching must not retarget the sender. |
 | Named workspaces | Viewport and native floater geometry exist; selective named arrangements, previews, favorites and HUD restore are incomplete. | Map Folderstorm's restore groups onto Aurora's typed settings/actions after stable character storage is established. |
 | Fade and Birdseye switches | Native activation exists; Folderstorm's visual transitions are not ported. | Preserve fenced GPU/input handoff; design each transition around native camera/render actions after host acceptance. |
 | Inactive monitors | Reduced-target caller/scene/UI and aggregate admission are unfinished. | Complete actual small render targets and latest-only delivery under a shared acknowledged/pending budget; models alone are not a working monitor. |
 | Assistant and other tools | Aurora has native inventory/appearance/camera actions; Folderstorm's adapter and some tools remain. | Port bounded typed actions after the supporting account/workspace models, rather than generic input injection. |
 | Profile import/migration | Stable new slots exist; migration of old generated profiles or ordinary viewer preferences is not implemented. | Decide explicit import/copy behavior later; keep credentials, writable caches and live-session authority separate. Moving installations does not silently migrate profiles. |
+
+Folderstorm can later acknowledge a visible, following, at-tail transcript after
+a configured delay (default 60 seconds with visible-read acknowledgment enabled).
+That automatic acknowledgment is a separate unported behavior; no current parity
+is claimed for it.
+
+Proposed next milestone, pending user priority: a shared CPU chat
+source/conversation selector using the existing Nearby/resident-IM transport and
+one canonical `ChatUi` per exact source. Attention remains a separate typed
+protocol milestone. See the pinned Folderstorm
+[host selection behavior](https://github.com/DrCum/Folderstorm/blob/abbe3cb0ca66ee2484f277219f6a27706fab7fc6/tools/session-host/main.cpp#L1508)
+and [worker unread handling](https://github.com/DrCum/Folderstorm/blob/abbe3cb0ca66ee2484f277219f6a27706fab7fc6/indra/newview/fssessionworker.cpp#L482).
+`ChatLine.event` is export-stream order, not a native unread cursor. Future Mark
+Read needs native observed-watermark metadata, never a cursor inferred from
+retained host lines.
 
 Stable profile labels are display names, not account identity. The actual logged-in
 account must remain visible beside a custom label. Chat drafts must never be keyed
@@ -219,6 +254,51 @@ is the same. A detached worker retains its profile lock until actual process exi
 The stable namespace remains tied to the canonical executable path; persistence
 tests must restart the host from the same location. Another portable folder is a
 separate installation for these profiles.
+
+## Human Windows retest
+
+Use the verified [latest Windows package](https://github.com/DrCum/Foldurora/actions/runs/42315300611/artifacts/13552619352),
+source `70c1b5cd`, version `0.9.3-beta.20261106.1+120.g70c1b5cda`. Extract the
+inner `Foldurora-test-70c1b5cda927-windows-x64.zip` to its own folder, then open
+PowerShell in the folder containing `aurora-viewer.exe` and run:
+
+```powershell
+.\aurora-viewer.exe --session-host --language en --title "Test Foldurora 70c1b5cd"
+```
+
+Keep this executable in the same folder through every close/reopen test; moving
+the portable folder intentionally creates a separate profile group. Use a fresh
+PowerShell window without demo/test overrides. Any real-grid login and account
+selection are performed by you, with no automated login.
+
+1. With two sessions open, switch A → B → A. Drag the host's actual Windows title
+   bar away, release, then drag it back and release. Switch B → A again and resize.
+   Check that the intended world, host controls, mouse and keyboard remain usable.
+   Briefly check movement/camera input is released when switching. Open the
+   viewer's searchable main menu and a submenu: both should stay compact.
+2. Detach one viewer. Close the host using its confirmed **Detach sessions and
+   close** action. Both viewers should be visible, responsive ordinary windows
+   with working captions/taskbar access and correct client contents. Check again
+   after a short wait. If a viewer freezes, disappears or reports device loss,
+   stop at that checkpoint and retain the report rather than repeatedly retrying.
+   Normally Quit the detached workers, confirming their actual process exit.
+3. Relaunch the controller with the same command. Check its selector has five
+   profiles, rename two and open their viewers manually. In one profile change a
+   harmless setting such as **Clock seconds**; keep the other profile distinct.
+   Normally Quit the first worker, confirm, and wait for its actual process exit
+   before reopening the same slot. Its setting should persist and the other
+   profile should keep its own value. Normally close and restart the controller
+   from the same executable path; labels and settings should remain. A detached
+   viewer must keep its profile **In use** until that viewer actually exits.
+4. If you already have Nearby and a resident IM available, type different unsent
+   drafts, navigate between them, then Close/reopen that character's chat popout.
+   Each draft should return to its own conversation and character; switching the
+   active world must not change the sending character. Draft retention is memory
+   only and does not extend across a controller restart.
+
+Report the exact displayed version, which steps passed or failed, and a screenshot
+of the relevant state. Human acceptance remains pending until these results are
+recorded; automated package checks alone do not establish the native behavior.
 
 ## Local Windows agent next steps
 
@@ -231,8 +311,8 @@ touching unrelated windows.
 
 1. Prefer exact source `70c1b5cda927547b28e5a5ff9713e861771aaee7` from
    [Windows run 42315300611](https://github.com/DrCum/Foldurora/actions/runs/42315300611)
-   once its package is ready. Verify manifest checks, source/version suffix and
-   SHA-256 before testing. Preserve the separate `8b738ea8` focused package and
+   and its verified artifact linked above. Verify manifest checks, source/version
+   suffix and SHA-256 before testing. Preserve the separate `8b738ea8` focused package and
    `8cd9a2aa` backend/profile checkpoint; do not mix their receipts. Keep the
    same executable location throughout persistence tests. If building locally,
    use its own default-dev worktree, normal build-slot rules, `scripts/check.ps1`,
