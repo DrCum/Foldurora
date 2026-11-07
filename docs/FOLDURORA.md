@@ -73,6 +73,21 @@ minimized/closed drafts, source disconnection, Enter/Shift+Enter, IME, and a rap
 source switch/Close. Only the human logs in or tests on a grid. Offline synthetic
 CPU captures and actual-egui tests are separate automated evidence.
 
+The native Enter release-fence follow-up requires a fresh check on its own
+package. Before any pending Send or earlier intent, focus a valid nonempty draft,
+hold Return through focus loss/return, and verify that neither the first real
+held press (which can report `repeat=false`) nor later repeats send. Preserve
+the exact focus/key order and selected sender, permissions, editor focus and
+draft observations; a later suppressed repeat after an accidental Send is not
+passing evidence. A synthetic focus-loss release must not rearm Send. Physical
+release followed by fresh Enter must send once; releasing while away must allow
+the next fresh Enter without a second tap. Check Shift+Enter, dropping Shift
+while Enter stays held, and Ctrl+Enter separately. Windows and X11 native
+acceptance remain separate; eight pure release-fence tests and a Linux-only
+ignored native fixture do not establish either platform's full acceptance.
+Frozen `0e40e48f` predates this guard and retains its reported Linux held-Enter
+finding even when its Windows build, tests and package checks pass.
+
 Friends/New IM creation, groups/conferences, native unread/read acknowledgment,
 Attention and render monitors remain subsequent stages. The native protocol is
 unchanged by this first shared surface. See [the host guide](SESSION_HOST.md).

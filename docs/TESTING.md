@@ -104,14 +104,22 @@ last 120 seconds for evidence and owned-process cleanup.
 
 Begin with repeat coverage before any intent: unblock to focus/type a synthetic
 draft, block the initial held Enter, lose focus to the owned owner window, then
-unblock/refocus the composer while still holding Enter. Require a non-synthetic
-OS `repeat=true` event after focus loss, with the same selected source's editor
-focused/enabled, a nonempty valid canonical draft, available/current Send
-permission, explicitly no Pending Send, Shift up and no earlier intent. Each
-native Enter repeat records this selected row, full captured ChatKey and exact
-predicate observations in `repeat_observation`; a counter alone is insufficient.
-No Send may result. Release/fresh Enter must Send.
-Then check Shift+Enter, Ctrl+Enter, delivered text before source/conversation
+unblock/refocus the composer while still holding Enter. Preserve the complete
+focus/synthetic-key trace and check its first non-synthetic held press even when
+the OS reports `repeat=false`; a later `repeat=true` event alone cannot validate
+that first press. Both must leave intents unchanged with the same selected
+source's editor focused/enabled, a nonempty valid canonical draft,
+available/current Send permission, explicitly no Pending Send and Shift up.
+Require zero earlier intents before checking the first held press. Each native
+Enter observation must retain the selected row, full captured ChatKey and exact
+predicates alongside `repeat_observation`; a counter alone is insufficient.
+A synthetic focus-loss release cannot rearm Send. Physical release/fresh Enter
+must Send exactly once. Also release Enter while away, return without an Enter
+snapshot press, and require the next fresh Enter to work without a second tap.
+Windows held-key snapshots may precede Focused(true); X11 snapshots follow it.
+Pure ordering tests do not replace either platform's native acceptance.
+Then check Shift+Enter, releasing Shift while Enter remains held, Ctrl+Enter,
+delivered text before source/conversation
 navigation, captured Read/no Send or activation, held Read source replacement,
 and close/reopen retention. Driver assertions must compare exact intent sources,
 text, observations and counts. `finish` additionally requires that repeat
