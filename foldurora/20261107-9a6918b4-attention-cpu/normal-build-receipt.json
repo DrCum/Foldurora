@@ -1,0 +1,17 @@
+{
+  "source_commit": "9a6918b4e7334e4da319449b56e985107e6b5cd5",
+  "command": [
+    "cargo",
+    "build",
+    "--locked",
+    "-p",
+    "aurora-viewer"
+  ],
+  "exit_code": 0,
+  "seconds": 321.083,
+  "tracked_source_clean": true,
+  "version": "Aurora Viewer 0.0.0+1579.g9a6918b4e",
+  "sha256": "b05f7500462de2e7f2dcf7fdf7ff9287f16ba3bbcad26fa1e0ea6e51b26901ed",
+  "bytes": 670553544,
+  "frozen_binary": "/workspace/work/viewport-dropdown-width/.scratch/attention-validation-9a6918b4/frozen-aurora-viewer"
+}

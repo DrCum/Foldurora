@@ -23,7 +23,38 @@ commands and these separate outcomes. The three unchanged full-run manifests
 all 54 captures' required-text, clipping and privacy results. This gallery
 publishes only six of those images; the other manifest image names are inventory
 entries, not additional published PNGs. [SHA256SUMS](SHA256SUMS) and
-[manifest.json](manifest.json) identify every copied file and its original name.
+[manifest.json](manifest.json) identify the original publication’s copied files
+and original names; the checksum list also covers the later normal-build receipt.
+
+The exact 9a normal Linux viewer build subsequently passed in **321.083 s**
+from clean tracked source. Its version is `0.0.0+1579.g9a6918b4e`,
+670,553,544 bytes, SHA-256
+`b05f7500462de2e7f2dcf7fdf7ff9287f16ba3bbcad26fa1e0ea6e51b26901ed`.
+The unchanged [normal-build receipt](normal-build-receipt.json) is separate from
+the test ELF/CPU capture receipt. Build success is not a native viewer launch.
+
+[Windows run 42385255872](https://github.com/DrCum/Foldurora/actions/runs/42385255872)
+for exact 9a is now verified as an **overall failed candidate**: strict Clippy
+rejected the unused production `Preferences::includes` helper. Tests measured
+**7,991 passed, zero failed, 52 ignored**, with all 203 required names passing
+once in both raw and packaged logs; build/package/static icons and integrity
+checks passed. Both package manifests report `all_checks_passed=false`; passing
+tests and package creation do not make this a green Windows candidate. Artifact
+[13581251607](https://github.com/DrCum/Foldurora/actions/runs/42385255872/artifacts/13581251607),
+version `0.9.3-beta.20261106.1+205.g9a6918b4e`, retains this negative outcome.
+Portable ZIP SHA-256:
+`e0c3855a6ed431ed2a6b13c880473f702cb30a41629b4f42b9c8ba984a2bb015`;
+EXE SHA-256:
+`585b53ed11045451dacf35029a444cb0951a171818ba574c36c126f77256258b`.
+No Windows installation/execution or native acceptance is claimed.
+
+The separate strict-Clippy fix is frozen at
+[`15d33e6c9225bb476f224df02446e3d8c8c94c8d`](https://github.com/DrCum/Foldurora/commit/15d33e6c9225bb476f224df02446e3d8c8c94c8d),
+on `fix/attention-windows-clippy`: one equivalent production helper use and the
+workflow branch allow entry. Its
+[new Windows run 42390650825](https://github.com/DrCum/Foldurora/actions/runs/42390650825)
+is **pending verification**. The old branch/images/receipts remain exact 9a;
+none of their measured results transfer to 15d without its own verification.
 
 The first Attention slice includes five stable saved-profile filters, Nearby
 and existing Direct conversations (Direct on, Nearby off by default), a local
@@ -46,8 +77,8 @@ authentication, preference-file IO, Shared Chat/World submission or grid
 acceptance. No real profiles, broker, worker, login or live network are used by
 this fixture. Native Review, monitors and chat protocol V3 are outside this MVP.
 The separately source-reviewed native Attention fixture and external driver have
-not been compiled or run. The Windows candidate run is tracked separately; no
-Windows result or normal-viewer binary hash is inferred from these images.
+not been compiled or run. The separately measured Linux normal build and negative Windows candidate are
+recorded above; neither result is inferred from these images.
 
 ## English selected reminder, filters collapsed — 540×580
 
