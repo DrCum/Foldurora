@@ -18,6 +18,17 @@
   actual-World lifecycle tests are authored/unrun; existing Favorites assertions
   remain. Bounded archive projection, new closed store kind, actual consumers
   and Folder Jump visibility integration are not yet implemented or enabled.
+- 🔧 Selective character preference copy, pure projection prerequisite (2026-11-07;
+  no issue): explicit16 Graphics,18 Interface,37 native byte-color fields and
+  bounded native action/two-slot bindings use actual defaults and shared native
+  presentation ranges. Strict current-schema JSON rejects duplicates and invalid
+  selected members, preserves unselected target values and never copies unknown
+  source fields. Fifteen pure contract/bounds/native-input cases are authored
+  UNRUN. Projection remains cfg(test); stopped-profile lease/CAS/cancellation IO,
+  bounded physical worker lifetime and real Manage Inspect/Apply/Cancel entry are
+  still required after independent source review. No new profile-copy behavior
+  or file access is enabled by this prerequisite.
+
 - 🔧 Locale-independent mouse binding identity prerequisite (2026-11-07; no issue):
   preserve the Input JSON shape while recognizing earlier EN/FR/JA stored aliases;
   constructors/defaults and re-encoding use stable native tokens. Visible labels

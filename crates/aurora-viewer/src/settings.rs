@@ -7,6 +7,9 @@ use std::path::{Path, PathBuf};
 pub mod area_search;
 pub mod backup;
 mod hover_height;
+mod presentation;
+#[cfg(test)]
+pub(crate) mod profile_seed;
 mod saver;
 pub mod stream_list;
 
@@ -2691,7 +2694,7 @@ impl Settings {
         if !self.chat_island_width.is_finite() || self.chat_island_width < 0.0 {
             self.chat_island_width = 0.0;
         }
-        self.draw_distance = self.draw_distance.clamp(32.0, 512.0);
+        self.draw_distance = presentation::draw_distance(self.draw_distance);
         self.chat_commands.sanitize();
         if let Some(toolbar) = &mut self.toolbar {
             toolbar.sanitize();
@@ -2701,43 +2704,31 @@ impl Settings {
         }
         self.snapshot.sanitize();
         self.dof.sanitize();
-        self.exposure = self.exposure.clamp(0.25, 4.0);
+        self.exposure = presentation::exposure(self.exposure);
         self.screen_indirect_intensity = if self.screen_indirect_intensity.is_finite() {
             self.screen_indirect_intensity.clamp(0.0, 4.0)
         } else {
             SCREEN_INDIRECT_INTENSITY
         };
-        self.sharpen = if self.sharpen.is_finite() {
-            self.sharpen.clamp(0.0, 1.0)
-        } else {
-            0.4
-        };
-        self.bloom_strength = if self.bloom_strength.is_finite() {
-            self.bloom_strength.clamp(0.05, 1.0)
-        } else {
-            BLOOM_STRENGTH
-        };
-        self.lod_factor = self.lod_factor.clamp(0.5, 4.0);
-        self.ui_scale = self.ui_scale.clamp(0.75, 2.0);
+        self.sharpen = presentation::sharpen(self.sharpen);
+        self.bloom_strength = presentation::bloom_strength(self.bloom_strength);
+        self.lod_factor = presentation::lod_factor(self.lod_factor);
+        self.ui_scale = presentation::ui_scale(self.ui_scale);
         self.mouse_sensitivity = self.mouse_sensitivity.clamp(0.1, 5.0);
-        self.texture_budget_mb = self.texture_budget_mb.clamp(256, 32768);
-        self.font_scale = self.font_scale.clamp(FONT_SCALE_MIN, FONT_SCALE_MAX);
-        self.chat_font_scale = if self.chat_font_scale.is_finite() {
-            self.chat_font_scale.clamp(FONT_SCALE_MIN, FONT_SCALE_MAX)
-        } else {
-            1.0
-        };
+        self.texture_budget_mb = presentation::texture_budget_mb(self.texture_budget_mb);
+        self.font_scale = presentation::font_scale(self.font_scale);
+        self.chat_font_scale = presentation::chat_font_scale(self.chat_font_scale);
         self.hover_tips.delay = if self.hover_tips.delay.is_finite() {
             self.hover_tips.delay.clamp(0.0, MAX_HOVER_TIP_DELAY)
         } else {
             HoverTips::default().delay
         };
-        self.shadow_quality = self.shadow_quality.min(4);
+        self.shadow_quality = presentation::shadow_quality(self.shadow_quality);
         self.projector_shadow_limit = self
             .projector_shadow_limit
             .clamp(1, aurora_render::projector_shadows::MAX_PROJECTOR_SHADOWS as u8);
-        self.antialiasing = self.antialiasing.min(6);
-        self.render_scale_percent = self.render_scale_percent.clamp(50, 100);
+        self.antialiasing = presentation::antialiasing(self.antialiasing);
+        self.render_scale_percent = presentation::render_scale_percent(self.render_scale_percent);
         self.reflection_probes = self.reflection_probes.min(3);
         self.probe_count = self.probe_count.clamp(8, 64);
         self.tonemapper = self.tonemapper.min(1);
