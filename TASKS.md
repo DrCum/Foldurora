@@ -1,5 +1,28 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Foldurora multiline script text boxes (human upstream request, 2026-11-08;
+  no fork issue; upstream #2832 / PR #2909, `a92c0e2e33d0`): base `388b299c`,
+  upstream snapshot `b01979c2`; complete port `b372453d7886` with `-x`.
+  Enter inserts a line; Send alone submits. Shared card code shows three lines
+  then scrolls in Aurora and Legacy styles; paste normalization and a 250-byte
+  UTF-8-safe reply cap apply in the editor and at the send boundary. Preserve
+  the original sender/object/channel and other notification/permission paths.
+  Retain the three upstream regressions and add both-style Enter/Send/source
+  coverage with opt-in synthetic CPU images through existing AURORA_CAPTURE.
+  Capture mode uses the supported opaque skin; normal tests use the default.
+  Refreshed refs/PRs show no duplicate and no production-file edits in visible
+  combined, Monitor, Shared Chat Close or wrap-up checkpoints. Deferred update
+  notification code remains absent. Seven other new commits overlap protected
+  App/rendering/inventory/settings/localization work and are excluded.
+  Exact check results and native acceptance belong to the PR. TASKS needs
+  later Dev Agent reconciliation; no shared App/FTL/schema change. Slick is
+  unavailable; no delivery. Local Cargo is unavailable and build space is
+  insufficient; preserve old outputs and use an independent CI runner.
+  Imported upstream validation is historical evidence, not fork acceptance.
+  - ⬜ Native both-style multiline/scrolling/paste/IME-near-limit checks;
+    human grid confirmation of exact received lines and byte limits. CPU
+    images do not establish native/default-glass/Vulkan acceptance.
+
 - 🔧 Selective upstream catch-up (human request, 2026-11-07; no issue): apply
   sixteen reviewed upstream commits individually with `-x` to frozen photo/
   branding base `f5ae21d5`, from upstream snapshot `576dd54a`. Production
