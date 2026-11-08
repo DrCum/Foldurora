@@ -271,6 +271,31 @@ impl Frames {
         self.pointer(pos, false).expect("captured action")
     }
     fn deferred(&mut self, events: Vec<egui::Event>, mut after_first: impl FnMut(&mut Self)) -> super::super::UiActions {
+        self.deferred_with(events, true, |f, pass| {
+            if pass == 0 {
+                after_first(f);
+            }
+        })
+    }
+    fn control(&self, pos: Pos2) -> egui::WidgetRect {
+        let layer = self.ctx.layer_id_at(pos).expect("painted Board layer");
+        self.ctx.viewport(|viewport| {
+            viewport
+                .prev_pass
+                .widgets
+                .get_layer(layer)
+                .filter(|widget| widget.sense.click && widget.interact_rect.contains(pos))
+                .last()
+                .copied()
+                .expect("actual painted button")
+        })
+    }
+    fn deferred_with(
+        &mut self,
+        events: Vec<egui::Event>,
+        discard: bool,
+        mut after_each: impl FnMut(&mut Self, usize),
+    ) -> super::super::UiActions {
         let ctx = self.ctx.clone();
         let mut actions = super::super::UiActions::default();
         let mut passes = 0;
@@ -303,16 +328,21 @@ impl Frames {
                     board: action,
                     ..Default::default()
                 });
-                if ui.ctx().current_pass_index() == 0 {
+                after_each(self, ui.ctx().current_pass_index());
+                if self.overlay {
+                    crate::ui::widgets::Modal::new(egui::Id::unique("board_fixture_overlay")).show(ui.ctx(), |ui| {
+                        ui.label("Fixture overlay");
+                    });
+                }
+                if discard && ui.ctx().current_pass_index() == 0 {
                     // A later, unrelated widget asks after the Board has drawn.
                     // No Board native/cache/store effect runs in this closure.
-                    after_first(self);
                     ui.ctx().request_discard("later widget changes its layout");
                 }
             },
         );
         output.textures_delta.clear();
-        assert!(passes >= 2, "exercise the actual input-free egui retry");
+        assert!(!discard || passes >= 2, "exercise the actual input-free egui retry");
         actions
     }
 }
@@ -334,6 +364,11 @@ fn board_native_ui_late_discard_defers_exact_batched_play_until_final_return_onc
     });
     assert!(!f.manager.has_playing());
     let action = actions.board.take().expect("first pass keeps its immutable gesture");
+    assert!(
+        f.ui.take_activation(&f.ctx, &action),
+        "original release survives the input-free retry"
+    );
+    assert!(!f.ui.take_activation(&f.ctx, &action), "a clone cannot consume the release twice");
     assert!(action.proof.same_owner(f.actor.proof(None, Instant::now()).unwrap()));
     assert_eq!(action.revision, f.data.revision);
     let Command::Play(ticket, captured) = action.command else {
@@ -383,6 +418,10 @@ fn board_native_ui_late_discard_cannot_refresh_original_play_after_new_native_ru
         );
         let native = f.manager.playback_id(target.item()).unwrap();
         let action = actions.board.take().unwrap();
+        assert!(
+            !f.ui.take_activation(&f.ctx, &action),
+            "the final control no longer represents the original Play"
+        );
         assert_eq!(action.revision, f.data.revision);
         let Command::Play(ticket, captured) = action.command else {
             panic!("captured original play")
@@ -397,6 +436,161 @@ fn board_native_ui_late_discard_cannot_refresh_original_play_after_new_native_ru
             Err(playback::Error::Stale)
         ));
         assert!(f.manager.playback_id(target.item()) == Some(native));
+        assert!(f.actor.pending.is_empty() && f.actor.job.is_none());
+    }
+}
+#[test]
+fn board_native_ui_final_modal_cancels_original_release_with_or_without_retry() {
+    for discard in [false, true] {
+        let mut f = Frames::new();
+        let pos = f.position(aurora_i18n::tr!("common-play"));
+        assert!(f.pointer(pos, true).is_none());
+        let mut actions = f.deferred_with(
+            vec![egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: Default::default(),
+            }],
+            discard,
+            |f, _| f.overlay = true,
+        );
+        let action = actions.board.take().expect("release captured before the later modal");
+        assert!(matches!(action.command, Command::Play(_, _)));
+        assert!(action.proof.same_owner(f.actor.proof(None, Instant::now()).unwrap()));
+        assert!(f.ctx.memory(|memory| memory.top_modal_layer().is_some()), "actual final egui modal");
+        assert!(!f.ui.take_activation(&f.ctx, &action));
+        assert!(!f.ui.take_activation(&f.ctx, &action.clone()), "cancellation is terminal");
+        assert!(!f.manager.has_playing());
+        assert!(f.actor.pending.is_empty() && f.actor.job.is_none());
+    }
+}
+#[test]
+fn board_native_ui_final_hidden_or_removed_control_cancels_without_source_or_revision_change() {
+    for hidden in [false, true] {
+        let mut f = Frames::new();
+        let pos = f.position(aurora_i18n::tr!("common-play"));
+        let control = f.control(pos);
+        let revision = f.data.revision;
+        assert!(f.pointer(pos, true).is_none());
+        let mut actions = f.deferred(
+            vec![egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: Default::default(),
+            }],
+            |f| {
+                if hidden {
+                    crate::ui::widgets::hide_windows(&f.ctx, true, false);
+                } else {
+                    // Isolate local control disappearance from the independent
+                    // catalogue/source fences that production also enforces.
+                    f.data.boards[0].tiles.clear();
+                }
+            },
+        );
+        let action = actions.board.take().expect("original release from the discarded pass");
+        assert!(action.proof.same_owner(f.actor.proof(None, Instant::now()).unwrap()));
+        assert_eq!(action.revision, revision);
+        assert_eq!(f.data.revision, revision);
+        assert!(f.ctx.viewport(|viewport| viewport.prev_pass.widgets.get(control.id).is_none()));
+        assert!(!f.ui.take_activation(&f.ctx, &action));
+        assert!(!f.manager.has_playing());
+        assert!(f.actor.pending.is_empty() && f.actor.job.is_none());
+    }
+}
+#[test]
+fn board_native_ui_final_moved_control_cancels_original_geometry() {
+    let mut f = Frames::new();
+    let pos = f.position(aurora_i18n::tr!("common-play"));
+    let control = f.control(pos);
+    assert!(f.pointer(pos, true).is_none());
+    let mut actions = f.deferred(
+        vec![egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: Default::default(),
+        }],
+        |f| crate::ui::widgets::move_floater(&f.ctx, "gesture_boards", egui::pos2(220.0, 200.0)),
+    );
+    let action = actions.board.take().expect("original geometry release");
+    let final_control = f
+        .ctx
+        .viewport(|viewport| viewport.prev_pass.widgets.get(control.id).copied())
+        .expect("moved control still exists");
+    assert_ne!(control.rect, final_control.rect);
+    assert!(
+        final_control.interact_rect.is_positive(),
+        "reject movement even when the button remains visible"
+    );
+    assert!(!f.ui.take_activation(&f.ctx, &action));
+    assert!(!f.manager.has_playing());
+    assert!(f.actor.pending.is_empty() && f.actor.job.is_none());
+}
+#[test]
+fn board_native_ui_final_zoom_clipped_control_cancels_original_positive_clip() {
+    let mut f = Frames::new();
+    let pos = f.position(aurora_i18n::tr!("common-play"));
+    let control = f.control(pos);
+    assert!(control.interact_rect.is_positive());
+    assert!(f.pointer(pos, true).is_none());
+    let mut actions = f.deferred(
+        vec![egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: Default::default(),
+        }],
+        |f| f.ctx.set_zoom_factor(8.0),
+    );
+    let action = actions.board.take().expect("release before the late zoom");
+    assert_eq!(f.ctx.zoom_factor(), 8.0);
+    assert!(
+        f.ctx.content_rect().height() < 150.0,
+        "retry uses the actual smaller logical canvas"
+    );
+    let final_control = f
+        .ctx
+        .viewport(|viewport| viewport.prev_pass.widgets.get(control.id).copied())
+        .expect("clipped control is still laid out");
+    assert!(final_control.rect.is_positive());
+    assert!(
+        !final_control.interact_rect.is_positive(),
+        "the actual egui button has no positive visible clip"
+    );
+    assert!(!f.ui.take_activation(&f.ctx, &action));
+    assert!(!f.manager.has_playing());
+    assert!(f.actor.pending.is_empty() && f.actor.job.is_none());
+}
+#[test]
+fn board_native_ui_final_key_focus_preserves_valid_retry_and_cancels_later_editor_ownership() {
+    for steal_focus in [false, true] {
+        let mut f = Frames::new();
+        let _ = f.click(aurora_i18n::tr!("common-play"));
+        assert!(f.draw(vec![key(egui::Key::Enter, true, false)]).0.is_none());
+        let original_focus = f.ctx.memory(|memory| memory.focused()).unwrap();
+        let editor = egui::Id::unique("board_final_fixture_editor");
+        let mut actions = f.deferred_with(vec![key(egui::Key::Enter, false, false)], true, |f, _| {
+            if steal_focus {
+                egui::Area::new(egui::Id::unique("board_final_fixture_editor_area"))
+                    .fixed_pos(egui::pos2(900.0, 50.0))
+                    .show(&f.ctx, |ui| {
+                        let mut text = String::new();
+                        ui.add(egui::TextEdit::singleline(&mut text).id(editor)).request_focus();
+                    });
+            }
+        });
+        let action = actions.board.take().expect("original keyboard release");
+        assert!(matches!(action.command, Command::Play(_, _)));
+        assert_eq!(
+            f.ctx.memory(|memory| memory.focused()),
+            Some(if steal_focus { editor } else { original_focus })
+        );
+        assert_eq!(f.ui.take_activation(&f.ctx, &action), !steal_focus);
+        assert!(!f.ui.take_activation(&f.ctx, &action), "one immutable keyboard release");
+        assert!(!f.manager.has_playing());
         assert!(f.actor.pending.is_empty() && f.actor.job.is_none());
     }
 }

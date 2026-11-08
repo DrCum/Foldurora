@@ -3745,5 +3745,13 @@ Open-source technologies that could set Aurora apart (human request of 2026-10-1
   playback on Add/load/open. EN/FR/JA; offline demo `AURORA_DEMO_GESTURES=board`
   uses memory-only metadata. Root compilation/tests/demo/human grid acceptance
   remain pending; author ran no Cargo/native/GPU/grid/socket execution.
+  - Runtime follow-up (source-only): test fixtures initialize the actual login
+    inventory skeleton before demo items. Board effects now run after the full
+    egui run; immutable original releases require the final exact control,
+    geometry, positive clip, modal/layer and key-focus ownership. Five additional
+    real-egui regressions cover late modal, hiding/removal, movement, zoom clipping
+    and editor focus, with existing valid retry/native-run tests strengthened.
+    All 64 Board test definitions are retained and author-UNRUN; independent
+    follow-up source review and root-owned runtime validation remain pending.
   - ⬜ Later parity: custom labels/colors/defaults, bulk edits/search/reordering,
     paging, persistent last selection, multiple windows and import/export.

@@ -80,6 +80,13 @@ pub(crate) struct Ticket {
     captured_at: Instant,
 }
 impl Ticket {
+    /// Compares an observed control's intent without extending either capture.
+    pub(crate) fn same_action(self, other: Self) -> bool {
+        Self {
+            captured_at: other.captured_at,
+            ..self
+        } == other
+    }
     pub fn is_stop(self) -> bool {
         matches!(self.intent, Intent::Stop(_))
     }
@@ -104,6 +111,12 @@ pub(crate) struct BoardTicket {
     captured_at: Instant,
 }
 impl BoardTicket {
+    pub(crate) fn same_action(self, other: Self) -> bool {
+        Self {
+            captured_at: other.captured_at,
+            ..self
+        } == other
+    }
     pub fn board(self) -> BoardId {
         self.board
     }
