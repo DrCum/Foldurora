@@ -448,7 +448,7 @@ fn fav_menu(parent: &egui::Ui, resp: &egui::Response, p: &Palette, fav: &Favorit
             p,
             "link-filled",
             aurora_i18n::tr!("common-copy-slurl"),
-            captured.slurl.is_some(),
+            captured.slurl.is_some() && fav.slurl.is_some(),
         ) && let Some(s) = &captured.slurl
         {
             *out = context_command(&captured, ContextCommand::CopySlurl(s.clone()));
