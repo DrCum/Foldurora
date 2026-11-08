@@ -672,8 +672,10 @@ impl Frames {
         for _ in 0..32 {
             self.run(Vec::new());
             let current = self.visible_heading();
-            if current.is_some() && current == previous {
-                return current.unwrap().0;
+            if let Some((heading, _)) = current
+                && current == previous
+            {
+                return heading;
             }
             previous = current;
         }
