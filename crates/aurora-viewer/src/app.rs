@@ -10909,6 +10909,8 @@ impl App {
         self.demo_interface_viewport();
         let has_native_canvas = raw.screen_rect.is_some();
         self.review_input.finish_frame_input(&mut raw, &mut self.alt_text);
+        // Native/cache completion is outside egui's retryable paint closure.
+        self.tick_boards_presented(Some(gesture_board::Presentation::new(&gfx.renderer, &gfx.window)));
         let mut full = ctx.run_ui(raw, |ui| {
             if has_native_canvas {
                 let native_canvas =
@@ -10952,6 +10954,7 @@ impl App {
             }
             windows_ms += t.elapsed().as_secs_f32() * 1000.0;
         });
+        self.commit_board_ui(actions.board.take(), gesture_board::Presentation::new(&gfx.renderer, &gfx.window));
         // a capture leaves the user's layout as it is (as at exit)
         self.photo_validate_canvas(&mut gfx.renderer, full.pixels_per_point);
         if self.capture.is_none() {
@@ -16626,7 +16629,7 @@ impl App {
                 );
                 ui::inventory::view::set_picker_sort(&ctx, self.settings.inventory.sort);
                 self.show_gestures(&ctx, &p);
-                self.show_boards(&ctx, &p, gesture_board::Presentation::new(renderer, board_window));
+                a.board = self.show_boards(&ctx, &p, gesture_board::Presentation::new(renderer, board_window));
                 self.show_texture_library(&ctx, &p);
                 self.inventory_ui.preferences_dirty |= self.settings.inventory != inventory_preferences;
                 self.inventory_ui.preferences_dirty |= self.settings.imports != import_preferences;
@@ -17733,6 +17736,8 @@ struct UiActions {
     typing: Vec<NetCommand>,
     /// Gestures played from the conversations' field.
     gestures: Vec<uuid::Uuid>,
+    /// Exact captured Board intent; dispatch only after the final egui pass.
+    board: Option<ui::gesture_board::Action>,
 }
 
 impl UiActions {
@@ -17766,6 +17771,7 @@ impl UiActions {
         self.currency.extend(later.currency);
         self.typing.extend(later.typing);
         self.gestures.extend(later.gestures);
+        first(&mut self.board, later.board);
     }
 }
 

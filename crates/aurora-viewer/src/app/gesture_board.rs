@@ -669,7 +669,7 @@ impl App {
     pub(super) fn tick_boards(&mut self) {
         self.tick_boards_presented(None);
     }
-    fn tick_boards_presented(&mut self, presentation: Option<Presentation<'_>>) {
+    pub(super) fn tick_boards_presented(&mut self, presentation: Option<Presentation<'_>>) {
         if self.board_state.is_none() && !self.panels.gesture_board {
             return;
         }
@@ -696,12 +696,12 @@ impl App {
             state.complete(app, presentation);
         });
     }
-    pub(super) fn show_boards(&mut self, ctx: &egui::Context, p: &crate::theme::Palette, frame: Presentation<'_>) {
+    pub(super) fn show_boards(&mut self, ctx: &egui::Context, p: &crate::theme::Palette, frame: Presentation<'_>) -> Option<Action> {
         if !self.panels.gesture_board {
-            return;
+            return None;
         }
         let presentation = Some(frame);
-        self.tick_boards_presented(presentation);
+        let mut captured = None;
         self.with_boards(presentation, |state, app| {
             let proof = state.reconcile(app, presentation);
             let data = state.snapshot.as_ref().map(|s| s.data.clone());
@@ -738,9 +738,21 @@ impl App {
                 state.reconcile(app, presentation);
                 return;
             }
-            if let Some(action) = action {
-                state.dispatch(app, action, presentation);
-            }
+            captured = action;
+        });
+        captured
+    }
+    /// Runs only after the complete egui run, including any late discard/retry.
+    /// Reconcile current native/source state without replacing the held proof.
+    pub(super) fn commit_board_ui(&mut self, action: Option<Action>, frame: Presentation<'_>) {
+        let Some(action) = action else { return };
+        if self.board_state.is_none() {
+            return;
+        }
+        let presentation = Some(frame);
+        self.with_boards(presentation, |state, app| {
+            state.reconcile(app, presentation);
+            state.dispatch(app, action, presentation);
         });
     }
 }

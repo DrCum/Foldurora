@@ -270,6 +270,135 @@ impl Frames {
         assert!(self.pointer(pos, true).is_none());
         self.pointer(pos, false).expect("captured action")
     }
+    fn deferred(&mut self, events: Vec<egui::Event>, mut after_first: impl FnMut(&mut Self)) -> super::super::UiActions {
+        let ctx = self.ctx.clone();
+        let mut actions = super::super::UiActions::default();
+        let mut passes = 0;
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, Vec2::new(1500.0, 900.0))),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                passes += 1;
+                let action = view::show(
+                    ui.ctx(),
+                    &crate::theme::Theme::default().palette(),
+                    &mut self.ui,
+                    &mut self.open,
+                    view::Context {
+                        data: Some(&self.data),
+                        selected: Some(self.data.boards[0].id),
+                        runtime: &self.actor.runtime,
+                        inventory: &self.inv,
+                        manager: &self.manager,
+                        proof: self.actor.proof(None, Instant::now()),
+                        add: self.add,
+                        writable: true,
+                        status: "board-ready",
+                    },
+                );
+                actions.merge(super::super::UiActions {
+                    board: action,
+                    ..Default::default()
+                });
+                if ui.ctx().current_pass_index() == 0 {
+                    // A later, unrelated widget asks after the Board has drawn.
+                    // No Board native/cache/store effect runs in this closure.
+                    after_first(self);
+                    ui.ctx().request_discard("later widget changes its layout");
+                }
+            },
+        );
+        output.textures_delta.clear();
+        assert!(passes >= 2, "exercise the actual input-free egui retry");
+        actions
+    }
+}
+#[test]
+fn board_native_ui_late_discard_defers_exact_batched_play_until_final_return_once() {
+    let mut f = Frames::new();
+    let target = f.add.unwrap();
+    let pos = f.position(aurora_i18n::tr!("common-play"));
+    let button = |pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Default::default(),
+    };
+    let mut actions = f.deferred(vec![egui::Event::PointerMoved(pos), button(true), button(false)], |f| {
+        assert!(!f.manager.has_playing(), "no effect before a later discard is known");
+        assert!(f.actor.pending.is_empty(), "no cache request from painting");
+        assert!(f.actor.job.is_none(), "no store request from painting");
+    });
+    assert!(!f.manager.has_playing());
+    let action = actions.board.take().expect("first pass keeps its immutable gesture");
+    assert!(action.proof.same_owner(f.actor.proof(None, Instant::now()).unwrap()));
+    assert_eq!(action.revision, f.data.revision);
+    let Command::Play(ticket, captured) = action.command else {
+        panic!("play")
+    };
+    assert!(captured == target);
+    let playback::Click::Ready(ready) = f
+        .actor
+        .runtime
+        .click(ticket, &f.data, captured, &mut f.manager, Instant::now())
+        .unwrap()
+    else {
+        panic!("cached gesture ready")
+    };
+    assert!(!f.manager.has_playing());
+    f.actor
+        .runtime
+        .start(ready, &f.data, captured, &mut f.manager, Instant::now())
+        .unwrap();
+    assert!(f.manager.playback_id(target.item()).is_some());
+    assert!(actions.board.take().is_none(), "one post-run commit only");
+    assert!(f.draw(Vec::new()).0.is_none(), "retry did not leave a replayable release");
+}
+#[test]
+fn board_native_ui_late_discard_cannot_refresh_original_play_after_new_native_run_or_source_fence() {
+    for source_loss in [false, true] {
+        let mut f = Frames::new();
+        let target = f.add.unwrap();
+        let pos = f.position(aurora_i18n::tr!("common-play"));
+        assert!(f.pointer(pos, true).is_none());
+        let mut actions = f.deferred(
+            vec![egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: Default::default(),
+            }],
+            |f| {
+                assert!(!f.manager.has_playing());
+                if source_loss {
+                    f.actor.cancel_actions();
+                }
+                // A native hotkey run arrives before final paint. The held
+                // Board Play must never become Stop for this later run.
+                f.manager.play(target.item(), Gesture::default(), None);
+            },
+        );
+        let native = f.manager.playback_id(target.item()).unwrap();
+        let action = actions.board.take().unwrap();
+        assert_eq!(action.revision, f.data.revision);
+        let Command::Play(ticket, captured) = action.command else {
+            panic!("captured original play")
+        };
+        assert!(captured == target);
+        assert!(!ticket.is_stop());
+        if source_loss {
+            assert!(!action.proof.same_owner(f.actor.proof(None, Instant::now()).unwrap()));
+        }
+        assert!(matches!(
+            f.actor.runtime.click(ticket, &f.data, captured, &mut f.manager, Instant::now()),
+            Err(playback::Error::Stale)
+        ));
+        assert!(f.manager.playback_id(target.item()) == Some(native));
+        assert!(f.actor.pending.is_empty() && f.actor.job.is_none());
+    }
 }
 #[test]
 fn board_native_ui_real_add_play_remove_stop_capture_exact_payload_without_automatic_effects() {
