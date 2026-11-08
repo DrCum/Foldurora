@@ -8,8 +8,18 @@ use crate::world::{World, account_metadata_origin::GridDigest, inventory_archive
 pub(super) struct Pending {
     proposal: Option<Proposal>,
     conflict: bool,
+    native: crate::ui::inventory::archive::NativeInput,
 }
 impl Pending {
+    pub(super) fn native_event(&mut self, event: &winit::event::WindowEvent) -> bool {
+        self.native.event(event)
+    }
+    pub(super) fn input(&self) -> crate::ui::inventory::archive::InputRead {
+        self.native.read()
+    }
+    pub(super) fn finish_input(&mut self) {
+        self.native.finish();
+    }
     pub(super) fn begin(&mut self) {
         self.proposal = None;
         self.conflict = false;
@@ -66,6 +76,12 @@ impl App {
             || self.login_form.busy
             || !self.host_input_allowed()
             || !self.focused
+            || self.ctrl
+            || self.alt
+            || self.shift
+            || self.command
+            || self.alt_graph
+            || !proposal.input_current(self.inventory_archive_ui.input())
             || self.exit_prompt.open
             || self.options_ui.capture.is_some()
             || self.options_ui.joystick_capturing()

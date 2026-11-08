@@ -1,5 +1,8 @@
 //! One source-qualified ordinary browse mask and bounded existing fetch demand.
 //! Exemptions are explicit; unavailable ordinary metadata never means exempt.
+mod input;
+pub(crate) use input::{InputRead, NativeInput};
+
 use super::*;
 use crate::world::inventory_archive::{
     Status,
@@ -140,7 +143,7 @@ impl State {
             (Some(Status::Saving), _) => Some(aurora_i18n::tr!("inventory-archive-saving")),
             (Some(Status::SaveFailed), _) => Some(aurora_i18n::tr!("inventory-archive-save-failed")),
             (Some(Status::LoadFailed), _) => Some(aurora_i18n::tr!("inventory-archive-load-failed")),
-            (Some(Status::Retired), _) | (_, VisibilityStatus::Unavailable) => Some(aurora_i18n::tr!("inventory-archive-unavailable")),
+            (Some(Status::Retired), _) => Some(aurora_i18n::tr!("inventory-archive-unavailable")),
             (_, VisibilityStatus::Loading) => Some(aurora_i18n::tr!("inventory-archive-loading")),
             (_, VisibilityStatus::Limited) => Some(aurora_i18n::tr!("inventory-archive-limited")),
             _ => None,
@@ -171,7 +174,10 @@ pub(super) fn visibility_menu(ui: &mut egui::Ui, p: &Palette, st: &mut Inventory
                 controls.visibility,
                 VisibilityStatus::Unavailable | VisibilityStatus::OfflineReadOnly
             );
-            if let Some(proposal) = st.archive_include_context.paint(ui, p, st.ui_id, revision, controls, enabled) {
+            if let Some(proposal) = st
+                .archive_include_context
+                .paint(ui, p, st.ui_id, revision, controls, enabled, st.archive_input)
+            {
                 st.archive_include_proposal = Some(proposal);
             }
         },
@@ -541,12 +547,158 @@ struct Control {
     layer: egui::LayerId,
     frame: u64,
     pass: u64,
+    registered: egui::WidgetRect,
+    paint_clip: egui::Rect,
+    transform: Option<egui::emath::TSTransform>,
+    input_epoch: u64,
+}
+fn finite_positive(rect: egui::Rect) -> bool {
+    rect.is_finite() && rect.size().is_finite() && rect.is_positive()
+}
+fn transformed_rect(rect: egui::Rect, transform: Option<egui::emath::TSTransform>) -> Option<egui::Rect> {
+    let transform = transform.unwrap_or(egui::emath::TSTransform::IDENTITY);
+    let finite = |transform: egui::emath::TSTransform| {
+        transform.scaling.is_finite()
+            && transform.scaling > 0.0
+            && transform.translation.x.is_finite()
+            && transform.translation.y.is_finite()
+    };
+    if !finite_positive(rect) || !finite(transform) || !finite(transform.inverse()) {
+        return None;
+    }
+    let global = transform * rect;
+    finite_positive(global).then_some(global)
 }
 impl Control {
+    fn capture(ui: &egui::Ui, response: &egui::Response, input: InputRead) -> Option<Self> {
+        let registered = ui.ctx().viewport(|viewport| viewport.this_pass.widgets.get(response.id).copied())?;
+        if !response.enabled()
+            || response.rect != registered.rect
+            || response.interact_rect != registered.interact_rect
+            || response.sense != registered.sense
+        {
+            return None;
+        }
+        let transform = ui.ctx().layer_transform_to_global(response.layer_id);
+        let paint_clip = ui.clip_rect();
+        let viewport = ui.ctx().content_rect();
+        if !finite_positive(viewport) {
+            return None;
+        }
+        let rect = transformed_rect(registered.rect, transform)?
+            .intersect(transformed_rect(registered.interact_rect, transform)?)
+            .intersect(transformed_rect(paint_clip, transform)?)
+            .intersect(viewport);
+        let control = Self {
+            widget: response.id,
+            rect,
+            layer: response.layer_id,
+            frame: ui.ctx().cumulative_frame_nr(),
+            pass: ui.ctx().cumulative_pass_nr(),
+            registered,
+            paint_clip,
+            transform,
+            input_epoch: input.epoch(),
+        };
+        control.registry(ui.ctx(), false).then_some(control)
+    }
     fn visible(self) -> bool {
-        self.rect.is_finite() && self.rect.is_positive()
+        finite_positive(self.rect)
+    }
+    fn same_widget(self, other: Self) -> bool {
+        self.widget == other.widget
+            && self.rect == other.rect
+            && self.layer == other.layer
+            && self.registered == other.registered
+            && self.paint_clip == other.paint_clip
+            && self.transform == other.transform
+            && self.input_epoch == other.input_epoch
+    }
+    fn geometry(self, ctx: &egui::Context) -> bool {
+        let viewport = ctx.content_rect();
+        let Some(rect) = transformed_rect(self.registered.rect, self.transform) else {
+            return false;
+        };
+        let Some(interact) = transformed_rect(self.registered.interact_rect, self.transform) else {
+            return false;
+        };
+        let Some(clip) = transformed_rect(self.paint_clip, self.transform) else {
+            return false;
+        };
+        let visible = rect.intersect(interact).intersect(clip).intersect(viewport);
+        finite_positive(viewport)
+            && finite_positive(visible)
+            && visible == self.rect
+            && ctx.layer_transform_to_global(self.layer) == self.transform
+    }
+    fn registry(self, ctx: &egui::Context, committed: bool) -> bool {
+        if !self.geometry(ctx) || !ctx.memory(|memory| memory.allows_interaction(self.layer)) {
+            return false;
+        }
+        ctx.viewport(|viewport| {
+            let widgets = if committed {
+                &viewport.prev_pass.widgets
+            } else {
+                &viewport.this_pass.widgets
+            };
+            widgets.get(self.widget).is_some_and(|widget| {
+                widget.enabled
+                    && widget.visible
+                    && widget.sense.senses_click()
+                    && *widget == self.registered
+                    && widget.id == self.widget
+                    && widget.layer_id == self.layer
+            })
+        })
+    }
+    /// Resolve egui's actual final registry AFTER the entire run, rather than
+    /// treating our saved control as proof that a later widget kept it live.
+    fn committed(self, ctx: &egui::Context) -> bool {
+        if !self.registry(ctx, true) {
+            return false;
+        }
+        let local = self
+            .registered
+            .rect
+            .intersect(self.registered.interact_rect)
+            .intersect(self.paint_clip);
+        let unoccluded = ctx.viewport(|viewport| {
+            let widgets = &viewport.prev_pass.widgets;
+            let Some((layer, index)) = widgets.order(self.widget) else {
+                return false;
+            };
+            layer == self.layer
+                && !widgets
+                    .get_layer(layer)
+                    .skip(index + 1)
+                    .any(|widget| widget.visible && widget.interact_rect.intersect(local).is_positive())
+        });
+        if !unoccluded {
+            return false;
+        }
+        // No Context accessors are nested while memory/viewport locks are held.
+        let above = ctx.memory(|memory| {
+            memory
+                .layer_ids()
+                .skip_while(|layer| *layer != self.layer)
+                .skip(1)
+                .filter(|layer| memory.areas().is_visible(layer))
+                .collect::<Vec<_>>()
+        });
+        for layer in above {
+            if let Some(area) = egui::AreaState::load(ctx, layer.id) {
+                let Some(rect) = transformed_rect(area.rect(), ctx.layer_transform_to_global(layer)) else {
+                    return false;
+                };
+                if rect.intersect(self.rect).is_positive() {
+                    return false;
+                }
+            }
+        }
+        ctx.layer_id_at(self.rect.center()) == Some(self.layer)
     }
 }
+
 #[derive(Clone, Copy, PartialEq)]
 enum Release {
     Pointer(egui::Pos2),
@@ -599,6 +751,14 @@ impl Proposal {
             _ => None,
         }
     }
+    pub(crate) fn input_current(&self, input: InputRead) -> bool {
+        input.plain()
+            && self.control.input_epoch == input.epoch()
+            && match self.release {
+                Release::Key(key) => input.key_allowed(key),
+                _ => true,
+            }
+    }
     pub(crate) fn same(&self, other: &Self) -> bool {
         self.owner == other.owner
             && self.revision == other.revision
@@ -645,7 +805,7 @@ struct Activation {
     blocked: bool,
 }
 impl Activation {
-    fn paint(&mut self, ui: &egui::Ui, response: &egui::Response) -> Option<(Control, Release)> {
+    fn paint(&mut self, ui: &egui::Ui, response: &egui::Response, input: InputRead) -> Option<(Control, Release)> {
         let frame = ui.ctx().cumulative_frame_nr();
         if self.frame != Some(frame) {
             self.previous = self.control.filter(|control| control.frame.checked_add(1) == Some(frame));
@@ -654,12 +814,20 @@ impl Activation {
             self.frame = Some(frame);
             self.blocked = false;
         }
-        let control = Control {
-            widget: response.id,
-            rect: response.rect.intersect(ui.clip_rect()),
-            layer: ui.layer_id(),
-            frame,
-            pass: ui.ctx().cumulative_pass_nr(),
+        if self
+            .gesture
+            .and_then(|gesture| gesture.key)
+            .is_some_and(|key| !input.key_allowed(key))
+        {
+            self.gesture = None;
+            self.released = None;
+        }
+        let Some(control) = Control::capture(ui, response, input) else {
+            self.gesture = None;
+            self.released = None;
+            self.control = None;
+            self.blocked = true;
+            return None;
         };
         if self.input_frame != Some(frame) {
             self.input_frame = Some(frame);
@@ -668,7 +836,7 @@ impl Activation {
             // strings or an unbounded raw event list from a menu paint.
             let (edges, blocked) = ui.input(|input| {
                 let mut edges = [None; 128];
-                let mut blocked = !input.focused || input.events.len() > edges.len();
+                let mut blocked = !input.focused || !input.modifiers.is_none() || input.events.len() > edges.len();
                 for (index, event) in input.events.iter().take(128).enumerate() {
                     edges[index] = match event {
                         egui::Event::PointerButton {
@@ -692,7 +860,7 @@ impl Activation {
                             repeat: *repeat,
                             plain: modifiers.is_none(),
                         }),
-                        egui::Event::Ime(_) | egui::Event::WindowFocused(false) => {
+                        egui::Event::Ime(_) | egui::Event::WindowFocused(false) | egui::Event::ModifiersChanged(_) => {
                             blocked = true;
                             Some(ActivationEdge::Cancel)
                         }
@@ -701,7 +869,7 @@ impl Activation {
                 }
                 (edges, blocked)
             });
-            self.blocked |= blocked || !ui.is_enabled();
+            self.blocked |= blocked || !ui.is_enabled() || !input.plain();
             if self.blocked {
                 self.gesture = None;
                 self.released = None;
@@ -715,9 +883,9 @@ impl Activation {
                             self.gesture = self
                                 .previous
                                 .filter(|previous| {
-                                    previous.visible()
+                                    previous.registry(ui.ctx(), true)
                                         && previous.rect.contains(pos)
-                                        && previous.widget == control.widget
+                                        && previous.same_widget(control)
                                         && ui.ctx().layer_id_at(pos) == Some(previous.layer)
                                 })
                                 .map(|control| Gesture { control, key: None });
@@ -731,14 +899,17 @@ impl Activation {
                         repeat,
                         plain,
                     } => {
-                        if !plain || pressed && repeat {
+                        if !plain || !input.key_allowed(key) || pressed && repeat {
                             self.gesture = None;
                             self.released = None;
                         } else if pressed {
                             self.gesture = self
                                 .previous
                                 .filter(|previous| {
-                                    previous.visible() && previous.widget == control.widget && focused == Some(previous.widget)
+                                    input.key_allowed(key)
+                                        && previous.registry(ui.ctx(), true)
+                                        && previous.same_widget(control)
+                                        && focused == Some(previous.widget)
                                 })
                                 .map(|control| Gesture { control, key: Some(key) });
                         } else if !pressed && let Some(gesture) = self.gesture.take().filter(|gesture| gesture.key == Some(key)) {
@@ -752,7 +923,7 @@ impl Activation {
                 }
             }
         }
-        if self.blocked || !ui.is_enabled() {
+        if self.blocked || !ui.is_enabled() || !input.plain() {
             self.gesture = None;
             self.released = None;
             return None;
@@ -760,8 +931,8 @@ impl Activation {
         if self.released.is_none()
             && self.gesture.is_none()
             && let Some(previous) = self.previous.filter(|previous| {
-                previous.visible()
-                    && previous.widget == control.widget
+                previous.registry(ui.ctx(), true)
+                    && previous.same_widget(control)
                     && ui.ctx().memory(|memory| memory.focused()) == Some(previous.widget)
             })
             && ui.input(|input| input.has_accesskit_action_request(control.widget, egui::accesskit::Action::Click))
@@ -777,7 +948,7 @@ impl Activation {
         self.control = Some(control);
         let (gesture, release) = self.released?;
         let relevant = control.visible()
-            && gesture.control.widget == control.widget
+            && gesture.control.same_widget(control)
             && ui.ctx().memory(|memory| memory.is_above_modal_layer(control.layer))
             && match release {
                 Release::Pointer(pos) => {
@@ -794,11 +965,14 @@ impl Activation {
         let Some(control) = self.control else { return false };
         self.released
             .is_some_and(|(gesture, actual)| gesture.control == original && actual == release)
-            && control.widget == original.widget
+            && control.same_widget(original)
+            && control.committed(ctx)
             && control.visible()
             && original.visible()
             && control.frame.checked_add(1) == Some(ctx.cumulative_frame_nr())
             && control.pass.checked_add(1) == Some(ctx.cumulative_pass_nr())
+            && !ctx.will_discard()
+            && ctx.input(|input| input.focused && input.modifiers.is_none())
             && !egui::Popup::is_any_open(ctx)
             && ctx.memory(|memory| memory.is_above_modal_layer(control.layer))
             && match release {
@@ -856,7 +1030,7 @@ impl Context {
             self.captured = true;
         }
     }
-    fn paint(&mut self, ui: &mut egui::Ui, p: &Palette, owner: Uuid, revision: Key, profile: &str) -> Option<Proposal> {
+    fn paint(&mut self, ui: &mut egui::Ui, p: &Palette, owner: Uuid, revision: Key, profile: &str, input: InputRead) -> Option<Proposal> {
         let ticket = self.ticket.as_ref()?;
         let nonce = self.nonce?;
         let label = if ticket.previous() {
@@ -869,7 +1043,7 @@ impl Context {
                 super::super::menu::editable_row(ui, p, "archive-filled", label, true, None, None, false)
             })
             .inner;
-        let (original, release) = self.activation.paint(ui, &response)?;
+        let (original, release) = self.activation.paint(ui, &response, input)?;
         ui.close();
         Some(Proposal {
             owner,
@@ -903,7 +1077,16 @@ impl IncludeContext {
             *self = Self::default();
         }
     }
-    fn paint(&mut self, ui: &mut egui::Ui, p: &Palette, owner: Uuid, revision: Key, controls: Controls, enabled: bool) -> Option<Proposal> {
+    fn paint(
+        &mut self,
+        ui: &mut egui::Ui,
+        p: &Palette,
+        owner: Uuid,
+        revision: Key,
+        controls: Controls,
+        enabled: bool,
+        input: InputRead,
+    ) -> Option<Proposal> {
         let frame = ui.ctx().cumulative_frame_nr();
         let binding = controls.binding.filter(|_| enabled).map(|binding| (binding, !controls.included));
         if self.binding != binding || self.seen.is_some_and(|seen| seen.checked_add(1).is_none_or(|next| next < frame)) {
@@ -930,7 +1113,7 @@ impl IncludeContext {
             .inner;
         let (binding, desired) = self.binding?;
         let nonce = self.nonce?;
-        let (control, release) = self.activation.paint(ui, &response)?;
+        let (control, release) = self.activation.paint(ui, &response, input)?;
         ui.close();
         Some(Proposal {
             owner,
@@ -958,7 +1141,7 @@ pub(super) fn context(ui: &mut egui::Ui, p: &Palette, id: Uuid, profile: &str, s
     let allowed = st.archive_change_frame != Some(ui.ctx().cumulative_frame_nr());
     let opened = ui.input(|input| input.pointer.secondary_clicked()) || st.row_menu_opened_frame == Some(ui.ctx().cumulative_frame_nr());
     st.archive_context.begin(ui, id, allowed, opened);
-    if let Some(proposal) = st.archive_context.paint(ui, p, st.ui_id, revision, profile) {
+    if let Some(proposal) = st.archive_context.paint(ui, p, st.ui_id, revision, profile, st.archive_input) {
         actions.push(InvAction::Archive(Box::new(proposal)));
     }
 }
@@ -1008,6 +1191,22 @@ impl InventoryUi {
                 }
                 Intent::Include { .. } => state.archive_include_context.validates(ctx, proposal),
             }
+    }
+    /// Modifier/history revocation touches Archive proof only. Keep popup,
+    /// context ticket, editor text/Undo and App-owned physical release guards.
+    pub(crate) fn revoke_archive_gestures(&mut self) {
+        self.archive_context.activation = Default::default();
+        self.archive_include_context.activation = Default::default();
+        self.archive_include_proposal = None;
+        for window in &mut self.windows {
+            window.state.revoke_archive_gestures();
+        }
+    }
+    pub(crate) fn archive_input(&mut self, input: InputRead) {
+        self.archive_input = input;
+        for window in &mut self.windows {
+            window.state.archive_input(input);
+        }
     }
     pub(crate) fn retire_archive_input(&mut self, ctx: &egui::Context) {
         self.archive_context.close(ctx);

@@ -231,6 +231,19 @@ cases authored UNRUN. Independent source review, Root compiler/tests/private
 native/platform checks and human visual validation remain required; this source
 checkpoint is not runtime or full Legacy Viewer parity acceptance.
 
+The follow-up authority guard resolves the actual final committed WidgetRect
+(enabled/visible/id/sense/clip/geometry/layer), unchanged finite forward/inverse
+layer transform and coverage after the whole UI run for BOTH Edit and Include.
+An App-owned native Enter/Space fence survives UI/source resets; actual modifier
+and hidden AltGraph transitions retire only Archive gestures and the original
+input epoch. They preserve editable popup drafts and never rearm a physically
+held key. New actual-consumer registry/transform/modifier cases are authored
+UNRUN; Root compilation/runtime and final independent review remain required.
+Offline ordinary Inventory browsing is supported by the separate readonly
+Scope. The actual demo's nil session still fails the pre-existing native Folder
+Jump source gate, so demo Folder Jump remains unavailable; no native session or
+rights are fabricated to enable it.
+
 `session_host/monitor_manager.rs` is the Shell-owned bounded binding/operation
 front for four fixed monitors and one cycling view. It depends on the separately
 authored real `preview_projection` facade; no local IO stub or inferred image

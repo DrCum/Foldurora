@@ -45,7 +45,7 @@ impl Pool {
     }
     fn acquire(&'static self) -> Option<Lease> {
         self.bytes
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |used| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |used| {
                 used.checked_add(BUNDLE_BYTES).filter(|next| *next <= PROCESS_BYTES)
             })
             .ok()?;

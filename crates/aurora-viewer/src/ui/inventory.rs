@@ -601,6 +601,7 @@ pub struct InventoryUi {
     row_menu: Option<(Uuid, egui::Pos2)>,
     row_menu_opened_frame: Option<u64>,
     archive_summary: Option<archive::Summary>,
+    archive_input: archive::InputRead,
     archive_controls: Option<archive::Controls>,
     archive_include_context: archive::IncludeContext,
     archive_include_proposal: Option<archive::Proposal>,
@@ -1992,6 +1993,7 @@ pub fn show(
     let mut actions = Vec::new();
     archive::preflight(ctx, world, st, st.scope);
     for window in &mut st.windows {
+        window.state.archive_input(st.archive_input);
         archive::preflight(ctx, world, &mut window.state, window.root);
     }
     st.focus_search = *open && (st.focus_search || !st.was_open);
@@ -2192,6 +2194,7 @@ pub fn show(
     let mut windows = std::mem::take(&mut st.windows);
     let mut spawned = Vec::new();
     for w in &mut windows {
+        w.state.archive_input(st.archive_input);
         if !w.root.is_nil() && !world.inventory.folders.contains_key(&w.root) {
             w.open = false;
             w.state.menu_editor.finish_inventory_frame(ctx, &mut prefs.context_menus);
