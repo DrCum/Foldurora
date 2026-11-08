@@ -653,8 +653,35 @@ impl Frames {
         self.pointer(target, egui::PointerButton::Secondary, false);
         self.settled(false).rect.center()
     }
+    fn visible_heading(&self) -> Option<(egui::WidgetRect, egui::Rect)> {
+        let ctx = &self.frames.ctx;
+        let (heading, _, _) = ctx.data(|data| data.get_temp::<(egui::WidgetRect, egui::Frame, egui::Vec2)>(visibility_heading_key()))?;
+        let actual = ctx.viewport(|viewport| viewport.prev_pass.widgets.get(heading.id).copied())?;
+        let parent = egui::AreaState::load(ctx, actual.layer_id.id)?.rect();
+        (actual.enabled
+            && actual.visible
+            && finite_positive(actual.rect)
+            && finite_positive(actual.interact_rect)
+            && finite_positive(parent)
+            && actual.interact_rect.contains_rect(actual.rect)
+            && parent.contains_rect(actual.rect))
+        .then_some((actual, parent))
+    }
+    fn settled_visibility_heading(&mut self) -> egui::WidgetRect {
+        let mut previous = None;
+        for _ in 0..32 {
+            self.run(Vec::new());
+            let current = self.visible_heading();
+            if current.is_some() && current == previous {
+                return current.unwrap().0;
+            }
+            previous = current;
+        }
+        panic!("actual parent Inventory window and unclipped Visibility heading did not settle");
+    }
     fn settled(&mut self, include: bool) -> Control {
         let mut previous: Option<Control> = None;
+        let mut previous_parent = None;
         for _ in 0..64 {
             self.run(Vec::new());
             let current = if include {
@@ -662,8 +689,12 @@ impl Frames {
             } else {
                 self.state.archive_context.activation.control
             };
+            let parent = self.visible_heading();
+            let parent_ready = !include || parent.is_some() && parent == previous_parent;
+            previous_parent = parent;
             if let Some(control) = current {
-                if control.committed(&self.frames.ctx)
+                if parent_ready
+                    && control.committed(&self.frames.ctx)
                     && previous.is_some_and(|previous| previous.same_widget(control) && previous.structure == control.structure)
                 {
                     return control;

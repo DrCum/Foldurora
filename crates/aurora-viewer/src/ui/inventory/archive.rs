@@ -161,6 +161,14 @@ pub(super) struct Controls {
     binding: Option<VisibilityBinding>,
     included: bool,
 }
+pub(super) fn visibility_toolbar(ui: &mut egui::Ui, p: &Palette, st: &mut InventoryUi) {
+    if st.archive_controls.is_none() || st.archive_key.is_none() {
+        return;
+    }
+    // SubMenu forwards dismissal to its nearest closable parent. In the
+    // Classic toolbar that owner is this menu, not Window's collapsing body.
+    ui.scope_builder(egui::UiBuilder::new().closable(), |ui| visibility_menu(ui, p, st));
+}
 pub(super) fn visibility_menu(ui: &mut egui::Ui, p: &Palette, st: &mut InventoryUi) {
     let Some(controls) = st.archive_controls else { return };
     let Some(revision) = st.archive_key else { return };

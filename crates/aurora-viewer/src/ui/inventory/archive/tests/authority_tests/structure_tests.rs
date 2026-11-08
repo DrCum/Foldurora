@@ -29,6 +29,52 @@ fn inventory_archive_structure_actual_popup_frame_keeps_both_original_intents_li
     }
 }
 
+#[test]
+fn inventory_archive_structure_classic_visibility_dismissal_does_not_collapse_its_inventory_window() {
+    for modality in MODALITIES {
+        let mut frames = Frames::new();
+        let control = original(&mut frames, true);
+        let window = egui::Id::unique("inventory").with("collapsing");
+        assert!(
+            egui::collapsing_header::CollapsingState::load(&frames.frames.ctx, window)
+                .unwrap()
+                .is_open()
+        );
+        assert!(
+            frames.visible_heading().is_some(),
+            "real parent heading is visible and unclipped before input"
+        );
+        controller_testing::reset_assignments();
+        release(&mut frames, control, modality, Late::None);
+        assert_eq!(frames.proposals.len(), 1);
+        assert!(valid(&frames));
+        assert!(
+            egui::collapsing_header::CollapsingState::load(&frames.frames.ctx, window)
+                .unwrap()
+                .is_open(),
+            "menu dismissal cannot close Window's body"
+        );
+        for _ in 0..12 {
+            frames.run(Vec::new());
+        }
+        let (heading, parent) = frames
+            .visible_heading()
+            .expect("real parent remains expanded after the menu closes");
+        assert!(parent.contains_rect(heading.rect));
+        assert!(heading.interact_rect.contains_rect(heading.rect));
+        assert!(
+            egui::collapsing_header::CollapsingState::load(&frames.frames.ctx, window)
+                .unwrap()
+                .is_open()
+        );
+        assert_eq!(controller_testing::assignments(), 0);
+        assert!(
+            !frames.state.archive.as_ref().unwrap().policy.included(),
+            "paint still posts intent only"
+        );
+    }
+}
+
 #[derive(Clone, Copy)]
 enum FrameLate {
     None,

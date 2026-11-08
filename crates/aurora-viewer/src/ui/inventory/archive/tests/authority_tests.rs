@@ -112,18 +112,13 @@ fn key(key: egui::Key, pressed: bool) -> egui::Event {
 }
 fn original(frames: &mut Frames, include: bool) -> Control {
     if include {
-        let mut texts = Vec::new();
-        for _ in 0..4 {
-            texts = frames.run(Vec::new());
-        }
-        let position = texts
-            .iter()
-            .find(|text| text.source == aurora_i18n::tr!("inventory-archive-visibility"))
-            .expect("actual Classic Visibility submenu")
-            .rect
-            .center();
+        let heading = frames.settled_visibility_heading();
+        frames.run(vec![egui::Event::PointerMoved(heading.rect.center())]);
+        let position = frames.settled_visibility_heading().rect.center();
         frames.pointer(position, egui::PointerButton::Primary, true);
         frames.pointer(position, egui::PointerButton::Primary, false);
+        let control = frames.settled(true);
+        frames.run(vec![egui::Event::PointerMoved(control.rect.center())]);
         frames.settled(true)
     } else {
         frames.open_context();
