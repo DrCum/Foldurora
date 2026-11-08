@@ -13450,6 +13450,7 @@ host-attention-profiles = Include profiles
 host-attention-nearby = Nearby chat
 host-attention-direct = Direct messages
 host-attention-groups = Group chats
+host-attention-conferences = Conferences
 host-attention-previous = Previous
 host-attention-next = Next
 host-attention-open = Open shared chat

@@ -27,6 +27,7 @@ pub(super) struct NativeInitialization {
     capture: RosterInitialization,
     start: bool,
     preserve_live: bool,
+    observed_through: u64,
 }
 
 struct Entry {
@@ -114,18 +115,32 @@ impl NativeSessionRosters {
         Some(capture)
     }
 
-    fn observe(&mut self, session: Uuid, batch: &SessionAgentBatch) -> Option<u64> {
-        let scope = self.scope?;
+    fn next_order(&mut self) -> Option<u64> {
+        self.scope?;
         let Some(order) = self.order.checked_add(1) else {
             self.lost = true;
             self.mute_history_lost_through = Some(u64::MAX);
             return None;
         };
         self.order = order;
+        Some(order)
+    }
+
+    fn observe(&mut self, session: Uuid, batch: &SessionAgentBatch) -> Option<u64> {
+        let scope = self.scope?;
+        let order = self.next_order()?;
         if let Some(entry) = self.entry(session) {
             entry.authority.observe(scope, batch, order);
         }
         Some(order)
+    }
+
+    fn observe_sender(&mut self, session: Uuid, sender: Uuid) {
+        let Some(scope) = self.scope else { return };
+        let Some(order) = self.next_order() else { return };
+        if let Some(entry) = self.entry(session) {
+            entry.authority.observe_sender(scope, sender, order);
+        }
     }
 
     fn accepts(&self, session: Uuid, capture: RosterInitialization, path: InitializationPath) -> bool {
@@ -169,10 +184,10 @@ impl NativeSessionRosters {
         } else {
             None
         };
-        if let Some(pending) = &pending {
-            if !entry.authority.merge_unbound(scope, capture, final_session, &pending.authority) {
-                entry.authority.invalidate();
-            }
+        if let Some(pending) = &pending
+            && !entry.authority.merge_unbound(scope, capture, final_session, &pending.authority)
+        {
+            entry.authority.invalidate();
         }
         let result = entry.authority.complete(scope, capture, final_session, batch);
         if result.is_some() {
@@ -273,6 +288,9 @@ impl World {
             info.native_incarnation = incarnation;
             info.native_scope = Some(scope);
             info.native_pending_text_mute = pending_mute;
+            info.native_initializations = [None; 2];
+            info.native_mute_floor = 0;
+            info.conference_known = false;
             info.active = false;
             info.closed = false;
         }
@@ -301,10 +319,11 @@ impl World {
                     correlation.begin_start(scope, incarnation)
                 }
             })?;
-        self.groups.sessions.get_mut(&session)?.native_initialization = Some(NativeInitialization {
+        self.groups.sessions.get_mut(&session)?.native_initializations[usize::from(start)] = Some(NativeInitialization {
             capture,
             start,
             preserve_live,
+            observed_through: self.groups.rosters.order,
         });
         Some(capture)
     }
@@ -336,9 +355,15 @@ impl World {
         self.groups.rosters.pending_mutes.remove(&session)
     }
 
+    pub(super) fn observe_session_sender(&mut self, session: Uuid, sender: Uuid) {
+        if !session.is_nil() && !sender.is_nil() && sender != self.agent_id && self.bind_roster_scope().is_some() {
+            self.groups.rosters.observe_sender(session, sender);
+        }
+    }
+
     pub(super) fn session_start_capture(&mut self, session: Uuid) -> Option<RosterInitialization> {
         self.bind_roster_scope()?;
-        let original = self.groups.sessions.get(&session)?.native_initialization?;
+        let original = self.groups.sessions.get(&session)?.native_initializations[1]?;
         if !original.start {
             return None;
         }
@@ -351,8 +376,7 @@ impl World {
             && self.groups.sessions.get(&session).is_some_and(|info| {
                 info.native_incarnation == capture.incarnation()
                     && info.native_scope == Some(capture.scope())
-                    && info
-                        .native_initialization
+                    && info.native_initializations[usize::from(start)]
                         .is_some_and(|original| original.capture == capture && original.start == start)
             })
     }
@@ -365,7 +389,15 @@ impl World {
         batch: &SessionAgentBatch,
     ) -> Option<RosterCompletion> {
         self.bind_roster_scope()?;
-        let original = self.groups.sessions.get(&session)?.native_initialization?;
+        let original = self
+            .groups
+            .sessions
+            .get(&session)?
+            .native_initializations
+            .iter()
+            .flatten()
+            .find(|original| original.capture == capture)
+            .copied()?;
         if !self.session_capture_current(session, capture, original.start)
             || final_session.is_nil()
             || (session != final_session && (!original.start || !capture.is_native_start()))
@@ -397,8 +429,20 @@ impl World {
         .into_iter()
         .flatten()
         .max_by_key(|entry| entry.0);
+        let native_was_ready = self.groups.sessions.get(&session)?.active && !self.groups.sessions.get(&session)?.closed;
+        let mute_floor = original.observed_through.max(self.groups.sessions.get(&session)?.native_mute_floor);
+        let later_unmute = latest_mute.is_some_and(|(order, muted)| !muted && order > mute_floor);
+        let initial_mute = batch
+            .agents()
+            .iter()
+            .rev()
+            .find_map(|agent| (agent.agent == self.agent_id).then_some(agent.text_muted).flatten());
+        let bootstrap_mutes = initial_mute == Some(true) && !later_unmute;
+        if bootstrap_mutes {
+            self.groups.sessions.get_mut(&session)?.native_mute_floor = mute_floor;
+        }
         self.groups.sessions.get_mut(&session)?.native_pending_text_mute = latest_mute;
-        self.groups.sessions.get_mut(&session)?.native_initialization = None;
+        self.groups.sessions.get_mut(&session)?.native_initializations[usize::from(original.start)] = None;
         let mut completion = self
             .groups
             .rosters
@@ -408,11 +452,12 @@ impl World {
             } else {
                 RosterCompletion::Unavailable { self_text_mute: None }
             });
-        let mute = if self
-            .groups
-            .rosters
-            .mute_history_lost_through
-            .is_some_and(|through| latest_mute.is_none_or(|latest| latest.0 <= through))
+        let mute = if bootstrap_mutes
+            || self
+                .groups
+                .rosters
+                .mute_history_lost_through
+                .is_some_and(|through| latest_mute.is_none_or(|latest| latest.0 <= through))
         {
             // Lost native permission history can never infer unmute from an
             // older bootstrap. A later explicit current self delta resolves it.
@@ -428,6 +473,19 @@ impl World {
             }
             RosterCompletion::AcknowledgedExisting => {}
         }
+        if native_was_ready || original.preserve_live {
+            // Group voice acceptance also starts the Group chat. Both native
+            // callbacks are current, but their unordered bootstrap lists must
+            // not replace an already live permission state. Stream deltas win;
+            // without one, a bootstrap may tighten but cannot infer unmute.
+            let info = self.groups.sessions.get_mut(&session)?;
+            if latest_mute.is_some_and(|(_, muted)| muted) || bootstrap_mutes || (final_session != session && mute == Some(true)) {
+                info.text_muted = true;
+            } else if later_unmute {
+                info.text_muted = false;
+            }
+            completion = RosterCompletion::AcknowledgedExisting;
+        }
         Some(completion)
     }
 
@@ -435,7 +493,13 @@ impl World {
         if self.bind_roster_scope().is_none() {
             return false;
         }
-        let Some(original) = self.groups.sessions.get(&session).and_then(|info| info.native_initialization) else {
+        let Some(original) = self.groups.sessions.get(&session).and_then(|info| {
+            info.native_initializations
+                .iter()
+                .flatten()
+                .find(|original| original.capture == capture)
+                .copied()
+        }) else {
             return false;
         };
         if !self.session_capture_current(session, capture, original.start) {
@@ -445,21 +509,21 @@ impl World {
             .sessions
             .get_mut(&session)
             .expect("validated native owner")
-            .native_initialization = None;
+            .native_initializations[usize::from(original.start)] = None;
         self.groups.rosters.fail(session, capture, retire);
         true
     }
 
     pub(super) fn retire_session_roster(&mut self, session: Uuid) {
         if let Some(info) = self.groups.sessions.get_mut(&session) {
-            info.native_initialization = None;
+            info.native_initializations = [None; 2];
         }
         self.groups.rosters.retire(session);
     }
 
     pub(super) fn cancel_session_initialization(&mut self, session: Uuid) {
         if let Some(info) = self.groups.sessions.get_mut(&session) {
-            info.native_initialization = None;
+            info.native_initializations = [None; 2];
         }
         self.groups.rosters.retire_proof(session);
     }

@@ -106,6 +106,79 @@ fn group_close_activity_actual_udp_is_per_conversation_not_a_shared_unread_count
 }
 
 #[test]
+fn conference_close_saved_direct_and_group_udp_keep_native_unread_without_live_activity_credit() {
+    for group in [false, true] {
+        let mut world = world();
+        let session = if group { Uuid::from_u128(0x996) } else { PEER };
+        if group {
+            initialized_group(&mut world, session);
+        }
+        let mut message = aurora_net::InstantMessage {
+            from_agent_id: PEER,
+            from_name: "Synthetic resident".into(),
+            to_agent_id: OWNER,
+            dialog: if group { crate::world::groups::dialog::SESSION_SEND } else { 0 },
+            session_id: session,
+            message: "Live delivery".into(),
+            offline: false,
+            from_group: false,
+            binary_bucket: Vec::new(),
+            timestamp: 0,
+        };
+        world.apply(aurora_net::NetEvent::InstantMessage(message.clone()));
+        let fence = world.shared_chat_close_fence();
+        let before = world.social.ims.iter().find(|entry| entry.other == session).unwrap().unread;
+        message.offline = true;
+        message.message = "Saved delivery".into();
+        world.apply(aurora_net::NetEvent::InstantMessage(message.clone()));
+        message.offline = false;
+        world.apply(aurora_net::NetEvent::SavedInstantMessage(message));
+        assert_eq!(world.shared_chat_close_fence(), fence);
+        assert_eq!(
+            world.social.ims.iter().find(|entry| entry.other == session).unwrap().unread,
+            before + 2
+        );
+    }
+}
+
+#[test]
+fn conference_close_saved_auto_response_preserves_unread_without_reopening_live_fence() {
+    let mut world = world();
+    let mut message = aurora_net::InstantMessage {
+        from_agent_id: PEER,
+        from_name: "Synthetic resident".into(),
+        to_agent_id: OWNER,
+        dialog: 0,
+        session_id: PEER,
+        message: "Live delivery".into(),
+        offline: false,
+        from_group: false,
+        binary_bucket: Vec::new(),
+        timestamp: 0,
+    };
+    world.apply(aurora_net::NetEvent::InstantMessage(message.clone()));
+    let fence = world.shared_chat_close_fence();
+    let before = world.social.ims.iter().find(|entry| entry.other == PEER).unwrap().unread;
+    message.offline = true;
+    message.dialog = crate::world::status::AUTO_RESPONSE;
+    message.message = "Saved automatic response".into();
+    world.apply(aurora_net::NetEvent::InstantMessage(message.clone()));
+    assert_eq!(world.shared_chat_close_fence(), fence);
+    let session = world.social.ims.iter().find(|entry| entry.other == PEER).unwrap();
+    assert_eq!(session.unread, before + 1);
+    assert!(session.lines.back().unwrap().text.contains("Saved automatic response"));
+    message.offline = false;
+    world.apply(aurora_net::NetEvent::SavedInstantMessage(message.clone()));
+    assert_eq!(world.shared_chat_close_fence(), fence);
+    assert_eq!(
+        world.social.ims.iter().find(|entry| entry.other == PEER).unwrap().unread,
+        before + 2
+    );
+    world.apply(aurora_net::NetEvent::InstantMessage(message));
+    assert!(world.shared_chat_close_fence().unwrap().serial > fence.unwrap().serial);
+}
+
+#[test]
 fn group_close_activity_uninitialized_restricted_and_nonincoming_lines_never_mint_or_backfill() {
     let group = Uuid::from_u128(0x996);
     for fault in 0..19 {

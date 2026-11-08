@@ -65,7 +65,7 @@ impl Session<'_> {
                     Ok(messages) => {
                         log::info!("offline messages: {}", messages.len());
                         for m in messages {
-                            let _ = events.send(NetEvent::InstantMessage(m));
+                            let _ = events.send(NetEvent::SavedInstantMessage(m));
                         }
                     }
                     // Firestorm stops there too, without the legacy request

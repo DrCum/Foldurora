@@ -43,7 +43,10 @@ pub struct SessionInfo {
     pub(super) native_incarnation: u64,
     pub(super) native_scope: Option<aurora_net::social::NativeSessionScope>,
     pub(super) native_pending_text_mute: Option<(u64, bool)>,
-    pub(super) native_initialization: Option<super::session_roster::NativeInitialization>,
+    pub(super) native_mute_floor: u64,
+    /// Explicit native conference start/voice type, never absence from Groups.
+    pub(super) conference_known: bool,
+    pub(super) native_initializations: [Option<super::session_roster::NativeInitialization>; 2],
     pub name: String,
     /// Group chat (session id = group id); else an ad-hoc conference.
     pub group: bool,
@@ -394,7 +397,7 @@ impl World {
                 .groups
                 .sessions
                 .get(&session)
-                .is_some_and(|info| info.group && info.active && !info.closed)
+                .is_some_and(|info| info.group && !info.conference_known && info.active && !info.closed)
             && self.social.has_session(&session)
     }
 
@@ -417,6 +420,61 @@ impl World {
             && !self.shared_group_blocked(session)
             && self.groups.sessions.get(&session).is_some_and(|info| !info.text_muted)
             && self.rlva_can_send_session(session)
+    }
+
+    /// Folderstorm FSSessionWorker::imAllowed uses the complete native speaker
+    /// set. A partially received Group list cannot establish Conference kind.
+    pub(crate) fn shared_conference_initialized(&self, session: Uuid) -> bool {
+        let Some(scope) = self.roster_scope() else { return false };
+        !session.is_nil()
+            && !self.groups.is_member(&session)
+            && !self.groups.restoring.contains(&session)
+            && self.groups.sessions.get(&session).is_some_and(|info| {
+                info.conference_known
+                    && !info.group
+                    && info.active
+                    && !info.closed
+                    && info.native_scope == Some(scope)
+                    && info.native_incarnation != 0
+            })
+            && self.social.has_session(&session)
+    }
+
+    pub(crate) fn shared_conference_stamp(&self, session: Uuid) -> Option<(u64, u64)> {
+        self.shared_conference_initialized(session).then_some(())?;
+        Some((
+            self.groups.sessions.get(&session)?.native_incarnation,
+            self.session_roster(session).map_or(0, |roster| roster.revision),
+        ))
+    }
+
+    pub(crate) fn shared_conference_readable(&self, session: Uuid) -> bool {
+        self.shared_conference_initialized(session) && !self.mutes.is_muted_id(&session) && self.shared_chat_privacy_allowed()
+    }
+
+    pub(crate) fn shared_conference_sendable(&self, session: Uuid) -> bool {
+        self.shared_conference_initialized(session)
+            && !self.mutes.is_muted_id(&session)
+            && self.groups.sessions.get(&session).is_some_and(|info| !info.text_muted)
+            && self.session_roster(session).is_some_and(|roster| {
+                roster.self_text_mute != Some(true)
+                    && roster.participants.iter().filter(|participant| **participant != self.agent_id)
+                        .all(|participant| self.rlva_allows_im("sendim", *participant))
+            })
+            // Preserve the owning App's common restriction boundary too.
+            && self.rlva_can_send_session(session)
+    }
+
+    pub(crate) fn own_shared_conference_im(&mut self, session: Uuid, text: &str) {
+        if self.agent_id.is_nil() || !self.mutes.is_loaded() || !self.shared_conference_sendable(session) {
+            return;
+        }
+        let me = self.own_name();
+        self.session_push(
+            session,
+            line(me, text.to_owned(), ChatKind::OWN, Uuid::nil(), SystemTime::now()),
+            false,
+        );
     }
 
     /// Record a literal host send after the common App send boundary. Unlike
@@ -648,9 +706,7 @@ impl World {
                 error,
                 agents,
             } => {
-                let Some(capture) = self.session_start_capture(temp_session) else {
-                    return None;
-                };
+                let capture = self.session_start_capture(temp_session)?;
                 if !success {
                     if !self.fail_session_roster(temp_session, capture, true) {
                         return None;
@@ -667,7 +723,9 @@ impl World {
                         aurora_i18n::tr!("world-groups-could-not-join-the-session", value0 = reason(&error).to_string()),
                     );
                     if let Some(s) = self.groups.sessions.get_mut(&id) {
-                        s.closed = true;
+                        // Paired Group voice acceptance remains valid, and a
+                        // redundant start cannot close an already live chat.
+                        s.closed = !s.active && s.native_initializations[0].is_none();
                     }
                     self.groups.restoring.remove(&id);
                     return None;
@@ -675,9 +733,7 @@ impl World {
                 if temp_session != session && self.groups.sessions.contains_key(&session) {
                     return None;
                 }
-                let Some(completion) = self.complete_session_roster(temp_session, session, capture, &agents) else {
-                    return None;
-                };
+                let completion = self.complete_session_roster(temp_session, session, capture, &agents)?;
                 // The original start witness is consumed before calls removes
                 // its pending conference map or native IDs are remapped.
                 self.call_session_started(temp_session, session, true);
@@ -698,16 +754,8 @@ impl World {
                 if completion != aurora_net::social::RosterCompletion::AcknowledgedExisting {
                     apply_agents(info, &agents, me);
                 }
-                let fetch = !info.history_fetched;
-                info.history_fetched = true;
                 self.apply_completed_roster(session, completion);
-                if fetch {
-                    self.groups.out.push(NetCommand::ChatSession {
-                        method: SessionMethod::FetchHistory,
-                        session,
-                        initialization: None,
-                    });
-                }
+                self.fetch_session_history_once(session);
             }
             NetEvent::SessionAgents { session, agents } => {
                 self.observe_session_roster(session, &agents);
@@ -758,15 +806,11 @@ impl World {
                 not_found,
             } => match method {
                 SessionMethod::AcceptInvitation => {
-                    let Some(capture) = initialization.filter(|capture| self.session_capture_current(session, *capture, false)) else {
-                        return None;
-                    };
+                    let capture = initialization.filter(|capture| self.session_capture_current(session, *capture, false))?;
                     match result {
                         Some(r) => {
                             let agents = aurora_net::social::parse_session_agent_batch(&r, aurora_net::social::MAX_SESSION_ROSTER_ENTRIES);
-                            let Some(completion) = self.complete_session_roster(session, session, capture, &agents) else {
-                                return None;
-                            };
+                            let completion = self.complete_session_roster(session, session, capture, &agents)?;
                             if let Some(s) = self.groups.sessions.get_mut(&session) {
                                 s.active = true;
                                 if completion != aurora_net::social::RosterCompletion::AcknowledgedExisting {
@@ -774,6 +818,7 @@ impl World {
                                 }
                             }
                             self.apply_completed_roster(session, completion);
+                            self.fetch_session_history_once(session);
                         }
                         // chatterBoxInvitationCoro: only a 404 is shown
                         // (session_does_not_exist_error), any other failure is
@@ -782,12 +827,16 @@ impl World {
                             if !self.fail_session_roster(session, capture, true) {
                                 return None;
                             }
+                            // 404 is definitive native disappearance and wins
+                            // over either callback's earlier or later success.
+                            self.retire_session_roster(session);
                             self.session_system(
                                 session,
                                 aurora_i18n::tr!("world-groups-could-not-join-the-session-it-no-longer-exists"),
                             );
                             if let Some(s) = self.groups.sessions.get_mut(&session) {
                                 s.closed = true;
+                                s.active = false;
                             }
                         }
                         None => {
@@ -813,6 +862,9 @@ impl World {
         let session = inv.session;
         if inv.from == self.agent_id || session.is_nil() {
             return;
+        }
+        if !inv.offline {
+            self.observe_session_sender(session, inv.from);
         }
         let in_group = self.groups.is_member(&session);
         if in_group && !self.rlva_allows_im("recvim", session) {
@@ -873,7 +925,7 @@ impl World {
             }
             let text = saved_prefix(inv.offline, inv.timestamp) + &inv.message;
             let l = line(inv.from_name.clone(), text, ChatKind::Im, inv.from, SystemTime::now());
-            self.session_push(session, l, true);
+            self.conversation_push_with_activity(session, l, true, !inv.offline);
         }
         self.groups.restoring.remove(&session);
         let initialization = self.begin_session_initialization(session, false);
@@ -882,7 +934,12 @@ impl World {
             session,
             initialization,
         });
-        // recent messages of a session we did not have yet (FetchGroupChatHistory)
+        self.fetch_session_history_once(session);
+    }
+
+    /// Recent messages remain once-only across Group start and acceptance,
+    /// including the paired requests of an incoming Group voice invitation.
+    fn fetch_session_history_once(&mut self, session: Uuid) {
         if let Some(s) = self.groups.sessions.get_mut(&session)
             && !s.history_fetched
         {
@@ -898,6 +955,14 @@ impl World {
     /// IM_SESSION_SEND / IM_SESSION_INVITE over UDP (llimprocessing.cpp).
     /// True when the message belonged to a session.
     pub(super) fn on_session_im(&mut self, im: &aurora_net::InstantMessage) -> bool {
+        if matches!(im.dialog, dialog::SESSION_SEND | dialog::SESSION_INVITE) && !im.offline {
+            self.observe_session_sender(im.session_id, im.from_agent_id);
+        }
+        self.on_session_im_observed(im, !im.offline)
+    }
+
+    /// The normal IM ingress observed identity before mute/spam rejection.
+    pub(super) fn on_session_im_observed(&mut self, im: &aurora_net::InstantMessage, live_activity: bool) -> bool {
         if im.dialog != dialog::SESSION_SEND && im.dialog != dialog::SESSION_INVITE {
             return false;
         }
@@ -953,7 +1018,7 @@ impl World {
         // on receipt, whether or not the chat is in front (FIRE-10178)
         let open = super::attention::Open::Conversation(session);
         self.keyword_alert(im.from_agent_id, &im.from_name, &im.message, false, open);
-        self.session_push(session, l, true);
+        self.conversation_push_with_activity(session, l, true, live_activity);
         true
     }
 }

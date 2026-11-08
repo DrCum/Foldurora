@@ -47,7 +47,7 @@ impl World {
         // particular a conference or uninitialized group cannot fall through
         // to the resident path. Group activity is ordinary live session text.
         let readable = if self.is_group_session(&session) {
-            matches!(line.kind, ChatKind::Im) && self.shared_group_readable(session)
+            matches!(line.kind, ChatKind::Im) && (self.shared_group_readable(session) || self.shared_conference_readable(session))
         } else {
             !self.groups.is_member(&session) && self.shared_chat_direct_readable(session)
         };

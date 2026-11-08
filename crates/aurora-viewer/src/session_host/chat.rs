@@ -27,7 +27,7 @@ pub(crate) struct NativeCursor {
 pub(crate) struct NativeSnapshot {
     pub title: Label,
     /// Native rule/mute revisions and privacy options, not message contents.
-    pub stamp: [u64; 4],
+    pub stamp: [u64; 6],
     pub ready: bool,
     pub can_send: bool,
     pub can_read: bool,
@@ -297,7 +297,7 @@ impl WorkerChat {
         }
         if !matches!(
             key.conversation,
-            Conversation::Nearby | Conversation::Direct(_) | Conversation::Group(_)
+            Conversation::Nearby | Conversation::Direct(_) | Conversation::Group(_) | Conversation::Conference(_)
         ) || !native
             .catalogue()
             .into_iter()
@@ -358,7 +358,7 @@ impl WorkerChat {
                 } else {
                     None
                 },
-                incoming_stream: if matches!(key, Conversation::Direct(_) | Conversation::Group(_))
+                incoming_stream: if matches!(key, Conversation::Direct(_) | Conversation::Group(_) | Conversation::Conference(_))
                     && state.policy.ready
                     && state.policy.can_read
                 {
@@ -764,7 +764,7 @@ mod tests {
                 .map_or(self.revision, |(_, revision)| revision);
             Some(NativeSnapshot {
                 title: Label::new("Synthetic nearby").unwrap(),
-                stamp: [revision, 0, 0, 0],
+                stamp: [revision, 0, 0, 0, 0, 0],
                 ready: true,
                 can_send: true,
                 can_read: self.readable,
@@ -1199,7 +1199,7 @@ mod tests {
         fn snapshot(&self, _: Conversation) -> Option<NativeSnapshot> {
             Some(NativeSnapshot {
                 title: Label::new("Synthetic").unwrap(),
-                stamp: [0; 4],
+                stamp: [0; 6],
                 ready: true,
                 can_send: true,
                 can_read: true,

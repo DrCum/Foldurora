@@ -202,6 +202,44 @@ pub struct VoiceInvite {
     pub voice: Llsd,
 }
 
+impl VoiceInvite {
+    /// Native EMultiAgentChatSessionType (llimview.cpp): Group0, Conference1,
+    /// P2P2. Missing/malformed metadata and nonmembership prove no kind.
+    pub fn is_conference(&self) -> bool {
+        !self.p2p && matches!(&self.voice["invitation_type"], Llsd::Integer(1))
+    }
+
+    pub fn is_group(&self) -> bool {
+        !self.p2p && matches!(&self.voice["invitation_type"], Llsd::Integer(0))
+    }
+}
+
+#[cfg(test)]
+mod conference_kind_tests {
+    use super::*;
+    use aurora_llsd::llsd_map;
+
+    #[test]
+    fn conference_voice_kind_requires_the_explicit_native_integer_and_not_p2p_or_membership_inference() {
+        for (value, conference, group) in [
+            (Llsd::from(0), false, true),
+            (Llsd::from(1), true, false),
+            (Llsd::from(2), false, false),
+            (Llsd::from(3), false, false),
+            (Llsd::from("1"), false, false),
+            (Llsd::from(true), false, false),
+            (Llsd::Undef, false, false),
+        ] {
+            let body = llsd_map! { "session_id" => Uuid::from_u128(9), "voice" => llsd_map! { "invitation_type" => value } };
+            let mut invitation = parse_voice_invitation(&body).unwrap();
+            assert_eq!(invitation.is_conference(), conference);
+            assert_eq!(invitation.is_group(), group);
+            invitation.p2p = true;
+            assert!(!invitation.is_conference() && !invitation.is_group());
+        }
+    }
+}
+
 /// Body of a ChatterBoxInvitation carrying a voice invitation.
 pub fn parse_voice_invitation(body: &Llsd) -> Option<VoiceInvite> {
     let voice = &body["voice"];

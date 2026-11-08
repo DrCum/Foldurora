@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::io;
 use std::path::{Path, PathBuf};
 
-const VERSION: u16 = 2;
+const VERSION: u16 = 3;
 const MAX_BYTES: usize = 512;
 const FILE_NAME: &str = "attention-preferences.json";
 
@@ -25,6 +25,7 @@ pub(crate) struct Preferences {
     pub nearby: bool,
     pub direct: bool,
     pub groups: bool,
+    pub conferences: bool,
     pub oldest_first: bool,
 }
 
@@ -35,6 +36,7 @@ impl Default for Preferences {
             nearby: false,
             direct: true,
             groups: true,
+            conferences: true,
             oldest_first: false,
         }
     }
@@ -51,6 +53,7 @@ impl Preferences {
             nearby: false,
             direct: false,
             groups: false,
+            conferences: false,
             oldest_first: false,
         }
     }
@@ -111,9 +114,27 @@ struct LegacyStored {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GroupPreferencesV2 {
+    include_slots: [bool; MAX_WORKERS],
+    nearby: bool,
+    direct: bool,
+    groups: bool,
+    oldest_first: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GroupStoredV2 {
+    version: u16,
+    preferences: GroupPreferencesV2,
+}
+
+#[derive(Deserialize)]
 #[serde(untagged)]
 enum StoredInput {
     Current(Stored),
+    Groups(GroupStoredV2),
     Legacy(LegacyStored),
 }
 
@@ -186,6 +207,16 @@ fn load(path: &Path) -> io::Result<Preferences> {
         Ok(_) => {
             match super::transport::read_json::<StoredInput>(path, MAX_BYTES)? {
                 StoredInput::Current(stored) if stored.version == VERSION => Ok(stored.preferences),
+                StoredInput::Groups(stored) if stored.version == 2 => Ok(Preferences {
+                    include_slots: stored.preferences.include_slots,
+                    nearby: stored.preferences.nearby,
+                    direct: stored.preferences.direct,
+                    groups: stored.preferences.groups,
+                    // The new personal-session category inherits saved Direct
+                    // silence; opening never writes or enables it implicitly.
+                    conferences: stored.preferences.direct,
+                    oldest_first: stored.preferences.oldest_first,
+                }),
                 StoredInput::Legacy(stored) if stored.version == 1 => Ok(Preferences {
                     include_slots: stored.preferences.include_slots,
                     nearby: stored.preferences.nearby,
@@ -193,6 +224,7 @@ fn load(path: &Path) -> io::Result<Preferences> {
                     // V1 had no Group filter. Preserve the existing choice to
                     // silence all supported non-Nearby reminders when off.
                     groups: stored.preferences.direct,
+                    conferences: stored.preferences.direct,
                     oldest_first: stored.preferences.oldest_first,
                 }),
                 _ => Err(io::Error::new(
@@ -247,6 +279,7 @@ mod tests {
             nearby: true,
             direct: false,
             groups: true,
+            conferences: false,
             oldest_first: true,
         }
     }
@@ -309,7 +342,7 @@ mod tests {
         assert_eq!(std::fs::read(registry).unwrap(), b"synthetic registry retained verbatim");
         let json: serde_json::Value = serde_json::from_slice(&std::fs::read(fixture.path()).unwrap()).unwrap();
         assert_eq!(json.as_object().unwrap().len(), 2);
-        assert_eq!(json["preferences"].as_object().unwrap().len(), 5);
+        assert_eq!(json["preferences"].as_object().unwrap().len(), 6);
     }
 
     #[test]
@@ -328,13 +361,14 @@ mod tests {
             let mut desired = changed();
             desired.direct = direct;
             desired.groups = direct;
+            desired.conferences = direct;
             assert_eq!(store.state.preferences, desired);
             assert_eq!(std::fs::read(fixture.path()).unwrap(), bytes, "opening cannot rewrite a V1 file");
             desired.groups = !direct;
             store.save(5, desired);
             assert_eq!(Store::open(&fixture.0).state.preferences, desired);
             let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(fixture.path()).unwrap()).unwrap();
-            assert_eq!(saved["version"], 2);
+            assert_eq!(saved["version"], 3);
             assert_eq!(saved["preferences"]["direct"], direct);
             assert_eq!(saved["preferences"]["groups"], !direct);
         }
@@ -342,7 +376,8 @@ mod tests {
 
     #[test]
     fn group_attention_preferences_reject_mismatched_closed_schemas_and_duplicate_fields_without_repair() {
-        let v2 = String::from_utf8(encoded()).unwrap();
+        let v3 = String::from_utf8(encoded()).unwrap();
+        let v2 = v3.replace("\"version\":3", "\"version\":2").replace(",\"conferences\":false", "");
         let v1 = v2.replace("\"version\":2", "\"version\":1").replace(",\"groups\":true", "");
         for bytes in [
             v2.replace("\"version\":2", "\"version\":1"),
@@ -358,6 +393,52 @@ mod tests {
             assert!(!store.state.writable && store.state.error.is_some(), "{bytes}");
             assert_eq!(store.state.preferences, Preferences::disabled());
             store.save(8, Preferences::default());
+            assert_eq!(std::fs::read(fixture.path()).unwrap(), bytes.as_bytes());
+        }
+    }
+
+    #[test]
+    fn conference_attention_preferences_migrate_v2_without_rewriting_and_preserve_direct_silence_independently_of_groups() {
+        for direct in [false, true] {
+            for groups in [false, true] {
+                let fixture = Fixture::new();
+                let bytes = serde_json::to_vec(&serde_json::json!({ "version": 2,
+                    "preferences": { "include_slots": [true, true, true, true, true], "nearby": false,
+                        "direct": direct, "groups": groups, "oldest_first": false }
+                }))
+                .unwrap();
+                fixture.write(&bytes);
+                let mut store = Store::open(&fixture.0);
+                assert!(store.state.writable);
+                assert_eq!(store.state.preferences.conferences, direct);
+                assert_eq!(store.state.preferences.groups, groups);
+                assert_eq!(std::fs::read(fixture.path()).unwrap(), bytes);
+                let desired = Preferences {
+                    conferences: !direct,
+                    ..store.state.preferences
+                };
+                store.save(9, desired);
+                assert_eq!(Store::open(&fixture.0).state.preferences, desired);
+                let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(fixture.path()).unwrap()).unwrap();
+                assert_eq!(saved["version"], 3);
+            }
+        }
+    }
+
+    #[test]
+    fn conference_attention_preferences_keep_new_closed_schema_strict_and_failed_files_unchanged() {
+        let current = String::from_utf8(encoded()).unwrap();
+        for bytes in [
+            current.replace("\"version\":3", "\"version\":2"),
+            current.replace(",\"conferences\":false", ""),
+            current.replace("\"conferences\":false", "\"conferences\":false,\"conferences\":true"),
+            current.replace("\"conferences\":false", "\"conferences\":null"),
+        ] {
+            let fixture = Fixture::new();
+            fixture.write(bytes.as_bytes());
+            let mut store = Store::open(&fixture.0);
+            assert!(!store.state.writable && store.state.error.is_some());
+            store.save(10, Preferences::default());
             assert_eq!(std::fs::read(fixture.path()).unwrap(), bytes.as_bytes());
         }
     }

@@ -1,5 +1,21 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Foldurora known-kind Conference feature group (2026-11-08): ChatV8
+  canonical shared/monitor composers, literal native Send, explicit Read,
+  host-only Close, independent Attention filter and show-only native Review.
+  Send requires positively known native kind/current login/incarnation and a
+  complete current roster with every peer's RLVa permission; uncertain live
+  senders suspend proof before body filters and recovery changes policy revision.
+  Read/Close remain independent of Send proof. Incoming ambiguous text stays
+  native-only; no membership-absence inference. Closed preferenceV3 migrates
+  saved Direct silence. Paired Group voice callbacks preserve native behavior
+  and mute ordering. Saved delivery keeps native unread/logging without minting
+  Close activity, including ReadOfflineMsgs with an online legacy flag.
+  Source-only review closed concrete provenance/callback findings. Combined
+  focused/aggregate validation is pending; no Windows package, grid/human
+  acceptance or new publication approval is implied.
+
+
 - 🔧 Foldurora native Conference dependency (2026-11-08): stable actual-login
   scope, native incarnation/original callback ownership independent of proof
   budgets, typed EQ base/delta provenance and local-only HTTP correlation.
@@ -9,7 +25,8 @@
   mute survives proof loss and unknown-history overflow cannot infer unmute.
   Twenty parser/model and two real loopback-HTTP cases passed before World
   integration; nine World cases passed before the final reviewed loss/mute fixes.
-  Twelve current World regressions are authored, awaiting focused validation.
+  Twelve final prerequisite World regressions and56 neighbors passed; the later
+  combined Conference group has separate pending validation.
   One disk-full link ran no tests; negative evidence is retained. The earlier
   synthetic Group temp→final remap fixture is now an explicit fixed-target
   refusal; real Conference remap/self-mute is covered by the new native fixture.

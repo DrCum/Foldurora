@@ -146,7 +146,7 @@ fn validate_key(key: ChatKey) -> Result<(), ChatError> {
     // lookup remains mandatory at the owning App's eventual review boundary.
     if !matches!(
         key.conversation,
-        Conversation::Nearby | Conversation::Direct(_) | Conversation::Group(_)
+        Conversation::Nearby | Conversation::Direct(_) | Conversation::Group(_) | Conversation::Conference(_)
     ) {
         return Err(ChatError::Invalid);
     }

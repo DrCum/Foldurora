@@ -7,7 +7,7 @@
 //! Parsing or a participant observation alone never supplies that authority.
 
 use super::{SessionAgent, SessionAgentBatch};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -94,6 +94,7 @@ pub struct SessionRosterAuthority {
     participants: Option<BTreeSet<Uuid>>,
     self_text_mute: Option<bool>,
     pending: Vec<PendingAgent>,
+    unconfirmed_senders: BTreeMap<Uuid, u64>,
     latest_pending_mute: Option<(u64, bool)>,
     last_order: u64,
     revision: u64,
@@ -117,6 +118,7 @@ impl SessionRosterAuthority {
             participants: None,
             self_text_mute: None,
             pending: Vec::new(),
+            unconfirmed_senders: BTreeMap::new(),
             latest_pending_mute: None,
             last_order: 0,
             revision: 0,
@@ -151,6 +153,7 @@ impl SessionRosterAuthority {
             self.participants = None;
             self.self_text_mute = None;
             self.pending.clear();
+            self.unconfirmed_senders.clear();
             self.latest_pending_mute = None;
             self.last_order = 0;
             self.revision = 0;
@@ -202,6 +205,13 @@ impl SessionRosterAuthority {
         if self.lost {
             return false;
         }
+        let mut resolved_sender = false;
+        for agent in updates {
+            if agent.present.is_some() && self.unconfirmed_senders.get(&agent.agent).is_some_and(|observed| *observed < order) {
+                self.unconfirmed_senders.remove(&agent.agent);
+                resolved_sender = true;
+            }
+        }
         if let Some(participants) = &mut self.participants {
             match apply(
                 participants,
@@ -211,6 +221,7 @@ impl SessionRosterAuthority {
                 self.maximum_participants,
             ) {
                 Ok(true) => self.advance_revision(),
+                Ok(false) if resolved_sender => self.advance_revision(),
                 Ok(false) => true,
                 Err(()) => {
                     self.lose();
@@ -232,6 +243,39 @@ impl SessionRosterAuthority {
                 index,
                 agent: agent.clone(),
             }));
+            true
+        }
+    }
+
+    /// Actual live text can contradict completeness, but cannot add a proven
+    /// member. Only a qualified base or later ENTER/LEAVE resolves uncertainty.
+    pub fn observe_sender(&mut self, scope: NativeSessionScope, sender: Uuid, order: u64) -> bool {
+        if scope != self.scope || self.retired || sender.is_nil() || sender == scope.owner {
+            return false;
+        }
+        if order == 0 || order <= self.last_order {
+            self.lose();
+            return false;
+        }
+        self.last_order = order;
+        if self.lost {
+            return false;
+        }
+        if self
+            .participants
+            .as_ref()
+            .is_some_and(|participants| participants.contains(&sender))
+        {
+            return true;
+        }
+        if !self.unconfirmed_senders.contains_key(&sender) && self.unconfirmed_senders.len() >= self.maximum_participants {
+            self.lose();
+            return false;
+        }
+        let added = self.unconfirmed_senders.insert(sender, order).is_none();
+        if added && self.participants.is_some() {
+            self.advance_revision()
+        } else {
             true
         }
     }
@@ -263,6 +307,14 @@ impl SessionRosterAuthority {
             self.latest_pending_mute = Some(mute);
         }
         self.last_order = self.last_order.max(other.last_order);
+        for (&sender, &order) in &other.unconfirmed_senders {
+            if !self.unconfirmed_senders.contains_key(&sender) && self.unconfirmed_senders.len() >= self.maximum_participants {
+                self.lose();
+                return false;
+            }
+            let current = self.unconfirmed_senders.entry(sender).or_insert(order);
+            *current = (*current).max(order);
+        }
         if self.lost
             || other.lost
             || self
@@ -351,12 +403,24 @@ impl SessionRosterAuthority {
                 self.lose();
                 return Some(RosterCompletion::Unavailable { self_text_mute: latest });
             }
+            if entry.agent.present.is_some()
+                && self
+                    .unconfirmed_senders
+                    .get(&entry.agent.agent)
+                    .is_some_and(|observed| *observed < entry.order)
+            {
+                self.unconfirmed_senders.remove(&entry.agent.agent);
+            }
         }
+        self.unconfirmed_senders.retain(|sender, _| !participants.contains(sender));
         self.participants = Some(participants);
         self.self_text_mute = own;
         self.pending.clear();
         self.latest_pending_mute = None;
         if !self.advance_revision() {
+            return Some(RosterCompletion::Unavailable { self_text_mute: own });
+        }
+        if !self.unconfirmed_senders.is_empty() {
             return Some(RosterCompletion::Unavailable { self_text_mute: own });
         }
         Some(RosterCompletion::Initialized { self_text_mute: own })
@@ -374,6 +438,7 @@ impl SessionRosterAuthority {
         self.request = None;
         self.participants = None;
         self.pending.clear();
+        self.unconfirmed_senders.clear();
         self.latest_pending_mute = None;
         self.retired = true;
     }
@@ -385,7 +450,14 @@ impl SessionRosterAuthority {
     }
 
     pub fn snapshot(&self, scope: NativeSessionScope, incarnation: u64) -> Option<RosterSnapshot<'_>> {
-        if scope != self.scope || incarnation == 0 || incarnation != self.incarnation || self.retired || self.lost || self.revision == 0 {
+        if scope != self.scope
+            || incarnation == 0
+            || incarnation != self.incarnation
+            || self.retired
+            || self.lost
+            || self.revision == 0
+            || !self.unconfirmed_senders.is_empty()
+        {
             return None;
         }
         Some(RosterSnapshot {
@@ -402,6 +474,7 @@ impl SessionRosterAuthority {
         self.lost = true;
         self.participants = None;
         self.pending.clear();
+        self.unconfirmed_senders.clear();
     }
 
     fn advance_revision(&mut self) -> bool {
@@ -778,6 +851,71 @@ mod tests {
         let (mut roster, _) = ready();
         assert!(roster.observe(scope(), &delta(2, Some("LEAVE"), None), 2));
         assert!(!roster.observe(scope(), &delta(2, Some("ENTER"), None), 1));
+        assert!(roster.snapshot(scope(), 1).is_none());
+    }
+
+    #[test]
+    fn conference_roster_state_live_sender_only_suspends_and_an_absent_leave_resolves_with_a_new_revision() {
+        let (mut roster, _) = ready();
+        let before = roster.snapshot(scope(), 1).unwrap().revision;
+        assert!(roster.observe_sender(scope(), id(3), 1));
+        assert!(roster.snapshot(scope(), 1).is_none());
+        assert!(!roster.participants.as_ref().unwrap().contains(&id(3)), "text cannot add a member");
+        assert!(roster.observe(scope(), &delta(3, None, None), 2));
+        assert!(
+            roster.snapshot(scope(), 1).is_none(),
+            "info-only data cannot resolve missing membership"
+        );
+        assert!(roster.observe(scope(), &delta(3, Some("LEAVE"), None), 3));
+        let after = roster.snapshot(scope(), 1).unwrap();
+        assert!(after.revision > before, "suspend→resolve cannot restore the old policy stamp");
+        assert!(!after.participants.contains(&id(3)));
+    }
+
+    #[test]
+    fn conference_roster_state_prebase_and_temp_final_sender_leave_order_never_invents_completeness() {
+        for merge in [false, true] {
+            for sender_after_leave in [false, true] {
+                let mut temporary = roster();
+                let capture = temporary.begin_start(scope(), 1).unwrap();
+                let mut final_pending = SessionRosterAuthority::new(scope(), id(200), 4, 8).unwrap();
+                let (sender_order, leave_order) = if sender_after_leave { (2, 1) } else { (1, 2) };
+                if merge {
+                    assert!(temporary.observe_sender(scope(), id(3), sender_order));
+                    assert!(final_pending.observe(scope(), &delta(3, Some("LEAVE"), None), leave_order));
+                    assert!(temporary.merge_unbound(scope(), capture, id(200), &final_pending));
+                } else if sender_after_leave {
+                    assert!(temporary.observe(scope(), &delta(3, Some("LEAVE"), None), 1));
+                    assert!(temporary.observe_sender(scope(), id(3), 2));
+                } else {
+                    assert!(temporary.observe_sender(scope(), id(3), 1));
+                    assert!(temporary.observe(scope(), &delta(3, Some("LEAVE"), None), 2));
+                }
+                let target = if merge { id(200) } else { id(100) };
+                temporary.complete(scope(), capture, target, &base(&[1, 2, 3], None));
+                assert_eq!(temporary.snapshot(scope(), 1).is_none(), sender_after_leave);
+                if sender_after_leave {
+                    assert!(temporary.observe(scope(), &delta(3, Some("ENTER"), None), 3));
+                    assert!(temporary.snapshot(scope(), 1).unwrap().participants.contains(&id(3)));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn conference_roster_state_sender_observation_overflow_cannot_be_evicted_or_repaired_by_a_cookie() {
+        let mut roster = roster();
+        let capture = roster.begin_acceptance(scope(), 1).unwrap();
+        for number in 3..7 {
+            assert!(roster.observe_sender(scope(), id(number), number as u64));
+        }
+        assert!(!roster.observe_sender(scope(), id(7), 7));
+        assert!(matches!(
+            roster.complete(scope(), capture, id(100), &base(&[1, 2], None)),
+            Some(RosterCompletion::Unavailable { .. })
+        ));
+        let retry = roster.begin_acceptance(scope(), 1).unwrap();
+        roster.complete(scope(), retry, id(100), &base(&[1, 2], None));
         assert!(roster.snapshot(scope(), 1).is_none());
     }
 }

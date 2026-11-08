@@ -13446,6 +13446,7 @@ host-attention-profiles = Profils inclus
 host-attention-nearby = Chat à proximité
 host-attention-direct = Messages directs
 host-attention-groups = Discussions de groupe
+host-attention-conferences = Conférences
 host-attention-previous = Précédent
 host-attention-next = Suivant
 host-attention-open = Ouvrir le chat partagé

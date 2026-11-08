@@ -407,6 +407,43 @@ mod tests {
     }
 
     #[test]
+    fn conference_attention_native_review_uses_existing_known_session_without_read_send_or_join() {
+        use aurora_session::{ConversationId, chat::Conversation};
+        let mut world = native_world();
+        world.bind_session_test_login(uuid::Uuid::from_u128(99));
+        world.start_text_conference(vec![uuid::Uuid::from_u128(55), uuid::Uuid::from_u128(56)]);
+        let temporary = *world.groups.sessions.keys().next().unwrap();
+        let session = uuid::Uuid::from_u128(600);
+        let body = aurora_llsd::llsd_map! { "agent_info" => aurora_llsd::llsd_map! {
+            uuid::Uuid::from_u128(99).to_string() => aurora_llsd::llsd_map! { "mutes" => aurora_llsd::llsd_map! { "text" => true } },
+            uuid::Uuid::from_u128(55).to_string() => aurora_llsd::llsd_map! {},
+        } };
+        world.apply(aurora_net::NetEvent::SessionStarted {
+            temp_session: temporary,
+            session,
+            success: true,
+            error: String::new(),
+            agents: aurora_net::social::parse_session_agent_batch(&body, aurora_net::social::MAX_SESSION_ROSTER_ENTRIES),
+        });
+        world.groups.take_commands();
+        let (token, raw, badge) = world.read_counters(Some(session)).unwrap();
+        world.read_ledger.reconcile(&[(Some(session), token, raw, badge)]);
+        let conversation = Conversation::Conference(ConversationId::from_bytes(*session.as_bytes()).unwrap());
+        let request = capture(&world, conversation);
+        let before = world.read_counters(Some(session));
+        let count = world.social.ims.len();
+        assert_eq!(existing_target(&world, request, true), Ok(Some(session)));
+        assert_eq!(world.read_counters(Some(session)), before);
+        assert_eq!(world.social.ims.len(), count);
+        assert!(world.groups.out.is_empty());
+        world.apply(aurora_net::NetEvent::SessionClosed {
+            session,
+            reason: String::new(),
+        });
+        assert!(existing_target(&world, request, true).is_err());
+    }
+
+    #[test]
     fn native_review_target_reuses_read_policy_without_send_permission_or_explicit_read_mutation() {
         use aurora_session::chat::Conversation;
         let mut world = native_world();

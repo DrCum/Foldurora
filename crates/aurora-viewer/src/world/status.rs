@@ -402,7 +402,7 @@ impl World {
     /// Offers refused by the status modes (teleports, group invitations,
     /// friendship) and the automatic response to an offer. True when the
     /// IM was consumed.
-    pub(super) fn on_status_im(&mut self, im: &InstantMessage) -> bool {
+    pub(super) fn on_status_im(&mut self, im: &InstantMessage, live_activity: bool) -> bool {
         let from = im.from_agent_id;
         if from.is_nil() || from == self.agent_id {
             return false;
@@ -456,7 +456,7 @@ impl World {
                         source: from,
                         origin: Origin::Live,
                     };
-                    self.conversation_push(from, line, true);
+                    self.conversation_push_with_activity(from, line, true, live_activity);
                 }
                 true
             }

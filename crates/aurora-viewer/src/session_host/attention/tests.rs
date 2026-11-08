@@ -280,7 +280,10 @@ fn attention_nearby_off_direct_on_and_unsupported_classes_never_adapt() {
         peer.conversations.push(info);
         peer.reads.insert(conversation, unread());
     }
-    let mut prefs = Preferences::default();
+    let mut prefs = Preferences {
+        conferences: false,
+        ..Preferences::default()
+    };
     let mut model = Attention::default();
     model.sync(&host, &prefs);
     assert_eq!(model.rows().len(), 1);
@@ -292,6 +295,39 @@ fn attention_nearby_off_direct_on_and_unsupported_classes_never_adapt() {
     model.sync(&host, &prefs);
     assert_eq!(model.rows().len(), 1);
     assert_eq!(model.rows()[0].key.conversation, Conversation::Nearby);
+}
+
+#[test]
+fn conference_attention_is_independent_of_direct_and_group_filters_and_navigation_never_marks_read() {
+    let mut host = fixture(1, 1);
+    let conference = Conversation::Conference(ConversationId::from_bytes([9; 16]).unwrap());
+    let peer = chat(&mut host, 0);
+    let mut info = peer.conversations[0].clone();
+    info.policy.key.conversation = conference;
+    peer.conversations.push(info);
+    peer.reads.insert(conference, unread());
+    let mut model = Attention::default();
+    let prefs = Preferences {
+        direct: false,
+        groups: false,
+        ..Preferences::default()
+    };
+    model.sync(&host, &prefs);
+    assert_eq!(model.rows().len(), 1);
+    assert_eq!(model.rows()[0].key.conversation, conference);
+    let captured = model.capture(model.rows()[0].key).unwrap();
+    assert!(model.review_capture(captured).is_some());
+    let before = chat(&mut host, 0).reads.clone();
+    model.sync(
+        &host,
+        &Preferences {
+            conferences: false,
+            ..prefs
+        },
+    );
+    assert!(model.rows().is_empty());
+    assert!(model.review_capture(captured).is_none());
+    assert_eq!(chat(&mut host, 0).reads, before);
 }
 
 #[test]

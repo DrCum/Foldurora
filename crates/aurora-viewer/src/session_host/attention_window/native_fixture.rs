@@ -627,6 +627,7 @@ fn attention_native_trace_budget_covers_512_fully_annotated_key_events() {
             nearby: false,
             direct: false,
             groups: false,
+            conferences: false,
             oldest_first: false,
         };
         fixture

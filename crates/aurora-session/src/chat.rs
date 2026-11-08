@@ -20,10 +20,14 @@ pub use review::*;
 mod close;
 pub use close::*;
 #[cfg(test)]
+mod conference_tests;
+#[cfg(test)]
 mod group_tests;
 
 /// V7 also admits explicit initialized-Group Review; older consumers fail closed.
-pub const VERSION: u16 = 7;
+/// V8 admits source-qualified Conference read/close/review rows; native roster
+/// completeness and current participant permission stay with the owning worker.
+pub const VERSION: u16 = 8;
 pub const MAX_PACKET_BYTES: usize = 4096;
 /// One native UDP chat/IM part (`aurora-net::message_split`), in UTF-8 bytes.
 pub const MAX_TEXT_BYTES: usize = 1023;

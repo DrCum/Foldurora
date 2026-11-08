@@ -504,6 +504,7 @@ impl World {
         );
         self.info_mut(session, &name).started_by_us = true;
         self.begin_session_initialization(session, true);
+        self.groups.sessions.get_mut(&session).expect("native start owner").conference_known = true;
         self.session_lines(session);
         self.social.focus_im = Some(session);
         self.calls.conferences.insert(session, agents.clone());
@@ -1005,6 +1006,10 @@ impl World {
             // accept the session (chatterBoxInvitationCoro)
             self.info_mut(inv.session, &inv.session_name);
             let initialization = self.begin_session_initialization(inv.session, false);
+            if let Some(info) = self.groups.sessions.get_mut(&inv.session) {
+                info.conference_known |= inv.is_conference();
+                info.group |= inv.is_group();
+            }
             self.groups.out.push(NetCommand::ChatSession {
                 method: SessionMethod::AcceptInvitation,
                 session: inv.session,

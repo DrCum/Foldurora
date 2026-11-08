@@ -680,6 +680,9 @@ pub enum NetEvent {
         typing: bool,
     },
     InstantMessage(InstantMessage),
+    /// Locally identified ReadOfflineMsgs delivery. Keep its native `offline`
+    /// field unchanged; that field can explicitly be false in saved replies.
+    SavedInstantMessage(InstantMessage),
     Appearance(AvatarAppearance),
     Sun(SunInfo),
     CoarseLocations {

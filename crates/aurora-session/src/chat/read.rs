@@ -71,7 +71,7 @@ impl ReadStateRow {
         self.info(source).policy.validate()?;
         if !matches!(
             self.conversation,
-            Conversation::Nearby | Conversation::Direct(_) | Conversation::Group(_)
+            Conversation::Nearby | Conversation::Direct(_) | Conversation::Group(_) | Conversation::Conference(_)
         ) {
             return Err(ChatError::Invalid);
         }
@@ -88,8 +88,10 @@ impl ReadStateRow {
             return Err(ChatError::Sequence);
         }
         if self.incoming_stream.is_some()
-            && (!matches!(self.conversation, Conversation::Direct(_) | Conversation::Group(_))
-                || !self.lease_current
+            && (!matches!(
+                self.conversation,
+                Conversation::Direct(_) | Conversation::Group(_) | Conversation::Conference(_)
+            ) || !self.lease_current
                 || !self.ready
                 || !self.can_read)
         {
@@ -119,7 +121,7 @@ impl MarkReadRequest {
         }
         if !matches!(
             self.key.conversation,
-            Conversation::Nearby | Conversation::Direct(_) | Conversation::Group(_)
+            Conversation::Nearby | Conversation::Direct(_) | Conversation::Group(_) | Conversation::Conference(_)
         ) {
             return Err(ChatError::Invalid);
         }

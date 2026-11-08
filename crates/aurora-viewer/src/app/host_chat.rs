@@ -132,6 +132,7 @@ impl NativeChat for AppChat<'_> {
         match key.conversation {
             Conversation::Direct(peer) => self.app.world.own_im(uuid(peer), text),
             Conversation::Group(session) => self.app.world.own_shared_group_im(uuid(session), text),
+            Conversation::Conference(session) => self.app.world.own_shared_conference_im(uuid(session), text),
             _ => {}
         }
         // App::send / NetClient::send have no enqueue result. The call is made,
@@ -190,8 +191,7 @@ fn mark_native_read(
 pub(super) fn native_read_key(conversation: Conversation) -> Option<Option<Uuid>> {
     match conversation {
         Conversation::Nearby => Some(None),
-        Conversation::Direct(peer) | Conversation::Group(peer) => Some(Some(uuid(peer))),
-        _ => None,
+        Conversation::Direct(peer) | Conversation::Group(peer) | Conversation::Conference(peer) => Some(Some(uuid(peer))),
     }
 }
 
@@ -221,7 +221,7 @@ fn incoming(world: &World, conversation: Conversation, ui_ready: bool) -> Option
     if !policy.ready || !policy.can_read {
         return None;
     }
-    let (Conversation::Direct(peer) | Conversation::Group(peer)) = conversation else {
+    let (Conversation::Direct(peer) | Conversation::Group(peer) | Conversation::Conference(peer)) = conversation else {
         return None;
     };
     world.shared_chat_activity(uuid(peer))
@@ -260,6 +260,8 @@ fn catalogue(world: &World) -> Vec<Conversation> {
         let id = conversation_id(session.other)?;
         if world.shared_group_initialized(session.other) {
             Some(Conversation::Group(id))
+        } else if world.shared_conference_initialized(session.other) {
+            Some(Conversation::Conference(id))
         } else if !world.is_group_session(&session.other) && !world.groups.is_member(&session.other) {
             Some(Conversation::Direct(id))
         } else {
@@ -286,6 +288,13 @@ fn native_lines(
             .find(|session| session.other == uuid(peer))
             .map(|session| (&session.lines, session.clock)),
         Conversation::Group(id) if world.shared_group_initialized(uuid(id)) => world
+            .social
+            .ims
+            .iter()
+            .take(MAX_CONVERSATIONS - 1)
+            .find(|session| session.other == uuid(id))
+            .map(|session| (&session.lines, session.clock)),
+        Conversation::Conference(id) if world.shared_conference_initialized(uuid(id)) => world
             .social
             .ims
             .iter()
@@ -334,7 +343,16 @@ pub(super) fn snapshot(world: &World, conversation: Conversation, ui_ready: bool
             };
             (world.shared_group_sendable(session), can_read, title)
         }
-        _ => return None,
+        Conversation::Conference(session) => {
+            let session = uuid(session);
+            let can_read = ready && world.shared_conference_readable(session);
+            let title = if can_read {
+                world.session_title(&session)
+            } else {
+                aurora_i18n::tr!("rlva-blocked").to_owned()
+            };
+            (world.shared_conference_sendable(session), can_read, title)
+        }
     };
     let flags = u64::from(r.enabled())
         | (u64::from(r.preferences.allow_ooc) << 1)
@@ -349,9 +367,21 @@ pub(super) fn snapshot(world: &World, conversation: Conversation, ui_ready: bool
     } else {
         end.saturating_sub(SCAN_LINES as u64).max(clock.first)
     };
+    let (incarnation, roster_revision) = if let Conversation::Conference(id) = conversation {
+        world.shared_conference_stamp(uuid(id))?
+    } else {
+        (0, 0)
+    };
     Some(NativeSnapshot {
         title: label(&title),
-        stamp: [r.revision, world.mutes.version, flags, world.main_region.unwrap_or(0)],
+        stamp: [
+            r.revision,
+            world.mutes.version,
+            flags,
+            world.main_region.unwrap_or(0),
+            incarnation,
+            roster_revision,
+        ],
         ready,
         can_send: ready && can_send,
         can_read: ready && can_read,
@@ -397,7 +427,7 @@ fn lines(world: &World, conversation: Conversation, cursor: NativeCursor, limit:
         };
     };
     let end = clock.first.saturating_add(entries.len() as u64);
-    let group = matches!(conversation, Conversation::Group(_));
+    let group = matches!(conversation, Conversation::Group(_) | Conversation::Conference(_));
     if group && !snapshot(world, conversation, true).is_some_and(|state| state.ready && state.can_read) {
         return NativePage {
             cursor: NativeCursor {
@@ -481,14 +511,13 @@ fn literal_command(world: &World, conversation: Conversation, text: &str) -> Opt
             to: uuid(peer),
             message: text.into(),
         }),
-        Conversation::Group(session) => Some(NetCommand::SendImDialog {
+        Conversation::Group(session) | Conversation::Conference(session) => Some(NetCommand::SendImDialog {
             to: uuid(session),
             dialog: crate::world::groups::dialog::SESSION_SEND,
             id: uuid(session),
             message: text.into(),
             bucket: Vec::new(),
         }),
-        _ => None,
     }
 }
 
@@ -590,6 +619,7 @@ mod tests {
             match key.conversation {
                 Conversation::Direct(peer) => self.world.own_im(uuid(peer), text),
                 Conversation::Group(session) => self.world.own_shared_group_im(uuid(session), text),
+                Conversation::Conference(session) => self.world.own_shared_conference_im(uuid(session), text),
                 _ => {}
             }
             SendOutcome::AcceptedLocally
@@ -1030,5 +1060,6 @@ mod tests {
     }
 
     mod close_tests;
+    mod conference_tests;
     mod group_tests;
 }

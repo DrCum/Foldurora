@@ -230,6 +230,12 @@ impl World {
     /// A line enters a conversation: written to its transcript (new lines,
     /// when instant messages are logged), kept in memory within `MAX_CHAT`.
     pub(super) fn conversation_push(&mut self, session: Uuid, line: ChatLine, unread: bool) {
+        self.conversation_push_with_activity(session, line, unread, true);
+    }
+
+    /// Saved delivery keeps native transcript/unread semantics but cannot mint
+    /// a new live-incoming Close fence for the host.
+    pub(super) fn conversation_push_with_activity(&mut self, session: Uuid, line: ChatLine, unread: bool, live_activity: bool) {
         self.session_lines(session);
         self.ensure_transcript(session);
         if line.origin == Origin::Live && self.chat_log.cfg.log_im && self.chat_log.identity().is_some() {
@@ -242,7 +248,7 @@ impl World {
             }
         }
         let incoming = unread && line.origin == Origin::Live && !matches!(line.kind, ChatKind::Own(_));
-        if incoming {
+        if incoming && live_activity {
             self.record_shared_chat_incoming(session, &line);
         }
         let s = self.session_lines(session);

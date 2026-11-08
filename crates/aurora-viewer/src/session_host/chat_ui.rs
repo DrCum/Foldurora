@@ -190,7 +190,7 @@ pub(super) fn eligible(snapshot: &HostChatSnapshot) -> bool {
 fn supported(conversation: Conversation) -> bool {
     matches!(
         conversation,
-        Conversation::Nearby | Conversation::Direct(_) | Conversation::Group(_)
+        Conversation::Nearby | Conversation::Direct(_) | Conversation::Group(_) | Conversation::Conference(_)
     )
 }
 
@@ -1089,7 +1089,10 @@ impl ChatUi {
                     && !self.read_busy
                     && !self.receipt.is_some_and(|receipt| receipt.outcome == SendOutcome::Pending)
                     && policy.can_read
-                    && matches!(policy.key.conversation, Conversation::Direct(_) | Conversation::Group(_))
+                    && matches!(
+                        policy.key.conversation,
+                        Conversation::Direct(_) | Conversation::Group(_) | Conversation::Conference(_)
+                    )
                     && matches!(mode, InputMode::Live | InputMode::Editing)
                     && focused
                     && !focus_changed
@@ -2098,6 +2101,10 @@ mod tests {
         for info in &mut snapshot.conversations {
             info.policy.key.conversation = Conversation::Conference(ConversationId::from_bytes([11; 16]).unwrap());
         }
+        assert!(eligible(&snapshot), "V8 supports source-qualified Conference rows");
+        for info in &mut snapshot.conversations {
+            info.policy.lease_current = false;
+        }
         assert!(!eligible(&snapshot));
     }
     fn with_read_metadata(mut snapshot: HostChatSnapshot, incoming: u64) -> HostChatSnapshot {
@@ -2225,5 +2232,6 @@ mod tests {
         assert!(frames.ui.view.read_metadata.is_none() && frames.ui.read_operation.is_none());
     }
     mod close_tests;
+    mod conference_tests;
     mod group_tests;
 }

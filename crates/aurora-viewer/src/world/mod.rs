@@ -2984,9 +2984,8 @@ impl World {
             | NetEvent::SessionError { .. }
             | NetEvent::SessionClosed { .. }
             | NetEvent::ChatSessionReply { .. }) => {
-                match &ev {
-                    NetEvent::SessionClosed { session, .. } => self.call_session_closed(*session),
-                    _ => {}
+                if let NetEvent::SessionClosed { session, .. } = &ev {
+                    self.call_session_closed(*session);
                 }
                 self.on_group_event(ev)
             }
@@ -2996,6 +2995,10 @@ impl World {
             }
             NetEvent::InstantMessage(im) => {
                 self.on_im(im);
+                None
+            }
+            NetEvent::SavedInstantMessage(im) => {
+                self.on_im_delivery(im, false);
                 None
             }
             NetEvent::OfflineMessagesFailed => {
@@ -4314,7 +4317,19 @@ impl World {
         );
     }
 
-    fn on_im(&mut self, mut im: InstantMessage) {
+    fn on_im(&mut self, im: InstantMessage) {
+        self.on_im_delivery(im, true);
+    }
+
+    fn on_im_delivery(&mut self, mut im: InstantMessage, live_delivery: bool) {
+        // ReadOfflineMsgs may explicitly return offline=false. Its local
+        // delivery provenance cannot be promoted to a new live incoming event.
+        let live_activity = live_delivery && !im.offline;
+        // Live session identity can revoke recipient completeness even when a
+        // later privacy/mute/spam check drops the body. It never adds a member.
+        if matches!(im.dialog, groups::dialog::SESSION_SEND | groups::dialog::SESSION_INVITE) && live_activity {
+            self.observe_session_sender(im.session_id, im.from_agent_id);
+        }
         // a message to the whole region, before the rules of conversations
         // (region_messages.rs)
         if region_messages::is_region_message(&im) {
@@ -4349,7 +4364,7 @@ impl World {
             }
             return;
         }
-        if self.on_session_im(&im) || self.on_status_im(&im) || self.on_im_offer(&im) {
+        if self.on_session_im_observed(&im, live_activity) || self.on_status_im(&im, live_activity) || self.on_im_offer(&im) {
             return;
         }
         // decided before the message opens its conversation
@@ -4397,7 +4412,7 @@ impl World {
                 source: im.from_agent_id,
                 origin: Origin::Live,
             };
-            self.conversation_push(im.from_agent_id, line, true);
+            self.conversation_push_with_activity(im.from_agent_id, line, true, live_activity);
             if rlva_filter != rlva::communication::Received::Masked {
                 self.send_autoresponse(&im, autoresponse);
             }

@@ -172,7 +172,7 @@ impl Attention {
                         || !policy.can_read
                         || !matches!(
                             key.conversation,
-                            Conversation::Nearby | Conversation::Direct(_) | Conversation::Group(_)
+                            Conversation::Nearby | Conversation::Direct(_) | Conversation::Group(_) | Conversation::Conference(_)
                         )
                     {
                         continue;
@@ -225,7 +225,7 @@ impl Attention {
                     Conversation::Nearby => preferences.nearby,
                     Conversation::Direct(_) => preferences.direct,
                     Conversation::Group(_) => preferences.groups,
-                    _ => false,
+                    Conversation::Conference(_) => preferences.conferences,
                 }
                 && !self.dismissed.iter().any(|dismissal| dismissal.hides(row))
         });

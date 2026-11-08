@@ -1274,7 +1274,7 @@ mod live_path_tests {
         fn snapshot(&self, _: Conversation) -> Option<NativeSnapshot> {
             Some(NativeSnapshot {
                 title: aurora_session::Label::new("Synthetic nearby").unwrap(),
-                stamp: [1; 4],
+                stamp: [1; 6],
                 ready: true,
                 can_send: true,
                 can_read: true,

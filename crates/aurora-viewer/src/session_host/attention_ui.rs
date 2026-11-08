@@ -465,6 +465,11 @@ impl AttentionUi {
                                             ("nearby", aurora_i18n::tr!("host-attention-nearby"), state.preferences.nearby),
                                             ("direct", aurora_i18n::tr!("host-attention-direct"), state.preferences.direct),
                                             ("groups", aurora_i18n::tr!("host-attention-groups"), state.preferences.groups),
+                                            (
+                                                "conferences",
+                                                aurora_i18n::tr!("host-attention-conferences"),
+                                                state.preferences.conferences,
+                                            ),
                                         ]
                                         .into_iter()
                                         .enumerate()
@@ -484,8 +489,10 @@ impl AttentionUi {
                                                 desired.nearby = !value;
                                             } else if kind == "direct" {
                                                 desired.direct = !value;
-                                            } else {
+                                            } else if kind == "groups" {
                                                 desired.groups = !value;
+                                            } else {
+                                                desired.conferences = !value;
                                             }
                                             self.control(
                                                 ui,

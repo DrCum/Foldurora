@@ -570,7 +570,7 @@ paths and ordered membership updates; absent/voice-only/malformed optional text
 metadata cannot clear an existing mute. Only explicit Boolean metadata changes
 it, and actual update notices preserve final-state change semantics. This does
 not establish complete Conference roster or asynchronous reply authority.
-Conference remains excluded pending participant-authority work.
+That V7 boundary is superseded by the known-kind V8 path below.
 `aurora-net/social/agent_batch.rs` supplies an immutable parser prerequisite:
 private provenance distinguishes validated full bases (including empty) from
 ordered deltas, missing input and invalid data. The legacy presentation vector
@@ -585,8 +585,7 @@ An original full base is followed by retained ordered updates. Invalid, missing,
 overflowed or lost data never becomes a complete roster; same-incarnation retries
 retain loss and final-session binding, including incomplete completions and
 initialization-kind changes. Only a genuine new native incarnation clears it.
-Live effective membership/mute changes advance a checked revision. The model
-has no network/UI effects; World lifecycle/callback integration is still required.
+Live effective membership/mute changes advance a checked revision. The model has no network/UI effects; the World integration below owns those boundaries.
 `world/session_roster.rs` now owns that native integration. Each native SessionInfo
 retains the original local callback and checked incarnation independently of
 bounded roster proof. The actual LoggedIn hook binds the stable login scope;
@@ -601,12 +600,38 @@ Unknown/lost/malformed history never truncates into completeness. Independent
 bounded close cutoffs constrain only original pending remaps; later genuine
 native starts and fixed-target callbacks continue after proof saturation. Native
 pending self-mute survives proof loss, including temp/final merge; unavailable
-mute history cannot infer unmute from an older bootstrap. These native foundations
-still do not enable Conference host catalogue/Send/Read/Close/Attention/Review.
+mute history cannot infer unmute from an older bootstrap. Group voice may retain two original callbacks (acceptance and start); retries
+replace only their own path. A generic counterpart failure cannot close an
+active/pending chat, definitive404 retires both, and history is fetched once.
+A retained mute-intent floor prevents pre-request unmute or older counterparts
+from overriding a matched newer mute.
+
+Chat V8 enables known-kind joined Conferences through the existing six canonical
+chat surfaces, Close, body-free Attention and explicit native Review. Kind must
+come from an actual outgoing Conference start or explicit integer1 native voice
+invitation; missing membership, names, desired invitees and unproven vectors
+never establish it. Ambiguous incoming plain-text invitations remain native-only.
+Read/Close require the current native login/incarnation and ordinary receive
+policy independently of roster availability. Send additionally requires complete
+current proven membership, every nonself participant's send policy, self moderator
+permission and the common native restriction boundary. A live unknown sender
+suspends proof even when its body is dropped by mute/privacy; only a qualified
+later presence transition resolves it, advancing revision even for absent LEAVE.
+Bounded observation loss remains unavailable. Policy stamps include native
+incarnation and proof revision, so a stale captured Send cannot survive a roster
+change or suspension/recovery. Literal dialog17 and guarded no-create echo add
+no join, unblock, focus or native Read. Closed Attention schemaV3 adds independent
+Conferences; V1/V2 migration preserves saved Direct silence without eager writes.
+Old chat/preference versions fail closed; controlV1 and native SL bodies stay
+unchanged.
 
 The Close-in-host producer retains its V4 closed data in `chat/close.rs`.
 `world/shared_chat_activity.rs` mints a checked native stream at actual LoggedIn,
-then advances it only at eligible live nonself Direct/Group conversation insertion.
+then advances it only at eligible live nonself Direct/Group/known-Conference conversation insertion.
+ReadOfflineMsgs carries separate local saved-delivery provenance even when its
+legacy offline field is false. Saved UDP/EQ/capability and automatic-response
+lines retain native unread/logging but cannot mint Close activity or live
+participant uncertainty.
 Existing fair ReadBatch rows export the optional current stream separately from
 optional session activity; neither absent value implies zero. WorkerChat owns a
 bounded exact-request Close ledger: original ingress age gates capture, while
@@ -627,9 +652,9 @@ lookup without replacing its original policy/stream. Recovery has a bounded
 pending gate; an unresolved result stays visibly Uncertain and hidden without
 blocking every other conversation. Explicit rejection restores visibility.
 Source replacement retires all state, and ordinary authority loss still purges
-private drafts, Undo and metadata. Nearby cannot be closed. Conference and
-Friends/New IM and their explicit native-open acknowledgments remain separate
-features. Close retains its V4 payload in the current V7 Chat envelope; the
+private drafts, Undo and metadata. Nearby cannot be closed. Friends/New IM and their explicit native-open
+acknowledgments remain separate features. Close retains its V4 payload in the
+current V8 Chat envelope; the
 control protocol stays V1.
 
 `app/host_chat_bridge.rs` drives `session_host/chat.rs` and `app/host_chat.rs` on

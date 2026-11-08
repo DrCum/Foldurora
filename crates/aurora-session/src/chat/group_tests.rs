@@ -104,10 +104,11 @@ fn shared_group_read_does_not_grant_close_review_or_conference_authority() {
         .is_err()
     );
     request.key.conversation = Conversation::Conference(ConversationId::from_bytes([7; 16]).unwrap());
-    assert_eq!(request.validate(), Err(ChatError::Invalid));
-    let mut invalid = row();
-    invalid.conversation = request.key.conversation;
-    assert_eq!(invalid.validate(source()), Err(ChatError::Invalid));
+    // V8 admits the typed row; it still grants no native session authority.
+    request.validate().unwrap();
+    let mut typed = row();
+    typed.conversation = request.key.conversation;
+    typed.validate(source()).unwrap();
 }
 
 #[test]
@@ -161,11 +162,8 @@ fn group_close_codec_bounds_maximum_provenance_and_requires_current_readable_pol
         stream: u64::MAX,
     };
     request.validate().unwrap();
-    for conversation in [
-        Conversation::Nearby,
-        Conversation::Conference(ConversationId::from_bytes([7; 16]).unwrap()),
-    ] {
-        request.key.conversation = conversation;
-        assert_eq!(request.validate(), Err(ChatError::Invalid));
-    }
+    request.key.conversation = Conversation::Conference(ConversationId::from_bytes([7; 16]).unwrap());
+    request.validate().unwrap();
+    request.key.conversation = Conversation::Nearby;
+    assert_eq!(request.validate(), Err(ChatError::Invalid));
 }

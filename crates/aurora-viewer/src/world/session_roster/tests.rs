@@ -60,6 +60,255 @@ fn accepted(capture: RosterInitialization, result: Option<Llsd>, not_found: bool
     }
 }
 
+fn group_member(world: &mut World) {
+    world.groups.groups.push(aurora_net::GroupMembership {
+        id: SESSION,
+        name: "Synthetic group".into(),
+        insignia: Uuid::nil(),
+        powers: 0,
+        accept_notices: true,
+        list_in_profile: true,
+        contribution: 0,
+    });
+}
+
+fn voice_acceptance(world: &mut World) -> (RosterInitialization, Vec<aurora_net::NetCommand>) {
+    world.accept_voice_invite(aurora_net::VoiceInvite {
+        session: SESSION,
+        session_name: "Synthetic group".into(),
+        from: PEER,
+        from_name: "Synthetic resident".into(),
+        p2p: false,
+        voice: llsd_map! { "channel_uri" => "synthetic-channel", "channel_credentials" => "synthetic-credential" },
+    });
+    let commands = world.groups.take_commands();
+    let capture = commands
+        .iter()
+        .find_map(|command| match command {
+            aurora_net::NetCommand::ChatSession {
+                method: SessionMethod::AcceptInvitation,
+                initialization,
+                ..
+            } => *initialization,
+            _ => None,
+        })
+        .unwrap();
+    (capture, commands)
+}
+
+fn group_started(success: bool, muted: bool) -> NetEvent {
+    NetEvent::SessionStarted {
+        temp_session: SESSION,
+        session: SESSION,
+        success,
+        error: if success { String::new() } else { "synthetic-start-failure".into() },
+        agents: batch(&base(&[OWNER, PEER], muted)),
+    }
+}
+
+fn history_count(world: &mut World) -> usize {
+    world
+        .groups
+        .take_commands()
+        .iter()
+        .filter(|command| {
+            matches!(
+                command,
+                aurora_net::NetCommand::ChatSession {
+                    method: SessionMethod::FetchHistory,
+                    session: SESSION,
+                    ..
+                }
+            )
+        })
+        .count()
+}
+
+#[test]
+fn conference_roster_native_group_voice_start_success_survives_http_failure_in_either_order_with_history_once() {
+    for start_first in [false, true] {
+        let mut world = world();
+        group_member(&mut world);
+        let (capture, commands) = voice_acceptance(&mut world);
+        let accept = commands
+            .iter()
+            .position(|command| {
+                matches!(
+                    command,
+                    aurora_net::NetCommand::ChatSession {
+                        method: SessionMethod::AcceptInvitation,
+                        ..
+                    }
+                )
+            })
+            .unwrap();
+        let start = commands
+            .iter()
+            .position(|command| {
+                matches!(
+                    command,
+                    aurora_net::NetCommand::SendImDialog {
+                        dialog: super::super::groups::dialog::SESSION_GROUP_START,
+                        ..
+                    }
+                )
+            })
+            .unwrap();
+        assert!(accept < start, "native wire order is preserved");
+        world.apply(delta(SESSION, OWNER, None, Some(true)));
+        let events = if start_first {
+            [group_started(true, false), accepted(capture, None, false)]
+        } else {
+            [accepted(capture, None, false), group_started(true, false)]
+        };
+        for event in events {
+            world.apply(event);
+        }
+        assert!(world.groups.sessions[&SESSION].active && !world.groups.sessions[&SESSION].closed);
+        assert!(world.groups.sessions[&SESSION].text_muted);
+        assert!(world.session_roster(SESSION).is_some());
+        assert_eq!(history_count(&mut world), 1);
+    }
+}
+
+#[test]
+fn conference_roster_native_group_voice_successful_acceptance_survives_redundant_start_failure_in_either_order() {
+    for start_first in [false, true] {
+        let mut world = world();
+        group_member(&mut world);
+        let (capture, _) = voice_acceptance(&mut world);
+        let success = accepted(capture, Some(base(&[OWNER, PEER], true)), false);
+        let events = if start_first {
+            [group_started(false, false), success]
+        } else {
+            [success, group_started(false, false)]
+        };
+        for event in events {
+            world.apply(event);
+        }
+        assert!(world.groups.sessions[&SESSION].active && !world.groups.sessions[&SESSION].closed);
+        assert!(world.groups.sessions[&SESSION].text_muted);
+        assert_eq!(history_count(&mut world), 1);
+    }
+}
+
+#[test]
+fn conference_roster_native_group_voice_404_retires_both_original_paths_before_any_late_success() {
+    for start_first in [false, true] {
+        let mut world = world();
+        group_member(&mut world);
+        let (capture, _) = voice_acceptance(&mut world);
+        let events = if start_first {
+            [group_started(true, false), accepted(capture, None, true)]
+        } else {
+            [accepted(capture, None, true), group_started(true, false)]
+        };
+        for event in events {
+            world.apply(event);
+        }
+        assert!(!world.groups.sessions[&SESSION].active && world.groups.sessions[&SESSION].closed);
+        assert!(world.session_roster(SESSION).is_none());
+        assert_eq!(history_count(&mut world), usize::from(start_first));
+        world.apply(accepted(capture, Some(base(&[OWNER, PEER], false)), false));
+        world.apply(group_started(true, false));
+        assert!(!world.groups.sessions[&SESSION].active && world.groups.sessions[&SESSION].closed);
+        assert_eq!(history_count(&mut world), 0);
+    }
+}
+
+#[test]
+fn conference_roster_native_group_voice_retries_replace_only_the_same_path_and_preserve_newer_stream_mute() {
+    let mut world = world();
+    group_member(&mut world);
+    let (old, _) = voice_acceptance(&mut world);
+    let retry = world.begin_session_initialization(SESSION, false).unwrap();
+    world.apply(accepted(old, None, true));
+    assert!(!world.groups.sessions[&SESSION].closed);
+    world.apply(delta(SESSION, OWNER, None, Some(true)));
+    world.apply(group_started(true, false));
+    assert!(world.groups.sessions[&SESSION].active && world.groups.sessions[&SESSION].text_muted);
+    world.apply(accepted(retry, Some(base(&[OWNER, PEER], false)), false));
+    assert!(world.groups.sessions[&SESSION].active && world.groups.sessions[&SESSION].text_muted);
+    assert!(world.session_roster(SESSION).is_some());
+    assert_eq!(history_count(&mut world), 1);
+}
+
+#[test]
+fn conference_roster_native_group_voice_existing_live_group_uses_acceptance_without_restarting_or_unmuting() {
+    let mut world = world();
+    group_member(&mut world);
+    let initial = acceptance(&mut world);
+    world.apply(accepted(initial, Some(base(&[OWNER, PEER], true)), false));
+    assert_eq!(history_count(&mut world), 1);
+    let (capture, commands) = voice_acceptance(&mut world);
+    assert!(!commands.iter().any(|command| matches!(
+        command,
+        aurora_net::NetCommand::SendImDialog {
+            dialog: super::super::groups::dialog::SESSION_GROUP_START,
+            ..
+        }
+    )));
+    world.apply(accepted(capture, Some(base(&[OWNER, PEER], false)), false));
+    assert!(world.groups.sessions[&SESSION].active && world.groups.sessions[&SESSION].text_muted);
+    assert_eq!(history_count(&mut world), 0);
+}
+
+#[test]
+fn conference_roster_native_group_voice_unordered_bootstraps_cannot_infer_unmute_but_a_live_delta_can() {
+    for start_first in [false, true] {
+        let mut world = world();
+        group_member(&mut world);
+        let (capture, _) = voice_acceptance(&mut world);
+        let success = accepted(capture, Some(base(&[OWNER, PEER], true)), false);
+        let events = if start_first {
+            [group_started(true, false), success]
+        } else {
+            [success, group_started(true, false)]
+        };
+        for event in events {
+            world.apply(event);
+        }
+        assert!(world.groups.sessions[&SESSION].text_muted);
+        assert!(!world.shared_group_sendable(SESSION));
+        assert_eq!(history_count(&mut world), 1);
+        world.apply(delta(SESSION, OWNER, None, Some(false)));
+        assert!(!world.groups.sessions[&SESSION].text_muted && world.shared_group_sendable(SESSION));
+    }
+}
+
+#[test]
+fn conference_roster_native_group_voice_new_intent_mute_is_not_overridden_by_an_older_lifetime_unmute_or_counterpart() {
+    for already_active in [false, true] {
+        let mut world = world();
+        group_member(&mut world);
+        if already_active {
+            let initial = acceptance(&mut world);
+            world.apply(accepted(initial, Some(base(&[OWNER, PEER], false)), false));
+            history_count(&mut world);
+            world.apply(delta(SESSION, OWNER, None, Some(false)));
+        }
+        let (original, _) = voice_acceptance(&mut world);
+        let current = if already_active {
+            original
+        } else {
+            world.apply(delta(SESSION, OWNER, None, Some(false)));
+            world.begin_session_initialization(SESSION, false).unwrap()
+        };
+        world.apply(accepted(current, Some(base(&[OWNER, PEER], true)), false));
+        assert!(world.groups.sessions[&SESSION].text_muted);
+        assert!(!world.shared_group_sendable(SESSION));
+        if !already_active {
+            // The still-current counterpart predates the new acceptance intent.
+            // Its older false cannot clear the newer bootstrap's mute either.
+            world.apply(group_started(true, false));
+            assert!(world.groups.sessions[&SESSION].text_muted);
+            assert!(!world.shared_group_sendable(SESSION));
+        }
+        world.apply(delta(SESSION, OWNER, None, Some(false)));
+        assert!(!world.groups.sessions[&SESSION].text_muted && world.shared_group_sendable(SESSION));
+    }
+}
+
 #[test]
 fn conference_roster_native_acceptance_replays_prebase_updates_and_repeated_bootstrap_cannot_unmute_live_state() {
     let mut world = world();
