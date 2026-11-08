@@ -95,6 +95,7 @@ pub mod rig_targets;
 pub mod rlva;
 pub mod script_debug;
 pub mod search;
+mod shared_chat_activity;
 pub mod sim_console;
 pub mod social;
 pub mod sound_parcels;
@@ -541,6 +542,9 @@ pub struct World {
     pub inventory: inventory::Inventory,
     pub(crate) inventory_archive: Option<inventory_archive::controller::Controller>,
     pub(crate) inventory_archive_instance: Option<u64>,
+    /// Native insertion order, independent of export scans/read interest.
+    pub(crate) shared_chat_incoming: Option<aurora_session::chat::NativeIncoming>,
+    pub(crate) shared_chat_incoming_owner: Option<(Uuid, Uuid)>,
     pub active_gestures: std::collections::BTreeSet<Uuid>,
     /// The inventory cache being read by its thread since the login reply
     /// (`poll_inventory_cache`), and when the read started.
@@ -856,6 +860,8 @@ impl World {
             inventory: inventory::Inventory::default(),
             inventory_archive: None,
             inventory_archive_instance: inventory_archive::fresh_inventory_instance(),
+            shared_chat_incoming: None,
+            shared_chat_incoming_owner: None,
             active_gestures: Default::default(),
             inventory_cache: None,
             inventory_background: Default::default(),
@@ -2500,6 +2506,7 @@ impl World {
         }
         match ev {
             NetEvent::LoggedIn(l) => {
+                self.bind_shared_chat_activity(l.agent_id, l.session_id);
                 self.agent_id = l.agent_id;
                 self.anti_spam.reset();
                 // a new session: no script holds a control yet

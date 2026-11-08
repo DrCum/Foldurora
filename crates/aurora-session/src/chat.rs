@@ -17,8 +17,10 @@ mod read;
 pub use read::*;
 mod review;
 pub use review::*;
+mod close;
+pub use close::*;
 
-pub const VERSION: u16 = 3;
+pub const VERSION: u16 = 4;
 pub const MAX_PACKET_BYTES: usize = 4096;
 /// One native UDP chat/IM part (`aurora-net::message_split`), in UTF-8 bytes.
 pub const MAX_TEXT_BYTES: usize = 1023;
@@ -530,6 +532,8 @@ impl ChatDrafts {
 #[allow(clippy::large_enum_variant)] // one bounded DTO per private packet
 pub enum ChatCommand {
     Send(SendRequest),
+    CloseConversation(CloseRequest),
+    QueryCloseReceipt(CloseRequest),
     MarkRead(MarkReadRequest),
     QueryReadReceipt(ReadReceiptQuery),
     ReviewConversation(ReviewConversationRequest),
@@ -546,6 +550,7 @@ pub enum ChatEvent {
     ReadBatch(Vec<ReadStateRow>),
     ReadReceipt(ReadReceiptReply),
     ReviewReceipt(ReviewReceiptReply),
+    CloseReceipt(CloseReceiptReply),
     Gap { through_event: u64 },
     Unsupported,
 }
@@ -570,6 +575,8 @@ pub struct ChatPacket {
 impl fmt::Debug for ChatPacket {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let kind = match &self.message {
+            ChatMessage::Command(ChatCommand::CloseConversation(_)) => "close_conversation",
+            ChatMessage::Command(ChatCommand::QueryCloseReceipt(_)) => "query_close_receipt",
             ChatMessage::Command(ChatCommand::Send(_)) => "send",
             ChatMessage::Command(ChatCommand::MarkRead(_)) => "mark_read",
             ChatMessage::Command(ChatCommand::QueryReadReceipt(_)) => "query_read_receipt",
@@ -582,6 +589,7 @@ impl fmt::Debug for ChatPacket {
             ChatMessage::Event(ChatEvent::ReadBatch(_)) => "read_batch",
             ChatMessage::Event(ChatEvent::ReadReceipt(_)) => "read_receipt",
             ChatMessage::Event(ChatEvent::ReviewReceipt(_)) => "review_receipt",
+            ChatMessage::Event(ChatEvent::CloseReceipt(_)) => "close_receipt",
             ChatMessage::Event(ChatEvent::Gap { .. }) => "gap",
             ChatMessage::Event(ChatEvent::Unsupported) => "unsupported",
         };
@@ -608,6 +616,10 @@ impl ChatPacket {
                 if self.reply_to != 0 {
                     return Err(ChatError::Sequence);
                 }
+                if let ChatCommand::CloseConversation(request) | ChatCommand::QueryCloseReceipt(request) = command {
+                    request.validate()?;
+                    source = request.key.source;
+                }
                 if let ChatCommand::MarkRead(request) = command {
                     request.validate()?;
                     source = request.key.source;
@@ -633,6 +645,13 @@ impl ChatPacket {
                 }
             }
             ChatMessage::Event(event) => match event {
+                ChatEvent::CloseReceipt(reply) => {
+                    reply.validate()?;
+                    if self.reply_to == 0 {
+                        return Err(ChatError::Sequence);
+                    }
+                    source = reply.request.key.source;
+                }
                 ChatEvent::Conversation(info) => {
                     info.policy.validate()?;
                     source = info.policy.key.source;

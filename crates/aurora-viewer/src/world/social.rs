@@ -31,6 +31,7 @@ pub struct ImSession {
     pub lines: VecDeque<ChatLine>,
     /// Follows `lines` for the view.
     pub clock: LineClock,
+    pub(crate) shared_chat_incoming: aurora_session::chat::NativeIncoming,
     pub unread: usize,
     #[allow(dead_code)] // draft of an IM session, not kept by the UI yet
     pub input: String,
@@ -44,6 +45,7 @@ impl ImSession {
             other,
             lines: VecDeque::new(),
             clock: LineClock::default(),
+            shared_chat_incoming: Default::default(),
             unread: 0,
             input: String::new(),
             log: SessionLog::default(),

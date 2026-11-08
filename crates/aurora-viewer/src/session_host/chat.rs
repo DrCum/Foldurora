@@ -6,6 +6,7 @@ use aurora_session::chat::{
     ChatCommand, ChatError, ChatEvent, ChatKey, ChatLine, ChatMessage, ChatPacket, ChatSource, ChatText, Conversation, ConversationInfo,
     MAX_CONVERSATIONS, MAX_RETAINED_LINES, NativeChatPolicy, SendAdmission, SendLedger, SendOutcome, SendReceipt, VERSION,
 };
+use aurora_session::chat::{CloseOutcome, CloseReceiptLedger, CloseRequest, NativeIncoming};
 use aurora_session::chat::{MAX_READ_ROWS, MarkReadRequest, ReadMetadata, ReadOutcome, ReadReceiptLedger, ReadReceiptQuery, ReadStateRow};
 use aurora_session::chat::{ReviewConversationRequest, ReviewOutcome, ReviewReceiptLedger, ReviewReceiptQuery, ReviewReceiptReply};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -59,6 +60,15 @@ pub(crate) trait NativeChat {
     fn mark_read(&mut self, _request: MarkReadRequest) -> ReadOutcome {
         ReadOutcome::RejectedNative
     }
+    fn incoming(&self, _conversation: Conversation) -> Option<NativeIncoming> {
+        None
+    }
+    fn incoming_stream(&self) -> Option<u64> {
+        None
+    }
+    fn close_conversation(&mut self, _request: CloseRequest) -> CloseOutcome {
+        CloseOutcome::RejectedNative
+    }
     fn review_conversation(&mut self, _request: ReviewConversationRequest) -> ReviewOutcome {
         ReviewOutcome::RejectedNative
     }
@@ -76,6 +86,7 @@ pub(crate) struct WorkerChat {
     retired: Option<ChatSource>,
     ledger: Option<SendLedger>,
     reads: Option<ReadReceiptLedger>,
+    closes: Option<CloseReceiptLedger>,
     reviews: Option<ReviewReceiptLedger>,
     read_cache: BTreeMap<Conversation, Option<ReadMetadata>>,
     read_dirty: VecDeque<Conversation>,
@@ -109,6 +120,7 @@ impl WorkerChat {
         }
         self.ledger = None;
         self.reads = None;
+        self.closes = None;
         self.reviews = None;
         self.read_cache.clear();
         self.read_dirty.clear();
@@ -142,6 +154,7 @@ impl WorkerChat {
         self.source = Some(source);
         self.ledger = Some(SendLedger::new(source)?);
         self.reads = Some(ReadReceiptLedger::new(source));
+        self.closes = Some(CloseReceiptLedger::new(source));
         self.reviews = Some(ReviewReceiptLedger::new(source)?);
         Ok(source)
     }
@@ -338,6 +351,16 @@ impl WorkerChat {
                 } else {
                     None
                 },
+                incoming: if state.policy.ready && state.policy.can_read {
+                    native.incoming(key)
+                } else {
+                    None
+                },
+                incoming_stream: if matches!(key, Conversation::Direct(_)) && state.policy.ready && state.policy.can_read {
+                    native.incoming_stream()
+                } else {
+                    None
+                },
             });
         }
         Ok(rows)
@@ -381,6 +404,40 @@ impl WorkerChat {
         // constructing its reply afterward. The driver reserves queue space.
         self.outgoing.checked_add(MAX_REPLY as u64).ok_or(ChatError::Sequence)?;
         match command {
+            ChatCommand::CloseConversation(request) => {
+                self.require_read_authority(native, request.key)?;
+                let duplicate = self.closes.as_mut().ok_or(ChatError::Unavailable)?.reserve(*request)?;
+                let receipt = if let Some(receipt) = duplicate {
+                    receipt
+                } else {
+                    let policy = self.states.get(&request.key.conversation).ok_or(ChatError::Unavailable)?.policy;
+                    let age = received_at.and_then(|received| now.checked_duration_since(received));
+                    let outcome = if age.is_none_or(|age| age > Duration::from_secs(2)) {
+                        CloseOutcome::Expired
+                    } else if policy.revision != request.policy_revision {
+                        CloseOutcome::StaleTarget
+                    } else if self.context(native)? == source {
+                        native.close_conversation(*request)
+                    } else {
+                        CloseOutcome::RejectedNative
+                    };
+                    self.closes.as_mut().ok_or(ChatError::Unavailable)?.finish(*request, outcome)?
+                };
+                if self.context(native)? != source {
+                    return Err(ChatError::Binding);
+                }
+                self.received = packet.sequence;
+                Ok(vec![self.packet(packet.sequence, ChatEvent::CloseReceipt(receipt))?])
+            }
+            ChatCommand::QueryCloseReceipt(request) => {
+                self.require_read_authority(native, request.key)?;
+                let reply = self.closes.as_ref().ok_or(ChatError::Unavailable)?.query(*request)?;
+                if self.context(native)? != source {
+                    return Err(ChatError::Binding);
+                }
+                self.received = packet.sequence;
+                Ok(vec![self.packet(packet.sequence, ChatEvent::CloseReceipt(reply))?])
+            }
             ChatCommand::ReviewConversation(request) => {
                 self.require_read_authority(native, request.target.key)?;
                 let duplicate = self.reviews.as_mut().ok_or(ChatError::Unavailable)?.reserve(*request)?;
@@ -1470,4 +1527,6 @@ mod tests {
         assert_eq!(backend.handle(&mut native, &query), Err(ChatError::Denied));
         assert_eq!(native.opens.len(), 1);
     }
+
+    mod close_tests;
 }
