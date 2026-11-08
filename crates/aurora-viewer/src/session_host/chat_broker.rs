@@ -15,7 +15,9 @@ use std::collections::{BTreeMap, VecDeque};
 
 mod close;
 use close::CloseBook;
-pub(crate) use close::{CloseOperation, CloseSnapshot, CloseStatus};
+#[cfg(test)]
+pub(crate) use close::CloseOperation;
+pub(crate) use close::{CloseSnapshot, CloseStatus};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ReadStatus {
