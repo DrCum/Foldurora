@@ -5431,7 +5431,7 @@ impl World {
 
     /// Native composer preparation, before either automatic unblock or own
     /// echo. The App still applies its independent final command restriction.
-    pub(crate) fn prepare_native_direct_im(&mut self, to: Uuid, text: &str) -> Option<NetCommand> {
+    pub(crate) fn prepare_native_direct_im(&mut self, to: Uuid, text: &str) -> Option<aurora_net::NetCommand> {
         if !self.allows_direct_contact(to) {
             return None;
         }
@@ -5444,7 +5444,7 @@ impl World {
             );
         }
         self.own_im(to, text);
-        Some(NetCommand::SendIm { to, message: text.into() })
+        Some(aurora_net::NetCommand::SendIm { to, message: text.into() })
     }
 
     /// Record an IM we sent.
