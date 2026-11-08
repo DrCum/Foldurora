@@ -486,6 +486,25 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn decoded_stereo_edges_preserve_relative_channel_level_and_polarity() {
+        for frames in [3, 64, 2048] {
+            let pcm: Vec<i16> = (0..frames).flat_map(|_| [16_384, -8_192]).collect();
+            let clip = SoundClip::decode(&wav_bytes(48_000, 2, &pcm)).unwrap();
+            let stereo = clip.samples.as_chunks::<2>().0;
+            assert_eq!(stereo.len(), frames);
+            assert_eq!(stereo[frames / 2], [0.5, -0.25], "the clip body keeps its level");
+            // Interleaved sample fades can offset the channels at the edges,
+            // changing their relative level even when the middle is correct.
+            for frame in stereo {
+                assert!((frame[0] + 2.0 * frame[1]).abs() < 1e-7, "stereo balance: {frame:?}");
+            }
+            if frames < 4 {
+                assert!(stereo.iter().all(|frame| *frame == [0.5, -0.25]), "no room for an edge fade");
+            }
+        }
+    }
+
+    #[test]
     fn decodes_mp3_frames() {
         let data = mp3_silence(30);
         let mut s = DecodeStream::open(Box::new(Cursor::new(data)), Some("mp3")).unwrap();
