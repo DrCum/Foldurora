@@ -100,6 +100,7 @@ fn close_activity_history_own_system_cards_groups_metadata_and_nearby_do_not_min
         excluded.source = from;
         w.conversation_push(PEER, excluded, true);
     }
+    w.conversation_line(PEER, line());
     w.conversation_card(PEER, line());
     w.own_im(PEER, "Synthetic own line");
     w.system_message("Synthetic system message");

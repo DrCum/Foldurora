@@ -242,7 +242,9 @@ impl World {
             }
         }
         let incoming = unread && line.origin == Origin::Live && !matches!(line.kind, ChatKind::Own(_));
-        self.record_shared_chat_incoming(session, &line);
+        if incoming {
+            self.record_shared_chat_incoming(session, &line);
+        }
         let s = self.session_lines(session);
         s.lines.push_back(line);
         s.clock.pushed_back();
