@@ -204,7 +204,7 @@ impl Frames {
         let context = self.contexts[index].clone();
         let palette = crate::theme::Theme::default().palette();
         let mut action = None;
-        let output = context.run_ui(raw, |ui| {
+        let mut output = context.run_ui(raw, |ui| {
             let result = if index == 0 {
                 let send = self.chat.show_for(Self::surface(index), ui, &palette, mode);
                 let read = self.chat.take_read_action_for(Self::surface(index));
@@ -230,6 +230,7 @@ impl Frames {
             };
             action = action.take().or(result);
         });
+        output.textures_delta.clear();
         self.text.clear();
         fn collect(shape: &egui::Shape, texts: &mut Vec<String>) {
             match shape {

@@ -351,7 +351,7 @@ fn favorites_real_egui_grouped_end_drop_uses_full_original_list_not_last_heading
         },
     );
     let mut action = None;
-    let _ = h.ctx.run_ui(
+    let mut output = h.ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(600.0, 400.0))),
             time: Some(h.time + 0.1),
@@ -371,6 +371,7 @@ fn favorites_real_egui_grouped_end_drop_uses_full_original_list_not_last_heading
             });
         },
     );
+    output.textures_delta.clear();
     assert_eq!(action, Some(FavAction::Move(Uuid::from_u128(10), 3)));
     if let Some(FavAction::Move(item, rank)) = action {
         h.data.favorites.rearrange(&h.data.inventory, item, rank);
