@@ -24,6 +24,18 @@ enum WindowsGrantRole {
     RetainedPrefix,
     SettingsObject,
 }
+// Exact Windows servicing identity measured by Root on the native runner.
+// This is not a service-SID namespace or an ACL grant trust rule.
+#[cfg(any(windows, test))]
+const TRUSTED_INSTALLER_SUBAUTHORITIES: [u32; 6] = [80, 956_008_885, 3_418_522_649, 1_831_038_044, 1_853_292_631, 2_271_478_464];
+#[cfg(any(windows, test))]
+fn windows_trusted_installer_sid(authority: [u8; 6], subauthorities: &[u32]) -> bool {
+    authority == [0, 0, 0, 0, 0, 5] && subauthorities == TRUSTED_INSTALLER_SUBAUTHORITIES.as_slice()
+}
+#[cfg(any(windows, test))]
+fn windows_owner_allowed(existing_trusted: bool, installer: bool, role: WindowsGrantRole) -> bool {
+    existing_trusted || installer && matches!(role, WindowsGrantRole::RetainedPrefix)
+}
 #[cfg(any(windows, test))]
 fn windows_allow_grant(trusted: bool, mask: u32, role: WindowsGrantRole) -> Result<bool, ()> {
     // FILE_READ_DATA/EA/ATTRIBUTES/EXECUTE, READ_CONTROL, SYNCHRONIZE,
@@ -216,6 +228,31 @@ mod native {
         admin_owner: bool,
         closed: bool,
     }
+    /// The caller supplies the owner of a live, successfully queried native
+    /// security descriptor. Validate its SID before reading exact components.
+    unsafe fn trusted_installer_owner(owner: PSID) -> bool {
+        // SAFETY: owner remains within the caller's live descriptor; the SID
+        // APIs below precede component reads and validate its complete extent.
+        unsafe {
+            if owner.is_null() || IsValidSid(owner) == 0 || GetLengthSid(owner) != 32 {
+                return false;
+            }
+            let authority = GetSidIdentifierAuthority(owner);
+            let count = GetSidSubAuthorityCount(owner);
+            if authority.is_null() || count.is_null() || *count != 6 {
+                return false;
+            }
+            let mut subauthorities = [0; 6];
+            for (index, value) in subauthorities.iter_mut().enumerate() {
+                let component = GetSidSubAuthority(owner, index as u32);
+                if component.is_null() {
+                    return false;
+                }
+                *value = component.read_unaligned();
+            }
+            windows_trusted_installer_sid((*authority).Value, &subauthorities)
+        }
+    }
     fn access(file: &File, role: WindowsGrantRole) -> io::Result<Access> {
         let wanted = OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION;
         let mut bytes = 0;
@@ -264,7 +301,11 @@ mod native {
             let user_owner = EqualSid(owner, sid) != 0;
             let admin_owner = EqualSid(owner, admins.as_mut_ptr().cast()) != 0;
             let system_owner = EqualSid(owner, system.as_mut_ptr().cast()) != 0;
-            if !user_owner && !admin_owner && !system_owner {
+            // Owner-only exception for an exact measured servicing SID on a
+            // retained prefix. It never changes user_owner/admin_owner, ACL
+            // principal trust, settings ownership or private-ancestor credit.
+            let installer_owner = matches!(role, WindowsGrantRole::RetainedPrefix) && trusted_installer_owner(owner);
+            if !windows_owner_allowed(user_owner || admin_owner || system_owner, installer_owner, role) {
                 return Err(invalid("ordinary settings native object has an untrusted owner"));
             }
             let mut information = ACL_SIZE_INFORMATION::default();
@@ -370,6 +411,55 @@ mod native {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn profile_copy_windows_trusted_installer_sid_requires_exact_authority_count_and_every_service_component() {
+        // Root's native runner matched this complete fixed servicing SID,
+        // never an arbitrary NT SERVICE principal or a translated SID name.
+        let authority = [0, 0, 0, 0, 0, 5];
+        let exact = [80, 956_008_885, 3_418_522_649, 1_831_038_044, 1_853_292_631, 2_271_478_464];
+        assert!(windows_trusted_installer_sid(authority, &exact));
+        for index in 0..exact.len() {
+            let mut neighbor = exact;
+            neighbor[index] = neighbor[index].wrapping_add(1);
+            assert!(!windows_trusted_installer_sid(authority, &neighbor));
+        }
+        for index in 0..authority.len() {
+            let mut other_authority = authority;
+            other_authority[index] ^= 1;
+            assert!(!windows_trusted_installer_sid(other_authority, &exact));
+        }
+        for count in 0..exact.len() {
+            assert!(!windows_trusted_installer_sid(authority, &exact[..count]));
+        }
+        let mut longer = exact.to_vec();
+        longer.push(0);
+        assert!(!windows_trusted_installer_sid(authority, &longer));
+    }
+
+    #[test]
+    fn profile_copy_windows_servicing_owner_is_prefix_only_without_acl_trust_or_private_settings_credit() {
+        assert!(windows_owner_allowed(false, true, WindowsGrantRole::RetainedPrefix));
+        assert!(!windows_owner_allowed(false, true, WindowsGrantRole::SettingsObject));
+        for role in [WindowsGrantRole::RetainedPrefix, WindowsGrantRole::SettingsObject] {
+            assert!(
+                windows_owner_allowed(true, false, role),
+                "existing User/System/Administrators owner trust remains"
+            );
+            assert!(!windows_owner_allowed(false, false, role), "unestablished owner remains refused");
+            for mask in [0x40, 0x10000, 0x40000, 0x80000, 0x001f_01ff, 0x1000_0000, 0x4000_0000, u32::MAX] {
+                assert_eq!(
+                    windows_allow_grant(false, mask, role),
+                    Err(()),
+                    "owner recognition never trusts this ACL principal"
+                );
+            }
+        }
+        assert!(!windows_settings_allowed(false, false, true, true));
+        assert!(!windows_source_allowed(false, false, true, true));
+        assert_eq!(windows_allow_grant(false, 4, WindowsGrantRole::RetainedPrefix), Ok(false));
+        assert_eq!(windows_allow_grant(false, 4, WindowsGrantRole::SettingsObject), Err(()));
+    }
 
     fn native_directory() -> PathBuf {
         let installation = format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());

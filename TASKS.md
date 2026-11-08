@@ -1,5 +1,15 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Windows selective-copy servicing-prefix owner compatibility (2026-11-08;
+  no issue): Root's read-only runner diagnostic42454510345 on image20261103.298.1
+  established exact TrustedInstaller root-prefix ownership for LocalAppData and
+  Temp, with no applicable TrustedInstaller grants. Admit that fully validated
+  fixed SID only as RetainedPrefix owner. No ACL grant trust, settings-object
+  owner exception, private credit, permission repair or native-handle/path/CAS
+  weakening is included. Existing tests/assertions remain exact; two additional
+  exact-SID/role/policy cases are authored UNRUN. Independent source review and
+  Root's actual Windows rerun remain required; no author execution is claimed.
+
 - 🔧 Candidate Linux validation on standard native ancestry (no issue):
   The isolated Windows-candidate workflow now also runs the repository's existing
   `ci` profile on Ubuntu for the monitor integration branch. This validates
