@@ -746,6 +746,7 @@
     groups, including changing/clearing the group while confirmation is open;
     verify bought-object group and unchanged purchase guards. No changed UI
     or translations; both editor layouts retain the same interaction path.
+- ✅ COLLADA upload accepts equivalent duplicate IDs ([#2105](https://github.com/Aurora-Viewer/Aurora-Viewer/issues/2105); task `collada-controller-ids`; [PR #2106](https://github.com/Aurora-Viewer/Aurora-Viewer/pull/2106)): some exporters (Blender's, with several rigged meshes on one armature) repeat the same element and its ID. A duplicate ID is accepted when both elements are equivalent (same name, attributes in any order, text without formatting whitespace, children); references resolve to the first one. Conflicting definitions still fail, with an error naming the ID (cut to 64 characters). Regression: `collada_duplicate_controller_ids_require_equivalent_definitions`. Validated by the contributor on the grid on 2026-11-03: rigged meshes sharing one armature upload; meshes with different armatures under the same ID are still refused.
 
 - 🔧 Selective upstream catch-up (human request, 2026-11-07; no issue): apply
   sixteen reviewed upstream commits individually with `-x` to frozen photo/
