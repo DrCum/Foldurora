@@ -515,7 +515,9 @@ pub struct InventoryUi {
     clipboard_loaded: Option<(u64, Vec<Uuid>)>,
     pub ui_id: Uuid,
     pub demo_menu: Option<Uuid>,
+    /// Aggregate loading status; each owner below completes independently.
     pub fetch_all: bool,
+    browse_fetch: bool,
     operation_fetch: bool,
     pub search: String,
     searches: [String; 5],
@@ -661,8 +663,17 @@ impl InventoryUi {
     /// loaded.
     pub fn begin_replace_links(&mut self, id: Uuid) {
         self.dialog = Some(EditDialog::ReplaceLinks(Box::new(replace_links::ReplaceLinks::new(id))));
-        self.fetch_all = true;
-        self.operation_fetch = true;
+        self.set_operation_fetch(true);
+    }
+
+    fn set_browse_fetch(&mut self, pending: bool) {
+        self.browse_fetch = pending;
+        self.fetch_all = self.browse_fetch || self.operation_fetch;
+    }
+
+    fn set_operation_fetch(&mut self, pending: bool) {
+        self.operation_fetch = pending;
+        self.fetch_all = self.browse_fetch || self.operation_fetch;
     }
 
     pub fn filter_move_to(&mut self, filter: &str) {
@@ -841,7 +852,7 @@ impl InventoryUi {
         self.filters.always_folders = false;
         self.filters_initialized = true;
         self.links_filter = Some(id);
-        self.fetch_all = true;
+        self.set_browse_fetch(true);
     }
     /// Advanced search on: what was typed in quick search becomes its rules
     /// (`SmartQuery::from_quick`), so nothing is lost.
@@ -890,7 +901,7 @@ impl InventoryUi {
         self.filters_initialized = true;
         self.links_filter = None;
         self.active_smart = id;
-        self.fetch_all = true;
+        self.set_browse_fetch(true);
     }
     /// Find similar: like Find all links, the filters in place come back
     /// when its chip is removed.
@@ -1340,8 +1351,8 @@ fn folder_window_contents_visible(
     let filtered = !q.is_empty() || st.links_filter.is_some() || st.filters.active();
     if filtered {
         request_search_visible(inv, root, st, prefs);
-    } else if st.fetch_all {
-        st.fetch_all = !inv.request_tree(root);
+    } else if st.browse_fetch {
+        st.set_browse_fetch(!inv.request_tree(root));
     }
     if filtered {
         st.view.search_gated(
@@ -1498,7 +1509,7 @@ fn request_search_visible(inv: &mut archive::Browse<'_, '_>, root: Uuid, st: &mu
     let received = st.tab == RECEIVED_TAB && st.scope.is_nil();
     let library = !received && root == inv.root && prefs.search_library;
     let key = (root, inv.generation, library, prefs.search_trash, prefs.search_outfits);
-    if st.fetch_generation == Some(key) && !st.fetch_all {
+    if st.fetch_generation == Some(key) && !st.browse_fetch {
         return;
     }
     if st
@@ -1543,7 +1554,7 @@ fn request_search_visible(inv: &mut archive::Browse<'_, '_>, root: Uuid, st: &mu
     for id in requests {
         inv.request(id);
     }
-    st.fetch_all = !complete;
+    st.set_browse_fetch(!complete);
     st.fetch_generation = Some(key);
     st.fetch_poll = Some(std::time::Instant::now());
 }
@@ -1824,12 +1835,12 @@ fn list_scope(inv: &mut archive::Browse<'_, '_>, st: &mut InventoryUi, prefs: &I
     };
     let filtered = st.result_view();
     if root.is_nil() {
-        st.fetch_all = false;
+        st.set_browse_fetch(false);
         st.view.results.clear();
-    } else if !filtered && st.fetch_all && !st.scope.is_nil() {
-        // a folder window loads its whole tree when an operation asks (the
-        // main window does it for the root in `show`)
-        st.fetch_all = !inv.request_tree(root);
+    } else if !filtered && st.browse_fetch {
+        // A pending browse follows its current visible root, including the
+        // main tree after a search is cleared. Mutation discovery is separate.
+        st.set_browse_fetch(!inv.request_tree(root));
     } else if filtered {
         request_search_visible(inv, root, st, prefs);
         st.view.search_gated(
@@ -1952,9 +1963,8 @@ fn inventory_contents_visible(
 /// the window showing the whole inventory is closed, independently of
 /// search scopes.
 fn fetch_whole_inventory(inv: &mut Inventory, st: &mut InventoryUi) {
-    if st.operation_fetch && st.search.trim().is_empty() && !st.filters.active() && st.links_filter.is_none() && st.tab == 0 {
-        st.operation_fetch = !rules::request_tree(inv, inv.root);
-        st.fetch_all |= st.operation_fetch;
+    if st.operation_fetch {
+        st.set_operation_fetch(!rules::request_tree(inv, inv.root));
     }
 }
 
@@ -2201,7 +2211,7 @@ pub fn show(
             continue;
         }
         w.state.ui_id = w.id;
-        if w.id == listings::PANEL && w.state.fetch_all {
+        if w.id == listings::PANEL && w.state.operation_fetch {
             fetch_whole_inventory(&mut world.inventory, &mut w.state);
         }
         w.state.focus_search = w.open && (w.state.focus_search || !w.state.was_open);
@@ -4513,6 +4523,7 @@ mod tests {
             let mut st = InventoryUi {
                 search: search.into(),
                 fetch_all,
+                browse_fetch: fetch_all,
                 ..Default::default()
             };
             folder_window_frame(&ctx, &mut inv, root, &mut st);

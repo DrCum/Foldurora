@@ -326,6 +326,80 @@ fn inventory_archive_ui_ordinary_none_denies_while_explicit_exemptions_are_named
     }
 }
 
+#[test]
+fn inventory_archive_ui_operation_and_canonical_browse_loading_complete_independently() {
+    let mut world = world(&[id(2)]);
+    for folder in world.inventory.folders.values_mut() {
+        folder.state = FetchState::Fetched;
+    }
+    world.inventory.folders.get_mut(&id(8)).unwrap().state = FetchState::Unknown;
+    let mut owner = State::default();
+    let instance = owner.instance();
+    let mut ui = InventoryUi {
+        search: "Library".into(),
+        ..Default::default()
+    };
+    let prefs = InventoryPreferences {
+        search_library: true,
+        ..Default::default()
+    };
+    ui.begin_replace_links(id(2));
+    let mut demands = Demands::new(&world.inventory);
+    {
+        let read = owner.read(&world).unwrap();
+        let gate = State::ordinary(instance, Some(&read), world.inventory_archive_instance);
+        assert!(!gate.passes(id(2)));
+        assert!(gate.passes(id(8)));
+        let mut browse = Browse {
+            inventory: &world.inventory,
+            gate,
+            ordinary: gate,
+            demands: &mut demands,
+        };
+        super::super::request_search_visible(&mut browse, world.inventory.root, &mut ui, &prefs);
+    }
+    assert!(ui.browse_fetch && ui.operation_fetch && ui.fetch_all);
+    assert_eq!(demands.pending, vec![id(8)], "only the visible Library browse is pending");
+    assert_eq!(demands.left, 15, "same sixteen source-bound browse admissions");
+    super::super::fetch_whole_inventory(&mut world.inventory, &mut ui);
+    assert!(!ui.operation_fetch, "personal operation completes even while search is active");
+    assert!(
+        ui.browse_fetch && ui.fetch_all,
+        "operation completion retains the Library browse owner"
+    );
+    assert!(
+        world.inventory.queue.is_empty(),
+        "operation adds no request to the complete personal tree"
+    );
+
+    world.inventory.folders.get_mut(&id(8)).unwrap().state = FetchState::Fetched;
+    world.inventory.folders.get_mut(&id(2)).unwrap().state = FetchState::Unknown;
+    ui.set_operation_fetch(true);
+    ui.fetch_poll = None;
+    let mut completed = Demands::new(&world.inventory);
+    {
+        let read = owner.read(&world).unwrap();
+        let gate = State::ordinary(instance, Some(&read), world.inventory_archive_instance);
+        let mut browse = Browse {
+            inventory: &world.inventory,
+            gate,
+            ordinary: gate,
+            demands: &mut completed,
+        };
+        super::super::request_search_visible(&mut browse, world.inventory.root, &mut ui, &prefs);
+    }
+    assert!(!ui.browse_fetch, "hidden unknown branch cannot keep ordinary browse loading");
+    assert!(
+        ui.operation_fetch && ui.fetch_all,
+        "browse completion retains the independent operation owner"
+    );
+    assert!(completed.pending.is_empty(), "ordinary browse never requests the archived branch");
+    world.inventory.folders.get_mut(&id(2)).unwrap().state = FetchState::Fetched;
+    super::super::fetch_whole_inventory(&mut world.inventory, &mut ui);
+    assert!(!ui.operation_fetch && !ui.browse_fetch && !ui.fetch_all);
+    assert!(world.inventory.queue.is_empty());
+}
+
 fn presentation_key() -> egui::Id {
     egui::Id::unique("archive_fixture_presentation")
 }
