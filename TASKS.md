@@ -18,6 +18,20 @@
   actual-World lifecycle tests are authored/unrun; existing Favorites assertions
   remain. Bounded archive projection, new closed store kind, actual consumers
   and Folder Jump visibility integration are not yet implemented or enabled.
+- 🔧 Selective-copy committed-widget and modifier guard correction
+  (2026-11-08; no issue): exact final egui prev_pass widget enabled/visible/ID/
+  parent/Sense/rect/interact/layer proof, finite forward/inverse geometry and
+  identity-only modal transforms. Same-layer widget and higher visible-Area coverage,
+  late focus and native Alt/AltGraph transitions revoke the original one-use
+  proposal; actual release/current modifiers must stay plain. Logical changes
+  do not rearm the unchanged native Enter/Space physical helper or touch editor
+  state. Six additional actual-egui/registry/native-metadata cases are authored
+  UNRUN (19 UI cases total; original13 bodies/assertions preserved). The prior
+  fb003e0e negative source review remains pinned; follow-up source review, Root
+  compilation/tests/native acceptance and human UI validation are still required.
+  All31 adapter/IO/security,19 projection,3 mouse and59 Settings cases remain
+  unchanged; production routes, EN/FR/JA and original worker deadline are intact.
+
 - 🔧 Manual selective profile copy, real Manage UI and production promotion
   (2026-11-08; no issue): stopped target, Main Saved read-only or another stopped
   slot source, four initially checked typed families, actual Inspect counters and

@@ -45,6 +45,15 @@ enum Late {
     OtherModal,
     Close,
     FocusLoss,
+    MoveWidget,
+    ReclipWidget,
+    ResenseWidget,
+    CoverWidget,
+    CoverLayer,
+    VisualWidgetCover,
+    VisualLayerCover,
+    FocusWidget,
+    Transform(egui::emath::TSTransform),
 }
 struct Frames {
     ctx: egui::Context,
@@ -101,6 +110,19 @@ impl Frames {
                 }
                 Late::Close => self.model.close(),
                 Late::FocusLoss => ui.ctx().input_mut(|input| input.focused = false),
+                Late::MoveWidget
+                | Late::ReclipWidget
+                | Late::ResenseWidget
+                | Late::CoverWidget
+                | Late::CoverLayer
+                | Late::VisualWidgetCover
+                | Late::VisualLayerCover
+                | Late::FocusWidget
+                | Late::Transform(_) => {
+                    if let Some(completed) = &self.model.completed {
+                        late_widget(ui, completed.control, late);
+                    }
+                }
             }
         });
         let command = action.and_then(|action| self.model.take_action(action, &self.ctx, &self.snapshot, false));
@@ -158,6 +180,80 @@ impl Frames {
         self.show(vec![], Late::None);
         self.show(vec![], Late::None);
         capture
+    }
+}
+
+fn late_widget(ui: &mut egui::Ui, control: Control, change: Late) {
+    if let Late::Transform(transform) = change {
+        ui.ctx().set_transform_layer(control.layer, transform);
+        return;
+    }
+    if matches!(change, Late::CoverLayer | Late::VisualLayerCover) {
+        egui::Area::new(Id::unique("copy_guard_late_cover_area"))
+            .order(egui::Order::Foreground)
+            .interactable(matches!(change, Late::CoverLayer))
+            .fixed_pos(control.rect.min)
+            .show(ui.ctx(), |ui| {
+                ui.allocate_response(control.rect.size(), egui::Sense::click());
+            });
+        return;
+    }
+    // Same-id metadata turnover is deliberate here, using actual Ui::interact
+    // registration and the final committed registry, not a mock response map.
+    ui.ctx().options_mut(|options| options.warn_on_id_clash = false);
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .id_salt("copy_guard_late_widget")
+            .layer_id(control.layer)
+            .max_rect(ui.ctx().content_rect()),
+    );
+    child.set_clip_rect(control.paint_clip);
+    match change {
+        Late::MoveWidget => {
+            child.interact(
+                control.registered.rect.translate(egui::vec2(11.0, 0.0)),
+                control.widget,
+                control.registered.sense,
+            );
+        }
+        Late::ReclipWidget => {
+            child.set_clip_rect(Rect::from_min_max(
+                control.rect.min,
+                egui::pos2(control.rect.center().x, control.rect.max.y),
+            ));
+            child.interact(control.registered.rect, control.widget, control.registered.sense);
+        }
+        Late::ResenseWidget => {
+            child.interact(
+                control.registered.rect,
+                control.widget,
+                control.registered.sense | egui::Sense::drag(),
+            );
+        }
+        Late::CoverWidget => {
+            child.interact(
+                control.registered.rect,
+                Id::unique("copy_guard_late_same_layer_cover"),
+                egui::Sense::click(),
+            );
+        }
+        Late::VisualWidgetCover => {
+            child.interact(
+                control.registered.rect,
+                Id::unique("copy_guard_late_visual_cover"),
+                egui::Sense::hover(),
+            );
+        }
+        Late::FocusWidget => {
+            let mut text = String::new();
+            child
+                .put(
+                    Rect::from_min_size(Pos2::ZERO, egui::vec2(80.0, 24.0)),
+                    egui::TextEdit::singleline(&mut text).id(Id::unique("copy_guard_late_editor")),
+                )
+                .request_focus();
+        }
+        _ => {}
     }
 }
 
@@ -582,5 +678,339 @@ fn profile_copy_ui_actual_compact_modal_and_source_popup_layout_explicit_locale(
             assert!(canvas.contains_rect(control.rect));
         }
         assert!(frames.model.controls.len() <= MAX_CONTROLS);
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Modality {
+    Pointer,
+    Enter,
+    Space,
+    Accessibility,
+}
+fn release_with(frames: &mut Frames, control: Control, modality: Modality, late: Late) -> Option<Command> {
+    match modality {
+        Modality::Pointer => frames.click(control, late),
+        Modality::Enter | Modality::Space => {
+            frames.ctx.memory_mut(|memory| memory.request_focus(control.widget));
+            frames.show(vec![], Late::None);
+            let key = if matches!(modality, Modality::Enter) {
+                Key::Enter
+            } else {
+                Key::Space
+            };
+            assert!(frames.show(vec![key_event(key, true, Modifiers::NONE)], Late::None).is_none());
+            frames.show(vec![key_event(key, false, Modifiers::NONE)], late)
+        }
+        Modality::Accessibility => {
+            frames.ctx.memory_mut(|memory| memory.request_focus(control.widget));
+            frames.show(vec![], Late::None);
+            frames.show(
+                vec![Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+                    action: egui::accesskit::Action::Click,
+                    target_tree: egui::accesskit::TreeId::ROOT,
+                    target_node: control.widget.accesskit_id(),
+                    data: None,
+                })],
+                late,
+            )
+        }
+    }
+}
+fn key_event(key: Key, pressed: bool, modifiers: Modifiers) -> Event {
+    Event::Key {
+        key,
+        physical_key: Some(key),
+        pressed,
+        repeat: false,
+        modifiers,
+    }
+}
+
+#[test]
+fn profile_copy_ui_final_committed_turnover_and_coverage_reject_every_modality_without_replay() {
+    for modality in [Modality::Pointer, Modality::Enter, Modality::Space, Modality::Accessibility] {
+        for late in [
+            Late::MoveWidget,
+            Late::ReclipWidget,
+            Late::ResenseWidget,
+            Late::CoverWidget,
+            Late::CoverLayer,
+            Late::VisualWidgetCover,
+            Late::VisualLayerCover,
+            Late::FocusWidget,
+        ] {
+            let mut frames = Frames::new();
+            frames.prepare();
+            let original = frames.control(|intent| matches!(intent, Intent::Apply(_)));
+            assert!(release_with(&mut frames, original, modality, late).is_none());
+            let committed = frames
+                .ctx
+                .viewport(|viewport| viewport.prev_pass.widgets.get(original.widget).copied())
+                .unwrap();
+            match late {
+                Late::MoveWidget => assert_ne!(committed.rect, original.registered.rect),
+                Late::ReclipWidget => {
+                    assert_ne!(committed.interact_rect, original.registered.interact_rect);
+                    assert!(committed.interact_rect.is_positive());
+                }
+                Late::ResenseWidget => assert_ne!(committed.sense, original.registered.sense),
+                Late::CoverWidget | Late::CoverLayer | Late::VisualWidgetCover | Late::VisualLayerCover => assert_eq!(
+                    committed, original.registered,
+                    "coverage alone must revoke a still-existing enabled widget"
+                ),
+                Late::FocusWidget => assert_eq!(
+                    frames.ctx.memory(|memory| memory.focused()),
+                    Some(Id::unique("copy_guard_late_editor"))
+                ),
+                _ => unreachable!(),
+            }
+            assert!(
+                frames.show(vec![], Late::None).is_none(),
+                "a rejected proposal cannot retry on an empty frame"
+            );
+            assert!(!frames.model.operation.as_ref().unwrap().apply_submitted);
+        }
+    }
+}
+
+#[test]
+fn profile_copy_ui_actual_late_transform_rejects_nonfinite_y_inverse_and_nonidentity_for_every_modality() {
+    use egui::emath::TSTransform;
+    let bad = [
+        TSTransform::from_translation(egui::vec2(f32::INFINITY, 0.0)),
+        TSTransform::from_translation(egui::vec2(0.0, f32::INFINITY)),
+        TSTransform::from_translation(egui::vec2(0.0, f32::NAN)),
+        TSTransform::from_scaling(0.0),
+        TSTransform::from_scaling(f32::NAN),
+        TSTransform::from_scaling(f32::from_bits(1)),
+        TSTransform::from_scaling(f32::MAX),
+        TSTransform::from_translation(egui::vec2(9.0, 3.0)),
+        TSTransform::from_scaling(1.5),
+    ];
+    for modality in [Modality::Pointer, Modality::Enter, Modality::Space, Modality::Accessibility] {
+        for transform in bad {
+            let mut frames = Frames::new();
+            frames.prepare();
+            let original = frames.control(|intent| matches!(intent, Intent::Apply(_)));
+            assert!(release_with(&mut frames, original, modality, Late::Transform(transform)).is_none());
+            assert_eq!(
+                frames
+                    .ctx
+                    .viewport(|viewport| viewport.prev_pass.widgets.get(original.widget).copied()),
+                Some(original.registered),
+                "reject transform change while original widget remains committed"
+            );
+            assert!(frames.show(vec![], Late::None).is_none());
+            assert!(!frames.model.operation.as_ref().unwrap().apply_submitted);
+        }
+    }
+    let rect = Rect::from_min_size(egui::pos2(1.0, 1.0), egui::vec2(90.0, 24.0));
+    assert!(transformed_rect(rect, None).is_some());
+    for invalid in [
+        Rect::ZERO,
+        Rect::EVERYTHING,
+        Rect::from_min_max(egui::pos2(-f32::MAX, 0.0), egui::pos2(f32::MAX, 24.0)),
+    ] {
+        assert!(transformed_rect(invalid, None).is_none());
+    }
+}
+
+#[test]
+fn profile_copy_ui_final_registry_disabled_hidden_removed_and_layer_turnover_have_no_stale_fallback() {
+    for fault in 0..5 {
+        let mut frames = Frames::new();
+        frames.prepare();
+        let original = frames.control(|intent| matches!(intent, Intent::Apply(_)));
+        assert!(original.committed(&frames.ctx));
+        // A real subsequent committed layout replaces the registry. Keep the
+        // original control unchanged; no later-layout proof is reminted.
+        let _output = frames.ctx.run_ui(
+            egui::RawInput {
+                focused: true,
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, frames.size)),
+                ..Default::default()
+            },
+            |ui| match fault {
+                0 => {
+                    frames
+                        .model
+                        .show(ui.ctx(), &crate::theme::Theme::default().palette(), &frames.snapshot, true);
+                }
+                1 => {
+                    widgets::Modal::new(original.layer.id).show(ui.ctx(), |ui| {
+                        ui.set_invisible();
+                        ui.interact(original.registered.rect, original.widget, original.registered.sense);
+                    });
+                }
+                2 => {}
+                3 => {
+                    egui::Area::new(Id::unique("copy_guard_replacement_layer"))
+                        .order(egui::Order::Foreground)
+                        .show(ui.ctx(), |ui| {
+                            ui.interact(original.registered.rect, original.widget, original.registered.sense);
+                        });
+                }
+                4 => {
+                    widgets::Modal::new(original.layer.id).show(ui.ctx(), |ui| {
+                        ui.interact(original.registered.rect, original.widget, egui::Sense::hover());
+                    });
+                }
+                _ => unreachable!(),
+            },
+        );
+        let committed = frames
+            .ctx
+            .viewport(|viewport| viewport.prev_pass.widgets.get(original.widget).copied());
+        match fault {
+            0 => assert!(!committed.unwrap().enabled),
+            1 => assert!(!committed.unwrap().visible),
+            2 => assert!(committed.is_none()),
+            3 => assert_ne!(committed.unwrap().layer_id, original.layer),
+            4 => assert!(!committed.unwrap().sense.senses_click()),
+            _ => unreachable!(),
+        }
+        assert!(!original.committed(&frames.ctx));
+        assert!(!frames.model.operation.as_ref().unwrap().apply_submitted);
+    }
+}
+
+#[test]
+fn profile_copy_ui_final_registry_guard_also_precedes_inspect_and_cancel_metadata() {
+    for cancel in [false, true] {
+        let mut frames = Frames::new();
+        if cancel {
+            frames.prepare();
+        }
+        let control = frames.control(|intent| {
+            if cancel {
+                matches!(intent, Intent::Close(_))
+            } else {
+                matches!(intent, Intent::Inspect(_))
+            }
+        });
+        assert!(frames.click(control, Late::MoveWidget).is_none());
+        assert!(frames.model.is_open());
+        assert!(frames.model.cancellation().is_none());
+        if !cancel {
+            assert!(frames.model.operation.is_none());
+        }
+        assert!(frames.show(vec![], Late::None).is_none());
+    }
+    // The unchanged contract is one original release, never deferred replay.
+    for modality in [Modality::Pointer, Modality::Enter, Modality::Space, Modality::Accessibility] {
+        let mut frames = Frames::new();
+        let exact = frames.prepare();
+        let apply = frames.control(|intent| matches!(intent, Intent::Apply(_)));
+        assert_eq!(release_with(&mut frames, apply, modality, Late::None), Some(Command::Apply(exact)));
+        assert!(frames.show(vec![], Late::None).is_none());
+    }
+}
+
+#[test]
+fn profile_copy_ui_raw_modifier_up_and_same_batch_alt_aba_revoke_plain_key_gesture() {
+    for key in [Key::Enter, Key::Space] {
+        for modifiers in [
+            Modifiers::ALT,
+            Modifiers::CTRL,
+            Modifiers::SHIFT,
+            Modifiers::MAC_CMD,
+            Modifiers::COMMAND,
+        ] {
+            let mut frames = Frames::new();
+            frames.prepare();
+            let apply = frames.control(|intent| matches!(intent, Intent::Apply(_)));
+            frames.ctx.memory_mut(|memory| memory.request_focus(apply.widget));
+            frames.show(vec![], Late::None);
+            assert!(frames.show(vec![key_event(key, true, Modifiers::NONE)], Late::None).is_none());
+            assert!(frames.show(vec![key_event(key, false, modifiers)], Late::None).is_none());
+            assert!(frames.show(vec![], Late::None).is_none());
+        }
+        let mut frames = Frames::new();
+        frames.prepare();
+        let apply = frames.control(|intent| matches!(intent, Intent::Apply(_)));
+        frames.ctx.memory_mut(|memory| memory.request_focus(apply.widget));
+        frames.show(vec![], Late::None);
+        frames.show(vec![key_event(key, true, Modifiers::NONE)], Late::None);
+        assert!(
+            frames
+                .show(
+                    vec![
+                        Event::ModifiersChanged(Modifiers::ALT),
+                        Event::ModifiersChanged(Modifiers::NONE),
+                        key_event(key, false, Modifiers::NONE)
+                    ],
+                    Late::None
+                )
+                .is_none()
+        );
+        assert!(frames.show(vec![], Late::None).is_none());
+    }
+}
+
+#[test]
+fn profile_copy_ui_native_modifier_events_between_batches_preserve_physical_fence_and_require_fresh_plain_press() {
+    use winit::event::{ElementState, WindowEvent};
+    use winit::keyboard::{Key as NativeKey, ModifiersState, NamedKey};
+    for native_key in [
+        NativeKey::Named(NamedKey::Enter),
+        NativeKey::Named(NamedKey::Space),
+        NativeKey::Character(" ".into()),
+    ] {
+        for alt_graph in [false, true] {
+            let mut frames = Frames::new();
+            let exact = frames.prepare();
+            let key = if native_key == NativeKey::Named(NamedKey::Enter) {
+                Key::Enter
+            } else {
+                Key::Space
+            };
+            let apply = frames.control(|intent| matches!(intent, Intent::Apply(_)));
+            frames.ctx.memory_mut(|memory| memory.request_focus(apply.widget));
+            frames.show(vec![], Late::None);
+            frames.model.native_key(&native_key, ElementState::Pressed, false, false);
+            frames.show(vec![key_event(key, true, Modifiers::NONE)], Late::None);
+            if alt_graph {
+                frames
+                    .model
+                    .native_key(&NativeKey::Named(NamedKey::AltGraph), ElementState::Pressed, false, false);
+            }
+            let state = if alt_graph {
+                ModifiersState::CONTROL | ModifiersState::ALT
+            } else {
+                ModifiersState::ALT
+            };
+            frames.model.native_event(&WindowEvent::ModifiersChanged(state.into()));
+            frames
+                .model
+                .native_event(&WindowEvent::ModifiersChanged(ModifiersState::empty().into()));
+            if alt_graph {
+                frames
+                    .model
+                    .native_key(&NativeKey::Named(NamedKey::AltGraph), ElementState::Released, false, true);
+                assert!(frames.model.alt_graph, "synthetic modifier release is not a physical release");
+                frames
+                    .model
+                    .native_key(&NativeKey::Named(NamedKey::AltGraph), ElementState::Released, false, false);
+            }
+            assert!(frames.model.gesture.is_none());
+            frames.show(vec![], Late::None);
+            frames.show(vec![], Late::None);
+            // An apparent fresh=false-repeat down without a real up remains
+            // physically held despite modifier ABA or logical UI cancellation.
+            frames.model.native_key(&native_key, ElementState::Pressed, false, false);
+            assert!(!frames.model.key_allowed(key));
+            assert!(frames.show(vec![key_event(key, true, Modifiers::NONE)], Late::None).is_none());
+            frames.model.native_key(&native_key, ElementState::Released, false, false);
+            assert!(frames.show(vec![key_event(key, false, Modifiers::NONE)], Late::None).is_none());
+            frames.show(vec![], Late::None);
+            frames.model.native_key(&native_key, ElementState::Pressed, false, false);
+            assert!(frames.show(vec![key_event(key, true, Modifiers::NONE)], Late::None).is_none());
+            frames.model.native_key(&native_key, ElementState::Released, false, false);
+            assert_eq!(
+                frames.show(vec![key_event(key, false, Modifiers::NONE)], Late::None),
+                Some(Command::Apply(exact))
+            );
+        }
     }
 }

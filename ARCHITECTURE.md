@@ -75,9 +75,19 @@ picker, four groups and three footer buttons fit); native Enter/Space observatio
 reuses the existing release fence without changing chat behavior or suppressing
 unrelated Host input. Discard, focus/IME, geometry, modal, selection or operation
 turnover revokes authority. After the ENTIRE Context::run_ui, Shell redeems a
-single-use proof against final frame/pass, modal/focus/control geometry and a
-fresh backend Capture snapshot before sending metadata. Rejected proof has no
-retry. Only that final Shell path starts a real HostController Inspect or Apply;
+single-use proof against final frame/pass, modal/focus and the EXACT committed
+prev_pass widget registry before sending metadata. Original widget identity,
+parent, enabled/visible state, click Sense, rect/interact clip and layer must
+match; no stale read_response fallback or later-layout proof is accepted. Both
+transform translations, positive scale/inverse and global finite geometry are
+checked; this modal supports identity transforms only. Later overlapping visible
+widgets in the same layer or visible Areas above it revoke every modality,
+including visual covers that do not themselves take input.
+Native modifier/AltGraph transitions revoke copy input across raw batches even
+after Alt-down/up ABA; actual release/final modifiers must remain plain. This
+does not reset the unchanged native EnterRelease helper or another editor's state.
+A fresh backend Capture snapshot remains mandatory. Rejected/discarded proof has
+no retry or remint. Only that final Shell path starts a real HostController Inspect or Apply;
 exact-request cancellation uses bounded Shell polling after its original revoke.
 
 The production callee chain includes settings/profile_seed, profile/settings_file,
@@ -92,6 +102,15 @@ AURORA_COMPACT_HOST_VISUAL_LANGUAGE setting. This production-promotion atom stil
 requires independent exact-source review, Root compilation/tests/native fixtures
 and human UI/native Windows acceptance before shipment. No native ACL/profile
 was inspected or fixture executed by the author.
+
+Six further actual-egui/final-registry/native-modifier metadata regressions are
+authored UNRUN for the narrow input correction, preserving all prior13 bodies
+and assertions (19 UI cases total). They cover late move/reclip/Sense/coverage/
+focus/transform changes for pointer/Enter/Space/AccessKit, actual committed
+disabled/hidden/removed/layer turnover, Inspect/Cancel no-effect refusal,
+raw/native modifier ABA, both Space forms and real release/fresh press recovery.
+The prior fb003e0e review is pinned BLOCKED on these two UI gaps; this correction
+needs independent exact-source follow-up and Root execution before shipment.
 
 The Broker/Lane transaction captures installation, controller, nonreused manager/
 UI instance, operation, selection incarnation, stable source/target slots and four
