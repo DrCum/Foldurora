@@ -1,0 +1,116 @@
+name: Isolated script textbox validation
+on:
+  push:
+    branches: [checks/upstream-script-textbox-20261108]
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+concurrency:
+  group: isolated-script-textbox-validation
+  cancel-in-progress: true
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+  CARGO_BUILD_JOBS: '2'
+  SOURCE_SHA: d2bbabc6c2723dfdcf1e296be157978884122201
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    steps:
+      - name: Checkout pinned public port source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: d2bbabc6c2723dfdcf1e296be157978884122201
+          fetch-depth: 0
+          filter: blob:none
+      - name: Source and runner
+        shell: bash
+        run: |
+          mkdir -p .scratch/validation
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git rev-parse HEAD | tee .scratch/validation/source.txt
+          echo "$GITHUB_SHA" > .scratch/validation/workflow.txt
+          rustc --version | tee .scratch/validation/rust.txt
+          cargo --version | tee .scratch/validation/cargo.txt
+          df -h .
+      - name: Existing CI system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev
+          rustup component add rustfmt clippy
+      - name: Restore repository Linux CI cache
+        uses: ./.github/actions/rust-cache
+        with:
+          name: linux-tests
+      - name: Formatting
+        run: |
+          cargo fmt --all -- --check 2>&1 | tee .scratch/validation/fmt.log
+      - name: Qualified workspace Clippy
+        run: |
+          cargo clippy --profile ci --workspace --all-targets --locked -- -D warnings -A dead-code 2>&1 | tee .scratch/validation/clippy.log
+      - name: Notification cards and shared editor layout
+        run: |
+          cargo test --profile ci --workspace --locked --offline ui::notifications:: 2>&1 | tee .scratch/validation/ui-notifications.log
+      - name: Notification replies and permission decisions
+        run: |
+          cargo test --profile ci --workspace --locked --offline world::notifications:: 2>&1 | tee .scratch/validation/world-notifications.log
+      - name: Notification history
+        run: |
+          cargo test --profile ci --workspace --locked --offline notification_history 2>&1 | tee .scratch/validation/history.log
+      - name: Theme guards
+        run: |
+          cargo test --profile ci --workspace --locked --offline theme_guard 2>&1 | tee .scratch/validation/theme.log
+      - name: Translation catalogs
+        run: |
+          cargo test --profile ci --workspace --locked --offline every_language_has_english_keys_and_variables 2>&1 | tee .scratch/validation/catalog-keys.log
+          cargo test --profile ci --workspace --locked --offline every_bundled_message_formats_with_its_declared_variables 2>&1 | tee .scratch/validation/catalog-format.log
+      - name: Confirm all four textbox regressions executed
+        run: |
+          python3 - <<'PYCODE'
+          import pathlib
+          root=pathlib.Path('.scratch/validation')
+          expected={
+            'ui-notifications.log':['script_text_box_shows_three_lines_then_scrolls','script_text_box_toast_keeps_its_place','script_text_box_enter_edits_and_send_uses_the_original_prompt_in_both_styles'],
+            'world-notifications.log':['text_box_reply_keeps_lines_within_the_legacy_limit'],
+          }
+          for filename,names in expected.items():
+            log=(root/filename).read_text()
+            for name in names:
+              assert '::'+name+' ... ok' in log,name
+          print('All four textbox regressions executed and passed.')
+          PYCODE
+      - name: Capture synthetic cards with the existing CPU painter
+        env:
+          AURORA_CAPTURE: ${{ github.workspace }}/.scratch/validation/textbox.png
+        run: |
+          cargo test --profile ci --workspace --locked --offline script_text_box_enter_edits_and_send_uses_the_original_prompt_in_both_styles -- --test-threads=1 --nocapture 2>&1 | tee .scratch/validation/capture.log
+          python3 - <<'PYCODE'
+          import hashlib,pathlib,struct
+          root=pathlib.Path('.scratch/validation')
+          for name in ['textbox-legacy.png','textbox-aurora.png']:
+            data=(root/name).read_bytes()
+            assert data[:8]==b'\x89PNG\r\n\x1a\n',name
+            assert struct.unpack('>II',data[16:24])==(640,480),name
+            print(name,len(data),hashlib.sha256(data).hexdigest())
+          PYCODE
+      - name: Full workspace suite on the frozen port candidate
+        timeout-minutes: 25
+        run: |
+          timeout 1200 cargo test --profile ci --workspace --locked --offline --no-fail-fast 2>&1 | tee .scratch/validation/full-suite.log
+      - name: Verify source remained frozen
+        if: always()
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git diff --exit-code
+      - name: Upload raw commands and results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: script-textbox-d2bbabc6c272
+          path: .scratch/validation/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
