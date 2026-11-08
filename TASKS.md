@@ -33,11 +33,15 @@
   original-byte/revision CAS and an independent TWO physical-worker pool through
   canceled/blocked exit; GUI polls/replies are try-only and binding starts no IO.
   Missing differs from corrupt metadata; failed saves keep published flags.
-  All26 pure tests are preserved and14 actual Store/controller/lifetime fixtures
-  are authored UNRUN (40 total). Independent source review and Root execution
-  remain required. Actual World/source/App turn ownership, every ordinary
-  Inventory consumer and Folder Jump index/final-parent gating must join before
-  ANY Archive production enablement; same-generation replacement must rebind.
+  Stage 2 adds actual World retirement-before-replacement/reset, original-login
+  digest fanout independent of Favorites, selected-profile retire/rebind, cheap
+  event revocation and one App-owned CPU-turn pump outside the whole UI run.
+  All40 prior tests are preserved plus6 World/controller adapter cases authored
+  UNRUN (46 total). Stage1 has independent source clearance; stage2 review and
+  all Root execution remain required. These hooks are test-gated until every
+  ordinary Inventory consumer and Folder Jump index/final-parent gating joins.
+  ANY Archive production enablement and final painted-context write dispatch
+  remain blocked on that complete consumer graph.
 
 - 🔧 Local Inventory archive prerequisite, shared origin (2026-11-07; no issue):
   World now owns one pure actual-request digest/ambiguity state, captured before

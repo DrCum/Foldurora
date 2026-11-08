@@ -540,6 +540,8 @@ pub struct World {
     /// Online status (away, do not disturb...) and automatic responses.
     pub status: status::Status,
     pub inventory: inventory::Inventory,
+    #[cfg(test)]
+    pub(crate) inventory_archive: Option<inventory_archive::controller::Controller>,
     pub active_gestures: std::collections::BTreeSet<Uuid>,
     /// The inventory cache being read by its thread since the login reply
     /// (`poll_inventory_cache`), and when the read started.
@@ -853,6 +855,8 @@ impl World {
             calls: calls::Calls::default(),
             status: status::Status::default(),
             inventory: inventory::Inventory::default(),
+            #[cfg(test)]
+            inventory_archive: None,
             active_gestures: Default::default(),
             inventory_cache: None,
             inventory_background: Default::default(),
@@ -926,10 +930,20 @@ impl World {
         }
     }
 
+    /// Every physical personal Inventory replacement must pass this boundary,
+    /// even equal source IDs/generation. Cache application is an in-place merge.
+    fn replace_inventory(&mut self, inventory: inventory::Inventory) {
+        #[cfg(test)]
+        self.retire_inventory_archive();
+        self.inventory = inventory;
+    }
+
     /// Back to the login screen. Nothing said to the account that leaves
     /// stays for the next one: the conversations and the nearby chat go, and
     /// the transcripts close (only their writer and settings are kept).
     pub fn reset(&mut self) {
+        #[cfg(test)]
+        self.retire_inventory_archive();
         self.save_open_ims();
         let lib = self.avatar_lib.clone();
         let cache_dir = self.cache_dir.take();
@@ -2531,7 +2545,7 @@ impl World {
                 self.media_filter = crate::media::filter::MediaFilter::load(account.join(crate::media::filter::FILE));
                 self.aliases_synced = u64::MAX;
                 self.sync_contact_aliases();
-                self.inventory = inventory::Inventory::from_login(&l.raw);
+                self.replace_inventory(inventory::Inventory::from_login(&l.raw));
                 self.inventory.owner = self.agent_id;
                 self.inventory_background = Default::default();
                 // read off the main thread; until `poll_inventory_cache`

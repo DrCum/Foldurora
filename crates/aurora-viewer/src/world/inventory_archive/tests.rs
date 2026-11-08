@@ -114,6 +114,9 @@ mod projection_tests;
 #[path = "runtime_tests.rs"]
 mod runtime_tests;
 
+#[path = "adapter_tests.rs"]
+mod adapter_tests;
+
 #[test]
 fn inventory_archive_eligibility_uses_actual_ordinary_outfit_own_ancestry_without_fetches() {
     let mut world = world();

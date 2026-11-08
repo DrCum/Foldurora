@@ -98,6 +98,8 @@ mod hud_drag;
 mod imports;
 mod inspect;
 mod inventory;
+#[cfg(test)]
+mod inventory_archive;
 mod inventory_drag;
 mod inventory_hover;
 mod inventory_thumbnail;
@@ -402,6 +404,8 @@ pub struct App {
     /// The window's icon, kept for a window a GPU recovery opens.
     window_icon: Option<winit::window::Icon>,
     world: World,
+    #[cfg(test)]
+    inventory_archive_turn: crate::world::inventory_archive::visibility::CpuTurn,
     bridge_runtime: crate::world::bridge::Bridge,
     native_anchor: crate::movement::movelock::Controller,
     anchor_stands: crate::ao::anchor::StandCheck,
@@ -1495,6 +1499,8 @@ impl App {
                 w
             },
             bridge_runtime: Default::default(),
+            #[cfg(test)]
+            inventory_archive_turn: Default::default(),
             native_anchor: Default::default(),
             anchor_stands: Default::default(),
             anchor_pose: None,
@@ -3142,6 +3148,12 @@ impl App {
     }
 
     fn on_app_event(&mut self, ev: NetEvent) {
+        self.apply_app_event(ev);
+        #[cfg(test)]
+        self.observe_inventory_archive();
+    }
+
+    fn apply_app_event(&mut self, ev: NetEvent) {
         if matches!(&ev, NetEvent::AgentMovementComplete { .. })
             && let Some(recovery) = &mut self.follow_recovery
         {
@@ -3784,6 +3796,8 @@ impl App {
                 };
                 self.load_region_titles(l.agent_id);
                 let metadata_grid = self.world.metadata_login.completed();
+                #[cfg(test)]
+                self.world.bind_inventory_archive(if self.demo { None } else { metadata_grid });
                 self.world.favorites = if self.demo {
                     Default::default()
                 } else {
@@ -8946,6 +8960,8 @@ impl App {
                 self.on_app_event(app_ev);
             }
             self.observe_about_location();
+            #[cfg(test)]
+            self.observe_inventory_archive();
             self.observe_folder_jump();
             if workspace_boundary {
                 self.workspace_tick();
@@ -10944,7 +10960,11 @@ impl App {
         self.review_input.finish_frame_input(&mut raw, &mut self.alt_text);
         // Native/cache completion is outside egui's retryable paint closure.
         self.tick_boards_presented(Some(gesture_board::Presentation::new(&gfx.renderer, &gfx.window)));
+        #[cfg(test)]
+        self.pump_inventory_archive();
         let mut full = ctx.run_ui(raw, |ui| {
+            #[cfg(test)]
+            self.observe_inventory_archive();
             self.observe_folder_jump();
             self.folder_jump.prepare_input(ui.ctx());
             if has_native_canvas {
@@ -20536,6 +20556,8 @@ impl ApplicationHandler for App {
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
         let folder_jump_window = self.gfx.as_ref().is_some_and(|gfx| gfx.window.id() == id);
         if folder_jump_window {
+            #[cfg(test)]
+            self.observe_inventory_archive();
             self.observe_folder_jump();
             self.folder_jump.native_event(&self.egui_ctx, &event);
         }

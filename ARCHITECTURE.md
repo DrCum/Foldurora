@@ -198,9 +198,16 @@ drop; request/reply queues are bounded, GUI calls try-only and Drop never joins.
 `controller.rs` accepts only exact original model/source/load/save receipts;
 missing differs from unknown bytes, and failures retain last published flags.
 Binding alone starts no IO. All Archive registration remains cfg(test): actual
-World replacement/source/App CPU-turn adapters, ordinary Inventory and complete
-Folder Jump index/final-parent consumers must join before production enablement.
-Same-generation physical Inventory replacement MUST retire/recreate its model.
+World replacement/reset helpers now retire before replacing Inventory, even
+equal source IDs/generation. The App copies the one original accepted-login
+digest independently from Favorites, with None for offline/demo. Profile changes
+retire/rebind from the retained original digest before any controller take scope;
+fresh reads/edits/Include reject a mismatched captured selection independently.
+Event/native/paint observers only compare cheap stamps and revoke; the sole
+App-owned CpuTurn advances/pumps immediately before the whole ctx.run_ui run,
+outside retryable closures. World reset cannot refill it. These hooks remain
+test-gated with the component. Ordinary Inventory and complete Folder Jump
+index/final-parent consumers must still join before production enablement.
 
 `session_host/monitor_manager.rs` is the Shell-owned bounded binding/operation
 front for four fixed monitors and one cycling view. It depends on the separately

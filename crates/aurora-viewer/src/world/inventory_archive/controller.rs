@@ -6,7 +6,7 @@ use super::{
     visibility::{CpuTurn, OwnerPolicy, Projection, VisibilityRead},
 };
 use crate::world::account_metadata_origin::GridDigest;
-use std::sync::Arc;
+use std::{path::Path, sync::Arc};
 use uuid::Uuid;
 
 #[derive(Clone, PartialEq, Eq)]
@@ -14,23 +14,58 @@ enum Pending {
     Load(LoadTicket),
     Save(SaveIntent),
 }
+
+#[cfg(test)]
+pub(super) mod testing {
+    use super::*;
+    pub(in crate::world::inventory_archive) fn projection(controller: &mut Controller, projection: Projection) {
+        controller.projection = projection;
+        controller.observed = None;
+    }
+    pub(in crate::world::inventory_archive) fn initialized(controller: &Controller) -> usize {
+        super::super::visibility::testing::initialized(&controller.projection)
+    }
+    pub(in crate::world::inventory_archive) fn previous_profile(controller: &mut Controller) {
+        // Perturb only the original captured selection, never actual global
+        // selection or NativeDirectory paths. Fresh APIs must reject it.
+        controller.profile = Some(Path::new("/synthetic-archive-previous-profile"));
+    }
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Stamp {
+    instance: u64,
+    publication: u64,
+    known: bool,
+    generation: u64,
+    library: Uuid,
+    privacy: u64,
+    privacy_enabled: bool,
+}
 pub(crate) struct Controller {
     model: Option<Model>,
     projection: Projection,
     worker: Option<Worker>,
     pending: Option<Pending>,
     original: Option<Arc<[u8]>>,
+    origin: Option<GridDigest>,
+    profile: Option<&'static Path>,
+    observed: Option<Stamp>,
 }
 impl Controller {
     /// No file access or worker startup. Missing actual submitted origin has
     /// no settings/form fallback; offline fixtures remain private-store idle.
     pub(crate) fn bind(world: &World, origin: Option<GridDigest>) -> Self {
+        let model = origin.and_then(|grid| Model::new(world, grid).ok());
+        let origin = model.as_ref().map(|model| model.source().grid());
         Self {
-            model: origin.and_then(|grid| Model::new(world, grid).ok()),
+            model,
             projection: Projection::default(),
             worker: None,
             pending: None,
             original: None,
+            origin,
+            profile: crate::session_host::profile::root(),
+            observed: None,
         }
     }
     pub(crate) fn retire(&mut self) {
@@ -40,15 +75,40 @@ impl Controller {
         self.worker = None;
         self.pending = None;
         self.original = None;
-        self.projection = Projection::default();
+        self.origin = None;
+        self.observed = None;
+        self.projection.invalidate();
     }
     /// Source mismatch is terminal, never an implicit rebind. The actual World
     /// replacement adapter must also retire BEFORE any Inventory assignment,
     /// including equal-source/equal-generation physical replacement.
     pub(crate) fn observe(&mut self, world: &World) {
-        if self.model.as_ref().is_some_and(|model| !model.matches(world)) {
+        if self.profile_changed() || self.model.as_ref().is_some_and(|model| !model.matches(world)) {
             self.retire();
+            return;
         }
+        let stamp = self.model.as_ref().map(|model| Stamp {
+            instance: model.instance,
+            publication: model.published.publication(),
+            known: matches!(
+                model.status(),
+                Status::Ready | Status::Saving | Status::SaveFailed | Status::ReadOnly
+            ),
+            generation: world.inventory.generation,
+            library: world.inventory.lib_root,
+            privacy: world.rlva.revision,
+            privacy_enabled: world.rlva.enabled(),
+        });
+        if self.observed != stamp {
+            self.observed = stamp;
+            self.projection.invalidate();
+        }
+    }
+    pub(super) fn profile_changed(&self) -> bool {
+        self.profile != crate::session_host::profile::root()
+    }
+    pub(super) fn original_for_profile_rebind(&self, world: &World) -> Option<GridDigest> {
+        self.model.as_ref().filter(|model| model.matches(world)).and(self.origin)
     }
     pub(crate) fn status(&self) -> Option<Status> {
         self.model.as_ref().map(Model::status)
@@ -86,6 +146,7 @@ impl Controller {
             Ok(None) => {}
             Err(_) => self.transport_failed(),
         }
+        self.observe(world);
     }
     fn accept(&mut self, reply: store::Reply) {
         let Some(model) = &mut self.model else { return };
@@ -131,12 +192,19 @@ impl Controller {
         }
     }
     pub(crate) fn read<'a>(&'a self, world: &'a World, policy: &'a mut OwnerPolicy) -> Option<VisibilityRead<'a>> {
+        if self.profile != crate::session_host::profile::root() {
+            return None;
+        }
         self.model.as_ref().map(|model| self.projection.read(world, model, policy))
     }
     pub(crate) fn set_include(&self, world: &World, policy: &mut OwnerPolicy, include: bool) -> bool {
-        self.model.as_ref().is_some_and(|model| policy.set_include(world, model, include))
+        self.profile == crate::session_host::profile::root()
+            && self.model.as_ref().is_some_and(|model| policy.set_include(world, model, include))
     }
     pub(crate) fn prepare_edit(&self, world: &World, folder: Uuid) -> Option<EditTicket> {
+        if self.profile != crate::session_host::profile::root() {
+            return None;
+        }
         self.model.as_ref()?.prepare_edit(world, folder)
     }
     /// Called only by the future final App input dispatcher AFTER ctx.run_ui.

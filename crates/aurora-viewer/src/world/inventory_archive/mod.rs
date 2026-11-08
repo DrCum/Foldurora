@@ -5,6 +5,7 @@
 
 mod codec;
 pub(crate) mod controller;
+mod owner;
 mod store;
 pub(crate) mod visibility;
 use super::{World, account_metadata_origin::GridDigest, inventory::Inventory};
