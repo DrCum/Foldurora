@@ -1,11 +1,12 @@
 //! Own the renderer's already-credited allocation; never allocate/copy RGBA.
 use super::Error;
+use aurora_render::viewport_capture::CapturedViewport;
 #[cfg(test)]
-use aurora_render::viewport_capture::CaptureToken;
-use aurora_render::viewport_capture::{CapturePublicationGuard, CapturedViewport};
+use aurora_render::viewport_capture::{CapturePublicationGuard, CaptureToken};
 use aurora_session::preview_image::PreviewStamp;
 
 enum Publication {
+    #[cfg(test)]
     Renderer(CapturePublicationGuard),
     Native(Box<super::super::preview_io::CapturePermitGuard>),
     // Codec/resource fixtures only. This is not a native/render permit and is
@@ -22,6 +23,7 @@ pub(super) struct CapturedBody {
     publication: Publication,
 }
 impl CapturedBody {
+    #[cfg(test)]
     pub fn new(stamp: PreviewStamp, frame: CapturedViewport, guard: CapturePublicationGuard) -> Result<Self, Error> {
         if guard.token() != frame.request().token() || !guard.current() {
             return Err(Error::Expired);
@@ -55,20 +57,25 @@ impl CapturedBody {
         Self::checked(stamp, frame, Publication::Native(guard))
     }
     pub fn check(&self) -> Result<(), Error> {
-        #[cfg(test)]
-        if let Publication::Fixture { gate: Some(gate), .. } = &self.publication
-            && !gate.current()
-        {
-            return Err(Error::CaptureRevoked);
+        match &self.publication {
+            Publication::Native(guard) => guard.transport_check(),
+            #[cfg(test)]
+            Publication::Fixture { gate: Some(gate), .. } if !gate.current() => Err(Error::CaptureRevoked),
+            #[cfg(test)]
+            _ => {
+                if self.current() {
+                    Ok(())
+                } else {
+                    Err(Error::Expired)
+                }
+            }
         }
-        if let Publication::Native(guard) = &self.publication {
-            return guard.transport_check();
-        }
-        if self.current() { Ok(()) } else { Err(Error::Expired) }
     }
+    #[cfg(test)]
     pub fn current(&self) -> bool {
         match &self.publication {
             Publication::Native(guard) => guard.current(std::time::Instant::now()),
+            #[cfg(test)]
             Publication::Renderer(guard) => guard.current() && guard.token() == self.frame.request().token(),
             #[cfg(test)]
             Publication::Fixture { token, current, .. } => {

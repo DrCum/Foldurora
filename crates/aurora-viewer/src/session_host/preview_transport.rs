@@ -3,6 +3,7 @@
 //! image file or App/native/render bridge is started or modified here.
 //! SourceImages remains the separate final authority; a valid MAC grants none.
 
+#[cfg(test)]
 mod admission;
 mod auth;
 mod captured;

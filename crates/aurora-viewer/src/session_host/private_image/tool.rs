@@ -54,6 +54,7 @@ pub(super) trait ToolNative: OwnedSurface {
     fn event(&mut self, context: &Self::PresentContext, event: &Self::Event) -> Result<Self::Response, Error>;
     fn show(&mut self, context: &Self::PresentContext) -> Result<(), Error>;
     fn request_redraw(&mut self, context: &Self::PresentContext) -> Result<(), Error>;
+    #[cfg(test)]
     fn focused(&self, context: &Self::PresentContext) -> Result<bool, Error>;
     fn focus(&mut self, context: &Self::PresentContext) -> Result<(), Error>;
     fn set_title(&mut self, context: &Self::PresentContext, title: &str) -> Result<(), Error>;
@@ -126,6 +127,7 @@ impl<S: ToolNative> Tool<S> {
     fn minimized(&mut self, flush: &mut dyn FnMut(&Context, RawInput)) -> Result<bool, Error> {
         self.operation(false, flush, |native| Ok(native.minimized()))
     }
+    #[cfg(test)]
     fn focused(&mut self, presentation: &S::PresentContext, flush: &mut dyn FnMut(&Context, RawInput)) -> Result<bool, Error> {
         self.operation(false, flush, |native| native.focused(presentation))
     }
@@ -292,6 +294,7 @@ impl MonitorSurface {
     ) -> Result<RawInput, Error> {
         self.tool.raw_input(flush)
     }
+    #[cfg(test)]
     pub(in crate::session_host) fn focused(
         &mut self,
         event_loop: &winit::event_loop::ActiveEventLoop,

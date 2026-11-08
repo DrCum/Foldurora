@@ -353,12 +353,14 @@ pub(super) struct PreviewRead {
     control_head: super::preview_io::EpochFence,
     shared: Arc<Shared>,
     now: u64,
-    status: ImageStatus,
+    // Retain per-view metadata snapshots; production terminal receipt handling
+    // uses the independent PreviewStatus publication.
+    _status: ImageStatus,
     image: Option<Arc<PreparedImage>>,
     image_guard: Option<ImageReadGuard>,
     commands: bool,
-    settings: Vec<SettingsReceipt>,
-    exchanges: Vec<ExchangeReceipt>,
+    _settings: Vec<SettingsReceipt>,
+    _exchanges: Vec<ExchangeReceipt>,
 }
 #[derive(Clone)]
 struct ImageReadGuard {
@@ -413,17 +415,18 @@ impl PreviewRead {
             control_head: self.control_head.clone(),
             shared: self.shared.clone(),
             now: self.now,
-            status: ImageStatus::Busy,
+            _status: ImageStatus::Busy,
             image: None,
             image_guard: None,
             commands: false,
-            settings: Vec::new(),
-            exchanges: Vec::new(),
+            _settings: Vec::new(),
+            _exchanges: Vec::new(),
         };
         body.view_current().then_some(body)
     }
+    #[cfg(test)]
     pub fn image_status(&self) -> ImageStatus {
-        self.status
+        self._status
     }
     pub fn prepared(&self) -> Option<&Arc<PreparedImage>> {
         self.image.as_ref().filter(|_| self.image_current())
@@ -437,11 +440,13 @@ impl PreviewRead {
     pub(in crate::session_host) fn admits_settings(&self, ticket: Ticket, base: State) -> bool {
         self.commands_current() && base.request.is_none() && self.view.ticket.same_binding(ticket) && self.view.options == base.accepted
     }
+    #[cfg(test)]
     pub fn settings_receipts(&self) -> &[SettingsReceipt] {
-        &self.settings
+        &self._settings
     }
+    #[cfg(test)]
     pub fn exchange_receipts(&self) -> &[ExchangeReceipt] {
-        &self.exchanges
+        &self._exchanges
     }
 }
 pub(super) struct PreviewStatus {

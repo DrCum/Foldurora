@@ -65,6 +65,7 @@ impl UiPixelBudget {
             bytes,
         })
     }
+    #[cfg(test)]
     pub(super) fn used(&self) -> usize {
         self.0.used.load(Ordering::Acquire)
     }
@@ -148,6 +149,7 @@ pub(super) struct PrivateFrame {
 impl PrivateFrame {
     /// Inspect shapes/text/ordinary atlas deltas for CPU fixtures. Private
     /// pixels and the sealed presentation ticket are never exposed here.
+    #[cfg(test)]
     pub(super) fn output(&self) -> &egui::FullOutput {
         &self.output
     }
@@ -276,6 +278,7 @@ impl PrivateImageSlot {
     /// Synthetic CPU visuals only: consumes the original sealed frame and uses
     /// the same local/admission validator as the owned surface. The fixture's
     /// canvas allocation is not a production image/DIB budget or erasure proof.
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)] // Explicit borrowed painter/canvas and authority for a dormant fixture.
     pub(super) fn paint_fixture(
         &mut self,

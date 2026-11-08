@@ -246,6 +246,7 @@ impl FrameHandoff {
         self.pixels.claim()
     }
 
+    #[cfg(test)]
     pub fn admit(
         self,
         owner: &mut aurora_session::preview_image::SourceImages,
@@ -359,8 +360,11 @@ pub(crate) struct SourceUpdate {
 }
 pub(crate) struct HostUpdate {
     pub sources: Vec<SourceUpdate>,
+    #[cfg(test)]
     pub pending_roles: usize,
+    #[cfg(test)]
     pub connected_roles: usize,
+    #[cfg(test)]
     pub raw_bytes: usize,
 }
 pub(super) struct HostMailbox {

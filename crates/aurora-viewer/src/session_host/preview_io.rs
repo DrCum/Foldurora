@@ -36,7 +36,9 @@ const DEADLINE: Duration = Duration::from_secs(1);
 const HEARTBEAT: Duration = Duration::from_millis(250);
 const QUEUE: usize = 4;
 const RAW_BYTES: usize = 32 * 1024 * 1024;
+#[cfg(test)]
 const UI_BYTES: usize = 24 * 1024 * 1024;
+#[cfg(test)]
 const SERVICE_BYTES: usize = 8 * 1024 * 1024;
 const THREAD_STACK: usize = 256 * 1024;
 

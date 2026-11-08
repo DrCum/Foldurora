@@ -327,11 +327,14 @@ impl HostChannel {
             return None;
         }
         let mut m = self.shared.mailbox.try_lock().ok()?;
-        let diagnostics = m.diagnostics;
+        let _diagnostics = m.diagnostics;
         Some(HostUpdate {
-            pending_roles: diagnostics[0],
-            connected_roles: diagnostics[1],
-            raw_bytes: diagnostics[2],
+            #[cfg(test)]
+            pending_roles: _diagnostics[0],
+            #[cfg(test)]
+            connected_roles: _diagnostics[1],
+            #[cfg(test)]
+            raw_bytes: _diagnostics[2],
             sources: m
                 .updates
                 .iter_mut()

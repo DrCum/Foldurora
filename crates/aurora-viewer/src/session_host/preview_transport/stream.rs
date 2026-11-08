@@ -121,6 +121,7 @@ impl UnadmittedPixels {
             validity: None,
         })
     }
+    #[cfg(test)]
     pub fn copy_from(stamp: PreviewStamp, input: &[u8], budget: &ImageBudget) -> Result<Self, Error> {
         if input.len() != stamp.geometry().payload_bytes() || input.as_chunks::<4>().0.iter().any(|pixel| pixel[3] != 255) {
             return Err(Error::Invalid);
@@ -144,6 +145,7 @@ impl UnadmittedPixels {
     /// Owns both bytes and their original credit through final model admission.
     /// A failed `SourceImages::admit` drops its trial clone while this object's
     /// reservation still exists; rejection then frees bytes before refunding.
+    #[cfg(test)]
     pub fn admit(self, owner: &mut SourceImages, now: u64) -> Result<AdmittedPixels, ImageError> {
         self.try_admit(owner, now).map_err(|(error, rejected)| {
             drop(rejected);
@@ -182,6 +184,7 @@ pub(crate) struct AdmittedPixels {
     image: AdmittedImage,
 }
 impl AdmittedPixels {
+    #[cfg(test)]
     pub fn image(&self) -> &AdmittedImage {
         &self.image
     }
@@ -217,18 +220,21 @@ struct Outgoing {
     live: bool,
 }
 enum OutgoingPixels {
+    #[cfg(test)]
     Owned(UnadmittedPixels),
     Captured(CapturedBody),
 }
 impl OutgoingPixels {
     fn bytes(&self) -> &[u8] {
         match self {
+            #[cfg(test)]
             Self::Owned(pixels) => &pixels.bytes,
             Self::Captured(frame) => frame.bytes(),
         }
     }
     fn check(&self) -> Result<(), Error> {
         match self {
+            #[cfg(test)]
             Self::Owned(pixels) => {
                 if pixels.transport_current() {
                     Ok(())
@@ -619,9 +625,11 @@ pub(crate) struct Pair {
     source_guard: Option<super::super::preview_io::guards::IoSourceGuard>,
 }
 impl Pair {
+    #[cfg(test)]
     pub fn new(metadata: Authenticated, pixels: Authenticated, budget: ImageBudget) -> Result<Self, Error> {
         Self::from_roles(metadata, pixels, Some(budget))
     }
+    #[cfg(test)]
     fn from_roles(metadata: Authenticated, pixels: Authenticated, budget: Option<ImageBudget>) -> Result<Self, Error> {
         if pixels.scope.lane != Lane::Pixels
             || !pixels.scope.valid()
@@ -745,6 +753,7 @@ impl Pair {
         }
         result
     }
+    #[cfg(test)]
     pub fn queue_pixels(&mut self, pixels: UnadmittedPixels) -> Result<(), Error> {
         if pixels.stamp.claim().source() != self.metadata.auth.scope.source
             || pixels.stamp.claim().connection() != self.metadata.auth.scope.connection
@@ -762,6 +771,7 @@ impl Pair {
             .ok_or(Error::Closed)?
             .enqueue(wire::encode_stamp(pixels.stamp)?, Some(OutgoingPixels::Owned(pixels)))
     }
+    #[cfg(test)]
     pub fn queue_captured(
         &mut self,
         stamp: PreviewStamp,
@@ -809,6 +819,7 @@ impl Pair {
     ) -> Result<(), Error> {
         self.queue_captured_body(stamp, CapturedBody::fixture_gate(stamp, frame, current, gate)?)
     }
+    #[cfg(test)]
     pub fn worker(metadata: Authenticated, pixels: Authenticated) -> Result<Self, Error> {
         if metadata.side != Side::Worker {
             return Err(Error::Direction);
@@ -848,6 +859,7 @@ impl Pair {
         self.pixels = Some(Endpoint::new(auth));
         Ok(())
     }
+    #[cfg(test)]
     pub fn poll(
         &mut self,
         metadata: &mut (impl Read + Write),

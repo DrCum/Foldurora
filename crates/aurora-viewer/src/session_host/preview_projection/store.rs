@@ -552,12 +552,12 @@ pub(super) fn read(shared: &Arc<Shared>, view: View, namespace: ViewNamespace) -
                 control_head: control.guard.clone(),
                 shared: shared.clone(),
                 now,
-                status: image_status,
+                _status: image_status,
                 image,
                 image_guard,
                 commands: true,
-                settings: store.settings_done.iter().copied().collect(),
-                exchanges: store.exchanges.iter().copied().collect(),
+                _settings: store.settings_done.iter().copied().collect(),
+                _exchanges: store.exchanges.iter().copied().collect(),
             })
         })();
         (result, store.drain_garbage())

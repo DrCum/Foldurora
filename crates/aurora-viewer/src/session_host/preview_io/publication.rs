@@ -194,6 +194,7 @@ impl ObservationDomain {
             retention,
         }
     }
+    #[cfg(test)]
     pub fn publisher(&self) -> u64 {
         self.publisher
     }
@@ -203,6 +204,7 @@ impl ObservationDomain {
     pub fn registration(&self) -> u64 {
         self.registration
     }
+    #[cfg(test)]
     pub fn metadata_connection(&self) -> u64 {
         self.connection
     }
@@ -287,6 +289,7 @@ impl LayoutReceipt {
     pub fn origin(self) -> ReceiptOrigin {
         self.origin
     }
+    #[cfg(test)]
     pub fn received_at(self) -> Instant {
         self.received_at
     }

@@ -147,6 +147,7 @@ pub(super) struct Navigation {
 }
 
 impl Navigation {
+    #[cfg(test)]
     pub fn target(self) -> Source {
         self.target
     }
@@ -395,6 +396,7 @@ impl MonitorSet {
 
     /// Deduplicated explicit visible bindings, including current Active. These
     /// are not inactive PreviewDemand values and grant no image authority.
+    #[cfg(test)]
     pub fn visible_sources(&self) -> Vec<Source> {
         let mut result = Vec::with_capacity(MAX_WORKERS);
         for binding in self.bindings.iter().flatten() {

@@ -210,6 +210,7 @@ pub(super) struct WindowsSurface {
 }
 #[cfg(windows)]
 impl WindowsSurface {
+    #[cfg(test)]
     pub(super) fn owned_tool(
         event_loop: &winit::event_loop::ActiveEventLoop,
         context: &Context,
@@ -309,6 +310,7 @@ impl super::tool::ToolNative for WindowsSurface {
         self.native.window.request_redraw();
         Ok(())
     }
+    #[cfg(test)]
     fn focused(&self, _context: &Self::PresentContext) -> Result<bool, Error> {
         Ok(self.native.window.has_focus())
     }
