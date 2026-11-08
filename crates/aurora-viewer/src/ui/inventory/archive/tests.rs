@@ -608,6 +608,60 @@ impl Frames {
                 previous = Some(control);
             }
         }
+        let ctx = &self.frames.ctx;
+        eprintln!(
+            "ARCHIVE_SETTLE include={include} frame={} pass={} context_target={:?} ticket={} seen={:?} source_key={} popup_open={} focus={:?}",
+            ctx.cumulative_frame_nr(),
+            ctx.cumulative_pass_nr(),
+            self.state.archive_context.target,
+            self.state.archive_context.ticket.is_some(),
+            self.state.archive_context.seen,
+            self.state.archive_key.is_some(),
+            egui::Popup::is_any_open(ctx),
+            ctx.memory(|memory| memory.focused())
+        );
+        if let Some(control) = previous {
+            eprintln!(
+                "ARCHIVE_CONTROL widget={:?} layer={:?} frame={} pass={} rect={:?} registered={:?} clip={:?} captured_transform={:?} current_transform={:?} geometry={} registry={} committed={} center_layer={:?} owner_structure={:?}",
+                control.widget,
+                control.layer,
+                control.frame,
+                control.pass,
+                control.rect,
+                control.registered,
+                control.paint_clip,
+                control.transform,
+                ctx.layer_transform_to_global(control.layer),
+                control.geometry(ctx),
+                control.registry(ctx, true),
+                control.committed(ctx),
+                ctx.layer_id_at(control.rect.center()),
+                control.structure
+            );
+            let detail = ctx.viewport(|viewport| {
+                format!(
+                    "final_widget={:?} final_structure={:?}\n{}",
+                    viewport.prev_pass.widgets.get(control.widget),
+                    structure::Witness::capture(&viewport.prev_pass.widgets, &control),
+                    control.structure_origin.diagnostic(&viewport.prev_pass.widgets, &control)
+                )
+            });
+            eprintln!("ARCHIVE_FINAL {detail}");
+            let layers = ctx.memory(|memory| {
+                memory
+                    .layer_ids()
+                    .take(16)
+                    .map(|layer| (layer, memory.areas().is_visible(&layer)))
+                    .collect::<Vec<_>>()
+            });
+            for (layer, visible) in layers {
+                eprintln!(
+                    "ARCHIVE_LAYER {layer:?} visible={visible} area={:?} transform={:?}",
+                    egui::AreaState::load(ctx, layer.id).map(|area| area.rect()),
+                    ctx.layer_transform_to_global(layer)
+                );
+            }
+        }
         panic!("actual captured Archive context control did not settle");
     }
 }

@@ -103,7 +103,10 @@ fn nested(late: FrameLate) -> (egui::Context, Control) {
                     assert_eq!(after.id, before.id);
                     assert_eq!(after.parent_id, before.parent_id);
                     assert_eq!(after.layer_id, before.layer_id);
-                    assert!(after.enabled && after.visible);
+                    assert!(
+                        after.enabled && after.visible,
+                        "actual parent turnover before={before:?} after={after:?}"
+                    );
                     assert!(!finite_positive(after.interact_rect));
                 }
                 if let Some(control) = saved.as_mut() {

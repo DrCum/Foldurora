@@ -21,6 +21,58 @@ pub(super) struct Origin {
     links: [Option<(Id, Id)>; MAX_PARENTS],
 }
 impl Origin {
+    #[cfg(test)]
+    pub(super) fn diagnostic(self, widgets: &WidgetRects, control: &Control) -> String {
+        use std::fmt::Write as _;
+        let mut out = String::new();
+        let _ = writeln!(
+            out,
+            "origin={self:?} final_links={:?}",
+            parent_links(widgets, control.registered, self.area, control.layer)
+        );
+        for (id, _) in self.links.iter().flatten() {
+            let _ = writeln!(out, "parent {id:?}: {:?}", widgets.get(*id));
+        }
+        for frame in self.frames.iter().flatten() {
+            let content = widgets.get(frame.content);
+            let parent = widgets.get(frame.parent);
+            let outer = content.map(|content| frame.frame.outer_rect(content.rect).round_ui());
+            let interact = outer.zip(parent).map(|(outer, parent)| outer.intersect(parent.interact_rect));
+            let _ = writeln!(
+                out,
+                "frame={frame:?} content={content:?} parent={parent:?} outer={outer:?} interact={interact:?}"
+            );
+            for candidate in widgets
+                .get_layer(control.layer)
+                .filter(|widget| widget.parent_id == frame.parent)
+                .take(16)
+            {
+                let _ = writeln!(out, "frame_sibling {:?} order={:?}", candidate, widgets.order(candidate.id));
+            }
+        }
+        let local = control
+            .registered
+            .rect
+            .intersect(control.registered.interact_rect)
+            .intersect(control.paint_clip);
+        if let Some((layer, index)) = widgets.order(control.widget) {
+            for cover in widgets
+                .get_layer(layer)
+                .skip(index + 1)
+                .filter(|widget| widget.visible && widget.interact_rect.intersect(local).is_positive())
+                .take(32)
+            {
+                let _ = writeln!(
+                    out,
+                    "late_intersection {:?} witnessed={}",
+                    cover,
+                    control.structure.is_some_and(|witness| witness.contains(cover.id))
+                );
+            }
+        }
+        out
+    }
+
     pub(super) fn capture(ui: &egui::Ui, registered: WidgetRect) -> Option<Self> {
         let layer = registered.layer_id;
         let mut frames = [None; MAX_FRAMES];
