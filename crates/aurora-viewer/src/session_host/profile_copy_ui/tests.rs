@@ -102,7 +102,7 @@ impl Frames {
             ..Default::default()
         };
         raw.viewports.entry(raw.viewport_id).or_default().native_pixels_per_point = Some(self.scale);
-        let _output = self.ctx.run_ui(raw, |ui| {
+        let mut output = self.ctx.run_ui(raw, |ui| {
             action = action.take().or(self.model.show(ui.ctx(), &p, &self.snapshot, false));
             match late {
                 Late::None => {}
@@ -133,6 +133,9 @@ impl Frames {
                 }
             }
         });
+        // This CPU fixture has no renderer; pinned TexturesDelta requires
+        // explicit disposal when its uploads/frees are deliberately discarded.
+        output.textures_delta.clear();
         let command = action.and_then(|action| self.model.take_action(action, &self.ctx, &self.snapshot, false));
         self.model.finish_frame(&self.ctx);
         command
