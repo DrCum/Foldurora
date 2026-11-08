@@ -1,5 +1,34 @@
 # Aurora Viewer architecture
 
+`session_host/profile_copy.rs`, `profile_copy/io.rs` and
+`profile/settings_file.rs` are a temporary cfg(test)-only stopped-profile adapter
+checkpoint. The real Broker/HostController metadata route captures installation,
+controller, nonreused manager/UI instance, operation, selection incarnation,
+stable source/target slots and four typed families. Current child/queued-Open
+proof and copy reservations precede worker-only SlotId-ordered try-locks; physical
+profile locks remain through Inspect, the original 30-second confirmation and
+Apply/cancel. One persistent process-wide physical worker permit survives modal
+reset, controller drop, blocked IO and actual thread retirement. Controller/GUI
+channel admission and polling are try-only; only the IO worker can wait for its
+bounded command/result channel. The channel cannot lose a definitive terminal
+receipt merely because its earlier Prepared result has not been consumed.
+
+The worker reads native-derived files only, acquires native defaults there, drops
+all unselected raw source before destination output, and retains original target
+bytes plus a source digest. A durable private temporary file precedes fresh
+source/target CAS, held-lock file-identity checks and final controller/cancel/
+original-deadline checks. Rename has no delayed retry after these checks. Main
+saved settings is strictly read-only; foreign ownership/public permissions,
+symlinks/reparse points and hard links are refused without repair. There is no
+raw backup or global Settings load/save. Logical cancellation never releases a
+reservation before actual worker terminal; a completed rename reports Applied
+for its original capture, and a missing terminal receipt reports uncertainty.
+Resource accounting is bounded raw/string payload up to 16MiB (plus bounded read
+sentinel bytes), selected payload up to 256KiB, and separate bounded JSON metadata;
+it makes no whole-process memory claim. Seventeen synthetic cases are authored
+UNRUN (one Unix-specific). Independent IO/controller source review precedes the
+mandatory actual Manage Inspect/Apply/Cancel modal and production promotion.
+
 `settings/profile_seed.rs` and its strict JSON reader are a cfg(test)-only
 selective-profile data prerequisite: four closed typed presentation/control families,
 explicit field lists, current native defaults, duplicate/depth/node/byte limits,

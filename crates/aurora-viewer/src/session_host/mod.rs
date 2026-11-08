@@ -36,6 +36,8 @@ mod preview_bootstrap;
 #[cfg(any(windows, test))]
 mod preview_projection;
 pub(crate) mod profile;
+#[cfg(test)]
+mod profile_copy;
 mod review;
 // App and WorkerBridge consume the genuine image proofs on every platform.
 // Linux does not gain a native monitor window or an image bootstrap fallback.

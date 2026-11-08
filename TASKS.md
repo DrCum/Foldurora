@@ -1,5 +1,20 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Selective character preference copy, stopped-profile IO/controller atom
+  (2026-11-08; no issue): cfg(test)-only real Broker/HostController metadata
+  Inspect/Apply/Cancel routing, immutable operation/selection captures, actual
+  child/queued-Open refusal and held copy reservations. A persistent process-wide
+  worker owns SlotId-ordered profile try-locks, worker-only native defaults,
+  strict selected projection, original source/target CAS, durable private temp,
+  held-lock identity and final controller/cancel/original-deadline checks.
+  Cancellation keeps the physical worker charged through actual exit; definitive
+  Applied and uncertain receipts retain the original target. No raw backup,
+  permission repair, arbitrary path, global Settings loader/saver or automatic
+  Open/login is added. Seventeen synthetic regressions are authored UNRUN
+  (one Unix-specific); Root alone owns compilation/native/filesystem execution.
+  Independent source review and the next real Manage modal plus full production
+  promotion remain required before this feature is enabled.
+
 - 🔧 Selective character preference copy, typed projection prerequisite (2026-11-07;
   no issue): explicit16 Graphics,18 Interface,37 native byte-color fields and
   bounded native action/two-slot bindings use actual defaults and shared native
