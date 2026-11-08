@@ -12,7 +12,7 @@ env:
   CARGO_INCREMENTAL: '0'
   CARGO_BUILD_JOBS: '2'
   CARGO_TERM_COLOR: never
-  SOURCE_SHA: 1f5be10946657448ca605f2cff23ef5270b1e738
+  SOURCE_SHA: 899d75c4bd2e840699a95eaea3b00909499512e4
   VALIDATION_SHA: ${{ github.sha }}
 jobs:
   font-search:
@@ -22,7 +22,7 @@ jobs:
     - name: Checkout exact font source
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
-        ref: 1f5be10946657448ca605f2cff23ef5270b1e738
+        ref: 899d75c4bd2e840699a95eaea3b00909499512e4
         fetch-depth: 0
         filter: blob:none
     - name: Runner capacity
@@ -45,7 +45,7 @@ jobs:
         mkdir -p .scratch
         python3 - <<'PY'
         from pathlib import Path
-        Path('.scratch/validate.py').write_text("from pathlib import Path\nimport hashlib,json,os,platform,re,subprocess,sys,time\nroot=Path('.scratch');root.mkdir(exist_ok=True)\nsource=os.environ['SOURCE_SHA']\nactual=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()\nassert actual==source,(actual,source)\ncommands={\n 'fmt':['cargo','fmt','--all','--','--check'],\n 'clippy':['cargo','clippy','--workspace','--all-targets','--locked','--','-D','warnings','-A','dead-code'],\n 'options':['cargo','test','--workspace','--locked','--offline','ui::options::'],\n 'theme':['cargo','test','--workspace','--locked','--offline','theme_guard'],\n 'catalog-keys':['cargo','test','--workspace','--locked','--offline','every_language_has_english_keys_and_variables'],\n 'catalog-format':['cargo','test','--workspace','--locked','--offline','every_bundled_message_formats_with_its_declared_variables'],\n 'captures':['cargo','test','--workspace','--locked','--offline','the_system_font_search_','--','--test-threads=1'],\n}\nname=sys.argv[1];cmd=commands[name]\nlog=root/(name+'.log');start=time.monotonic()\nwith log.open('w') as out:\n proc=subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,bufsize=1)\n for line in proc.stdout:\n  out.write(line);print(line,end='',flush=True)\n code=proc.wait()\ntext=log.read_text()\ncounts=re.findall(r'test result: (\\w+)\\. (\\d+) passed; (\\d+) failed; (\\d+) ignored;',text)\nrow={'name':name,'command':cmd,'exit_code':code,'seconds':round(time.monotonic()-start,2),'passed':sum(int(x[1]) for x in counts),'failed':sum(int(x[2]) for x in counts),'ignored':sum(int(x[3]) for x in counts)}\nif cmd[1]=='test' and not row['passed']:code=1;row['matched_no_tests']=True\nif name=='options':\n for test in ['search_click_keeps_the_font_list_open','the_system_font_search_filters_and_resets','the_system_font_search_resets_above_its_button']:\n  if not re.search(r'test .*'+test+r' \\.\\.\\. ok',text):code=1;row.setdefault('missing_regressions',[]).append(test)\nif name=='captures':\n images=sorted(root.glob('font-search-*.png'))\n row['captures']=[{'name':p.name,'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()} for p in images]\n if row['passed']!=2 or len(images)!=8:code=1;row['capture_count_mismatch']=True\nrow['final_exit_code']=code\np=root/'checks.json';rows=json.loads(p.read_text()) if p.exists() else [];rows.append(row);p.write_text(json.dumps(rows,indent=2)+'\\n')\nmeta={'source':actual,'validation_workflow_commit':os.environ['VALIDATION_SHA'],'platform':platform.platform(),'profile':'default dev/test','incremental':'disabled','rust':subprocess.check_output(['rustc','--version'],text=True).strip(),'cargo':subprocess.check_output(['cargo','--version'],text=True).strip(),'native_acceptance':False}\n(root/'runner.json').write_text(json.dumps(meta,indent=2)+'\\n')\nprint(json.dumps(row),flush=True)\nraise SystemExit(code)\n")
+        Path('.scratch/validate.py').write_text("from pathlib import Path\nimport hashlib,json,os,platform,re,subprocess,sys,time\nroot=Path('.scratch');root.mkdir(exist_ok=True)\nsource=os.environ['SOURCE_SHA']\nactual=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()\nassert actual==source,(actual,source)\ncommands={\n 'fmt':['cargo','fmt','--all','--','--check'],\n 'clippy':['cargo','clippy','--workspace','--all-targets','--locked','--','-D','warnings','-A','dead-code'],\n 'options':['cargo','test','--workspace','--locked','--offline','ui::options::'],\n 'theme':['cargo','test','--workspace','--locked','--offline','theme_guard'],\n 'catalog-keys':['cargo','test','--workspace','--locked','--offline','every_language_has_english_keys_and_variables'],\n 'catalog-format':['cargo','test','--workspace','--locked','--offline','every_bundled_message_formats_with_its_declared_variables'],\n 'captures':['cargo','test','--workspace','--locked','--offline','the_system_font_search_','--','--test-threads=1'],\n}\nname=sys.argv[1];cmd=commands[name]\nlog=root/(name+'.log');start=time.monotonic()\nwith log.open('w') as out:\n proc=subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,bufsize=1)\n for line in proc.stdout:\n  out.write(line);print(line,end='',flush=True)\n code=proc.wait()\ntext=log.read_text()\ncounts=re.findall(r'test result: (\\w+)\\. (\\d+) passed; (\\d+) failed; (\\d+) ignored;',text)\nrow={'name':name,'command':cmd,'exit_code':code,'seconds':round(time.monotonic()-start,2),'passed':sum(int(x[1]) for x in counts),'failed':sum(int(x[2]) for x in counts),'ignored':sum(int(x[3]) for x in counts)}\nif cmd[1]=='test' and not (row['passed']+row['failed']+row['ignored']):code=1;row['matched_no_tests']=True\nif name=='options':\n for test in ['search_click_keeps_the_font_list_open','the_system_font_search_filters_and_resets','the_system_font_search_resets_above_its_button']:\n  if not re.search(r'test .*'+test+r' \\.\\.\\. ok',text):code=1;row.setdefault('missing_regressions',[]).append(test)\nif name=='captures':\n images=sorted(root.glob('font-search-*.png'))\n row['captures']=[{'name':p.name,'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()} for p in images]\n if row['passed']!=2 or len(images)!=8:code=1;row['capture_count_mismatch']=True\nrow['final_exit_code']=code\np=root/'checks.json';rows=json.loads(p.read_text()) if p.exists() else [];rows.append(row);p.write_text(json.dumps(rows,indent=2)+'\\n')\nmeta={'source':actual,'validation_workflow_commit':os.environ['VALIDATION_SHA'],'platform':platform.platform(),'profile':'default dev/test','incremental':'disabled','rust':subprocess.check_output(['rustc','--version'],text=True).strip(),'cargo':subprocess.check_output(['cargo','--version'],text=True).strip(),'native_acceptance':False}\n(root/'runner.json').write_text(json.dumps(meta,indent=2)+'\\n')\nprint(json.dumps(row),flush=True)\nraise SystemExit(code)\n")
         PY
     - name: Formatting
       run: python3 .scratch/validate.py fmt
@@ -70,7 +70,7 @@ jobs:
       if: always()
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
       with:
-        name: font-search-1f5be1094665
+        name: font-search-899d75c4bd2e
         path: |
           .scratch/*.log
           .scratch/*.json
