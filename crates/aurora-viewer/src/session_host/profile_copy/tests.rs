@@ -351,7 +351,7 @@ fn profile_copy_symlink_hardlink_public_file_and_replaced_lifetime_lock_refuse_w
                 symlink(fixture.path(slot(1)), path).unwrap();
             }
             1 => std::fs::hard_link(fixture.path(slot(0)), fixture.path(slot(0)).with_extension("hardlink")).unwrap(),
-            2 => std::fs::set_permissions(fixture.path(slot(0)), std::fs::Permissions::from_mode(0o644)).unwrap(),
+            2 => std::fs::set_permissions(fixture.path(slot(0)), std::fs::Permissions::from_mode(0o666)).unwrap(),
             3 => {
                 let root = profile::slot_root(&fixture.installation.to_string(), slot(0)).unwrap();
                 std::fs::remove_file(root.join("profile.lock")).unwrap();
@@ -369,7 +369,7 @@ fn profile_copy_symlink_hardlink_public_file_and_replaced_lifetime_lock_refuse_w
         if kind == 2 {
             assert_eq!(
                 std::fs::metadata(fixture.path(slot(0))).unwrap().permissions().mode() & 0o777,
-                0o644
+                0o666
             );
         }
     }

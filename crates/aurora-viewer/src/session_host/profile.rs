@@ -565,13 +565,13 @@ mod platform {
         }
     }
 
-    fn check(success: windows_sys::core::BOOL) -> io::Result<()> {
+    pub(super) fn check(success: windows_sys::core::BOOL) -> io::Result<()> {
         if success == 0 { Err(io::Error::last_os_error()) } else { Ok(()) }
     }
 
     /// Aligned storage for variable-sized Windows security data. The queried
     /// size is bounded before allocating, and every pointer stays in its owner.
-    fn storage(bytes: u32) -> io::Result<Vec<usize>> {
+    pub(super) fn storage(bytes: u32) -> io::Result<Vec<usize>> {
         if !(1..=65_536).contains(&bytes) {
             return Err(invalid("invalid Windows security descriptor size"));
         }
@@ -592,7 +592,7 @@ mod platform {
         Ok(data)
     }
 
-    fn current_user() -> io::Result<Vec<usize>> {
+    pub(super) fn current_user() -> io::Result<Vec<usize>> {
         token_information(TokenUser)
     }
 

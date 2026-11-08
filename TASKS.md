@@ -1,5 +1,18 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Ordinary-saver compatibility for the stopped-profile copy adapter
+  (2026-11-08; no issue): settings-specific retained native ancestor/file handle
+  identity and permission/ACL checks accept ordinary confined saved settings
+  without weakening strict profile lock/private-temp validators. Unix0644 needs
+  genuine same-user0700 confinement; writable/link/ancestor turnover refuses.
+  Windows inherited ACLs use closed TokenUser/System/Administrators applicable
+  grants; administrator-owned settings require same-user private ancestry.
+  Existing permissions are never repaired; Settings and atomic_file are
+  unchanged. Seven new synthetic cases are authored UNRUN (24 adapter definitions,
+  three Unix-specific); independent correction source review and Root-owned
+  execution remain required. Actual Manage modal/production promotion stays
+  gated until this compatibility correction independently clears.
+
 - 🔧 Selective character preference copy, stopped-profile IO/controller atom
   (2026-11-08; no issue): cfg(test)-only real Broker/HostController metadata
   Inspect/Apply/Cancel routing, immutable operation/selection captures, actual
