@@ -136,6 +136,10 @@ allocations, account/session and Inventory source even without a name-edit
 ticket. A reused row, changed source or fully clipped owner retires the entire
 context. Teleport, map, edit and clipboard requests repeat the current source
 and real landmark checks in App dispatch before their existing native effects.
+Favorite SLURL availability shares Places' current `showloc` policy; clipboard
+dispatch repeats it so a previously captured URL cannot outlive the restriction.
+The final landmark check is deliberately stricter for foreign or malformed
+Inventory records; ordinary personal landmark actions retain their targets.
 Two process-wide Favorite-name worker slots are acquired before channels/spawn
 and held until the actual worker exits, including canceled OS IO/mutex waits.
 Replacing a source immediately clears its model; a busy replacement stays empty

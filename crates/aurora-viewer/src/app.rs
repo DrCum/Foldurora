@@ -14017,6 +14017,14 @@ impl App {
         ui::widgets::open_floater(&self.egui_ctx, "places", &mut self.panels.places);
     }
 
+    /// Repeat Places' current location restriction when accepting a captured
+    /// Favorite URL: a string prepared before showloc was added grants nothing.
+    pub(crate) fn favorite_copy_slurl(ctx: &egui::Context, rlva: &crate::world::rlva::Rlva, slurl: String) {
+        if !rlva.has("showloc") {
+            ctx.copy_text(slurl);
+        }
+    }
+
     /// A click in the favourites of the islands.
     fn favorite_action(&mut self, action: ui::bars::favorites::FavAction) {
         use ui::bars::favorites::FavAction;
@@ -14046,7 +14054,7 @@ impl App {
                     ContextCommand::Teleport => self.favorite_action(FavAction::Teleport(asset)),
                     ContextCommand::ShowOnMap(global) => self.favorite_action(FavAction::ShowOnMap(global)),
                     ContextCommand::Edit => self.favorite_action(FavAction::Edit(item)),
-                    ContextCommand::CopySlurl(slurl) => self.egui_ctx.copy_text(slurl),
+                    ContextCommand::CopySlurl(slurl) => Self::favorite_copy_slurl(&self.egui_ctx, &self.world.rlva, slurl),
                 }
             }
             // LLFavoritesBarCtrl::onButtonClick: no confirmation
@@ -14222,10 +14230,7 @@ impl App {
                 }
                 loaded
             });
-            let slurl = global.zip(sim.as_ref()).map(|(g, (region, _))| {
-                let (x, y) = self.world.map.local_xy(g.x, g.y);
-                crate::slurl::make(region, glam::Vec3::new(x as f32, y as f32, g.z as f32))
-            });
+            let slurl = global.and_then(|g| ui::places::slurl_at(&self.world, g, ""));
             list.push(ui::bars::favorites::Favorite {
                 source: Some(self.world.favorites.context_source(account, session, &self.world.inventory)),
                 item: id,

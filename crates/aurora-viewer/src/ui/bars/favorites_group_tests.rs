@@ -662,3 +662,72 @@ fn favorites_context_dispatch_rechecks_real_source_and_item_even_without_group_m
         "source rebinding retires contexts even when group metadata is unavailable"
     );
 }
+
+#[test]
+fn favorites_real_egui_cached_context_slurl_respects_actual_showloc_added_before_copy_dispatch() {
+    use aurora_net::{ChatMessage, ChatSourceType, ChatType};
+    for restrict_after_capture in [false, true] {
+        let mut h = Harness::members();
+        let mut rlva = crate::world::rlva::Rlva::default();
+        rlva.configure(true);
+        assert!(!rlva.has("showloc"));
+        let editor = h.open_member_context();
+        let original_slurl = editor.favorite.slurl.clone().unwrap();
+        let (output, action) = h.click(aurora_i18n::tr!("common-copy-slurl"), PointerButton::Primary);
+        assert!(
+            !output
+                .platform_output
+                .commands
+                .iter()
+                .any(|command| matches!(command, egui::OutputCommand::CopyText(_)))
+        );
+        let Some(FavAction::Context {
+            source,
+            item,
+            asset,
+            command: ContextCommand::CopySlurl(cached),
+        }) = action
+        else {
+            panic!("actual captured member Copy SLURL command")
+        };
+        assert_eq!(cached, original_slurl);
+        assert!(
+            h.data
+                .favorites
+                .context_current(&source, h.data.account, h.data.session, &h.data.inventory, item, asset)
+        );
+        if restrict_after_capture {
+            assert!(rlva.receive(&ChatMessage {
+                from_name: "Synthetic restriction issuer".into(),
+                source_id: Uuid::from_u128(700),
+                owner_id: h.data.account,
+                source_type: ChatSourceType::Object,
+                chat_type: ChatType::OwnerSay,
+                position: glam::Vec3::ZERO,
+                message: "@showloc=n".into(),
+            }));
+            assert!(rlva.has("showloc"), "apply the actual current restriction after context capture");
+        }
+        // Invoke the same effect boundary as App, with the current RLVa model
+        // and the old context string. Only normal unrestricted flow may copy.
+        crate::app::App::favorite_copy_slurl(&h.ctx, &rlva, cached);
+        let output = h.frame(Vec::new()).0;
+        assert_eq!(
+            output
+                .platform_output
+                .commands
+                .iter()
+                .any(|command| matches!(command, egui::OutputCommand::CopyText(text) if text == &original_slurl)),
+            !restrict_after_capture,
+        );
+        if restrict_after_capture {
+            assert!(
+                !output
+                    .platform_output
+                    .commands
+                    .iter()
+                    .any(|command| matches!(command, egui::OutputCommand::CopyText(_)))
+            );
+        }
+    }
+}
