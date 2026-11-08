@@ -236,3 +236,128 @@ fn contact_policy_oversized_network_reply_latches_loss_in_both_feed_orders_and_i
         assert_eq!(w.contact_policy_revision(), 0);
     }
 }
+
+#[test]
+fn contact_policy_primary_legacy_tracks_lower_modern_zero_through_both_orders_and_cache_reload() {
+    let grid = GridDigest::from_uri(aurora_net::login::SL_MAIN_GRID).unwrap();
+    for legacy_first in [true, false] {
+        let root = std::env::temp_dir().join(format!("aurora-contact-legacy-{}", Uuid::new_v4()));
+        let mut w = world();
+        let legacy = || Patch {
+            agents: [(OWNER, 0), (SUPPORTER, SUPPORT)].into(),
+            legacy: true,
+        };
+        if legacy_first {
+            apply(&mut w, Feed::Agents, legacy());
+        }
+        apply(&mut w, Feed::Data, patch(&[(OWNER, NO_SUPPORT)]));
+        if !legacy_first {
+            apply(&mut w, Feed::Agents, legacy());
+        }
+        assert!(!w.allows_direct_contact(SUPPORTER));
+        for feed in Feed::ALL {
+            w.save_contact_policy_cache(&root, grid, feed);
+        }
+        let mut reloaded = world();
+        reloaded.load_contact_policy_cache(&root, grid);
+        assert!(!reloaded.allows_direct_contact(SUPPORTER));
+        for model in [&mut w, &mut reloaded] {
+            apply(model, Feed::Data, patch(&[(OWNER, 0)]));
+            assert!(
+                model.allows_direct_contact(SUPPORTER),
+                "legacy must not freeze an inherited refusal"
+            );
+            apply(model, Feed::Agents, patch(&[(OWNER, NO_SUPPORT)]));
+            apply(model, Feed::Agents, legacy());
+            assert!(
+                !model.allows_direct_contact(SUPPORTER),
+                "legacy cannot clear actual modern primary flags"
+            );
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
+fn contact_policy_primary_provenance_change_advances_revision_even_when_bits_are_equal() {
+    let mut w = world();
+    apply(&mut w, Feed::Data, patch(&[(SUPPORTER, SUPPORT)]));
+    apply(
+        &mut w,
+        Feed::Agents,
+        Patch {
+            agents: [(OWNER, 0)].into(),
+            legacy: true,
+        },
+    );
+    let before = w.contact_policy_revision();
+    apply(&mut w, Feed::Agents, patch(&[(OWNER, 0)]));
+    assert!(w.contact_policy_revision() > before);
+    apply(&mut w, Feed::Data, patch(&[(OWNER, NO_SUPPORT)]));
+    assert!(
+        w.allows_direct_contact(SUPPORTER),
+        "explicit modern primary zero stays authoritative"
+    );
+}
+
+#[test]
+fn contact_policy_mixed_cache_validates_both_maps_before_install_and_rejects_flattened_schema() {
+    let root = std::env::temp_dir().join(format!("aurora-contact-cache-{}", Uuid::new_v4()));
+    let grid = GridDigest::from_uri(aurora_net::login::SL_MAIN_GRID).unwrap();
+    let mut w = world();
+    apply(&mut w, Feed::Agents, patch(&[(OWNER, NO_SUPPORT), (SUPPORTER, SUPPORT)]));
+    let file = cache_file(grid, Feed::Agents);
+    for legacy in [
+        aurora_llsd::llsd_map! { OTHER.to_string() => 16 },
+        aurora_llsd::llsd_map! { OWNER.to_string().to_uppercase() => aurora_llsd::llsd_map! { "support" => true } },
+    ] {
+        let bytes = aurora_llsd::to_xml(&aurora_llsd::llsd_map! {
+            "schema" => CACHE_SCHEMA, "grid" => grid.namespace(), "feed" => "agents",
+            "Agents" => aurora_llsd::llsd_map! { OWNER.to_string() => 0 }, "SupportAgents" => legacy
+        });
+        write_cache(&root, &file, &bytes).unwrap();
+        assert!(read_cache(&root.join(&file), grid, Feed::Agents).is_err());
+        w.load_contact_policy_cache(&root, grid);
+        assert!(
+            !w.allows_direct_contact(SUPPORTER),
+            "no partially installed zero from an invalid cache"
+        );
+    }
+    let flattened = aurora_llsd::to_xml(&aurora_llsd::llsd_map! {
+        "schema" => 1, "grid" => grid.namespace(), "feed" => "agents",
+        "Agents" => aurora_llsd::llsd_map! { OWNER.to_string() => NO_SUPPORT }
+    });
+    let old = format!("contact-policy-v1-{}-agents.xml", grid.namespace());
+    write_cache(&root, &old, &flattened).unwrap();
+    write_cache(&root, &file, &flattened).unwrap();
+    assert!(read_cache(&root.join(&file), grid, Feed::Agents).is_err());
+    w.load_contact_policy_cache(&root, grid);
+    assert!(!w.allows_direct_contact(SUPPORTER));
+    assert_eq!(
+        std::fs::read(root.join(old)).unwrap(),
+        flattened,
+        "old evidence is not repaired by guessing"
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn contact_policy_mixed_cache_applies_one_combined_budget_to_both_maps() {
+    let root = std::env::temp_dir().join(format!("aurora-contact-budget-{}", Uuid::new_v4()));
+    let grid = GridDigest::from_uri(aurora_net::login::SL_MAIN_GRID).unwrap();
+    let mut modern = Llsd::new_map();
+    for id in 1..=MAX_AGENTS {
+        modern.insert(Uuid::from_u128(id as u128).to_string(), 0);
+    }
+    let bytes = aurora_llsd::to_xml(&aurora_llsd::llsd_map! {
+        "schema" => CACHE_SCHEMA, "grid" => grid.namespace(), "feed" => "agents", "Agents" => modern,
+        "SupportAgents" => aurora_llsd::llsd_map! { SUPPORTER.to_string() => aurora_llsd::llsd_map! { "support" => true } }
+    });
+    let file = cache_file(grid, Feed::Agents);
+    write_cache(&root, &file, &bytes).unwrap();
+    assert_eq!(read_cache(&root.join(file), grid, Feed::Agents), Err(Error::TooLarge));
+    let mut w = world();
+    w.load_contact_policy_cache(&root, grid);
+    assert!(!w.allows_direct_contact(OTHER));
+    std::fs::remove_dir_all(root).unwrap();
+}

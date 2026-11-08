@@ -15,10 +15,18 @@ pub(crate) fn supported_grid(grid: GridDigest) -> bool {
         || Some(grid) == GridDigest::from_uri(aurora_net::login::SL_BETA_GRID)
 }
 
+const CACHE_SCHEMA: i32 = 2;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct StoredFlags {
+    bits: i32,
+    legacy: bool,
+}
+
 #[derive(Default)]
 pub(crate) struct State {
     source: Option<LoginSource>,
-    feeds: [BTreeMap<Uuid, i32>; 2],
+    feeds: [BTreeMap<Uuid, StoredFlags>; 2],
     revision: u64,
     lost: bool,
 }
@@ -36,13 +44,14 @@ impl State {
             .is_some_and(|source| source.matches_login(login, login.agent_id))
     }
     fn flags(&self, agent: Uuid) -> i32 {
-        // Dedicated agents.xml wins regardless of download/cache arrival order.
-        // Missing records retain previously known flags, as processAgents does.
-        self.feeds[1]
-            .get(&agent)
-            .or_else(|| self.feeds[0].get(&agent))
-            .copied()
-            .unwrap_or(0)
+        let lower = self.feeds[0].get(&agent).map_or(0, |entry| entry.bits);
+        match self.feeds[1].get(&agent) {
+            // Legacy primary rows know only SUPPORT. They must not freeze a
+            // copied lower-feed NO_SUPPORT bit after an explicit lower update.
+            Some(primary) if primary.legacy => lower | primary.bits,
+            Some(primary) => primary.bits,
+            None => lower,
+        }
     }
     pub(super) fn lose(&mut self) {
         if !self.lost {
@@ -54,15 +63,31 @@ impl State {
         if !self.current(login) {
             return Err(Error::Invalid);
         }
+        if patch.agents.len() > MAX_AGENTS {
+            self.lose();
+            return Err(Error::TooLarge);
+        }
+        let mask = if patch.legacy { SUPPORT } else { SUPPORT | NO_SUPPORT };
+        if patch
+            .agents
+            .iter()
+            .any(|(id, flags)| id.is_nil() || *flags < 0 || *flags & !mask != 0)
+        {
+            return Err(Error::Invalid);
+        }
         let mut updated = self.feeds[feed.index()].clone();
-        for (id, flags) in &patch.agents {
-            let flags = if patch.legacy {
-                // Legacy has no information capable of clearing NO_SUPPORT.
-                updated.get(id).copied().unwrap_or_else(|| self.flags(*id)) | flags
-            } else {
-                *flags
+        for (id, bits) in &patch.agents {
+            let entry = match updated.get(id) {
+                Some(old) if patch.legacy => StoredFlags {
+                    bits: old.bits | bits,
+                    legacy: old.legacy,
+                },
+                _ => StoredFlags {
+                    bits: *bits,
+                    legacy: patch.legacy,
+                },
             };
-            updated.insert(*id, flags);
+            updated.insert(*id, entry);
         }
         if updated.len() > MAX_AGENTS {
             self.lose();
@@ -86,11 +111,21 @@ impl State {
     }
     pub(super) fn cache_xml(&self, grid: GridDigest, feed: Feed) -> Vec<u8> {
         let mut agents = Llsd::new_map();
+        let mut legacy = Llsd::new_map();
         for (id, flags) in &self.feeds[feed.index()] {
-            agents.insert(id.to_string(), *flags);
+            if flags.legacy {
+                let mut entry = Llsd::new_map();
+                if flags.bits & SUPPORT != 0 {
+                    entry.insert("support", true);
+                }
+                legacy.insert(id.to_string(), entry);
+            } else {
+                agents.insert(id.to_string(), flags.bits);
+            }
         }
         aurora_llsd::to_xml(&aurora_llsd::llsd_map! {
-            "schema" => 1, "grid" => grid.namespace(), "feed" => feed.name(), "Agents" => agents
+            "schema" => CACHE_SCHEMA, "grid" => grid.namespace(), "feed" => feed.name(),
+            "Agents" => agents, "SupportAgents" => legacy
         })
     }
 }
@@ -126,7 +161,12 @@ impl World {
         };
         for feed in Feed::ALL {
             let path = root.join(cache_file(grid, feed));
-            let result = read_cache(&path, grid, feed).and_then(|patch| self.contact_policy.apply(&login, feed, &patch));
+            let result = read_cache(&path, grid, feed).and_then(|patches| {
+                for patch in patches {
+                    self.contact_policy.apply(&login, feed, &patch)?;
+                }
+                Ok(())
+            });
             if result == Err(Error::TooLarge) {
                 self.contact_policy.lose();
             }
@@ -149,10 +189,10 @@ impl World {
 }
 
 fn cache_file(grid: GridDigest, feed: Feed) -> String {
-    format!("contact-policy-v1-{}-{}.xml", grid.namespace(), feed.name())
+    format!("contact-policy-v{CACHE_SCHEMA}-{}-{}.xml", grid.namespace(), feed.name())
 }
 
-fn read_cache(path: &Path, grid: GridDigest, feed: Feed) -> Result<Patch, Error> {
+fn read_cache(path: &Path, grid: GridDigest, feed: Feed) -> Result<Vec<Patch>, Error> {
     let metadata = std::fs::symlink_metadata(path).map_err(|_| Error::Invalid)?;
     if !metadata.is_file() || metadata.file_type().is_symlink() {
         return Err(Error::Invalid);
@@ -170,10 +210,26 @@ fn read_cache(path: &Path, grid: GridDigest, feed: Feed) -> Result<Patch, Error>
         return Err(Error::TooLarge);
     }
     let data = aurora_llsd::from_xml(&bytes).map_err(|_| Error::Invalid)?;
-    if data["schema"] != Llsd::Integer(1) || data["grid"].as_str() != grid.namespace() || data["feed"].as_str() != feed.name() {
+    if data["schema"] != Llsd::Integer(CACHE_SCHEMA) || data["grid"].as_str() != grid.namespace() || data["feed"].as_str() != feed.name() {
         return Err(Error::Invalid);
     }
-    aurora_net::contact_policy::parse(&bytes)
+    // Network feeds have whole-document precedence; mixed caches must validate
+    // BOTH disjoint maps before installing either. V1 flattened provenance and
+    // cannot be repaired by guessing, so its separate filename/schema is ignored.
+    if !data["Agents"].is_map() || !data["SupportAgents"].is_map() {
+        return Err(Error::Invalid);
+    }
+    let modern = aurora_net::contact_policy::parse(&bytes)?;
+    let legacy = aurora_net::contact_policy::parse(&aurora_llsd::to_xml(&aurora_llsd::llsd_map! {
+        "SupportAgents" => data["SupportAgents"].clone()
+    }))?;
+    if modern.agents.len() + legacy.agents.len() > MAX_AGENTS {
+        return Err(Error::TooLarge);
+    }
+    if modern.agents.keys().any(|id| legacy.agents.contains_key(id)) {
+        return Err(Error::Invalid);
+    }
+    Ok(vec![legacy, modern])
 }
 
 fn write_cache(root: &Path, file: &str, bytes: &[u8]) -> std::io::Result<()> {

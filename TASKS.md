@@ -2,8 +2,10 @@
 
 - 🔧 Foldurora Host Friends/New IM dependencies (2026-11-08): original-login
   name replies and grid-cache capture pass9 focused +36 neighboring cases at
-  `9caf6761`. Shared FSData Direct-contact policy is implemented next, pending
-  focused checks; chooser/Open/search are still unfinished. One combined full
+  `9caf6761`. Shared FSData Direct-contact policy passes15 focused cases at
+  `523d6d40` after an explicitly preserved compile failure; a subsequent legacy
+  precedence/cache-provenance correction adds four regressions, pending rerun.
+  Chooser/Open/search are still unfinished. One combined full
   checkpoint follows the feature group. Source publication remains held.
 
 

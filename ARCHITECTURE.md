@@ -13,8 +13,10 @@ SUPPORT/NO_SUPPORT Direct-contact rule (Folderstorm abbe3cb0, fsdata.cpp and
 fsimcontactpolicy.h, LGPL-2.1-or-later). Actual SL login requests enable fixed
 HTTPS public feeds, ordinary public TLS, no redirects and bounded requests.
 Grid/feed/schema-bound public caches retain known flags on ordinary failures.
-Dedicated agents entries override data entries deterministically; legacy flags
-are additive and cannot clear modern refusals. These are deliberate refinements
+Dedicated modern agents entries override data entries deterministically;
+legacy rows overlay current lower-feed support flags without freezing inherited
+NO_SUPPORT bits. Schema2 caches preserve disjoint per-row modern/legacy
+provenance; ambiguous development V1 caches are ignored and left untouched. These are deliberate refinements
 to reference arrival-order merging. Missing flags allow contact; unrepresentable
 size/revision loss disables Direct contact until a fresh login. Native Open,
 pre-unblock/echo preparation, final Send/typing and host Send share the rule;
