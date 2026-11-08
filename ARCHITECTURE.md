@@ -167,9 +167,14 @@ object/callback/unknown grants and untrusted mutation fail closed. Current-user
 source files can have broad read-only grants; administrator-owned source/target
 settings still require closed TokenUser/System/Administrators applicable allows
 plus a same-user private ancestor. Inherit-only ACEs supply no current-object
-confinement; deny ACEs never excuse unsafe allows. Unestablished prefix owners,
-including TrustedInstaller layouts, remain a native acceptance gate without
-speculative trust. The Unix source fixture discards optional privacy evidence
+confinement; deny ACEs never excuse unsafe allows. Root's read-only Windows runner
+diagnostic established the exact TrustedInstaller service SID as a root-prefix
+owner, with no applicable grants for that SID. Only that fully validated SID can
+be an additional RetainedPrefix owner: it receives no ACL-principal trust,
+settings-parent/file ownership or private-ancestor credit. All other unestablished
+owners remain refused. Existing retained/current handles, native path identities
+and owner/DACL checks remain mandatory before and after reads/CAS, with no
+permission repair. The Unix source fixture discards optional privacy evidence
 while retaining every real opened ancestor, avoiding CI-private-parent assumptions.
 
 The projection retains only four explicit native typed families:16 Graphics,
