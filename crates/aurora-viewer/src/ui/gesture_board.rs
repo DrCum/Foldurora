@@ -11,7 +11,11 @@ use crate::{
     theme::Palette,
     world::inventory::{Inventory, actions::PlaybackItem},
 };
-use std::{collections::HashMap, time::Instant};
+use std::{
+    collections::HashMap,
+    sync::atomic::{AtomicU64, Ordering},
+    time::Instant,
+};
 
 #[derive(Clone)]
 pub(crate) enum Command {
@@ -30,9 +34,47 @@ pub(crate) struct Action {
     pub proof: Proof,
     pub revision: u64,
     pub command: Command,
+    activation: Option<ActivationControlTicket>,
+}
+impl Action {
+    fn same_action(&self, other: &Self) -> bool {
+        self.proof.same_owner(other.proof)
+            && self.revision == other.revision
+            && match (&self.command, &other.command) {
+                (Command::Select(a), Command::Select(b)) => a == b,
+                (Command::Inventory, Command::Inventory) | (Command::BeginNew, Command::BeginNew) => true,
+                (Command::Play(a, target_a), Command::Play(b, target_b)) => target_a == target_b && a.same_action(*b),
+                (Command::Stop(board_a, a), Command::Stop(board_b, b)) => board_a == board_b && a.same_action(*b),
+                (Command::Add(a, target_a), Command::Add(b, target_b)) => a == b && target_a == target_b,
+                (Command::Edit(a), Command::Edit(b)) => a == b,
+                (Command::BeginRename(a), Command::BeginRename(b)) | (Command::BeginDelete(a), Command::BeginDelete(b)) => a == b,
+                _ => false,
+            }
+    }
+}
+/// Local committed-control correlation only. Construction and consumption stay
+/// in this module; it cannot replace App's genuine native/source proof.
+#[derive(Clone, Copy, PartialEq)]
+struct ActivationControlTicket {
+    instance: u64,
+    release: u64,
+    control: u64,
+    frame: u64,
+    id: egui::Id,
+    rect: egui::Rect,
+    clip: egui::Rect,
+    layer: egui::LayerId,
+    transform: Option<egui::emath::TSTransform>,
+    key: Option<egui::Key>,
+    position: Option<egui::Pos2>,
 }
 struct Held {
     id: egui::Id,
+    control: u64,
+    rect: egui::Rect,
+    clip: egui::Rect,
+    layer: egui::LayerId,
+    transform: Option<egui::emath::TSTransform>,
     action: Action,
     key: Option<egui::Key>,
     press_frame: u64,
@@ -66,22 +108,30 @@ struct Dialog {
     board: Option<BoardId>,
     delete: bool,
     name: String,
+    created: BoardId,
 }
 struct Painted {
+    control: u64,
     action: Action,
     rect: egui::Rect,
     layer: egui::LayerId,
+    transform: Option<egui::emath::TSTransform>,
     clip: egui::Rect,
     focused: bool,
 }
 const MAX_CONTROLS: usize = model::MAX_TILES * 2 + model::MAX_BOARDS + 16;
-#[derive(Default)]
 pub(crate) struct State {
+    instance: u64,
+    next_control: u64,
+    next_release: u64,
+    released: Option<ActivationControlTicket>,
+    dialog_completed: Option<u64>,
     owner: Option<Proof>,
     held: Option<Held>,
     dialog: Option<Dialog>,
     last_press: Option<u64>,
     frame: Option<u64>,
+    finished_pass: Option<u64>,
     painted: HashMap<egui::Id, Painted>,
     building: HashMap<egui::Id, Painted>,
     composing: bool,
@@ -89,6 +139,38 @@ pub(crate) struct State {
     suspended: bool,
     focus: Option<egui::Id>,
     retire_focus: Option<egui::Id>,
+}
+impl Default for State {
+    fn default() -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        Self {
+            instance: NEXT
+                .try_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_add(1))
+                .unwrap_or(0),
+            next_control: 1,
+            next_release: 1,
+            released: None,
+            dialog_completed: None,
+            owner: None,
+            held: None,
+            dialog: None,
+            last_press: None,
+            frame: None,
+            finished_pass: None,
+            painted: HashMap::new(),
+            building: HashMap::new(),
+            composing: false,
+            input_blocked: false,
+            suspended: false,
+            focus: None,
+            retire_focus: None,
+        }
+    }
+}
+fn next(counter: &mut u64) -> Option<u64> {
+    let current = *counter;
+    *counter = current.checked_add(1).unwrap_or(0);
+    (current != 0 && *counter != 0).then_some(current)
 }
 impl State {
     pub(crate) fn cancel(&mut self) {
@@ -102,6 +184,9 @@ impl State {
         self.focus = None;
         self.held = None;
         self.dialog = None;
+        self.dialog_completed = None;
+        self.released = None;
+        self.finished_pass = None;
         self.painted.clear();
         self.building.clear();
     }
@@ -114,6 +199,10 @@ impl State {
     fn begin(&mut self, ctx: &egui::Context) {
         let frame = ctx.cumulative_frame_nr();
         if self.frame != Some(frame) {
+            if self.dialog_completed.take().is_some() {
+                self.dialog = None;
+            }
+            self.released = None;
             self.painted = std::mem::take(&mut self.building);
             self.frame = Some(frame);
         }
@@ -157,9 +246,61 @@ impl State {
         self.input_blocked = blocked;
         if blocked {
             self.held = None;
+            self.released = None;
         }
     }
+    /// Must be called after Context::run_ui returns. A later widget can discard
+    /// the pass, change geometry or take modal/focus ownership after show().
+    pub(crate) fn take_activation(&mut self, ctx: &egui::Context, action: &Action) -> bool {
+        let Some(ticket) = action.activation else { return false };
+        if self.released != Some(ticket) {
+            return false;
+        }
+        self.released = None;
+        let valid = self.instance != 0
+            && ticket.instance == self.instance
+            && self.frame == Some(ticket.frame)
+            && ticket.frame.checked_add(1) == Some(ctx.cumulative_frame_nr())
+            && self.finished_pass.and_then(|pass| pass.checked_add(1)) == Some(ctx.cumulative_pass_nr())
+            && !self.input_blocked
+            && !self.composing
+            && ctx.input(|input| input.focused)
+            && !egui::Popup::is_any_open(ctx)
+            && ctx.memory(|memory| memory.allows_interaction(ticket.layer))
+            && ctx.layer_transform_to_global(ticket.layer) == ticket.transform
+            && ctx.viewport(|viewport| {
+                // end_pass swaps this exact committed widget set into prev_pass.
+                // The local map alone cannot establish that egui kept the widget.
+                viewport.prev_pass.widgets.get(ticket.id).is_some_and(|widget| {
+                    widget.enabled
+                        && widget.visible
+                        && widget.rect == ticket.rect
+                        && widget.interact_rect == ticket.clip
+                        && widget.layer_id == ticket.layer
+                })
+            })
+            && self.building.get(&ticket.id).is_some_and(|painted| {
+                painted.control == ticket.control
+                    && painted.action.same_action(action)
+                    && painted.rect == ticket.rect
+                    && painted.clip == ticket.clip
+                    && painted.layer == ticket.layer
+                    && painted.transform == ticket.transform
+                    && painted.clip.is_positive()
+                    && painted.rect.intersect(painted.clip).is_positive()
+                    && match (ticket.key, ticket.position) {
+                        (None, Some(position)) => painted.clip.contains(position) && ctx.layer_id_at(position) == Some(ticket.layer),
+                        (Some(_), None) => painted.focused && ctx.memory(|memory| memory.focused() == Some(ticket.id)),
+                        _ => false,
+                    }
+            });
+        if self.dialog_completed.take().is_some() && valid {
+            self.dialog = None;
+        }
+        valid
+    }
     fn finish(&mut self, ctx: &egui::Context) {
+        self.finished_pass = Some(ctx.cumulative_pass_nr());
         // Virtualization/removal may prevent the originating widget from being
         // visited. Its retirement or exact release still consumes the gesture.
         let frame = ctx.cumulative_frame_nr();
@@ -240,23 +381,44 @@ impl State {
                 })
                 .map(|painted| Held {
                     id: response.id,
+                    control: painted.control,
+                    rect: painted.rect,
+                    clip: painted.clip,
+                    layer: painted.layer,
+                    transform: painted.transform,
                     action: painted.action.clone(),
                     key,
                     press_frame: frame,
                     press_index,
                 });
         }
-        if interactive
+        if self.instance != 0
+            && interactive
             && response.enabled()
             && self.building.len() < MAX_CONTROLS
             && let Some(action) = make()
         {
+            let control = self
+                .painted
+                .get(&response.id)
+                .filter(|painted| {
+                    painted.action.same_action(&action)
+                        && painted.rect == response.rect
+                        && painted.clip == response.interact_rect
+                        && painted.layer == response.layer_id
+                        && painted.transform == response.ctx.layer_transform_to_global(response.layer_id)
+                })
+                .map(|painted| painted.control)
+                .or_else(|| next(&mut self.next_control));
+            let Some(control) = control else { return None };
             self.building.insert(
                 response.id,
                 Painted {
+                    control,
                     action,
                     rect: response.rect,
                     layer: response.layer_id,
+                    transform: response.ctx.layer_transform_to_global(response.layer_id),
                     clip: response.interact_rect,
                     focused: response.has_focus(),
                 },
@@ -274,7 +436,23 @@ impl State {
                 |pos| response.interact_rect.contains(pos) && response.ctx.layer_id_at(pos) == Some(response.layer_id),
             );
             if interactive && !self.input_blocked && response.enabled() && owns_release {
-                return Some(held.action);
+                let ticket = ActivationControlTicket {
+                    instance: self.instance,
+                    release: next(&mut self.next_release)?,
+                    control: held.control,
+                    frame,
+                    id: response.id,
+                    rect: held.rect,
+                    clip: held.clip,
+                    layer: held.layer,
+                    transform: held.transform,
+                    key: held.key,
+                    position,
+                };
+                let mut action = held.action;
+                action.activation = Some(ticket);
+                self.released = Some(ticket);
+                return Some(action);
             }
         }
 
@@ -326,6 +504,7 @@ pub(crate) fn show(ctx: &egui::Context, p: &Palette, state: &mut State, open: &m
                 proof,
                 revision: data.revision,
                 command,
+                activation: None,
             })
         };
         egui::ScrollArea::horizontal().id_salt("board_choices").show(ui, |ui| {
@@ -464,13 +643,24 @@ pub(crate) fn show(ctx: &egui::Context, p: &Palette, state: &mut State, open: &m
         state.cancel();
         return None;
     }
-    if let Some(Action { proof, revision, command }) = output.take() {
+    if let Some(Action {
+        proof,
+        revision,
+        command,
+        activation,
+    }) = output.take()
+    {
         let dialog = match command {
             Command::BeginNew => Some((None, false, String::new())),
             Command::BeginRename(id) => data.and_then(|d| d.board(id)).map(|b| (Some(id), false, b.name.clone())),
             Command::BeginDelete(id) => data.and_then(|d| d.board(id)).map(|b| (Some(id), true, b.name.clone())),
             _ => {
-                output = Some(Action { proof, revision, command });
+                output = Some(Action {
+                    proof,
+                    revision,
+                    command,
+                    activation,
+                });
                 None
             }
         };
@@ -484,6 +674,7 @@ pub(crate) fn show(ctx: &egui::Context, p: &Palette, state: &mut State, open: &m
                 board,
                 delete,
                 name,
+                created: BoardId::new(),
             });
         }
     }
@@ -522,7 +713,7 @@ pub(crate) fn show(ctx: &egui::Context, p: &Palette, state: &mut State, open: &m
                             }
                         } else {
                             Change::Create {
-                                id: BoardId::new(),
+                                id: dialog.created,
                                 name: dialog.name.clone(),
                             }
                         };
@@ -530,10 +721,14 @@ pub(crate) fn show(ctx: &egui::Context, p: &Palette, state: &mut State, open: &m
                             proof,
                             revision: dialog.revision,
                             command: Command::Edit(command),
+                            activation: None,
                         })
                     }) {
                         output = Some(a);
-                        keep = false;
+                        // The final pass must still contain this exact Save
+                        // control. The post-run consumer closes it; direct UI
+                        // callers retire it at the next frame boundary.
+                        state.dialog_completed = Some(ctx.cumulative_frame_nr());
                     }
                     if ui.button(aurora_i18n::tr!("common-cancel")).clicked() {
                         keep = false;

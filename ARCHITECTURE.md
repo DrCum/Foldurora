@@ -5027,7 +5027,12 @@ of renderer/image permission; failed managed proof never becomes standalone.
 
 `ui/gesture_board.rs` uses shared Floater/Modal widgets, virtualized tiles and
 press-time targets from actual Inventory. Both menu styles and Gestures expose
-the window. Add rejects duplicate resolved aliases and never plays. Gesture cache
+the window. Native/cache/store effects run outside egui's retryable paint closure.
+An opaque local release ticket retains the original action across input-free
+retries; after the complete run the App consumes it only against the final exact
+egui control, geometry, positive clip, layer, modal and key-focus ownership. This
+correlation never renews the original native/source proof or playback ticket.
+Add rejects duplicate resolved aliases and never plays. Gesture cache
 requests preserve shared Load flags; only separate still-current Board intent
 may start cached playback. The controller owns exact Manager run IDs before
 ordinary effect callbacks. Stop Board cancels only its pending/issued readiness

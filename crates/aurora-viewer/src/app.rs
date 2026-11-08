@@ -10954,7 +10954,11 @@ impl App {
             }
             windows_ms += t.elapsed().as_secs_f32() * 1000.0;
         });
-        self.commit_board_ui(actions.board.take(), gesture_board::Presentation::new(&gfx.renderer, &gfx.window));
+        self.commit_board_ui(
+            &ctx,
+            actions.board.take(),
+            gesture_board::Presentation::new(&gfx.renderer, &gfx.window),
+        );
         // a capture leaves the user's layout as it is (as at exit)
         self.photo_validate_canvas(&mut gfx.renderer, full.pixels_per_point);
         if self.capture.is_none() {

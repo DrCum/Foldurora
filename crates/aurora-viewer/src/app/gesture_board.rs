@@ -744,13 +744,16 @@ impl App {
     }
     /// Runs only after the complete egui run, including any late discard/retry.
     /// Reconcile current native/source state without replacing the held proof.
-    pub(super) fn commit_board_ui(&mut self, action: Option<Action>, frame: Presentation<'_>) {
+    pub(super) fn commit_board_ui(&mut self, ctx: &egui::Context, action: Option<Action>, frame: Presentation<'_>) {
         let Some(action) = action else { return };
         if self.board_state.is_none() {
             return;
         }
         let presentation = Some(frame);
         self.with_boards(presentation, |state, app| {
+            if !state.ui.take_activation(ctx, &action) {
+                return;
+            }
             state.reconcile(app, presentation);
             state.dispatch(app, action, presentation);
         });

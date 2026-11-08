@@ -119,7 +119,7 @@ fn boards<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<Board>, D::Error
 pub(crate) fn valid_name(name: &str) -> bool {
     !name.is_empty() && name == name.trim() && name.len() <= 96 && name.chars().count() <= 64 && !name.chars().any(char::is_control)
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Change {
     Create { id: BoardId, name: String },
     Rename { board: BoardId, name: String },
