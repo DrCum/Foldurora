@@ -31,6 +31,12 @@
   repeats the current restriction before clipboard effects. One additional
   actual-egui regression captures a URL before a real RLVa restriction change
   and checks denied copying plus normal allowed flow; authored and unrun.
+  Root d9 isolated execution exposed a scroll-fixture setup error: newly added
+  unranked Favorites preceded the intended owner, so its initial right-click
+  targeted clipped text. The fixture now uses the actual reorder path before
+  opening that owner and asserts visible clipping and exact item identity.
+  All 29 cases and prior assertions remain; this correction is author-unrun
+  and changes no production visibility, source or clipboard policy.
   first-member folders share the original ordered landmarks across menu, row and
   grid. Separate bounded account/profile/grid metadata uses original submitted
   login provenance, exact stale-editor checks, IO-only atomic publication and a

@@ -561,10 +561,21 @@ fn favorites_real_egui_fully_scrolled_member_retires_context_even_while_row_is_s
             .push(Uuid::from_u128(id));
     }
     h.data.inventory.generation += 1;
+    // New, unranked Favorites sort ahead of the already numbered fixture.
+    // Use the actual reorder path to expose the intended owner before its
+    // real right-click; a clipped text shape is not a clickable visible row.
+    h.data.favorites.rearrange(&h.data.inventory, Uuid::from_u128(10), 0);
+    assert_eq!(h.view().list[0].item, Uuid::from_u128(10));
     for _ in 0..4 {
         h.frame(Vec::new());
     }
+    let (visible_owner, _) = h.frame(Vec::new());
+    let owner_name = h.position("First landmark");
+    assert!(visible_owner.shapes.iter().any(|shape| {
+        text_rect(&shape.shape, "First landmark").is_some_and(|rect| rect.contains(owner_name) && shape.clip_rect.contains(owner_name))
+    }));
     let editor = h.open_member_context();
+    assert_eq!(editor.favorite.item, Uuid::from_u128(10));
     let command_pos = h.position(aurora_i18n::tr!("common-teleport-3"));
     assert!(h.frame(pointer(command_pos, PointerButton::Primary, true)).1.is_none());
     let before = h.ctx.read_response(editor.owner).unwrap().rect;
