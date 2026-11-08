@@ -117,6 +117,12 @@ fn inventory_archive_eligibility_uses_actual_ordinary_outfit_own_ancestry_withou
     for n in [0, 1, 5, 6, 7, 8, 9, 999] {
         assert!(!eligible(&world.inventory, id(n)));
     }
+    // Actual Library identity is stronger than a missing/mislabelled flag.
+    world.inventory.folders.get_mut(&id(7)).unwrap().library = false;
+    world.inventory.folders.get_mut(&id(7)).unwrap().info.parent = id(1);
+    assert!(!eligible(&world.inventory, id(8)));
+    world.inventory.folders.get_mut(&id(7)).unwrap().info.type_default = -1;
+    assert!(!eligible(&world.inventory, id(7)));
     for kind in 0..=100 {
         folder(&mut world, 1000 + kind as u128, 1, kind, false);
         assert_eq!(eligible(&world.inventory, id(1000 + kind as u128)), kind == 47);
@@ -128,6 +134,11 @@ fn inventory_archive_eligibility_uses_actual_ordinary_outfit_own_ancestry_withou
     world.inventory.folders.get_mut(&id(2)).unwrap().info.parent = id(1);
     world.inventory.folders.get_mut(&id(2)).unwrap().info.id = id(999);
     assert!(!eligible(&world.inventory, id(3)), "map-key aliases are not actual folders");
+    world.inventory.lib_root = world.inventory.root;
+    assert!(
+        !eligible(&world.inventory, id(4)),
+        "personal/Library root alias is not personal ancestry"
+    );
     assert!(
         world.inventory.queue.is_empty(),
         "Unknown content is not fetched by local eligibility"
@@ -247,6 +258,14 @@ fn inventory_archive_wrong_document_or_actual_login_root_never_becomes_ready_emp
         current.include_allowed(&world),
         "explicit Include is independent of failed mask readiness"
     );
+    world.inventory.lib_root = world.inventory.root;
+    assert!(!current.matches(&world) && !current.include_allowed(&world));
+    assert!(Model::new(&world, grid("https://archive.example.invalid/login")).is_err());
+    world.inventory.lib_root = id(7);
+    world.inventory.folders.get_mut(&id(1)).unwrap().info.type_default = 14;
+    assert!(!current.matches(&world) && !current.include_allowed(&world));
+    assert!(Model::new(&world, grid("https://archive.example.invalid/login")).is_err());
+    world.inventory.folders.get_mut(&id(1)).unwrap().info.type_default = 8;
     Arc::make_mut(world.login.as_mut().unwrap()).inventory_root = id(999);
     assert!(!current.matches(&world) && !current.include_allowed(&world));
     assert!(Model::new(&world, grid("https://archive.example.invalid/login")).is_err());
