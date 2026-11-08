@@ -15,9 +15,22 @@ pub(super) struct SourceStackNode {
 #[derive(Clone)]
 pub(super) struct SourceDiagnostic {
     pub(super) control: Control,
+    pub(super) response_rect: Rect,
+    pub(super) response_interact_rect: Rect,
+    pub(super) response_sense: egui::Sense,
+    pub(super) painting_count: usize,
     pub(super) stack: Vec<SourceStackNode>,
     pub(super) flags: [bool; 5],
     pub(super) pass: usize,
+}
+
+fn rect_bits(rect: Rect) -> [u32; 4] {
+    [
+        rect.min.x.to_bits(),
+        rect.min.y.to_bits(),
+        rect.max.x.to_bits(),
+        rect.max.y.to_bits(),
+    ]
 }
 
 fn bounded_diagnostic(mut text: String) -> String {
@@ -175,9 +188,7 @@ impl Frames {
                 Late::None => {}
                 Late::Discard => ui.ctx().request_discard("copy fixture changes layout after the modal body"),
                 Late::OtherModal => {
-                    widgets::Modal::new(Id::unique("copy_fixture_late_modal")).show(ui.ctx(), |ui| {
-                        ui.label("synthetic modal");
-                    });
+                    late_modal(ui.ctx());
                 }
                 Late::Close => self.model.close(),
                 Late::FocusLoss => ui.ctx().input_mut(|input| input.focused = false),
@@ -203,6 +214,34 @@ impl Frames {
         // This CPU fixture has no renderer; pinned TexturesDelta requires
         // explicit disposal when its uploads/frees are deliberately discarded.
         output.textures_delta.clear();
+        if matches!(late, Late::OtherModal | Late::CoverLayer | Late::VisualLayerCover) {
+            let control = self
+                .model
+                .completed
+                .as_ref()
+                .expect("original release before actual late coverage")
+                .control;
+            let layer = egui::LayerId::new(egui::Order::Foreground, late_layer_id(late));
+            let above = self.ctx.memory(|memory| {
+                let layers = memory.layer_ids().collect::<Vec<_>>();
+                memory.areas().is_visible(&layer)
+                    && matches!((layers.iter().position(|id| *id == control.layer), layers.iter().position(|id| *id == layer)), (Some(original), Some(cover)) if original < cover)
+            });
+            assert!(above, "late fixture must be genuinely visible above the original layer");
+            let area = egui::AreaState::load(&self.ctx, layer.id).unwrap().rect();
+            if matches!(late, Late::OtherModal) {
+                assert!(!area.intersect(control.rect).is_positive(), "exercise the backdrop beyond its body");
+            } else {
+                assert!(area.contains_rect(control.rect), "actual late Area must cover the original control");
+            }
+            assert!(
+                self.ctx
+                    .viewport(|viewport| viewport.prev_pass.widgets.get_layer(layer).any(|widget| {
+                        widget.visible && finite_positive(widget.interact_rect) && widget.interact_rect.contains_rect(control.rect)
+                    })),
+                "actual final visible widget/backdrop must cover the original control"
+            );
+        }
         if let Late::Transform(transform) = late {
             let control = self
                 .model
@@ -287,15 +326,64 @@ impl Frames {
             .unwrap_or_default()
             .iter()
             .map(|record| {
+                let retained = self.model.painting.iter().find(|control| control.widget == record.control.widget);
+                let final_frame = self
+                    .ctx
+                    .viewport(|viewport| FrameWitness::capture(&viewport.prev_pass.widgets, &record.control));
+                let stored = retained.and_then(|control| control.frame);
+                let covers = stored.map(|frame| {
+                    self.ctx.viewport(|viewport| {
+                        let widgets = &viewport.prev_pass.widgets;
+                        widgets.order(record.control.widget).map(|(layer, index)| {
+                            widgets
+                                .get_layer(layer)
+                                .skip(index + 1)
+                                .filter(|widget| {
+                                    !frame.contains(widget.id)
+                                        && widget.visible
+                                        && widget.interact_rect.intersect(record.control.rect).is_positive()
+                                })
+                                .take(8)
+                                .map(|widget| {
+                                    (
+                                        widget.id.value(),
+                                        widget.parent_id.value(),
+                                        widget.rect,
+                                        widget.interact_rect,
+                                        widget.sense,
+                                        widget.enabled,
+                                        widget.visible,
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                    })
+                });
+                // Keep eligibility/commit stages ahead of bulky parent data.
                 (
-                    describe(&record.control),
+                    record.control.widget.value(),
+                    (rect_bits(record.response_rect), rect_bits(record.control.registered.rect)),
+                    (
+                        rect_bits(record.response_interact_rect),
+                        rect_bits(record.control.registered.interact_rect),
+                    ),
+                    (record.response_sense, record.control.registered.sense),
+                    record.painting_count,
+                    record.flags,
+                    record.pass,
+                    (
+                        retained.is_some(),
+                        stored.is_some(),
+                        final_frame.is_some(),
+                        stored.zip(final_frame).map(|(old, current)| old == current),
+                    ),
+                    retained.map(|control| (control.registry(&self.ctx, true), control.committed(&self.ctx))),
+                    covers,
                     record
                         .stack
                         .iter()
-                        .map(|node| (node.id, node.parent, node.kind))
+                        .map(|node| (node.id.value(), node.parent.map(|parent| parent.value()), node.kind))
                         .collect::<Vec<_>>(),
-                    record.flags,
-                    record.pass,
                 )
             })
             .collect::<Vec<_>>();
@@ -310,7 +398,7 @@ impl Frames {
             .map(|completed| (completed.control.widget, completed.focused, completed.frame, completed.pass));
         let completed_control = self.model.completed.as_ref().map(|completed| describe(&completed.control));
         format!(
-            "late={late:?}, action={action:?}, frame={}, pass={}, input_frame={:?}, painted={:?}, focus={focus:?}, modal={modal:?}, gesture={gesture:?}, completed={completed:?}, native_focused={}, rejected={:?}, native_modifiers={:?}, transition={}, alt_graph={}, input={input:?}, areas={areas:?}\ncompleted_control={completed_control:?}\nSource flags=[live, enabled, valid, registry_at_paint, allows_interaction], records={sources:#?}\npopup_widgets={popup_widgets:#?}\npainting={painting:#?}",
+            "late={late:?}, action={action:?}, frame={}, pass={}, input_frame={:?}, painted={:?}, focus={focus:?}, modal={modal:?}, gesture={gesture:?}, completed={completed:?}, native_focused={}, rejected={:?}, native_modifiers={:?}, transition={}, alt_graph={}, input={input:?}, areas={areas:?}\ncompleted_control={completed_control:?}\nSource records=(id, response/registered rect bits, response/registered interact bits, senses, paint_count, flags[live,enabled,valid,registry,allows], pass, retained/stored/final/equal, registry/committed, later_covers[id,parent,rect,interact,sense,enabled,visible], stack)={sources:#?}\npopup_widgets={popup_widgets:#?}\npainting={painting:#?}",
             self.ctx.cumulative_frame_nr(),
             self.ctx.cumulative_pass_nr(),
             self.model.input_frame,
@@ -374,6 +462,7 @@ impl Frames {
             })
     }
     fn click(&mut self, control: Control, late: Late) -> Option<Command> {
+        self.warm_late(control, late);
         assert!(
             self.show(
                 vec![Event::PointerMoved(control.rect.center()), pointer(control.rect.center(), true)],
@@ -382,6 +471,39 @@ impl Frames {
             .is_none()
         );
         self.show(vec![pointer(control.rect.center(), false)], late)
+    }
+    fn warm_late(&mut self, control: Control, late: Late) {
+        if !matches!(late, Late::OtherModal | Late::CoverLayer | Late::VisualLayerCover) {
+            return;
+        }
+        assert!(self.model.gesture.is_none());
+        // A first Area pass is deliberately invisible sizing in pinned egui.
+        // Warm the SAME real owner before minting input, then restore and
+        // settle the original modal. No private focus or authority is minted.
+        for _ in 0..2 {
+            self.frame += 1;
+            let mut raw = egui::RawInput {
+                focused: true,
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, self.size)),
+                time: Some(self.frame as f64 / 60.0),
+                ..Default::default()
+            };
+            raw.viewports.entry(raw.viewport_id).or_default().native_pixels_per_point = Some(self.scale);
+            let mut output = self.ctx.run_ui(raw, |ui| {
+                if matches!(late, Late::OtherModal) {
+                    late_modal(ui.ctx());
+                } else {
+                    late_widget(ui, control, late);
+                }
+            });
+            output.textures_delta.clear();
+        }
+        assert!(self.show(vec![], Late::None).is_none());
+        self.settle();
+        let current = self.control(|intent| intent == control.intent);
+        assert_eq!(current.registered, control.registered);
+        assert_eq!(current.frame, control.frame);
+        assert!(current.committed(&self.ctx));
     }
     fn inspect(&mut self) -> (Selection, u64) {
         let control = self.control(|intent| matches!(intent, Intent::Inspect(_)));
@@ -433,6 +555,18 @@ impl Frames {
     }
 }
 
+fn late_layer_id(late: Late) -> Id {
+    if matches!(late, Late::OtherModal) {
+        Id::unique("copy_fixture_late_modal")
+    } else {
+        Id::unique("copy_guard_late_cover_area")
+    }
+}
+fn late_modal(ctx: &egui::Context) {
+    widgets::Modal::new(late_layer_id(Late::OtherModal)).show(ctx, |ui| {
+        ui.label("synthetic modal");
+    });
+}
 fn late_widget(ui: &mut egui::Ui, control: Control, change: Late) {
     if matches!(change, Late::AmbiguousFrame) {
         let frame = control.frame.unwrap();
@@ -463,12 +597,16 @@ fn late_widget(ui: &mut egui::Ui, control: Control, change: Late) {
         return;
     }
     if matches!(change, Late::CoverLayer | Late::VisualLayerCover) {
-        egui::Area::new(Id::unique("copy_guard_late_cover_area"))
+        let cover = control.rect.expand(2.0);
+        egui::Area::new(late_layer_id(change))
             .order(egui::Order::Foreground)
             .interactable(matches!(change, Late::CoverLayer))
-            .fixed_pos(control.rect.min)
+            .constrain(false)
+            .fade_in(false)
+            .default_size(cover.size())
+            .fixed_pos(cover.min)
             .show(ui.ctx(), |ui| {
-                ui.allocate_response(control.rect.size(), egui::Sense::click());
+                ui.allocate_response(cover.size(), egui::Sense::click());
             });
         return;
     }
@@ -985,6 +1123,9 @@ enum Modality {
     Accessibility,
 }
 fn release_with(frames: &mut Frames, control: Control, modality: Modality, late: Late) -> Option<Command> {
+    if !matches!(modality, Modality::Pointer) {
+        frames.warm_late(control, late);
+    }
     match modality {
         Modality::Pointer => frames.click(control, late),
         Modality::Enter | Modality::Space => {
@@ -1259,6 +1400,33 @@ fn profile_copy_ui_final_committed_turnover_and_coverage_reject_every_modality_w
             );
             assert!(!frames.model.operation.as_ref().unwrap().apply_submitted);
         }
+    }
+}
+
+#[test]
+fn profile_copy_ui_visible_other_modal_backdrop_beyond_body_revokes_every_original_modality() {
+    for modality in [Modality::Pointer, Modality::Enter, Modality::Space, Modality::Accessibility] {
+        let mut frames = Frames::new();
+        frames.prepare();
+        let original = frames.control(|intent| matches!(intent, Intent::Apply(_)));
+        // The helper checks actual final visibility/order and full backdrop
+        // coverage, while also requiring that the modal BODY does not overlap.
+        assert!(
+            release_with(&mut frames, original, modality, Late::OtherModal).is_none(),
+            "{modality:?}: {}",
+            frames.last_diagnostic
+        );
+        assert_eq!(
+            frames
+                .ctx
+                .viewport(|viewport| viewport.prev_pass.widgets.get(original.widget).copied()),
+            Some(original.registered)
+        );
+        assert!(!frames.model.operation.as_ref().unwrap().apply_submitted);
+        assert!(
+            frames.show(vec![], Late::None).is_none(),
+            "a hidden backdrop cannot replay the consumed proposal"
+        );
     }
 }
 

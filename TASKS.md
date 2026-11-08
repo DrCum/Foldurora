@@ -16,9 +16,16 @@
   obtaining bounded real Tab focus only after the native refusal/release trace.
   Existing assertion conditions, native guards and Undo checks are preserved.
   Bounded cfg(test) Source/Frame/focus/native metadata and failure messages now
-  distinguish the still-unresolved popup and late-refusal cases. No production
-  authority change or runtime pass is claimed; independent review and Root's
-  next focused/full official-profile checks remain required.
+  distinguish the still-unresolved popup and late-refusal cases. Root's exact
+  6ac focused run measured 16 pass, four fail and one ignored. Two late fixtures
+  used an invisible first sizing pass or missed the actual control; they now
+  warm the same owners before input and require real final visible coverage.
+  Final consumption additionally rejects bounded finite actual higher-layer
+  widgets, including a modal backdrop beyond its Area body, retaining every
+  existing authority guard. A four-modality regression covers that backdrop.
+  Popup diagnostics prioritize exact response/registry bits and retained-frame
+  stages; no popup or scrollbar exception is added. New code remains author-
+  UNRUN; independent review and Root's next official-profile checks are required.
 
 - 🔧 Candidate Linux validation on standard native ancestry (no issue):
   The isolated Windows-candidate workflow now also runs the repository's existing

@@ -16,6 +16,8 @@ const MAX_CONTROLS: usize = 24;
 const MAX_SOURCES: usize = 5;
 const MAX_CONTROL_PARENTS: usize = 16;
 const MAX_CONTROL_FRAMES: usize = 8;
+const MAX_COVER_LAYERS: usize = 16;
+const MAX_COVER_WIDGETS: usize = 512;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Command {
@@ -315,17 +317,51 @@ impl Control {
                 .skip_while(|layer| *layer != self.layer)
                 .skip(1)
                 .filter(|layer| memory.areas().is_visible(layer))
+                .take(MAX_COVER_LAYERS + 1)
                 .collect::<Vec<_>>()
         });
+        if above.len() > MAX_COVER_LAYERS {
+            return false;
+        }
+        let mut widget_budget = MAX_COVER_WIDGETS;
         for layer in above {
+            let transform = ctx.layer_transform_to_global(layer);
             if let Some(area) = egui::AreaState::load(ctx, layer.id) {
-                let Some(rect) = transformed_rect(area.rect(), ctx.layer_transform_to_global(layer)) else {
+                let Some(rect) = transformed_rect(area.rect(), transform) else {
                     return false;
                 };
                 if rect.intersect(self.rect).is_positive() {
                     return false;
                 }
             }
+            // A real modal backdrop extends beyond its Area body. The public
+            // top-modal getter describes the previous frame, so also validate
+            // the actual final higher-layer widgets without reminting a proof.
+            let inspected = ctx.viewport(|viewport| {
+                let mut used = 0;
+                for widget in viewport.prev_pass.widgets.get_layer(layer) {
+                    if used == widget_budget {
+                        return None;
+                    }
+                    used += 1;
+                    if !widget.visible {
+                        continue;
+                    }
+                    if !widget.interact_rect.is_finite() || !widget.interact_rect.size().is_finite() {
+                        return None;
+                    }
+                    if !widget.interact_rect.is_positive() {
+                        continue;
+                    }
+                    let rect = transformed_rect(widget.interact_rect, transform)?;
+                    if rect.intersect(self.rect).is_positive() {
+                        return None;
+                    }
+                }
+                Some(used)
+            });
+            let Some(used) = inspected else { return false };
+            widget_budget -= used;
         }
         ctx.layer_id_at(self.rect.center()) == Some(self.layer)
     }
@@ -1123,6 +1159,10 @@ impl CopyUi {
             // This adds no Ui/ID scope and grants no input authority.
             let record = tests::SourceDiagnostic {
                 control,
+                response_rect: response.rect,
+                response_interact_rect: response.interact_rect,
+                response_sense: response.sense,
+                painting_count: self.painting.len(),
                 stack: ui
                     .stack()
                     .iter()
