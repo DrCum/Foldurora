@@ -885,6 +885,9 @@ fn folder_jump_ime_quarantine_never_claims_another_actual_editors_preedit_or_com
             active_range_chars: None,
         })],
     );
+    owner.event(&WindowEvent::Focused(false));
+    owner.event(&WindowEvent::Focused(true));
+    assert!(owner.composing(), "focus snapshots cannot certify an unowned composition ended");
     owner.close();
     assert!(
         !owner.ime_quarantined,
