@@ -3773,5 +3773,13 @@ Open-source technologies that could set Aurora apart (human request of 2026-10-1
     predicates and actual focused egui keys with stable invalid transforms or
     infinite rectangles versus valid original-proof retries. All 66 definitions
     remain author-UNRUN; no runtime acceptance is claimed.
+    Root's d9f50d0f full run and exact isolated repeats measured five Board UI
+    fixture failures. The source follow-up explicitly establishes actual egui
+    widget focus and paints it before keyboard input, and settles the modal
+    layer handoff before a fresh body click. It preserves all 66 names and
+    assertions and adds two real-egui regressions for those prerequisites;
+    production capture, source/native rights and final validation are unchanged.
+    All 68 definitions remain author-UNRUN pending independent source review
+    and Root execution; the measured negative run remains recorded.
   - ⬜ Later parity: custom labels/colors/defaults, bulk edits/search/reordering,
     paging, persistent last selection, multiple windows and import/export.

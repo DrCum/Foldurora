@@ -270,6 +270,31 @@ impl Frames {
         assert!(self.pointer(pos, true).is_none());
         self.pointer(pos, false).expect("captured action")
     }
+    fn focus_control(&mut self, label: &str) {
+        // egui buttons do not acquire keyboard focus from a pointer click.
+        // Request the actual committed widget, then paint its focused state
+        // before sending a key: Board deliberately captures the prior paint.
+        let pos = self.position(label);
+        let control = self.control(pos);
+        assert!(control.enabled && control.visible && control.interact_rect.is_positive());
+        assert!(self.ctx.memory(|memory| memory.allows_interaction(control.layer_id)));
+        self.ctx.memory_mut(|memory| memory.request_focus(control.id));
+        assert!(self.draw(vec![]).0.is_none());
+        assert_eq!(self.ctx.memory(|memory| memory.focused()), Some(control.id));
+        assert!(self.ctx.viewport(|viewport| {
+            viewport.prev_pass.widgets.get(control.id).is_some_and(|widget| {
+                widget.enabled && widget.visible && widget.rect == control.rect && widget.interact_rect == control.interact_rect
+            })
+        }));
+    }
+    fn settle_modal_handoff(&mut self) {
+        // Focus::end_pass retires the previous modal layer only after the
+        // first closed-dialog pass. The following input-free pass paints the
+        // newly interactive underlying controls before a fresh gesture.
+        assert!(self.draw(vec![]).0.is_none());
+        assert!(self.draw(vec![]).0.is_none());
+        assert!(self.ctx.memory(|memory| memory.top_modal_layer().is_none()));
+    }
     fn deferred(&mut self, events: Vec<egui::Event>, mut after_first: impl FnMut(&mut Self)) -> super::super::UiActions {
         self.deferred_with(events, true, |f, pass| {
             if pass == 0 {
@@ -569,6 +594,7 @@ fn board_native_ui_final_key_focus_preserves_valid_retry_and_cancels_later_edito
     for steal_focus in [false, true] {
         let mut f = Frames::new();
         let _ = f.click(aurora_i18n::tr!("common-play"));
+        f.focus_control(aurora_i18n::tr!("common-play"));
         assert!(f.draw(vec![key(egui::Key::Enter, true, false)]).0.is_none());
         let original_focus = f.ctx.memory(|memory| memory.focused()).unwrap();
         let editor = egui::Id::unique("board_final_fixture_editor");
@@ -720,12 +746,14 @@ fn board_native_ui_real_new_rename_delete_confirm_carries_exact_original_catalog
     assert_ne!(id, first);
     assert_eq!(name, "Second board");
     f.data = f.data.apply(Change::Create { id, name }).unwrap();
+    f.settle_modal_handoff();
     assert!(f.tap(aurora_i18n::tr!("common-rename")).is_none());
     for _ in 0..3 {
         f.draw(vec![]);
     }
     let renamed = f.click(aurora_i18n::tr!("common-save"));
     assert!(matches!(renamed.command,Command::Edit(Change::Rename{board,name})if board==first&&name=="First board"));
+    f.settle_modal_handoff();
     assert!(f.tap(aurora_i18n::tr!("common-delete")).is_none());
     for _ in 0..3 {
         f.draw(vec![]);
@@ -848,6 +876,7 @@ fn board_native_ui_exact_nonrepeat_key_keeps_original_intent_and_ignores_other_r
     let mut f = Frames::new();
     let target = f.add.unwrap();
     let _ = f.click(aurora_i18n::tr!("common-play"));
+    f.focus_control(aurora_i18n::tr!("common-play"));
     assert!(f.draw(vec![key(egui::Key::Enter, true, false)]).0.is_none());
     f.manager.play(target.item(), Gesture::default(), None);
     let native = f.manager.playback_id(target.item()).unwrap();
@@ -864,9 +893,65 @@ fn board_native_ui_exact_nonrepeat_key_keeps_original_intent_and_ignores_other_r
     assert!(f.manager.playback_id(target.item()) == Some(native));
 }
 #[test]
+fn board_native_ui_keyboard_requires_committed_actual_focus_before_fresh_nonrepeat_press() {
+    let mut f = Frames::new();
+    let original = f.click(aurora_i18n::tr!("common-play"));
+    let pos = f.position(aurora_i18n::tr!("common-play"));
+    let control = f.control(pos);
+    assert_eq!(f.ctx.memory(|memory| memory.focused()), None);
+    assert!(f.draw(vec![key(egui::Key::Enter, true, false)]).0.is_none());
+    assert!(f.draw(vec![key(egui::Key::Enter, false, false)]).0.is_none());
+
+    // A focus request is real egui focus, but cannot make the previous
+    // unfocused paint an activation witness for this same input batch.
+    f.ctx.memory_mut(|memory| memory.request_focus(control.id));
+    assert!(f.draw(vec![key(egui::Key::Enter, true, false)]).0.is_none());
+    assert!(f.draw(vec![key(egui::Key::Enter, false, false)]).0.is_none());
+    assert_eq!(f.ctx.memory(|memory| memory.focused()), Some(control.id));
+    assert!(f.draw(vec![key(egui::Key::Enter, true, false)]).0.is_none());
+    let action = f
+        .draw(vec![key(egui::Key::Enter, false, false)])
+        .0
+        .expect("fresh key after committed focus");
+    assert!(action.proof.same_owner(original.proof));
+    assert_eq!(action.revision, original.revision);
+    let (Command::Play(captured, target), Command::Play(previous, original_target)) = (&action.command, &original.command) else {
+        panic!("same original play target")
+    };
+    assert!(*target == *original_target);
+    assert!(captured.same_action(*previous));
+    assert!(f.ui.take_activation(&f.ctx, &action));
+    assert!(!f.ui.take_activation(&f.ctx, &action));
+    assert!(!f.manager.has_playing());
+    assert!(f.actor.pending.is_empty() && f.actor.job.is_none());
+}
+#[test]
+fn board_native_ui_closing_modal_requires_committed_body_before_fresh_pointer_capture() {
+    let mut f = Frames::new();
+    let pos = f.position(aurora_i18n::tr!("board-add"));
+    assert!(f.tap(aurora_i18n::tr!("board-new")).is_none());
+    for _ in 0..3 {
+        assert!(f.draw(vec![]).0.is_none());
+    }
+    assert!(f.ctx.memory(|memory| memory.top_modal_layer().is_some()));
+    assert!(f.tap(aurora_i18n::tr!("common-cancel")).is_none());
+    // This first closed-dialog frame is still blocked by egui's preceding
+    // modal layer. Its queued press cannot reuse the pre-dialog Add witness.
+    assert!(f.pointer(pos, true).is_none());
+    assert!(f.pointer(pos, false).is_none());
+    f.settle_modal_handoff();
+    let action = f.click(aurora_i18n::tr!("board-add"));
+    assert!(matches!(action.command, Command::Add(board, item) if board == f.data.boards[0].id && Some(item) == f.add));
+    assert!(f.ui.take_activation(&f.ctx, &action));
+    assert!(!f.ui.take_activation(&f.ctx, &action));
+    assert!(!f.manager.has_playing());
+    assert!(f.actor.pending.is_empty() && f.actor.job.is_none());
+}
+#[test]
 fn board_native_ui_ime_focus_and_removed_overlay_cancel_held_or_queued_activation() {
     let mut f = Frames::new();
     let _ = f.click(aurora_i18n::tr!("common-play"));
+    f.focus_control(aurora_i18n::tr!("common-play"));
     assert!(f.draw(vec![key(egui::Key::Enter, true, false)]).0.is_none());
     assert!(
         f.draw(vec![egui::Event::Ime(egui::ImeEvent::Preedit {
@@ -885,6 +970,7 @@ fn board_native_ui_ime_focus_and_removed_overlay_cancel_held_or_queued_activatio
         .is_none()
     );
     let _ = f.click(aurora_i18n::tr!("common-play"));
+    f.focus_control(aurora_i18n::tr!("common-play"));
     assert!(f.draw(vec![key(egui::Key::Space, true, false)]).0.is_none());
     assert!(f.draw(vec![egui::Event::WindowFocused(false)]).0.is_none());
     assert!(
@@ -1104,6 +1190,7 @@ fn board_native_ui_removed_held_tile_release_does_not_stick_or_retarget_next_con
         f.draw(vec![]);
     }
     assert!(f.tap(aurora_i18n::tr!("common-cancel")).is_none());
+    f.settle_modal_handoff();
     assert!(matches!(f.click(aurora_i18n::tr!("board-add")).command, Command::Add(_, _)));
     assert!(!f.manager.has_playing());
 }
@@ -1112,6 +1199,7 @@ fn board_native_ui_removed_held_tile_release_does_not_stick_or_retarget_next_con
 fn board_native_ui_ime_terminal_retires_only_command_focus_before_later_enter_confirmation() {
     let mut f = Frames::new();
     let _ = f.click(aurora_i18n::tr!("common-play"));
+    f.focus_control(aurora_i18n::tr!("common-play"));
     assert!(
         f.draw(vec![egui::Event::Ime(egui::ImeEvent::Preedit {
             text: "x".into(),
@@ -1124,6 +1212,7 @@ fn board_native_ui_ime_terminal_retires_only_command_focus_before_later_enter_co
     assert!(f.draw(vec![key(egui::Key::Enter, true, false)]).0.is_none());
     assert!(f.draw(vec![key(egui::Key::Enter, false, false)]).0.is_none());
     let _ = f.click(aurora_i18n::tr!("common-play"));
+    f.focus_control(aurora_i18n::tr!("common-play"));
     assert!(f.draw(vec![key(egui::Key::Enter, true, false)]).0.is_none());
     assert!(matches!(
         f.draw(vec![key(egui::Key::Enter, false, false)]).0.unwrap().command,
