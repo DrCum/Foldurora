@@ -41,6 +41,7 @@ fn nested(late: FrameLate) -> (egui::Context, Control) {
     crate::theme::Theme::default().apply(&ctx, 1.0);
     let mut saved = None;
     for _ in 0..3 {
+        let mut changed_parent = None;
         let mut output = ctx.run_ui(
             egui::RawInput {
                 focused: true,
@@ -87,10 +88,24 @@ fn nested(late: FrameLate) -> (egui::Context, Control) {
                                 }
                             }
                             FrameLate::ChangedParent => {
-                                ui.disable();
+                                changed_parent = ui
+                                    .ctx()
+                                    .viewport(|viewport| viewport.this_pass.widgets.get(ui.unique_id()).copied());
+                                ui.set_clip_rect(egui::Rect::ZERO);
                             }
                         }
                     });
+                if let Some(before) = changed_parent {
+                    let after = host
+                        .ctx()
+                        .viewport(|viewport| viewport.this_pass.widgets.get(before.id).copied())
+                        .unwrap();
+                    assert_eq!(after.id, before.id);
+                    assert_eq!(after.parent_id, before.parent_id);
+                    assert_eq!(after.layer_id, before.layer_id);
+                    assert!(after.enabled && after.visible);
+                    assert!(!finite_positive(after.interact_rect));
+                }
                 if let Some(control) = saved.as_mut() {
                     control.structure = host
                         .ctx()

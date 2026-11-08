@@ -100,6 +100,8 @@ fn folder_jump_archive_exact_publication_without_inventory_change_retires_old_in
         };
         model.sync_visible(&world.inventory, Some(source(&world)), policy, gate.mask());
         ready(&mut model, &world.inventory, gate.mask());
+        model.set_query("Folder 3");
+        ready(&mut model, &world.inventory, gate.mask());
         original = model.capture(id(3)).unwrap();
     }
     let generation = world.inventory.generation;

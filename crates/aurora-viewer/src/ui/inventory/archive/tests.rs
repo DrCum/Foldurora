@@ -327,6 +327,26 @@ fn inventory_archive_ui_ordinary_none_denies_while_explicit_exemptions_are_named
     }
 }
 
+fn presentation_key() -> egui::Id {
+    egui::Id::unique("archive_fixture_presentation")
+}
+fn presentation_snapshot() -> egui::Id {
+    egui::Id::unique("archive_fixture_presentation_snapshot")
+}
+pub(super) fn presentation(ui: &mut egui::Ui) {
+    match ui.ctx().data(|data| data.get_temp::<u8>(presentation_key()).unwrap_or(0)) {
+        1 => ui.disable(),
+        2 => ui.set_invisible(),
+        _ => {}
+    }
+}
+pub(super) fn record_presentation(ui: &egui::Ui, response: &egui::Response) {
+    let actual = ui.ctx().viewport(|viewport| viewport.this_pass.widgets.get(response.id).copied());
+    if let Some(actual) = actual {
+        ui.ctx().data_mut(|data| data.insert_temp(presentation_snapshot(), actual));
+    }
+}
+
 struct Frames {
     frames: crate::ui::widgets::elide_tests::Frames,
     world: World,
@@ -361,6 +381,21 @@ impl Frames {
     }
     fn run(&mut self, events: Vec<egui::Event>) -> Vec<crate::ui::widgets::elide_tests::Text> {
         let palette = crate::theme::Theme::default().palette();
+        let before = self
+            .state
+            .archive_context
+            .activation
+            .control
+            .or(self.state.archive_include_context.activation.control);
+        let mode = match self.late {
+            authority_tests::Late::Disable => 1_u8,
+            authority_tests::Late::Hide => 2,
+            _ => 0,
+        };
+        self.frames.ctx.data_mut(|data| {
+            data.insert_temp(presentation_key(), mode);
+            data.remove::<egui::WidgetRect>(presentation_snapshot());
+        });
         let Self {
             frames,
             world,
@@ -373,7 +408,7 @@ impl Frames {
             late,
             cover_original,
         } = self;
-        frames.run(events, |ui| {
+        let texts = frames.run(events, |ui| {
             let actions = crate::ui::inventory::show(
                 ui.ctx(),
                 &palette,
@@ -419,7 +454,41 @@ impl Frames {
             if *discard && ui.ctx().current_pass_index() == 0 {
                 ui.ctx().request_discard("synthetic later widget discarded Archive release paint");
             }
-        })
+        });
+        if mode != 0 {
+            let actual = frames
+                .ctx
+                .data(|data| data.get_temp::<egui::WidgetRect>(presentation_snapshot()))
+                .expect("actual targeted presentation row");
+            let original = before.expect("original control before targeted presentation turnover");
+            assert_eq!(actual.id, original.widget);
+            assert_eq!(actual.layer_id, original.layer);
+            assert_eq!(actual.rect, original.registered.rect);
+            if mode == 1 {
+                assert!(!actual.enabled);
+            } else {
+                assert!(!actual.visible);
+            }
+        }
+        if let authority_tests::Late::Transform(transform) = *late {
+            let control = state
+                .archive_context
+                .activation
+                .control
+                .or(state.archive_include_context.activation.control)
+                .expect("actual original layer before final transform");
+            // Write the actual public current-transform store AFTER the whole
+            // UI run. Pinned set_transform_layer compares NaN to identity and
+            // would panic before the consumer under test could reject it.
+            frames.ctx.memory_mut(|memory| {
+                memory.to_global.insert(control.layer, transform);
+            });
+            let actual = frames.ctx.layer_transform_to_global(control.layer).unwrap();
+            assert_eq!(actual.scaling.to_bits(), transform.scaling.to_bits());
+            assert_eq!(actual.translation.x.to_bits(), transform.translation.x.to_bits());
+            assert_eq!(actual.translation.y.to_bits(), transform.translation.y.to_bits());
+        }
+        texts
     }
     fn pointer(&mut self, pos: egui::Pos2, button: egui::PointerButton, pressed: bool) {
         self.run(vec![
@@ -433,8 +502,9 @@ impl Frames {
         ]);
     }
     fn open_context(&mut self) -> egui::Pos2 {
+        self.state.show_original(&self.world.inventory, id(2));
         let mut texts = Vec::new();
-        for _ in 0..4 {
+        for _ in 0..8 {
             texts = self.run(Vec::new());
         }
         let target = texts
@@ -445,16 +515,27 @@ impl Frames {
             .center();
         self.pointer(target, egui::PointerButton::Secondary, true);
         self.pointer(target, egui::PointerButton::Secondary, false);
-        let mut texts = Vec::new();
-        for _ in 0..3 {
-            texts = self.run(Vec::new());
+        self.settled(false).rect.center()
+    }
+    fn settled(&mut self, include: bool) -> Control {
+        let mut previous: Option<Control> = None;
+        for _ in 0..64 {
+            self.run(Vec::new());
+            let current = if include {
+                self.state.archive_include_context.activation.control
+            } else {
+                self.state.archive_context.activation.control
+            };
+            if let Some(control) = current {
+                if control.committed(&self.frames.ctx)
+                    && previous.is_some_and(|previous| previous.same_widget(control) && previous.structure == control.structure)
+                {
+                    return control;
+                }
+                previous = Some(control);
+            }
         }
-        texts
-            .iter()
-            .find(|text| text.source == aurora_i18n::tr!("inventory-archive-archive"))
-            .expect("actual captured Archive context control")
-            .rect
-            .center()
+        panic!("actual captured Archive context control did not settle");
     }
 }
 

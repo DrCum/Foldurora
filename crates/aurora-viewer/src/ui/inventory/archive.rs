@@ -561,18 +561,18 @@ struct Control {
 fn finite_positive(rect: egui::Rect) -> bool {
     rect.is_finite() && rect.size().is_finite() && rect.is_positive()
 }
-fn transformed_rect(rect: egui::Rect, transform: Option<egui::emath::TSTransform>) -> Option<egui::Rect> {
-    let transform = transform.unwrap_or(egui::emath::TSTransform::IDENTITY);
-    let finite = |transform: egui::emath::TSTransform| {
-        transform.scaling.is_finite()
-            && transform.scaling > 0.0
-            && transform.translation.x.is_finite()
-            && transform.translation.y.is_finite()
+fn finite_transform(transform: Option<egui::emath::TSTransform>) -> bool {
+    let value = transform.unwrap_or(egui::emath::TSTransform::IDENTITY);
+    let finite = |value: egui::emath::TSTransform| {
+        value.scaling.is_finite() && value.scaling > 0.0 && value.translation.x.is_finite() && value.translation.y.is_finite()
     };
-    if !finite_positive(rect) || !finite(transform) || !finite(transform.inverse()) {
+    finite(value) && finite(value.inverse())
+}
+fn transformed_rect(rect: egui::Rect, transform: Option<egui::emath::TSTransform>) -> Option<egui::Rect> {
+    if !finite_positive(rect) || !finite_transform(transform) {
         return None;
     }
-    let global = transform * rect;
+    let global = transform.unwrap_or(egui::emath::TSTransform::IDENTITY) * rect;
     finite_positive(global).then_some(global)
 }
 impl Control {
@@ -614,7 +614,9 @@ impl Control {
         finite_positive(self.rect)
     }
     fn same_widget(self, other: Self) -> bool {
-        self.widget == other.widget
+        finite_transform(self.transform)
+            && finite_transform(other.transform)
+            && self.widget == other.widget
             && self.rect == other.rect
             && self.layer == other.layer
             && self.registered == other.registered
@@ -625,6 +627,12 @@ impl Control {
     }
     fn geometry(self, ctx: &egui::Context) -> bool {
         let viewport = ctx.content_rect();
+        let current = ctx.layer_transform_to_global(self.layer);
+        // Pinned TSTransform PartialEq debug-panics for NaN vectors. Validate
+        // BOTH operands, including both translations/inverse, before equality.
+        if !finite_transform(self.transform) || !finite_transform(current) {
+            return false;
+        }
         let Some(rect) = transformed_rect(self.registered.rect, self.transform) else {
             return false;
         };
@@ -635,10 +643,7 @@ impl Control {
             return false;
         };
         let visible = rect.intersect(interact).intersect(clip).intersect(viewport);
-        finite_positive(viewport)
-            && finite_positive(visible)
-            && visible == self.rect
-            && ctx.layer_transform_to_global(self.layer) == self.transform
+        finite_positive(viewport) && finite_positive(visible) && visible == self.rect && current == self.transform
     }
     fn registry(self, ctx: &egui::Context, committed: bool) -> bool {
         if !self.geometry(ctx) || !ctx.memory(|memory| memory.allows_interaction(self.layer)) {
@@ -814,6 +819,7 @@ struct Activation {
     previous: Option<Control>,
     gesture: Option<Gesture>,
     released: Option<(Gesture, Release)>,
+    settled_focus: Option<Option<egui::Id>>,
     input_frame: Option<u64>,
     blocked: bool,
 }
@@ -824,6 +830,7 @@ impl Activation {
             self.previous = self.control.filter(|control| control.frame.checked_add(1) == Some(frame));
             self.control = None;
             self.released = None;
+            self.settled_focus = None;
             self.frame = Some(frame);
             self.blocked = false;
         }
@@ -975,6 +982,10 @@ impl Activation {
         Some((gesture.control, release))
     }
     fn settle(&mut self, ctx: &egui::Context) {
+        // Pointer activation need not focus the row. Retain the actual focus
+        // after its owner finishes, so a later editor cannot take authority
+        // between this original release and the whole-run consumer.
+        self.settled_focus = self.released.map(|_| ctx.memory(|memory| memory.focused()));
         if let Some(control) = &mut self.control {
             if control.frame == ctx.cumulative_frame_nr() && control.pass == ctx.cumulative_pass_nr() {
                 control.structure = ctx.viewport(|viewport| structure::Witness::capture(&viewport.this_pass.widgets, control));
@@ -997,6 +1008,7 @@ impl Activation {
             && control.pass.checked_add(1) == Some(ctx.cumulative_pass_nr())
             && !ctx.will_discard()
             && ctx.input(|input| input.focused && input.modifiers.is_none())
+            && self.settled_focus == Some(ctx.memory(|memory| memory.focused()))
             && !egui::Popup::is_any_open(ctx)
             && ctx.memory(|memory| memory.is_above_modal_layer(control.layer))
             && match release {
@@ -1006,6 +1018,15 @@ impl Activation {
                 Release::Key(_) | Release::Accessibility => ctx.memory(|memory| memory.focused()) == Some(control.widget),
             }
     }
+}
+
+fn archive_row(ui: &mut egui::Ui, p: &Palette, label: &str, enabled: bool, checked: Option<bool>) -> egui::Response {
+    #[cfg(test)]
+    tests::presentation(ui);
+    let response = super::super::menu::editable_row(ui, p, "archive-filled", label, enabled, checked, None, false);
+    #[cfg(test)]
+    tests::record_presentation(ui, &response);
+    response
 }
 
 #[derive(Default)]
@@ -1065,7 +1086,7 @@ impl Context {
         };
         let response = ui
             .push_id(("inventory_archive_original_context", nonce, ticket.namespace()), |ui| {
-                super::super::menu::editable_row(ui, p, "archive-filled", label, true, None, None, false)
+                archive_row(ui, p, label, true, None)
             })
             .inner;
         let (original, release) = self.activation.paint(ui, &response, input)?;
@@ -1125,15 +1146,12 @@ impl IncludeContext {
         self.seen = Some(frame);
         let response = ui
             .push_id(("inventory_archive_include", self.nonce), |ui| {
-                super::super::menu::editable_row(
+                archive_row(
                     ui,
                     p,
-                    "archive-filled",
                     aurora_i18n::tr!("inventory-archive-include"),
                     enabled,
                     Some(controls.included),
-                    None,
-                    false,
                 )
             })
             .inner;
