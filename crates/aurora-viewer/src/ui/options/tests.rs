@@ -1718,6 +1718,7 @@ impl FontSearchCapture {
         image::save_buffer(&path, &rgba, self.size[0] as u32, self.size[1] as u32, image::ColorType::Rgba8).expect("CPU font-search PNG");
         std::fs::write(path.with_extension("json"), serde_json::to_vec_pretty(&serde_json::json!({
             "synthetic_cpu_capture": true,
+                "skin": "opaque test skin (panel_alpha=255)",
             "native_or_vulkan_acceptance": false,
             "production_surface": "ui::options::show / Appearance",
             "screen": self.size,
@@ -1732,7 +1733,13 @@ impl FontSearchCapture {
 /// filtered list left closes it. `screen_h` short enough opens it above its
 /// button.
 fn font_search(screen_h: f32) {
-    let theme = crate::theme::Theme::default();
+    let capture_path = std::env::var_os("AURORA_CAPTURE");
+    let mut theme = crate::theme::Theme::default();
+    if capture_path.is_some() {
+        // The supported opaque skin needs no GPU glass callbacks in this CPU
+        // fixture. The ordinary regression run retains the default skin.
+        theme.panel_alpha = 255;
+    }
     let p = theme.palette();
     let ctx = egui::Context::default();
     crate::ui::fonts::apply(&ctx, crate::ui::fonts::INTER);
@@ -1754,7 +1761,7 @@ fn font_search(screen_h: f32) {
     };
     let mut open = true;
     let mut frame = 0;
-    let capture = std::env::var_os("AURORA_CAPTURE").map(|path| std::cell::RefCell::new(FontSearchCapture::new(path, screen_h)));
+    let capture = capture_path.map(|path| std::cell::RefCell::new(FontSearchCapture::new(path, screen_h)));
     let record = |stage| {
         if let Some(capture) = &capture {
             capture.borrow().save(stage);
