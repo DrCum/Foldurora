@@ -1,12 +1,12 @@
 //! Worker-only native paths, stopped locks, strict projection and byte CAS.
 use super::*;
-use crate::session_host::profile::settings_file::{ProfileSettingsFile, SlotLocks, lock_slots};
+use crate::session_host::profile::settings_file::{SlotLocks, SourceSettingsFile, TargetSettingsFile, lock_slots};
 use crate::settings::profile_seed::ProfileSeed;
 use sha2::{Digest, Sha256};
 
 pub(super) struct Prepared {
-    source: ProfileSettingsFile,
-    target: ProfileSettingsFile,
+    source: SourceSettingsFile,
+    target: TargetSettingsFile,
     original_source: [u8; 32],
     original_target: Option<Vec<u8>>,
     output: Vec<u8>,
@@ -43,11 +43,11 @@ impl Prepared {
         let locks = lock_slots(&installation, capture.selection.target, capture.selection.source.slot()).map_err(io_error)?;
         check(inspect, None)?;
         let source = match capture.selection.source {
-            Source::MainSaved => ProfileSettingsFile::main_saved(),
-            Source::Slot(slot) => ProfileSettingsFile::slot(&installation, slot),
+            Source::MainSaved => SourceSettingsFile::main_saved(),
+            Source::Slot(slot) => SourceSettingsFile::stopped_slot(&installation, slot),
         }
         .map_err(io_error)?;
-        let target = ProfileSettingsFile::slot(&installation, capture.selection.target).map_err(io_error)?;
+        let target = TargetSettingsFile::slot(&installation, capture.selection.target).map_err(io_error)?;
         let raw_source = source.read().map_err(io_error)?.ok_or(Outcome::Refused(Failure::Io))?;
         let original_source = Sha256::digest(&raw_source).into();
         let seed =

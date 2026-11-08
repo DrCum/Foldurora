@@ -6,28 +6,82 @@ use std::io::{Read, Write};
 
 mod security;
 
-pub(in crate::session_host) struct ProfileSettingsFile {
-    path: PathBuf,
-    slot: bool,
-    confinement: security::Confinement,
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SettingsRole {
+    ReadOnlySource,
+    PrivateTarget,
 }
 
-impl ProfileSettingsFile {
+/// Closed native source capability. No publish method or conversion to target.
+pub(in crate::session_host) struct SourceSettingsFile(ProfileSettingsFile);
+impl SourceSettingsFile {
     pub(in crate::session_host) fn main_saved() -> io::Result<Self> {
         let directory = crate::settings::catalogue_dir();
         if !directory.is_absolute() {
             return Err(invalid("main settings directory is not absolute"));
         }
-        Self::selected(directory.join("settings.json"), false)
+        Ok(Self(ProfileSettingsFile::capture(
+            directory.join("settings.json"),
+            false,
+            SettingsRole::ReadOnlySource,
+        )?))
     }
+    pub(in crate::session_host) fn stopped_slot(installation: &str, slot: super::super::slots::SlotId) -> io::Result<Self> {
+        Ok(Self(ProfileSettingsFile::capture(
+            slot_root(installation, slot)?.join("config/settings.json"),
+            true,
+            SettingsRole::ReadOnlySource,
+        )?))
+    }
+    pub(in crate::session_host) fn read(&self) -> io::Result<Option<Vec<u8>>> {
+        self.0.read()
+    }
+}
 
+/// Only this stopped native slot capability can publish replacement settings.
+pub(in crate::session_host) struct TargetSettingsFile(ProfileSettingsFile);
+impl TargetSettingsFile {
     pub(in crate::session_host) fn slot(installation: &str, slot: super::super::slots::SlotId) -> io::Result<Self> {
+        Ok(Self(ProfileSettingsFile::capture(
+            slot_root(installation, slot)?.join("config/settings.json"),
+            true,
+            SettingsRole::PrivateTarget,
+        )?))
+    }
+    pub(in crate::session_host) fn read(&self) -> io::Result<Option<Vec<u8>>> {
+        self.0.read()
+    }
+    pub(in crate::session_host) fn publish(&self, bytes: &[u8], final_check: impl FnOnce() -> io::Result<()>) -> io::Result<()> {
+        self.0.publish(bytes, final_check)
+    }
+}
+
+struct ProfileSettingsFile {
+    path: PathBuf,
+    slot: bool,
+    role: SettingsRole,
+    confinement: security::Confinement,
+}
+
+impl ProfileSettingsFile {
+    #[cfg(test)]
+    fn slot(installation: &str, slot: super::super::slots::SlotId) -> io::Result<Self> {
         Self::selected(slot_root(installation, slot)?.join("config/settings.json"), true)
     }
 
+    #[cfg(test)]
     fn selected(path: PathBuf, slot: bool) -> io::Result<Self> {
-        let confinement = security::Confinement::capture(&path)?;
-        Ok(Self { path, slot, confinement })
+        Self::capture(path, slot, SettingsRole::PrivateTarget)
+    }
+
+    fn capture(path: PathBuf, slot: bool, role: SettingsRole) -> io::Result<Self> {
+        let confinement = security::Confinement::capture(&path, role)?;
+        Ok(Self {
+            path,
+            slot,
+            role,
+            confinement,
+        })
     }
 
     fn checked_parent(&self) -> io::Result<&Path> {
@@ -47,11 +101,14 @@ impl ProfileSettingsFile {
         if self.slot {
             let root = host_root()?;
             relative_beneath(&root, &self.path)?;
+            if self.role == SettingsRole::PrivateTarget {
+                self.confinement.require_private_target()?;
+            }
         }
         Ok(parent)
     }
 
-    pub(in crate::session_host) fn read(&self) -> io::Result<Option<Vec<u8>>> {
+    fn read(&self) -> io::Result<Option<Vec<u8>>> {
         self.checked_parent()?;
         match std::fs::symlink_metadata(&self.path) {
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -98,7 +155,7 @@ impl ProfileSettingsFile {
 
     /// Source/target byte CAS and cancellation are supplied by the one worker,
     /// after the private temporary file is durable, immediately before rename.
-    pub(in crate::session_host) fn publish(&self, bytes: &[u8], final_check: impl FnOnce() -> io::Result<()>) -> io::Result<()> {
+    fn publish(&self, bytes: &[u8], final_check: impl FnOnce() -> io::Result<()>) -> io::Result<()> {
         self.publish_with(bytes, final_check, create_private_file, File::sync_all, |from, to| {
             std::fs::rename(from, to)
         })
@@ -112,7 +169,7 @@ impl ProfileSettingsFile {
         sync: impl FnOnce(&File) -> io::Result<()>,
         rename: impl FnOnce(&Path, &Path) -> io::Result<()>,
     ) -> io::Result<()> {
-        if !self.slot || bytes.len() > MAX_FILE {
+        if !self.slot || self.role != SettingsRole::PrivateTarget || bytes.len() > MAX_FILE {
             return Err(invalid("settings publication is not a bounded slot write"));
         }
         let parent = self.checked_parent()?;

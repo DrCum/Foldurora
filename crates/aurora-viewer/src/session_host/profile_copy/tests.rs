@@ -261,6 +261,41 @@ fn profile_copy_source_cas_requires_new_inspect_and_preserves_original_target() 
     assert_eq!(fixture.bytes(slot(0)), original);
 }
 
+#[cfg(unix)]
+#[test]
+fn profile_copy_ordinary_0644_source_uses_readonly_capability_again_at_final_cas() {
+    use std::os::unix::fs::PermissionsExt;
+    for changed_bytes in [false, true] {
+        let fixture = Fixture::new();
+        fixture.write(slot(0), br#"{"settings_version":32,"ui_scale":1.0,"target":"original"}"#);
+        let source = fixture.path(slot(1));
+        let ordinary = br#"{"settings_version":32,"ui_scale":1.25,"excluded_source":"never copied"}"#;
+        crate::atomic_file::write(&source, ordinary).unwrap();
+        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let original = fixture.bytes(slot(0));
+        let prepared = fixture.prepared();
+        if changed_bytes {
+            crate::atomic_file::write(&source, br#"{"settings_version":32,"ui_scale":1.5}"#).unwrap();
+            std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o644)).unwrap();
+        } else {
+            std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o666)).unwrap();
+        }
+        assert_eq!(
+            prepared.apply(&fixture.inspect, Instant::now() + CONFIRMATION),
+            if changed_bytes {
+                Outcome::Changed
+            } else {
+                Outcome::Refused(Failure::Io)
+            }
+        );
+        assert_eq!(fixture.bytes(slot(0)), original);
+        assert_eq!(
+            std::fs::metadata(source).unwrap().permissions().mode() & 0o777,
+            if changed_bytes { 0o644 } else { 0o666 }
+        );
+    }
+}
+
 #[test]
 fn profile_copy_cancel_and_original_expiry_before_commit_never_write() {
     for cancel in [false, true] {

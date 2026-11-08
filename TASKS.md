@@ -1,5 +1,19 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Read-only source capability for stopped-profile copy (2026-11-08; no issue):
+  distinct native source/target wrappers capture immutable security roles through
+  preparation and all final rereads/CAS. Current-user ordinary0644 source settings
+  need safe ownership/non-other-writable opened ancestry and identity, without
+  confidential ancestry. Windows broad read-only source grants retain mutation
+  refusal; administrator-owned sources still need closed ACL and private ancestry.
+  Sources cannot publish or lend private authority; targets still need a genuine
+  private ancestor even for0600 files. Strict locks/temps and ordinary Settings
+  saver are unchanged. Four additional synthetic cases are authored UNRUN
+  (31 adapter definitions; six Unix-only, one Windows-only), including native
+  ordinary saver/read fixtures without supplied confidentiality evidence and
+  source-CAS/writability refusal. Independent source review and Root execution
+  precede the mandatory actual Manage modal and production promotion.
+
 - 🔧 Windows existing-prefix ACL compatibility for stopped-profile copy
   (2026-11-08; no issue): retained native directory roles distinguish creating a
   different child from deleting/replacing the already retained next child.
@@ -16,7 +30,8 @@
   (2026-11-08; no issue): settings-specific retained native ancestor/file handle
   identity and permission/ACL checks accept ordinary confined saved settings
   without weakening strict profile lock/private-temp validators. Unix0644 needs
-  genuine same-user0700 confinement; writable/link/ancestor turnover refuses.
+  genuine same-user0700 confinement for targets; the separate read-only source
+  capability above no longer needs confidentiality. Writable/link/ancestor turnover refuses.
   Windows inherited ACLs use closed TokenUser/System/Administrators applicable
   grants; administrator-owned settings require same-user private ancestry.
   Existing permissions are never repaired; Settings and atomic_file are
