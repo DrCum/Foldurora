@@ -109,7 +109,7 @@ impl Frames {
             }
         });
         if discarded {
-            assert!(output.num_completed_passes > 1);
+            assert!(output.platform_output.num_completed_passes > 1);
         }
         if let Some(Action::Open(ticket)) = result {
             if !self
@@ -162,7 +162,7 @@ impl Frames {
             }
         });
         if discard_after {
-            assert!(output.num_completed_passes > 1);
+            assert!(output.platform_output.num_completed_passes > 1);
         }
         let opened = owner.take_open(&self.ctx, &self.inventory, Some(self.source), self.policy);
         assert!(
@@ -983,11 +983,9 @@ fn folder_jump_owned_native_terminal_dropped_before_egui_acknowledges_only_after
         "quarantined batches do not partially admit a newer preedit"
     );
     owner.native_event(&frames.ctx, &WindowEvent::Ime(Ime::Disabled));
-    assert!(
-        frames
-            .show_owner(&mut owner, vec![Event::Ime(egui::ImeEvent::Disabled)], false, false)
-            .is_none()
-    );
+    // egui-winit 0.37 forwards no egui event for native Disabled. Only the
+    // original native terminal plus this completed batch acknowledges it.
+    assert!(frames.show_owner(&mut owner, Vec::new(), false, false).is_none());
     assert!(!owner.owned_composition);
     assert!(frames.show_owner(&mut owner, pointer(true), false, false).is_none());
     assert!(frames.show_owner(&mut owner, pointer(false), false, false).is_none());
@@ -1012,4 +1010,151 @@ fn folder_jump_owned_native_terminal_dropped_before_egui_acknowledges_only_after
             .is_none()
     );
     assert_eq!(owner.body.query, "Beta");
+}
+
+#[test]
+fn folder_jump_ime_delete_surrounding_edits_characters_without_ending_composition_or_confirming_open() {
+    let mut frames = Frames::new();
+    frames.replace_query("é");
+    let query = frames.query().widget;
+    assert!(
+        frames
+            .show(vec![Event::Ime(egui::ImeEvent::Preedit {
+                text: "Beta".into(),
+                active_range_chars: None,
+            })])
+            .is_none()
+    );
+    assert_eq!(frames.body.query, "éBeta");
+    assert!(
+        frames
+            .show(vec![
+                Event::Ime(egui::ImeEvent::DeleteSurrounding {
+                    before_chars: 1,
+                    after_chars: 0,
+                }),
+                key(Key::Enter, true),
+                key(Key::Enter, false),
+            ])
+            .is_none()
+    );
+    assert_eq!(
+        frames.body.query, "Beta",
+        "the original event edits the actual TextEdit by character"
+    );
+    assert!(frames.body.ime && frames.body.ime_pending, "surrounding deletion is not a terminal");
+    assert_eq!(frames.ctx.memory(|memory| memory.focused()), Some(query));
+    assert!(frames.show(vec![Event::Ime(egui::ImeEvent::Commit("Beta".into()))]).is_none());
+    assert_eq!(
+        frames.body.query, "Beta",
+        "Commit still replaces exactly the retained preedit range"
+    );
+    assert_ne!(frames.ctx.memory(|memory| memory.focused()), Some(query));
+    frames.settle();
+    assert!(frames.show(vec![key(Key::Enter, true), key(Key::Enter, false)]).is_none());
+    assert!(frames.click(frames.query()).is_none());
+    assert_eq!(
+        Frames::opened(frames.show(vec![key(Key::Enter, true), key(Key::Enter, false)])),
+        id(3)
+    );
+}
+
+#[test]
+fn folder_jump_retired_ime_delete_surrounding_cannot_edit_reopened_query_or_acknowledge_old_epoch() {
+    use winit::event::{Ime, WindowEvent};
+    let mut frames = Frames::new();
+    let mut owner = frames.attach_owner();
+    owner.native_event(&frames.ctx, &WindowEvent::Ime(Ime::Preedit("Old candidate".into(), None)));
+    assert!(
+        frames
+            .show_owner(
+                &mut owner,
+                vec![Event::Ime(egui::ImeEvent::Preedit {
+                    text: "Old candidate".into(),
+                    active_range_chars: None,
+                })],
+                false,
+                false,
+            )
+            .is_none()
+    );
+    owner.close();
+    let old_epoch = owner.composition_epoch;
+    frames.source.session = id(902);
+    owner.owner = Some(frames.source.window);
+    owner.source = Some(frames.source);
+    assert!(frames.show_owner(&mut owner, Vec::new(), false, false).is_none());
+    let query = owner.body.query_widget.expect("reopened query");
+    let at = frames.ctx.read_response(query).expect("actual reopened field").rect.center();
+    for down in [true, false] {
+        assert!(
+            frames
+                .show_owner(
+                    &mut owner,
+                    vec![
+                        Event::PointerMoved(at),
+                        Event::PointerButton {
+                            pos: at,
+                            button: PointerButton::Primary,
+                            pressed: down,
+                            modifiers: Modifiers::NONE,
+                        },
+                    ],
+                    false,
+                    false,
+                )
+                .is_none()
+        );
+    }
+    assert!(
+        frames
+            .show_owner(&mut owner, vec![Event::Text("Gamma".into())], false, false)
+            .is_none()
+    );
+    assert_eq!(owner.body.query, "Gamma");
+    owner.native_event(&frames.ctx, &WindowEvent::Ime(Ime::Preedit(String::new(), None)));
+    assert!(
+        frames
+            .show_owner(
+                &mut owner,
+                vec![
+                    Event::Ime(egui::ImeEvent::Preedit {
+                        text: String::new(),
+                        active_range_chars: None,
+                    }),
+                    Event::Ime(egui::ImeEvent::DeleteSurrounding {
+                        before_chars: 1,
+                        after_chars: 0,
+                    }),
+                    key(Key::Enter, true),
+                    key(Key::Enter, false),
+                ],
+                true,
+                false,
+            )
+            .is_none()
+    );
+    assert_eq!(
+        owner.body.query, "Gamma",
+        "retired surrounding deletion cannot retarget the new editor"
+    );
+    assert!(owner.ime_quarantined && owner.owned_composition && owner.composing());
+    assert_eq!(
+        owner.composition_epoch, old_epoch,
+        "deletion cannot acknowledge or replace an old epoch"
+    );
+    owner.native_event(&frames.ctx, &WindowEvent::Ime(Ime::Commit("Old candidate".into())));
+    assert!(
+        frames
+            .show_owner(
+                &mut owner,
+                vec![Event::Ime(egui::ImeEvent::Commit("Old candidate".into()))],
+                false,
+                false,
+            )
+            .is_none()
+    );
+    assert_eq!(owner.body.query, "Gamma", "the late original commit remains quarantined");
+    assert!(!owner.ime_quarantined && !owner.owned_composition);
+    assert_ne!(frames.ctx.memory(|memory| memory.focused()), Some(query));
 }

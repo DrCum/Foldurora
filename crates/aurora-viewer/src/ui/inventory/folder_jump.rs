@@ -239,7 +239,7 @@ impl Chooser {
             input
                 .events
                 .iter()
-                .any(|event| matches!(event, egui::Event::Ime(egui::ImeEvent::Commit(_) | egui::ImeEvent::Disabled)))
+                .any(|event| matches!(event, egui::Event::Ime(egui::ImeEvent::Commit(_))))
         });
         if self.ime_frame_quarantined {
             self.body

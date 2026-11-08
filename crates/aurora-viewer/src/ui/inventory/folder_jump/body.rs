@@ -320,12 +320,17 @@ impl Body {
                                 pending |= !text.is_empty();
                                 terminal |= text.is_empty();
                             }
-                            egui::ImeEvent::Commit(_) | egui::ImeEvent::Disabled => {
+                            egui::ImeEvent::Commit(_) => {
                                 composing = false;
                                 pending = false;
                                 terminal = true;
                             }
-                            egui::ImeEvent::Enabled => {}
+                            // TextEdit applies this edit without ending its
+                            // composition. It must not release pending IME.
+                            egui::ImeEvent::DeleteSurrounding { .. } => {}
+                            // egui 0.37 ignores the deprecated enable/disable
+                            // variants; egui-winit never forwards them.
+                            _ => {}
                         }
                         None
                     }
@@ -502,7 +507,7 @@ impl Body {
             .filter(|focus| self.controls.iter().any(|control| control.widget == *focus));
         let terminal_ime = ui.input(|input| {
             input.events.iter().any(|event| {
-                matches!(event, egui::Event::Ime(egui::ImeEvent::Commit(_) | egui::ImeEvent::Disabled))
+                matches!(event, egui::Event::Ime(egui::ImeEvent::Commit(_)))
                     || matches!(event, egui::Event::Ime(egui::ImeEvent::Preedit { text, .. }) if text.is_empty())
             })
         });
@@ -510,7 +515,7 @@ impl Body {
             input
                 .events
                 .iter()
-                .any(|event| matches!(event, egui::Event::Ime(egui::ImeEvent::Commit(_) | egui::ImeEvent::Disabled)))
+                .any(|event| matches!(event, egui::Event::Ime(egui::ImeEvent::Commit(_))))
         });
         if terminal_ime && let Some(focus) = owned_focus.filter(|focus| Some(*focus) != self.query_widget) {
             ui.ctx().memory_mut(|memory| memory.surrender_focus(focus));

@@ -28,13 +28,13 @@ fn folder_jump_shortcut_keeps_configured_held_and_derived_passwall_bindings_and_
         "explicit custom Ctrl+J owns its action"
     );
     let mut bindings = KeyBindings::default();
-    bindings.set(Action::Forward, 0, Some(Binding::plain(input.clone())));
+    bindings.set(Action::Forward, 0, Some(Binding::captured(input.clone(), Mods::default())));
     assert!(
         !shortcut::available(&bindings, &input, ctrl),
         "held movement binding is not a menu-action fallback"
     );
     let mut bindings = KeyBindings::default();
-    bindings.set(Action::Up, 0, Some(Binding::plain(input.clone())));
+    bindings.set(Action::Up, 0, Some(Binding::captured(input.clone(), Mods::default())));
     assert!(bindings.pass_wall_triggered(&input, ctrl));
     assert!(!shortcut::available(&bindings, &input, ctrl));
 }
