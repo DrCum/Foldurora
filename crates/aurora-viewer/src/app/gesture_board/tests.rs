@@ -595,6 +595,49 @@ fn board_native_ui_final_key_focus_preserves_valid_retry_and_cancels_later_edito
     }
 }
 #[test]
+fn board_native_ui_focused_key_rejects_stable_infinite_transform_or_rect_and_keeps_valid_retry_proof() {
+    use egui::emath::TSTransform;
+    let mut f = Frames::new();
+    let original = f.click(aurora_i18n::tr!("common-play"));
+    let rect = egui::Rect::from_min_max(egui::pos2(10.0, 10.0), egui::pos2(90.0, 40.0));
+    let clip = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(120.0, 60.0));
+    let infinite = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(f32::INFINITY, f32::INFINITY));
+    for (transform, rect, clip, valid) in [
+        (None, rect, clip, true),
+        (Some(TSTransform::new(egui::vec2(3.0, 5.0), 1.5)), rect, clip, true),
+        (Some(TSTransform::new(egui::vec2(0.0, f32::INFINITY), 1.0)), rect, clip, false),
+        (Some(TSTransform::new(egui::vec2(f32::INFINITY, 0.0), 1.0)), rect, clip, false),
+        (Some(TSTransform::from_scaling(f32::INFINITY)), rect, clip, false),
+        (Some(TSTransform::from_scaling(0.0)), rect, clip, false),
+        (Some(TSTransform::from_scaling(f32::from_bits(1))), rect, clip, false),
+        (Some(TSTransform::from_translation(egui::vec2(10000.0, 10000.0))), rect, clip, false),
+        (None, infinite, infinite, false),
+    ] {
+        let (captured, accepted, replayed, focused_widget) = view::finite_geometry_tests::key_run(original.clone(), rect, clip, transform);
+        assert!(
+            focused_widget,
+            "invalid geometry cannot be rejected merely because the keyed widget disappeared or lost focus"
+        );
+        assert_eq!(captured.is_some(), valid);
+        assert_eq!(accepted, valid);
+        assert!(!replayed, "the original release can only be consumed once");
+        if let Some(captured) = captured {
+            assert!(captured.proof.same_owner(original.proof));
+            assert_eq!(
+                captured.proof.at, original.proof.at,
+                "a retry cannot renew the original proof timestamp"
+            );
+            let (Command::Play(ticket, target), Command::Play(original_ticket, original_target)) = (captured.command, &original.command)
+            else {
+                panic!("original Play")
+            };
+            assert!(ticket == *original_ticket && target == *original_target);
+        }
+    }
+    assert!(!f.manager.has_playing());
+    assert!(f.actor.pending.is_empty() && f.actor.job.is_none());
+}
+#[test]
 fn board_native_ui_real_add_play_remove_stop_capture_exact_payload_without_automatic_effects() {
     let mut f = Frames::new();
     let original = f.add.unwrap();
