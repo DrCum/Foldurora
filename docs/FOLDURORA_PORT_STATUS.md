@@ -9,33 +9,64 @@ Monitor, Workspace and Board slices and the remaining Folderstorm behavior.
 The late initial port-order table below is historical; newer exact-build entries
 and the backlog supersede its implementation inventory.
 
-## Current candidate: profile-copy checks
+## Current wrap-up candidate: automated checks running
 
-Exact source [`072bef3af9b4cf655f0838b8754907f2de855255`](https://github.com/DrCum/Foldurora/commit/072bef3af9b4cf655f0838b8754907f2de855255),
-tree `1dfceeee6f9a7d9d87f2f4fd19f7e0de8a929ca8`, is frozen on
-`feat/monitor-runtime-integration`. Independent combined source review,
-formatting and qualified Linux Clippy passed. The full Linux suite awaits build
-space recovery. [Windows run 42443002624](https://github.com/DrCum/Foldurora/actions/runs/42443002624),
-attempt 1, is running. Neither final counts nor native acceptance are established.
+Exact source [`9c09565035c95d772adecc8ece5a9800681b02ea`](https://github.com/DrCum/Foldurora/commit/9c09565035c95d772adecc8ece5a9800681b02ea),
+tree `b16795a87dd3bc54f4b4cacc6a4289d845f3b6d8`, is frozen on
+`feat/monitor-runtime-integration`. The user requested finishing the current
+changes, checks, builds and handoff, then stopping. No new feature, upstream
+integration, PR, main merge or release is part of this wrap-up.
 
-This candidate adds explicit selective preference copying in Manage for a
-stopped target character slot. Graphics, interface, colors and bindings are
-separate choices; Inspect precedes Apply, and Cancel retains the original target.
-Sources are saved main-viewer settings or another stopped slot. The adapter uses
-role-specific file access, real profile ownership, bounded worker admission and
-an exact captured source/target check before publication. It does not log in a
-character. The actual UI and EN/FR/JA strings are joined; first-open offers and
-broader copy families remain later work.
+Independent reviews cover the actual stopped-profile copy and Inventory Archive
+UI/Folder Jump graph, original/final input guards, native modifier history and
+structural-frame correction. Existing Root fixes and assertions are retained.
+Local formatting and qualified Linux Clippy passed in the repository's existing
+`ci` profile; full local tests are running. [Workflow 42451382774](https://github.com/DrCum/Foldurora/actions/runs/42451382774),
+attempt 1, runs two separate jobs: Windows dev checks/build/package and genuine
+Ubuntu CI-profile checks. No final counts, portable package or native acceptance
+are established yet. The native Ubuntu run keeps strict file-security rules:
+the managed sandbox's unmapped filesystem-root owner cannot qualify those
+fixtures, and no readonly-prefix exception or skipped test was introduced.
 
-All 8,677 baseline test definitions are retained; 69 Profile definitions join,
-including one ignored isolated layout capture. The source inventory requires
-825 Windows / 828 applicable Linux names. Conditional totals are Windows
-8,613/0/56 and Linux 8,649/1/58 across 33 summaries, with the inherited terrain
-case included in the Linux expectation. These are **source expectations, not
-measured results**. Inventory SHA-256:
-`72759569a188a163d468e3350829aa6a5969c56021ebedf17930bfc2aa7d4caf`.
-Independent combined review SHA-256:
-`9eeb6c5494fcd7eb860e2258eacbfe6cdf6a8da39ea4d4c127d3bb831f36772f`.
+Profile Copy offers Graphics, Interface, Colors and Bindings, with Inspect before
+Apply, a stopped target, and a saved main-viewer or stopped-slot source. Cancel
+and completion stay tied to the original operation; copying does not open a
+viewer. Archive is local visibility metadata: ordinary Inventory and Folder Jump
+share the same qualified mask, with owner-local Include and recoverable Trash.
+It neither moves nor deletes Inventory assets. Broader profile families,
+first-open offers and live inactive-world rendering remain unfinished.
+
+The source inventory requires 906 Windows / 909 applicable Linux names.
+Conditional default-platform totals are Windows 8,694/0/56 and Linux 8,730/1/58
+across 33 summaries; the Linux expectation retains the inherited software-GPU
+terrain failure. These are **source expectations, not measured results**.
+Inventory SHA-256:
+`5c6a208d5f8434eacd0d0820305c5680594f195cf57be216cfdd2a63b19d7a15`.
+
+### Preserved Profile/Archive integration failures
+
+Exact `072bef3a` completed default-profile Linux with **8,616 passed, 34 failed,
+58 ignored**, across 33 summaries. All 828 required names appeared once; 33
+failed. Seventeen failures came from strict file-security fixtures against this
+sandbox's unmapped root owner, 16 from a falsely rejected enclosing modal Frame,
+and one from inherited terrain. Representative file/UI failures also failed in
+isolation. The later source corrects the Frame interpretation without allowing
+real covers, removes no assertions, and retains native file-security checks.
+
+[Windows run 42443002624](https://github.com/DrCum/Foldurora/actions/runs/42443002624)
+for that exact source failed compilation with one ambiguous Windows `PSID`
+pointer type. Parsing/formatting passed; Clippy, tests and build failed;
+packaging was skipped. Runtime counts are **unobserved**, not zero.
+[Artifact 13603505417](https://github.com/DrCum/Foldurora/actions/runs/42443002624/artifacts/13603505417)
+is diagnostics only, with no executable. Verified receipt SHA-256:
+`82721a16059068c48c6cce5f09977e74853090736389cfd6c3d8c283eb64b388`.
+The explicit pointer annotation is source-reviewed in the current candidate.
+
+Subsequent local CI-profile checks exposed unapplied headless texture-delta
+cleanup and Archive receiver/borrowed-gate/lint/test-driver issues. Those fixes
+passed independent source reviews; the current full suite must establish their
+execution outcome. Original negative logs and exact frozen executables are
+retained separately from current checks.
 
 ### Preceding integration: Linux qualified, Windows negative
 

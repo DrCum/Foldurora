@@ -9,11 +9,19 @@ source review and staged code do not establish a working product or test pass.
 
 ## Current candidate
 
-Exact `072bef3a` adds the actual selective Profile Copy UI, adapter and typed
-projection, plus a test-only preview Busy correction. Independent combined source
-review, formatting and qualified Linux Clippy passed. Full Linux tests await
-resource recovery; [Windows run 42443002624](https://github.com/DrCum/Foldurora/actions/runs/42443002624)
-is running. No final counts or new acceptance package are established.
+Exact `9c095650` is frozen for the final current-work checks and build.
+Profile Copy and actual Archive UI/Folder Jump integration, input/frame guards
+and headless-fixture corrections passed source review. Local formatting and
+qualified Linux Clippy passed; full local tests and the two-job
+[Windows/Ubuntu workflow 42451382774](https://github.com/DrCum/Foldurora/actions/runs/42451382774)
+are running. No final counts or new acceptance package are established. The
+user requested finishing these changes and checks, saving the handoff, then
+stopping; no new feature or upstream stage starts during this wrap-up.
+
+Exact `072bef3a` measured Linux 8,616/34/58 and failed Windows compilation before
+runtime. Its diagnostics and later local failure evidence remain preserved.
+The current candidate contains independently reviewed corrections and must earn
+its own passing results; see the ledger.
 
 Preceding exact `6e51ba4c` measured Linux **8,582/1/57** and Windows
 **8,550/1/55** (passed/failed/ignored), each across 33 summaries. All 761 required
@@ -50,8 +58,8 @@ and human grid acceptance remain pending; see the ledger for checks and hashes.
 | Named Favorite menus | Actual menu ownership, immutable context, clipped-owner validation and location privacy are joined. Fixture-only visible-order correction `2e4de465` preserves all 29 cases and production bytes; these passed in 6e51 on Linux and Windows. Inventory items are not moved. |
 | About report location choice | Per-open, source-qualified opt-in and copied-report filtering are joined in `4ff12e60`, preserving native restrictions. Required cases passed in 6e51; native acceptance remains pending. |
 | Folder Jump | Loaded-only chooser, real Inventory-local shortcut and current egui API corrections are joined. Focus-setup correction `3cce3f49` preserves all 29 cases and production bytes; these passed in 6e51 on Linux and Windows. Archive-policy integration remains mandatory before enabling archives. |
-| Inventory archive | Model/projection and native store/controller are source-reviewed (40 unrun cases). Actual World/App adapters `bc87fa8b` add six unrun cases and passed source review; ordinary Inventory and full Folder Jump integration are in progress. No archive UI or mask is enabled. |
-| Selective profile preferences | Actual Manage UI, translations, adapter and typed projection are joined in `072bef3a` after independent review. Its 69 new definitions are unrun; full and native acceptance are pending. First-open offers and broader families remain later work. |
+| Inventory archive | Actual native store/controller, World lifecycle, canonical ordinary Inventory/FJ mask and UI guards are joined in `9c095650` after source review. All authored cases remain unverified until the current full suites complete; native/human acceptance is pending. |
+| Selective profile preferences | Actual Manage UI, translations, adapter and typed projection are joined with final Frame/native-input and headless-disposal corrections in `9c095650`. Full and native acceptance are pending. First-open offers and broader families remain later work. |
 | Fixed-slot quick actions | Reviewed pure fixed-slot model has eight unrun cases. Data-only Show Viewer ledger and first actual Control V2 API `f9002ebe` passed source review. The IO/native consumer is in progress; actual actor, private preferences and UI remain; detached/recovery Show is later work. |
 
 The intermediate monitor component source `df213a08` completed Linux workspace
