@@ -4,6 +4,7 @@
 //! This pure prerequisite has no IO, App action or production UI registration.
 
 mod codec;
+pub(crate) mod visibility;
 use super::{World, account_metadata_origin::GridDigest, inventory::Inventory};
 pub(crate) use codec::Document;
 use std::collections::BTreeSet;
