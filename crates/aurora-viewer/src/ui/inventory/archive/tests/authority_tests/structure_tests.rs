@@ -41,7 +41,7 @@ fn nested(late: FrameLate) -> (egui::Context, Control) {
     crate::theme::Theme::default().apply(&ctx, 1.0);
     let mut saved = None;
     for _ in 0..3 {
-        let _output = ctx.run_ui(
+        let mut output = ctx.run_ui(
             egui::RawInput {
                 focused: true,
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 900.0))),
@@ -98,6 +98,7 @@ fn nested(late: FrameLate) -> (egui::Context, Control) {
                 }
             },
         );
+        output.textures_delta.clear();
     }
     (ctx, saved.unwrap())
 }

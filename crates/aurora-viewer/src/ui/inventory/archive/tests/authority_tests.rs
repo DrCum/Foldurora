@@ -449,7 +449,7 @@ fn inventory_archive_authority_actual_committed_registry_removal_hidden_disabled
             let mut frames = Frames::new();
             let control = original(&mut frames, include);
             assert!(control.committed(&frames.frames.ctx));
-            let _output = frames.frames.ctx.run_ui(
+            let mut output = frames.frames.ctx.run_ui(
                 egui::RawInput {
                     focused: true,
                     screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 900.0))),
@@ -491,6 +491,7 @@ fn inventory_archive_authority_actual_committed_registry_removal_hidden_disabled
                         });
                 },
             );
+            output.textures_delta.clear();
             let committed = frames
                 .frames
                 .ctx
