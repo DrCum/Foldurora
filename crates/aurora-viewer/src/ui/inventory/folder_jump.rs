@@ -182,9 +182,6 @@ impl Chooser {
                 self.jump_blocked = true;
                 self.blocked = [true; 2];
                 self.body.cancel_input();
-                if !focused {
-                    self.composing = false;
-                }
                 for key in [egui::Key::Enter, egui::Key::Space] {
                     self.body.block_key(key, true);
                 }
