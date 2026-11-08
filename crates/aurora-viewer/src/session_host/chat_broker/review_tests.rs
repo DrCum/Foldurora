@@ -13,6 +13,8 @@ fn row() -> ReadStateRow {
         ready: true,
         can_send: false,
         can_read: true,
+        incoming: None,
+        incoming_stream: None,
         read: Some(ReadMetadata {
             unread: 3,
             unread_revision: 1,

@@ -723,6 +723,10 @@ impl Peer {
                     self.review_pending = None;
                 }
             }
+            // The canonical hide/query-once owner is the next reviewed atom.
+            // No current host intent can submit a Close or adopt an unsolicited
+            // receipt as permission to hide, reopen or clear another operation.
+            ChatEvent::CloseReceipt(_) => return Err(ChatError::UnknownReceipt),
             ChatEvent::Line(line) => {
                 let policy = self.conversations.get(&line.key.conversation).ok_or(ChatError::Unavailable)?.policy;
                 self.history.as_mut().ok_or(ChatError::Unavailable)?.push(line.clone(), policy)?;
@@ -1084,6 +1088,8 @@ mod tests {
             ready: true,
             can_send: true,
             can_read: true,
+            incoming: None,
+            incoming_stream: None,
             read: Some(ReadMetadata {
                 unread: through,
                 unread_revision: through + 1,

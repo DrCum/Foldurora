@@ -442,6 +442,18 @@ receipts; queues, packet sizes and per-frame native commands are bounded.
 receive sequences or exposing immutable conversation/history/receipt snapshots.
 Native permission gaps purge cached text and titles before fresh metadata.
 
+The staged Close-in-host producer uses chat V4 closed data in `chat/close.rs`.
+`world/shared_chat_activity.rs` mints a checked native stream at actual LoggedIn,
+then advances it only at eligible live nonself Direct conversation insertion.
+Existing fair ReadBatch rows export the optional current stream separately from
+optional session activity; neither absent value implies zero. WorkerChat owns a
+bounded exact-request Close ledger: original ingress age gates capture, while
+read-only lookup returns the immutable result without recapture. The App fence
+rechecks current native stream, source and ordinary privacy. It never leaves a
+native session or resets unread. The canonical host hide/draft/query-once owner,
+source/stream retirement and Uncertain presentation remain a later atom; current
+Peer rejects Close receipts and no UI intent/button exposes the staged action.
+
 `app/host_chat_bridge.rs` drives `session_host/chat.rs` and `app/host_chat.rs` on
 the owning App thread, including standby CPU ticks. The literal Nearby/existing
 resident-IM adapter rechecks actual World/account and native restrictions at
@@ -771,8 +783,8 @@ and receipts for explicit native conversation review, binding the full chat
 source, native policy/observation and exact activation. Its 32-entry single-flight
 ledger reserves before an independently authorized native operation, retains
 immutable outcomes across same-source reconnects, and fences evicted IDs with a
-high-water mark. Chat V3 carries ReviewConversation, QueryReviewReceipt and
-ReviewReceipt; old chat V1/V2 peers fail closed. Query replies validate the exact
+high-water mark. Chat V3 introduced ReviewConversation, QueryReviewReceipt and
+ReviewReceipt; current chat V4 retains them and older chat peers fail closed. Query replies validate the exact
 conversation/request and can be matched against the complete original capture/
 grant. These DTOs and their codec confer no native/UI or sending authority;
 the host/native adapters must independently revalidate it. Control and chat

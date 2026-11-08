@@ -44,6 +44,10 @@ pub struct ReadStateRow {
     pub can_send: bool,
     pub can_read: bool,
     pub read: Option<ReadMetadata>,
+    /// Independently produced live incoming activity; no read permission.
+    pub incoming: Option<NativeIncoming>,
+    /// Current native incarnation only; does not imply per-session activity.
+    pub incoming_stream: Option<u64>,
 }
 
 impl ReadStateRow {
@@ -73,6 +77,20 @@ impl ReadStateRow {
             if !self.lease_current || !self.ready || !self.can_read {
                 return Err(ChatError::Denied);
             }
+        }
+        if self.incoming.is_some() && self.incoming.map(|incoming| incoming.stream) != self.incoming_stream {
+            return Err(ChatError::Binding);
+        }
+        if self.incoming_stream == Some(0) {
+            return Err(ChatError::Sequence);
+        }
+        if self.incoming_stream.is_some()
+            && (!matches!(self.conversation, Conversation::Direct(_)) || !self.lease_current || !self.ready || !self.can_read)
+        {
+            return Err(ChatError::Denied);
+        }
+        if let Some(incoming) = self.incoming {
+            incoming.validate()?;
         }
         Ok(())
     }

@@ -531,6 +531,22 @@
   separately above. Windows/native/human acceptance remains pending for the
   new candidate; frozen `0e40e48f` predates the guard.
 
+- 🔧 Shared conversation Close producer/fence slice (2026-11-08; no issue):
+  source-only from frozen `072bef3a`, following Folderstorm `abbe3cb0` native
+  CloseChat fence and host newer-incoming rules. Chat V4 adds a bounded exact
+  request ledger and read-only receipt lookup. Actual live Direct insertion
+  supplies checked nonreused stream/serial provenance; privacy-denied, imported
+  history, own/system/card/group and export scans do not advance it. Fair existing
+  metadata rows export activity without an extra packet/thread or selected host
+  surface. Original stream and original ingress deadline bind Close capture;
+  duplicates/lookups retain the fixed outcome and never capture again. No native
+  leave/read/send, hide button, draft consumer, Attention filtering or AutoRead
+  enablement. Missing activity/receipt stays unknown. Canonical hide/query-once
+  ownership and visibly Uncertain recovery, current-source/stream retirement,
+  bounded hidden bookkeeping and explicit reopening remain required before UI
+  promotion. New codec/ledger, actual World-producer and Worker/App regressions
+  are authored UNRUN; compiler/runtime/human validation belongs to Root.
+
 - 🔧 Native unread and explicit Shared Chat read (2026-11-07; no issue):
   isolated follow-up to the frozen Shared Chat candidate. Separate chat V2
   transports native Nearby/existing resident-IM badge counts and native incoming/

@@ -84,6 +84,20 @@ impl NativeChat for AppChat<'_> {
         self.source()?;
         read_metadata(&self.app.world, conversation, !self.app.exit_prompt.open)
     }
+    fn incoming(&self, conversation: Conversation) -> Option<aurora_session::chat::NativeIncoming> {
+        self.source()?;
+        incoming(&self.app.world, conversation, !self.app.exit_prompt.open)
+    }
+    fn incoming_stream(&self) -> Option<u64> {
+        self.source()?;
+        self.app.world.shared_chat_close_fence().map(|stamp| stamp.stream)
+    }
+    fn close_conversation(&mut self, request: aurora_session::chat::CloseRequest) -> aurora_session::chat::CloseOutcome {
+        let bridge = self.bridge;
+        close_native_conversation(&self.app.world, request, !self.app.exit_prompt.open, &|| {
+            bridge.bound_session().and_then(|binding| ChatSource::try_from(binding).ok()) == Some(request.key.source)
+        })
+    }
     fn mark_read(&mut self, request: aurora_session::chat::MarkReadRequest) -> aurora_session::chat::ReadOutcome {
         if self.source() != Some(request.key.source) {
             return aurora_session::chat::ReadOutcome::RejectedNative;
@@ -199,6 +213,37 @@ pub(super) fn read_metadata(world: &World, conversation: Conversation, ui_ready:
 fn uuid(id: ConversationId) -> Uuid {
     Uuid::from_bytes(*id.as_bytes())
 }
+
+fn incoming(world: &World, conversation: Conversation, ui_ready: bool) -> Option<aurora_session::chat::NativeIncoming> {
+    let policy = snapshot(world, conversation, ui_ready)?;
+    if !policy.ready || !policy.can_read {
+        return None;
+    }
+    let Conversation::Direct(peer) = conversation else { return None };
+    world.shared_chat_activity(uuid(peer))
+}
+
+/// Native CloseChat is only an ordered fence (Folderstorm abbe3cb0,
+/// FSSessionWorker::chatCommand). Never close/leave a native session or Read.
+fn close_native_conversation(
+    world: &World,
+    request: aurora_session::chat::CloseRequest,
+    ui_ready: bool,
+    source_current: &dyn Fn() -> bool,
+) -> aurora_session::chat::CloseOutcome {
+    use aurora_session::chat::CloseOutcome;
+    let readable = snapshot(world, request.key.conversation, ui_ready).is_some_and(|policy| policy.ready && policy.can_read);
+    if request.validate().is_err() || !source_current() || !readable {
+        return CloseOutcome::RejectedNative;
+    }
+    let Some(through) = world.shared_chat_close_fence() else {
+        return CloseOutcome::RejectedNative;
+    };
+    if through.stream != request.stream || !source_current() {
+        return CloseOutcome::StaleTarget;
+    }
+    CloseOutcome::Closed(through)
+}
 fn conversation_id(id: Uuid) -> Option<ConversationId> {
     ConversationId::from_bytes(*id.as_bytes()).ok()
 }
@@ -244,7 +289,7 @@ pub(super) fn snapshot(world: &World, conversation: Conversation, ui_ready: bool
     let r = &world.rlva;
     // Native UI can mask these at draw time. Fail closed here rather than
     // exporting raw historical names/locations from an earlier privacy state.
-    let privacy = r.enabled() && (r.has("shownames") || r.has("showloc") || r.has("shownearby"));
+    let privacy = !world.shared_chat_privacy_allowed();
     let ready = ui_ready && !world.agent_id.is_nil() && world.mutes.is_loaded();
     let (can_send, can_read, title) = match conversation {
         Conversation::Nearby => (
@@ -255,7 +300,7 @@ pub(super) fn snapshot(world: &World, conversation: Conversation, ui_ready: bool
         Conversation::Direct(peer) => {
             let peer = uuid(peer);
             let muted = world.mutes.is_muted_id(&peer);
-            let can_read = !muted && !privacy && world.rlva_allows_im("recvim", peer);
+            let can_read = world.shared_chat_direct_readable(peer);
             let title = if can_read {
                 world.social.name_of(&peer)
             } else {
@@ -935,4 +980,6 @@ mod tests {
         assert_eq!(mark_native_read(&mut clean, request, true, &|| true), ReadOutcome::RejectedNative);
         assert!(native.sent.is_empty());
     }
+
+    mod close_tests;
 }

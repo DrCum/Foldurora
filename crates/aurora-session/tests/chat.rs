@@ -378,6 +378,8 @@ fn chat_v2_read_codec_maximal_rows_receipts_and_closed_schema_fit_packets() {
                 ready: true,
                 can_send: false,
                 can_read: true,
+                incoming: None,
+                incoming_stream: None,
                 read: Some(ReadMetadata {
                     unread: u64::MAX,
                     unread_revision: u64::MAX,
