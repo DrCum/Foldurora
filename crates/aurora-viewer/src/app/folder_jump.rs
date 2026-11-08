@@ -29,6 +29,7 @@ impl App {
         };
         if *is_synthetic
             || event.repeat
+            || !self.folder_jump.jump_allowed()
             || event.state != ElementState::Pressed
             || !matches!(&event.logical_key, Key::Character(key) if key.eq_ignore_ascii_case("j"))
             || !matches!(self.screen, Screen::World)
@@ -74,7 +75,19 @@ impl App {
             || self.options_ui.joystick_capturing()
             || self.web_has_focus()
             || self.media.focus.is_some();
-        if let Some(folder) = self.folder_jump.show(ctx, palette, &self.world, live, visible, blocked) {
+        self.folder_jump.show(ctx, palette, &self.world, live, visible, blocked);
+    }
+
+    /// The actual whole-context run has completed, including any later widget
+    /// requesting another layout pass. Navigation can now consume its one
+    /// exact original proposal against current owner/source/Inventory facts.
+    pub(super) fn finish_folder_jump_input(&mut self, ctx: &egui::Context) {
+        let visible = self
+            .folder_jump
+            .owner()
+            .is_some_and(|owner| self.inventory_ui.jump_owner_visible(ctx, self.panels.inventory, owner));
+        let live = matches!(self.screen, Screen::World) && !self.login_form.busy && self.host_input_allowed();
+        if let Some(folder) = self.folder_jump.finish_input(ctx, &self.world, live, visible) {
             self.inventory_ui.open_folder_window(folder);
         }
     }

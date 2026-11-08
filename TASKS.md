@@ -36,7 +36,13 @@
   Genuine IME Commit is kept once, then confirmation focus retires. Existing
   rooted windows open exact captured folders; no chooser content fetch,
   fetch-all, move/delete/send or normal Inventory search change is introduced.
-  Twenty-one portable/actual-egui tests are authored, uncompiled and unrun;
+  Whole-context completion now commits controls and consumes exact Open once,
+  with actual final-pass clip/layer/focus checks; later-widget layout discard
+  cannot navigate mid-pass. Native denied-press latches survive queued Up and
+  close/reopen, including held Ctrl/Cmd+J. Query-owned IME quarantine survives
+  source changes and empty Preedit without swallowing other editors' commits;
+  actual terminal custody is acknowledged only after the completed batch.
+  Twenty-seven portable/actual-egui tests are authored, uncompiled and unrun;
   independent full-UI source review and Root runtime/human validation are next.
   Node/text caps, source-unready closure and unsupported specialized/partial/
   Favorites/Marketplace owners are explicit stricter first-slice differences.

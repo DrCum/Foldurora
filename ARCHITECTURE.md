@@ -9,7 +9,14 @@ and previous committed/clipped exact tickets; query edits, selection/revision/
 source changes, focus/modal and IME boundaries cannot lend a replacement row
 an old gesture. Genuine query Commit reaches its TextEdit once before terminal
 confirmation focus retires. Layout reruns retain only the original release;
-index work remains bounded once per egui frame.
+controls publish and external Open dispatch only after the entire egui context
+batch completes. A one-shot final-pass/frame/control proof rechecks fresh
+source, ancestry, clip, layer and focus. Denied native presses remain denied
+through a queued Down/Up batch and close/reopen. Query-owned retired IME stays
+quarantined through empty Preedit until an actual terminal batch completes;
+composition epochs prevent an old terminal from erasing newer ownership.
+Other editors' IME input never grants that quarantine. Index work remains
+bounded once per egui frame.
 The ordinary `app/folder_jump.rs` adapter observes actual login/profile/owner/
 Inventory and RLVa state after delivered events, before input and callback.
 Main/additional full personal Inventory gets a classic control or Aurora menu
@@ -21,8 +28,9 @@ Open only calls the existing rooted-window constructor. No chooser fetch,
 Inventory mutation, archive/custom-tab policy, asset contents or normal search
 change is introduced. Future archive/other folder policies must enter both the
 shared folder admission and revision/final-parent checks before support.
-Twenty-one portable/actual-egui tests are authored and unrun, including both
-style entries, narrow/short/150% bounds and native-key metadata traces. This is
+Twenty-seven portable/actual-egui tests are authored and unrun, including both
+style entries, narrow/short/150% bounds, real scrolling, whole-context reruns,
+composed native/body batches and native-key metadata traces. This is
 source implementation, not compiled, native, grid or full parity acceptance.
 
 `session_host/monitor_manager.rs` is the Shell-owned bounded binding/operation

@@ -10943,6 +10943,8 @@ impl App {
         let has_native_canvas = raw.screen_rect.is_some();
         self.review_input.finish_frame_input(&mut raw, &mut self.alt_text);
         let mut full = ctx.run_ui(raw, |ui| {
+            self.observe_folder_jump();
+            self.folder_jump.prepare_input(ui.ctx());
             if has_native_canvas {
                 let native_canvas =
                     egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(w as f32, h as f32) / ui.ctx().pixels_per_point());
@@ -10985,6 +10987,7 @@ impl App {
             }
             windows_ms += t.elapsed().as_secs_f32() * 1000.0;
         });
+        self.finish_folder_jump_input(&ctx);
         self.workspace_after_ui(actions.workspace.take(), &gfx.renderer, &gfx.window);
         // a capture leaves the user's layout as it is (as at exit)
         self.photo_validate_canvas(&mut gfx.renderer, full.pixels_per_point);
@@ -20489,7 +20492,8 @@ impl ApplicationHandler for App {
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
         let folder_jump_window = self.gfx.as_ref().is_some_and(|gfx| gfx.window.id() == id);
         if folder_jump_window {
-            self.folder_jump.event(&event);
+            self.observe_folder_jump();
+            self.folder_jump.native_event(&self.egui_ctx, &event);
         }
         // the window of a lost device, on screen until its successor has
         // presented: its redraws and sizes are not the new renderer's
