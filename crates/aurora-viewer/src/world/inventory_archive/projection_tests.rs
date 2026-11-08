@@ -428,10 +428,12 @@ fn inventory_archive_projection_qualified_read_reuses_one_borrowed_source_privac
     let mut projection = testing::projection(32, 16, 16, MAX_DEPTH, false);
     finish(&mut projection, &world, &model, &mut CpuTurn::default());
     let mut owner = OwnerPolicy::default();
+    testing::reset_qualifications();
     {
         // World, Model and owner policy are all borrowed for the entire read:
         // none can be changed while consumers use this once-qualified proof.
         let read = projection.read(&world, &model, &mut owner);
+        assert_eq!(testing::qualifications(), 1, "actual qualification runs at read acquisition");
         let revision = read.revision();
         for _ in 0..512 {
             assert!(read.passes(id(4)));
@@ -440,6 +442,7 @@ fn inventory_archive_projection_qualified_read_reuses_one_borrowed_source_privac
             assert!(!read.passes(id(999)));
             assert_eq!(read.revision(), revision);
         }
+        assert_eq!(testing::qualifications(), 1, "all row checks reuse the borrowed qualification");
     }
     // End the immutable borrow, then change actual policy/source facts before
     // acquiring another read. No event observer is needed for stale denial.
