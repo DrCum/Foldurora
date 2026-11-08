@@ -113,7 +113,6 @@ impl App {
         let (instance, read) = archive_read(&mut self.inventory_ui, &self.world, owner);
         let gate = State::ordinary(instance, read.as_ref(), self.world.inventory_archive_instance);
         let folder = self.folder_jump.finish_input(ctx, &self.world, live, visible, gate);
-        drop(read);
         if let Some(folder) = folder {
             // The whole-context proposal was consumed. Reacquire the SAME
             // original owner's actual gate immediately before the callback;
@@ -125,7 +124,6 @@ impl App {
                 && visible
                 && read.as_ref().is_some_and(|read| read.passes(folder))
                 && folder_jump::current_folder(&self.world.inventory, folder, gate.mask());
-            drop(read);
             if current {
                 self.inventory_ui.open_folder_window(folder);
             }

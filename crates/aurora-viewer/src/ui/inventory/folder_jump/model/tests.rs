@@ -407,7 +407,7 @@ fn folder_jump_exhaustion_and_exact_selection_changes_cannot_reuse_input_or_row_
         ..Default::default()
     };
     model.sync(&inventory, Some(current), ALLOWED);
-    model.advance(&inventory);
+    inventory.with(|inventory, mask, _| model.advance_visible(inventory, Some(mask)));
     assert_eq!(model.phase(), Phase::Exhausted);
     assert!(model.rows().next().is_none());
 }
