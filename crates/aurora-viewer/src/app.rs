@@ -453,6 +453,9 @@ pub struct App {
     /// it separate (aurora_media::Modifiers::command).
     command: bool,
     screen: Screen,
+    /// Name-cache destination captured with the login request. Editing grid
+    /// settings later must not publish this world's names into another grid.
+    name_cache_file: Option<std::path::PathBuf>,
     login_form: LoginForm,
     // Bug report form (disabled, see main.rs):
     // bug_report: ui::bug_report::BugReportUi,
@@ -1530,6 +1533,7 @@ impl App {
             ctrl: false,
             command: false,
             screen: Screen::Login,
+            name_cache_file: None,
             login_form: LoginForm::default(),
             // Bug report form (disabled, see main.rs):
             // bug_report: Default::default(),
@@ -1948,6 +1952,13 @@ impl App {
                 self.world.system_message(text);
             }
             crate::demo::experience::Reply::Nothing => {}
+        }
+    }
+
+    fn demo_reply(&self, cmd: &NetCommand) -> Vec<NetEvent> {
+        match &self.world.login {
+            Some(login) => crate::demo::demo_reply_for_login(cmd, login),
+            None => crate::demo::demo_reply(cmd),
         }
     }
 
@@ -2746,7 +2757,7 @@ impl App {
             {
                 self.world.apply(NetEvent::Balance(balance - price));
             }
-            for mut ev in crate::demo::demo_reply(&cmd) {
+            for mut ev in self.demo_reply(&cmd) {
                 crate::ao::demo::preserve_custom_motions(&self.world, &cmd, &mut ev);
                 if matches!(cmd, NetCommand::ObjectRelease { .. }) {
                     crate::demo::hud::preserve_touch_transform(&self.world, &mut ev);
@@ -3113,6 +3124,7 @@ impl App {
             self.scene.clear(&mut g.renderer);
         }
         self.world.reset();
+        self.name_cache_file = None;
         // the next session's network starts with the neighbours allowed
         self.neighbours_refused = false;
         // the transcripts shown belong to the account that leaves
@@ -3794,6 +3806,11 @@ impl App {
                 };
                 self.load_region_titles(l.agent_id);
                 let metadata_grid = self.world.metadata_login.completed();
+                // This receipt was captured from the actual submitted request;
+                // a competing/ignored login cannot redirect the first cache.
+                self.name_cache_file = metadata_grid
+                    .filter(|_| !self.demo)
+                    .map(|grid| crate::settings::cache_dir().join(crate::world::names::cache_file(grid)));
                 self.bind_inventory_archive_login(metadata_grid);
                 self.world.favorites = if self.demo {
                     Default::default()
@@ -4050,7 +4067,9 @@ impl App {
             NetEvent::LandToolPrepared(result) => self.land_tool_prepared(result),
             NetEvent::CurrencyBought(result) => self.currency_bought(result),
             // LLSetDisplayNameReply + LLFloaterDisplayName::onCacheSetName
-            NetEvent::SetDisplayNameReply { status, reason, content } => {
+            NetEvent::SetDisplayNameReply {
+                status, reason, content, ..
+            } => {
                 log::info!("display name change: {status} {reason}");
                 // our name was out of date (409 Conflict): fetch it again
                 if status == 409 {
@@ -7959,24 +7978,7 @@ impl App {
     }
 
     fn name_cache_path(&self) -> Option<std::path::PathBuf> {
-        use crate::settings::GridChoice;
-        if self.demo {
-            return None;
-        }
-        let file = match self.settings.grid {
-            GridChoice::SecondLife => "avatar_name_cache.xml".to_owned(),
-            GridChoice::SecondLifeBeta => "avatar_name_cache.aditi.xml".to_owned(),
-            GridChoice::Custom => {
-                let grid: String = self
-                    .settings
-                    .custom_login_uri
-                    .chars()
-                    .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
-                    .collect();
-                format!("avatar_name_cache.{}.xml", grid.trim_matches('_'))
-            }
-        };
-        Some(crate::settings::cache_dir().join(file))
+        self.name_cache_file.clone()
     }
 
     /// An action of the Contacts window (docked or torn off).
@@ -8572,7 +8574,7 @@ impl App {
         let (due, later) = std::mem::take(&mut self.demo_lookups).into_iter().partition(|(at, _)| *at <= now);
         self.demo_lookups = later;
         for (_, cmd) in due {
-            for ev in crate::demo::demo_reply(&cmd) {
+            for ev in self.demo_reply(&cmd) {
                 self.world.apply(ev);
             }
         }
@@ -20188,7 +20190,7 @@ impl ApplicationHandler for App {
             // AURORA_DEMO_GLYPHS=1|2|rtl: residents named and talking in the
             // characters of the grid's display names (system fallback fonts)
             if let Some(mode) = crate::demo::glyphs::scenario() {
-                for ev in crate::demo::glyphs::events(mode) {
+                for ev in crate::demo::glyphs::events_for_login(mode, self.world.login.as_ref().expect("logged-in demo")) {
                     if let Some(e) = self.world.apply(ev) {
                         self.on_app_event(e);
                     }

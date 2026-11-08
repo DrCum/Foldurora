@@ -2501,6 +2501,20 @@ impl World {
 
     fn apply_event(&mut self, ev: NetEvent) -> Option<NetEvent> {
         self.events_this_frame += 1;
+        // HTTP jobs can finish after logout/relogin. Stale failures are just as
+        // important as successes: they must not queue a legacy lookup or change
+        // a replacement account's display-name dialog.
+        let name_source = match &ev {
+            NetEvent::Names { source, .. }
+            | NetEvent::DisplayNames { source, .. }
+            | NetEvent::DisplayNamesFailed { source, .. }
+            | NetEvent::DisplayNameUpdate { source, .. }
+            | NetEvent::SetDisplayNameReply { source, .. } => Some(source),
+            _ => None,
+        };
+        if name_source.is_some_and(|source| !self.login.as_ref().is_some_and(|login| source.matches_login(login, self.agent_id))) {
+            return None;
+        }
         let mut ev = self.hold_for_parked(ev)?;
         if self.anti_spam_event(&mut ev) {
             return None;
@@ -3438,7 +3452,7 @@ impl World {
                 self.on_mean_collisions(list);
                 None
             }
-            NetEvent::Names(list) => {
+            NetEvent::Names { names: list, .. } => {
                 for (id, first, last) in list {
                     self.social.avatar_names.on_legacy(id, &first, &last);
                     self.social.names.insert(id, social::format_name(&first, &last));
@@ -3446,16 +3460,20 @@ impl World {
                 self.refresh_task_inventory_offers();
                 None
             }
-            NetEvent::DisplayNames { names, bad_ids, max_age } => {
+            NetEvent::DisplayNames {
+                names, bad_ids, max_age, ..
+            } => {
                 self.social.avatar_names.on_display_names(&names, &bad_ids, max_age);
                 self.refresh_task_inventory_offers();
                 None
             }
-            NetEvent::DisplayNamesFailed(ids) => {
+            NetEvent::DisplayNamesFailed { ids, .. } => {
                 self.social.avatar_names.on_failed(&ids);
                 None
             }
-            NetEvent::DisplayNameUpdate { name, old_display_name } => {
+            NetEvent::DisplayNameUpdate {
+                name, old_display_name, ..
+            } => {
                 let notice = self.social.avatar_names.on_update(&name, &old_display_name);
                 self.refresh_task_inventory_offers();
                 log::info!("display name update: {notice}");

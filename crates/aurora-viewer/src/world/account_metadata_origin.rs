@@ -19,7 +19,6 @@ impl GridDigest {
     pub(crate) fn bytes(self) -> [u8; 32] {
         self.0
     }
-    #[cfg(test)]
     pub(crate) fn from_uri(uri: &str) -> Option<Self> {
         Self::parse(uri)
     }

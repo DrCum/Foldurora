@@ -5,12 +5,14 @@ use aurora_net::inventory::InvItem;
 pub const SKY_VISITOR: Uuid = Uuid::from_u128(0xd0d0_b120_0000_0000_0000_0000_0000_0001);
 
 pub fn seed_queries(world: &mut World) {
-    if let Some(region) = world.main_region {
+    if let (Some(region), Some(login)) = (world.main_region, world.login.as_ref()) {
+        let source = aurora_net::NameSource::from_login(login);
         world.coarse.entry(region).or_default().push((
             SKY_VISITOR,
             world.agent.position + glam::Vec3::new(16.0, 0.0, 1020.0 - world.agent.position.z),
         ));
         let _ = world.apply(NetEvent::DisplayNames {
+            source,
             names: vec![aurora_net::AvatarNameData {
                 id: SKY_VISITOR,
                 username: "sky.visitor".into(),

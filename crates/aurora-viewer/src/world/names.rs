@@ -21,6 +21,20 @@ const DEFAULT_EXPIRES: f64 = 60.0 * 60.0;
 /// A request still unanswered after this is sent again.
 const PENDING_TIMEOUT: f64 = 5.0 * 60.0;
 
+/// Public name caches belong to a grid, regardless of account. Do not reuse
+/// the former punctuation-flattened custom-grid names: distinct authorities,
+/// paths and query strings could collide. Leave those old files untouched.
+pub(crate) fn cache_file(grid: super::account_metadata_origin::GridDigest) -> String {
+    use super::account_metadata_origin::GridDigest;
+    if Some(grid) == GridDigest::from_uri(aurora_net::login::SL_MAIN_GRID) {
+        "avatar_name_cache.xml".to_owned()
+    } else if Some(grid) == GridDigest::from_uri(aurora_net::login::SL_BETA_GRID) {
+        "avatar_name_cache.aditi.xml".to_owned()
+    } else {
+        format!("avatar_name_cache.{}.xml", grid.namespace())
+    }
+}
+
 fn now() -> f64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0)
 }
@@ -574,6 +588,10 @@ impl AvatarNames {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "names_source_tests.rs"]
+mod source_tests;
 
 #[cfg(test)]
 mod tests {

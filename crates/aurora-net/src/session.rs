@@ -3067,12 +3067,13 @@ impl Session<'_> {
     /// handed back as failed, for the legacy UUIDNameRequest.
     fn request_display_names(&mut self, ids: Vec<uuid::Uuid>) {
         const NAME_URL_SEND_THRESHOLD: usize = 3500;
+        let source = NameSource::from_login(&self.login);
         let cap = self
             .main
             .and_then(|a| self.sims.get(&a))
             .and_then(|s| s.caps.get("GetDisplayNames").cloned());
         let Some(cap) = cap else {
-            emit(self.sh, NetEvent::DisplayNamesFailed(ids));
+            emit(self.sh, NetEvent::DisplayNamesFailed { source, ids });
             return;
         };
         // caps are granted without the slash the query needs
@@ -3089,6 +3090,7 @@ impl Session<'_> {
             }
         }
         for (url, ids) in batches {
+            let source = source.clone();
             let http = self.sh.caps_http.clone();
             let events = self.sh.events.clone();
             tokio::spawn(async move {
@@ -3114,21 +3116,26 @@ impl Session<'_> {
                                     .map(|i| i.as_uuid())
                                     .filter(|i| !i.is_nil())
                                     .collect();
-                                NetEvent::DisplayNames { names, bad_ids, max_age }
+                                NetEvent::DisplayNames {
+                                    source,
+                                    names,
+                                    bad_ids,
+                                    max_age,
+                                }
                             }
                             _ => {
                                 log::warn!("GetDisplayNames: invalid reply for {} ids", ids.len());
-                                NetEvent::DisplayNamesFailed(ids)
+                                NetEvent::DisplayNamesFailed { source, ids }
                             }
                         }
                     }
                     Ok(resp) => {
                         log::warn!("GetDisplayNames: HTTP {} for {} ids", resp.status(), ids.len());
-                        NetEvent::DisplayNamesFailed(ids)
+                        NetEvent::DisplayNamesFailed { source, ids }
                     }
                     Err(e) => {
                         log::warn!("GetDisplayNames: {}", e.without_url());
-                        NetEvent::DisplayNamesFailed(ids)
+                        NetEvent::DisplayNamesFailed { source, ids }
                     }
                 };
                 let _ = events.send(ev);
@@ -3140,6 +3147,7 @@ impl Session<'_> {
     /// SetDisplayName. The answer comes later as SetDisplayNameReply on the
     /// event queue; only a failed POST is reported here.
     fn set_display_name(&mut self, old: String, new: String) {
+        let source = NameSource::from_login(&self.login);
         let cap = self
             .main
             .and_then(|a| self.sims.get(&a))
@@ -3148,6 +3156,7 @@ impl Session<'_> {
             emit(
                 self.sh,
                 NetEvent::SetDisplayNameReply {
+                    source,
                     status: 0,
                     reason: "unsupported".into(),
                     content: Llsd::Undef,
@@ -3178,6 +3187,7 @@ impl Session<'_> {
             if let Some((status, reason)) = failed {
                 log::warn!("SetDisplayName failed: {reason}");
                 let _ = events.send(NetEvent::SetDisplayNameReply {
+                    source,
                     status,
                     reason,
                     content: Llsd::Undef,
@@ -3905,6 +3915,7 @@ impl Session<'_> {
                 emit(
                     self.sh,
                     NetEvent::SetDisplayNameReply {
+                        source: NameSource::from_login(&self.login),
                         status,
                         reason,
                         content: b["content"].clone(),
@@ -3920,7 +3931,14 @@ impl Session<'_> {
                 }
                 if !name.id.is_nil() {
                     let old_display_name = b["old_display_name"].to_string_value();
-                    emit(self.sh, NetEvent::DisplayNameUpdate { name, old_display_name });
+                    emit(
+                        self.sh,
+                        NetEvent::DisplayNameUpdate {
+                            source: NameSource::from_login(&self.login),
+                            name,
+                            old_display_name,
+                        },
+                    );
                 }
             }
             _ => {}
@@ -4946,7 +4964,13 @@ impl Session<'_> {
                 .iter()
                 .map(|b| (b.id, field_str(&b.first_name), field_str(&b.last_name)))
                 .collect();
-            emit(self.sh, NetEvent::Names(names));
+            emit(
+                self.sh,
+                NetEvent::Names {
+                    source: NameSource::from_login(&self.login),
+                    names,
+                },
+            );
         } else if id == OnlineNotification::ID {
             let m: OnlineNotification = pkt.decode()?;
             emit(
@@ -5838,6 +5862,10 @@ mod socket_tests {
         assert!(send > 0);
     }
 }
+
+#[cfg(test)]
+#[path = "session_names_tests.rs"]
+mod name_source_tests;
 
 #[cfg(test)]
 mod event_queue_tests {

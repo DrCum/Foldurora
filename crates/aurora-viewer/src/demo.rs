@@ -846,6 +846,11 @@ fn demo_raw() -> Llsd {
 
 /// Fake replies for name / inventory requests in demo mode.
 /// Demo residents and groups (block list and group chat).
+/// Same local routing identity as this offline fixture's LoggedIn event.
+pub fn name_source() -> aurora_net::NameSource {
+    aurora_net::NameSource::from_login(&name_login())
+}
+
 pub const DEMO_AGENT: Uuid = Uuid::from_u128(0xA0E0_A6E1_0000_0000_0000_0000_0000_0001);
 pub const DEMO_LOUP: Uuid = Uuid::from_u128(0xA0E0_A6E1_0000_0000_0000_0000_0000_0002);
 pub const DEMO_NOVA: Uuid = Uuid::from_u128(0xA0E0_A6E1_0000_0000_0000_0000_0000_0003);
@@ -2757,6 +2762,17 @@ fn demo_folder(f: Uuid, owner: Uuid) -> aurora_net::inventory::FolderContents {
 }
 
 pub fn demo_reply(cmd: &aurora_net::NetCommand) -> Vec<NetEvent> {
+    demo_reply_with_source(cmd, name_source())
+}
+
+/// Capture the actual offline login at request dispatch, just like the native
+/// network session does. Alternate synthetic accounts must not borrow baseline
+/// fixture identity or relabel a completed reply.
+pub fn demo_reply_for_login(cmd: &aurora_net::NetCommand, login: &Arc<LoginResponse>) -> Vec<NetEvent> {
+    demo_reply_with_source(cmd, aurora_net::NameSource::from_login(login))
+}
+
+fn demo_reply_with_source(cmd: &aurora_net::NetCommand, source: aurora_net::NameSource) -> Vec<NetEvent> {
     if let aurora_net::NetCommand::FetchInventoryOrphans { request } = cmd {
         let contents = if std::env::var("AURORA_DEMO_INVENTORY").is_ok_and(|mode| mode == "lost") {
             crate::world::inventory::demo::lost_reply(DEMO_AGENT)
@@ -2825,8 +2841,10 @@ pub fn demo_reply(cmd: &aurora_net::NetCommand) -> Vec<NetEvent> {
                 aurora_i18n::tr!("demo-orion-example"),
                 "Tess Touch",
             ];
-            vec![NetEvent::Names(
-                ids.iter()
+            vec![NetEvent::Names {
+                source: source.clone(),
+                names: ids
+                    .iter()
                     .map(|id| {
                         if let Some((first, last, _)) = group::member_name(id) {
                             return (*id, first.to_owned(), last.to_owned());
@@ -2836,7 +2854,7 @@ pub fn demo_reply(cmd: &aurora_net::NetCommand) -> Vec<NetEvent> {
                         (*id, it.next().unwrap_or("").to_owned(), it.next().unwrap_or("").to_owned())
                     })
                     .collect(),
-            )]
+            }]
         }
         // People API names: half of them with a chosen display name
         aurora_net::NetCommand::RequestDisplayNames(ids) => {
@@ -2847,6 +2865,7 @@ pub fn demo_reply(cmd: &aurora_net::NetCommand) -> Vec<NetEvent> {
                 ("tesstouch", "Resident", "Tess ✨"),
             ];
             vec![NetEvent::DisplayNames {
+                source: source.clone(),
                 names: ids
                     .iter()
                     .map(|id| {
@@ -2902,6 +2921,7 @@ pub fn demo_reply(cmd: &aurora_net::NetCommand) -> Vec<NetEvent> {
                 let mut content = Llsd::new_map();
                 content.insert("error_tag", tag);
                 return vec![NetEvent::SetDisplayNameReply {
+                    source: source.clone(),
                     status: 400,
                     reason: "Bad Request".into(),
                     content,
@@ -2925,11 +2945,13 @@ pub fn demo_reply(cmd: &aurora_net::NetCommand) -> Vec<NetEvent> {
             content.insert("display_name", name.display_name.clone());
             vec![
                 NetEvent::SetDisplayNameReply {
+                    source: source.clone(),
                     status: 200,
                     reason: "OK".into(),
                     content,
                 },
                 NetEvent::DisplayNameUpdate {
+                    source: source.clone(),
                     name,
                     old_display_name: old.clone(),
                 },
@@ -4154,31 +4176,43 @@ pub fn friend_location(world: &mut crate::world::World) {
     }
 }
 
+// Name fixtures and their LoggedIn event share the same original login object.
+// Only this offline simulator reuses its static login; real sessions allocate
+// a fresh Arc in aurora-net even if a grid reuses its wire identifiers.
+fn name_login() -> Arc<LoginResponse> {
+    static LOGIN: std::sync::OnceLock<Arc<LoginResponse>> = std::sync::OnceLock::new();
+    LOGIN
+        .get_or_init(|| {
+            Arc::new(LoginResponse {
+                agent_id: DEMO_AGENT,
+                session_id: Uuid::nil(),
+                secure_session_id: Uuid::nil(),
+                first_name: "Aurora".into(),
+                last_name: "Demo".into(),
+                sim_ip: std::net::Ipv4Addr::LOCALHOST,
+                sim_port: 0,
+                circuit_code: 0,
+                region_x: 256000,
+                region_y: 256000,
+                region_size_x: 256,
+                region_size_y: 256,
+                seed_capability: String::new(),
+                look_at: Vec3::new(1.0, 0.3, 0.0),
+                message: aurora_i18n::tr!("demo-offline-demo-mode-no-network-connection").into(),
+                agent_appearance_service: String::new(),
+                inventory_root: Uuid::nil(),
+                mfa_hash: None,
+                raw: demo_raw(),
+            })
+        })
+        .clone()
+}
+
 pub fn events() -> Vec<NetEvent> {
-    let agent = Uuid::from_u128(0xA0E0_A6E1_0000_0000_0000_0000_0000_0001);
-    let login = LoginResponse {
-        agent_id: agent,
-        session_id: Uuid::nil(),
-        secure_session_id: Uuid::nil(),
-        first_name: "Aurora".into(),
-        last_name: "Demo".into(),
-        sim_ip: std::net::Ipv4Addr::LOCALHOST,
-        sim_port: 0,
-        circuit_code: 0,
-        region_x: 256000,
-        region_y: 256000,
-        region_size_x: 256,
-        region_size_y: 256,
-        seed_capability: String::new(),
-        look_at: Vec3::new(1.0, 0.3, 0.0),
-        message: aurora_i18n::tr!("demo-offline-demo-mode-no-network-connection").into(),
-        agent_appearance_service: String::new(),
-        inventory_root: Uuid::nil(),
-        mfa_hash: None,
-        raw: demo_raw(),
-    };
+    let agent = DEMO_AGENT;
+    let login = name_login();
     let mut ev = vec![
-        NetEvent::LoggedIn(Arc::new(login)),
+        NetEvent::LoggedIn(login),
         NetEvent::MainRegionChanged { handle: HANDLE },
         // only the People API (names) is simulated, and what the
         // scenarios of sim_extras add

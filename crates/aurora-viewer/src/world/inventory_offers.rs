@@ -1188,7 +1188,11 @@ mod tests {
         w.on_im(gift);
         assert!(!w.social.names.contains_key(&JANE));
         assert!(w.notifications.list[0].body.contains(&JANE.to_string()));
-        w.apply(aurora_net::NetEvent::Names(vec![(JANE, "Jane".into(), "Doe".into())]));
+        w.bind_session_test_login(ME);
+        w.apply(aurora_net::NetEvent::Names {
+            source: aurora_net::NameSource::from_login(w.login.as_ref().unwrap()),
+            names: vec![(JANE, "Jane".into(), "Doe".into())],
+        });
         let n = &w.notifications.list[0];
         assert_eq!(n.title, "Gift dispenser");
         assert!(n.body.contains("Gift dispenser") && n.body.contains("Jane Doe") && n.body.contains("Free gift"));

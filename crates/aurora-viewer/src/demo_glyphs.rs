@@ -163,7 +163,16 @@ pub fn resident(avatar: &Uuid) -> Option<(String, &'static Sample)> {
 /// The residents in two rows in front of the start position, facing it, each
 /// saying its line (last resident first with `reversed`: the chat window
 /// shows the last few lines); the prim with the hover text on the right.
+#[cfg(test)]
 pub fn events(mode: Mode) -> Vec<NetEvent> {
+    events_with_source(mode, crate::demo::name_source())
+}
+
+pub fn events_for_login(mode: Mode, login: &std::sync::Arc<aurora_net::LoginResponse>) -> Vec<NetEvent> {
+    events_with_source(mode, aurora_net::NameSource::from_login(login))
+}
+
+fn events_with_source(mode: Mode, source: aurora_net::NameSource) -> Vec<NetEvent> {
     let boxp = shape(LL_PCODE_PATH_LINE, LL_PCODE_PROFILE_SQUARE, 100, 0, 0);
     // start position and view direction of the demo (see `events`)
     let (start, ahead) = (Vec3::new(132.0, 126.0, 0.0), Vec3::new(0.8, 0.4, 0.0).normalize());
@@ -220,6 +229,7 @@ pub fn events(mode: Mode) -> Vec<NetEvent> {
     // too, the picture before it
     if mode.rtl {
         events.push(NetEvent::DisplayNames {
+            source,
             names: samples(true)
                 .iter()
                 .enumerate()
