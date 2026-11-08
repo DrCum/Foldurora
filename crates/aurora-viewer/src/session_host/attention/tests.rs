@@ -120,6 +120,27 @@ fn navigate(model: &mut Attention, direction: Direction) -> Option<ChatKey> {
 }
 
 #[test]
+fn shared_group_unread_export_does_not_grant_attention_or_native_review() {
+    let mut host = fixture(1, 2);
+    let group = Conversation::Group(ConversationId::from_bytes([7; 16]).unwrap());
+    let chat = chat(&mut host, 0);
+    chat.conversations[1].policy.key.conversation = group;
+    chat.reads.insert(group, unread());
+    let mut attention = Attention::default();
+    attention.sync(&host, &Preferences::default());
+    assert_eq!(attention.rows().len(), 1);
+    assert!(attention.rows().iter().all(|row| row.key.conversation != group));
+    assert!(
+        attention
+            .capture(ChatKey {
+                source: source(1),
+                conversation: group
+            })
+            .is_none()
+    );
+}
+
+#[test]
 fn attention_active_and_standby_readable_rows_ignore_send_and_mark_capacity() {
     let mut host = fixture(5, 1);
     let mut model = Attention::default();

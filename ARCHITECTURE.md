@@ -548,7 +548,16 @@ receipts; queues, packet sizes and per-frame native commands are bounded.
 receive sequences or exposing immutable conversation/history/receipt snapshots.
 Native permission gaps purge cached text and titles before fresh metadata.
 
-The staged Close-in-host producer uses chat V4 closed data in `chat/close.rs`.
+Chat V5 additionally exports existing initialized group conversations through
+the same canonical six chat surfaces and native read ledger. Native membership,
+active/closed state, restoring/snoozed previews, group/sender receive policy,
+moderator text mute and fresh send policy gate every boundary. Literal group
+sends use `IM_SESSION_SEND` through the common App restriction boundary; a
+guarded own echo cannot join, unblock, unsnooze or focus a native conversation.
+V4 peers fail closed rather than misread Group read rows. Conference, Group
+Attention, Close and native Review remain excluded from this slice.
+
+The Close-in-host producer retains its V4 closed data in `chat/close.rs`.
 `world/shared_chat_activity.rs` mints a checked native stream at actual LoggedIn,
 then advances it only at eligible live nonself Direct conversation insertion.
 Existing fair ReadBatch rows export the optional current stream separately from

@@ -366,6 +366,57 @@ impl World {
         }
     }
 
+    /// Folderstorm FSSessionWorker::chatCommand/imAllowed (abbe3cb0,
+    /// LGPL-2.1): host chat may use only an already initialized native group.
+    /// Neither a membership, saved preview nor conference supplies authority.
+    pub(crate) fn shared_group_initialized(&self, session: Uuid) -> bool {
+        !session.is_nil()
+            && self.groups.is_member(&session)
+            && !self.groups.restoring.contains(&session)
+            && !self.groups.snoozed.contains_key(&session)
+            && self
+                .groups
+                .sessions
+                .get(&session)
+                .is_some_and(|info| info.group && info.active && !info.closed)
+            && self.social.has_session(&session)
+    }
+
+    fn shared_group_blocked(&self, session: Uuid) -> bool {
+        self.mutes.is_muted_id(&session)
+            || self.mutes.group_chat_muted(&session)
+            || self.groups.mute_all_groups
+            || (self.groups.mute_when_notices_off && self.groups.group(&session).is_none_or(|group| !group.accept_notices))
+    }
+
+    pub(crate) fn shared_group_readable(&self, session: Uuid) -> bool {
+        self.shared_group_initialized(session)
+            && !self.shared_group_blocked(session)
+            && self.shared_chat_privacy_allowed()
+            && self.rlva_allows_im("recvim", session)
+    }
+
+    pub(crate) fn shared_group_sendable(&self, session: Uuid) -> bool {
+        self.shared_group_initialized(session)
+            && !self.shared_group_blocked(session)
+            && self.groups.sessions.get(&session).is_some_and(|info| !info.text_muted)
+            && self.rlva_can_send_session(session)
+    }
+
+    /// Record a literal host send after the common App send boundary. Unlike
+    /// send_session_im this cannot join, unblock, unsnooze or focus a session.
+    pub(crate) fn own_shared_group_im(&mut self, session: Uuid, text: &str) {
+        if self.agent_id.is_nil() || !self.mutes.is_loaded() || !self.shared_group_sendable(session) {
+            return;
+        }
+        let me = self.own_name();
+        self.session_push(
+            session,
+            line(me, text.to_owned(), ChatKind::OWN, Uuid::nil(), SystemTime::now()),
+            false,
+        );
+    }
+
     /// Close a conversation: a group / conference session is left
     /// (LLIMModel::sendLeaveSession), a 1:1 conversation only leaves the list
     /// (nothing is sent; the next message from that resident opens it again).
@@ -888,6 +939,48 @@ fn saved_prefix(offline: bool, timestamp: u32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shared_group_restoring_and_snoozed_previews_never_gain_host_send_authority() {
+        let group = Uuid::from_u128(500);
+        for snoozed in [false, true] {
+            let mut world = World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+            world.agent_id = Uuid::from_u128(99);
+            world.mutes.state = crate::world::mutes::LoadState::Loaded;
+            world.groups.groups.push(GroupMembership {
+                id: group,
+                name: "Synthetic group".into(),
+                insignia: Uuid::nil(),
+                powers: 0,
+                accept_notices: true,
+                list_in_profile: false,
+                contribution: 0,
+            });
+            world.groups.sessions.insert(
+                group,
+                SessionInfo {
+                    group: true,
+                    active: true,
+                    ..Default::default()
+                },
+            );
+            world.session_lines(group);
+            if snoozed {
+                world.groups.snooze(group, Instant::now() + std::time::Duration::from_secs(60));
+            } else {
+                world.groups.restoring.insert(group);
+            }
+            assert!(!world.shared_group_initialized(group));
+            assert!(!world.shared_group_sendable(group));
+            assert!(!world.shared_group_readable(group));
+            world.own_shared_group_im(group, "No join, unblock or unsnooze");
+            assert!(world.social.ims[0].lines.is_empty());
+            assert!(world.groups.out.is_empty());
+            assert_eq!(world.social.focus_im, None);
+            assert_eq!(world.groups.snoozed.contains_key(&group), snoozed);
+            assert_eq!(world.groups.restoring.contains(&group), !snoozed);
+        }
+    }
 
     #[test]
     fn the_bell_changes_the_notices_and_sends_the_profile_listing_as_it_is() {

@@ -19,8 +19,11 @@ mod review;
 pub use review::*;
 mod close;
 pub use close::*;
+#[cfg(test)]
+mod group_tests;
 
-pub const VERSION: u16 = 4;
+/// V5 admits initialized group read rows; V4 consumers reject those rows.
+pub const VERSION: u16 = 5;
 pub const MAX_PACKET_BYTES: usize = 4096;
 /// One native UDP chat/IM part (`aurora-net::message_split`), in UTF-8 bytes.
 pub const MAX_TEXT_BYTES: usize = 1023;

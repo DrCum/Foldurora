@@ -373,6 +373,13 @@ $env:AURORA_HOST_CHAT_VISUAL_LANGUAGE = 'fr'
 cargo test --workspace host_chat_cpu_visual_fixture -- --ignored --test-threads=1 --nocapture
 ```
 
+The initialized-Group adapter and actual composer regressions run offline with
+`cargo test --profile ci --workspace --locked shared_group_ -- --test-threads=1`.
+They cover existing native session authority, literal send/replay, fresh group/
+sender restrictions, native read CAS and canonical six-surface drafts. Review
+codec regressions must also pass after any chat envelope version change. These
+synthetic checks do not establish native Windows or grid acceptance.
+
 The fixture drives the actual chat widgets with egui pointer/text events and
 paints their meshes through the same CPU painter as `SoftwareWindow`. It
 creates fourteen PNGs with matching JSON records and a combined `manifest.json`:

@@ -188,7 +188,10 @@ pub(super) fn eligible(snapshot: &HostChatSnapshot) -> bool {
 }
 
 fn supported(conversation: Conversation) -> bool {
-    matches!(conversation, Conversation::Nearby | Conversation::Direct(_))
+    matches!(
+        conversation,
+        Conversation::Nearby | Conversation::Direct(_) | Conversation::Group(_)
+    )
 }
 
 fn native_policy(snapshot: &HostChatSnapshot, key: ChatKey) -> Option<NativeChatPolicy> {
@@ -2093,7 +2096,7 @@ mod tests {
         assert!(!eligible(&snapshot));
         snapshot.live = true;
         for info in &mut snapshot.conversations {
-            info.policy.key.conversation = Conversation::Group(ConversationId::from_bytes([11; 16]).unwrap());
+            info.policy.key.conversation = Conversation::Conference(ConversationId::from_bytes([11; 16]).unwrap());
         }
         assert!(!eligible(&snapshot));
     }
@@ -2222,4 +2225,5 @@ mod tests {
         assert!(frames.ui.view.read_metadata.is_none() && frames.ui.read_operation.is_none());
     }
     mod close_tests;
+    mod group_tests;
 }

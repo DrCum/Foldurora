@@ -129,8 +129,10 @@ impl NativeChat for AppChat<'_> {
             return SendOutcome::RejectedNative;
         }
         self.app.send(command);
-        if let Conversation::Direct(peer) = key.conversation {
-            self.app.world.own_im(uuid(peer), text);
+        match key.conversation {
+            Conversation::Direct(peer) => self.app.world.own_im(uuid(peer), text),
+            Conversation::Group(session) => self.app.world.own_shared_group_im(uuid(session), text),
+            _ => {}
         }
         // App::send / NetClient::send have no enqueue result. The call is made,
         // but we cannot promise acceptance or remote delivery. Never retry it.
@@ -188,7 +190,7 @@ fn mark_native_read(
 pub(super) fn native_read_key(conversation: Conversation) -> Option<Option<Uuid>> {
     match conversation {
         Conversation::Nearby => Some(None),
-        Conversation::Direct(peer) => Some(Some(uuid(peer))),
+        Conversation::Direct(peer) | Conversation::Group(peer) => Some(Some(uuid(peer))),
         _ => None,
     }
 }
@@ -252,15 +254,16 @@ fn catalogue(world: &World) -> Vec<Conversation> {
     let mut result = vec![Conversation::Nearby];
     // Bound the inspected native entries too: thousands of group tabs must
     // not turn a small IPC request into an unbounded main-thread search.
-    result.extend(
-        world
-            .social
-            .ims
-            .iter()
-            .take(MAX_CONVERSATIONS - 1)
-            .filter(|session| !world.is_group_session(&session.other))
-            .filter_map(|session| conversation_id(session.other).map(Conversation::Direct)),
-    );
+    result.extend(world.social.ims.iter().take(MAX_CONVERSATIONS - 1).filter_map(|session| {
+        let id = conversation_id(session.other)?;
+        if world.shared_group_initialized(session.other) {
+            Some(Conversation::Group(id))
+        } else if !world.is_group_session(&session.other) && !world.groups.is_member(&session.other) {
+            Some(Conversation::Direct(id))
+        } else {
+            None
+        }
+    }));
     result
 }
 
@@ -273,12 +276,19 @@ fn native_lines(
 )> {
     match conversation {
         Conversation::Nearby => Some((&world.chat, world.chat_clock)),
-        Conversation::Direct(peer) if !world.is_group_session(&uuid(peer)) => world
+        Conversation::Direct(peer) if !world.is_group_session(&uuid(peer)) && !world.groups.is_member(&uuid(peer)) => world
             .social
             .ims
             .iter()
             .take(MAX_CONVERSATIONS - 1)
             .find(|session| session.other == uuid(peer))
+            .map(|session| (&session.lines, session.clock)),
+        Conversation::Group(id) if world.shared_group_initialized(uuid(id)) => world
+            .social
+            .ims
+            .iter()
+            .take(MAX_CONVERSATIONS - 1)
+            .find(|session| session.other == uuid(id))
             .map(|session| (&session.lines, session.clock)),
         _ => None,
     }
@@ -311,6 +321,16 @@ pub(super) fn snapshot(world: &World, conversation: Conversation, ui_ready: bool
                 can_read,
                 title,
             )
+        }
+        Conversation::Group(session) => {
+            let session = uuid(session);
+            let can_read = world.shared_group_readable(session);
+            let title = if can_read {
+                world.session_title(&session)
+            } else {
+                aurora_i18n::tr!("rlva-blocked").to_owned()
+            };
+            (world.shared_group_sendable(session), can_read, title)
         }
         _ => return None,
     };
@@ -375,6 +395,17 @@ fn lines(world: &World, conversation: Conversation, cursor: NativeCursor, limit:
         };
     };
     let end = clock.first.saturating_add(entries.len() as u64);
+    let group = matches!(conversation, Conversation::Group(_));
+    if group && !snapshot(world, conversation, true).is_some_and(|state| state.ready && state.can_read) {
+        return NativePage {
+            cursor: NativeCursor {
+                token: clock.token,
+                next: end,
+            },
+            gap: true,
+            lines: Vec::new(),
+        };
+    }
     if cursor.token != clock.token {
         return NativePage {
             cursor: NativeCursor {
@@ -399,6 +430,12 @@ fn lines(world: &World, conversation: Conversation, cursor: NativeCursor, limit:
             ChatKind::Invite(_) | ChatKind::InventoryOffer(_) | ChatKind::Payment(_) => continue,
         };
         if !matches!(kind, LineKind::Own | LineKind::System) && world.mutes.text_muted(&native.source, &native.from) {
+            continue;
+        }
+        // Native IM_SESSION_SEND leaves existing group text unfiltered. Apply
+        // both group and individual receive restrictions at the export edge,
+        // as Folderstorm filterChatEvent does (abbe3cb0, LGPL-2.1).
+        if group && kind == LineKind::Incoming && (native.source.is_nil() || !world.rlva_allows_im("recvim", native.source)) {
             continue;
         }
         let (text, truncated) = line_text(&native.text);
@@ -441,6 +478,13 @@ fn literal_command(world: &World, conversation: Conversation, text: &str) -> Opt
         Conversation::Direct(peer) => Some(NetCommand::SendIm {
             to: uuid(peer),
             message: text.into(),
+        }),
+        Conversation::Group(session) => Some(NetCommand::SendImDialog {
+            to: uuid(session),
+            dialog: crate::world::groups::dialog::SESSION_SEND,
+            id: uuid(session),
+            message: text.into(),
+            bucket: Vec::new(),
         }),
         _ => None,
     }
@@ -541,8 +585,10 @@ mod tests {
                 return SendOutcome::RejectedNative;
             };
             self.sent.push(command); // An offline native sink: no network/runtime/login.
-            if let Conversation::Direct(peer) = key.conversation {
-                self.world.own_im(uuid(peer), text);
+            match key.conversation {
+                Conversation::Direct(peer) => self.world.own_im(uuid(peer), text),
+                Conversation::Group(session) => self.world.own_shared_group_im(uuid(session), text),
+                _ => {}
             }
             SendOutcome::AcceptedLocally
         }
@@ -982,4 +1028,5 @@ mod tests {
     }
 
     mod close_tests;
+    mod group_tests;
 }

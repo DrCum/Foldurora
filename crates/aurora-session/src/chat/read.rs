@@ -69,7 +69,10 @@ impl ReadStateRow {
     }
     pub fn validate(&self, source: ChatSource) -> Result<(), ChatError> {
         self.info(source).policy.validate()?;
-        if !matches!(self.conversation, Conversation::Nearby | Conversation::Direct(_)) {
+        if !matches!(
+            self.conversation,
+            Conversation::Nearby | Conversation::Direct(_) | Conversation::Group(_)
+        ) {
             return Err(ChatError::Invalid);
         }
         if let Some(read) = self.read {
@@ -111,7 +114,10 @@ impl MarkReadRequest {
         if self.request == 0 || self.policy_revision == 0 || self.observed.epoch == 0 || self.unread_revision == 0 {
             return Err(ChatError::Sequence);
         }
-        if !matches!(self.key.conversation, Conversation::Nearby | Conversation::Direct(_)) {
+        if !matches!(
+            self.key.conversation,
+            Conversation::Nearby | Conversation::Direct(_) | Conversation::Group(_)
+        ) {
             return Err(ChatError::Invalid);
         }
         Ok(())

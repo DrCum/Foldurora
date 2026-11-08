@@ -1825,6 +1825,10 @@ fn shared_chat_external_key_rejects_unavailable_policy_source_and_unsupported_ta
                     Conversation::Conference(id)
                 };
                 chat.conversations[1].policy.key = target;
+                if case == 9 {
+                    // A group tag is no substitute for native readiness.
+                    chat.conversations[1].policy.ready = false;
+                }
             }
             11 => chat.conversations[1].policy.key.source = source(3),
             12 => {

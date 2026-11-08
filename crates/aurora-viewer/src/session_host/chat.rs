@@ -295,12 +295,14 @@ impl WorkerChat {
         if self.context(native)? != key.source {
             return Err(ChatError::Binding);
         }
-        if !matches!(key.conversation, Conversation::Nearby | Conversation::Direct(_))
-            || !native
-                .catalogue()
-                .into_iter()
-                .take(MAX_CONVERSATIONS)
-                .any(|conversation| conversation == key.conversation)
+        if !matches!(
+            key.conversation,
+            Conversation::Nearby | Conversation::Direct(_) | Conversation::Group(_)
+        ) || !native
+            .catalogue()
+            .into_iter()
+            .take(MAX_CONVERSATIONS)
+            .any(|conversation| conversation == key.conversation)
         {
             return Err(ChatError::Unavailable);
         }

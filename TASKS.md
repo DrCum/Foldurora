@@ -708,6 +708,19 @@
   pending. The earlier first-click observation remains unexplained by native
   frame evidence; no earlier candidate's validation transfers to this change.
 
+- 🔧 Initialized Group Shared Chat (Folderstorm port, 2026-11-08; no issue):
+  source work extends the canonical Shared Chat/monitor surfaces with live
+  text, literal sending and explicit native Mark read for an existing initialized
+  Group conversation. Native membership, active/closed and restoring/snoozed
+  state, privacy, group/sender receive restrictions, moderator text mute and
+  current source/policy are rechecked; no join/unblock/unsnooze/focus path.
+  Chat V5 excludes older V4 consumers of Group read rows; control V1 and native
+  protocol behavior stay unchanged. Conference, Group Attention/Close/Review
+  remain later slices. Source reference: Folderstorm abbe3cb0 worker chatCommand/
+  imAllowed and filterChatEvent. Source review, formatting, qualified Linux
+  Clippy and all 14 focused regressions pass. Full frozen-candidate validation
+  follows; Windows/package/native and human acceptance remain pending.
+
 - 🔧 Shared Chat first stage (Folderstorm port, 2026-11-07; no issue): one owned
   CPU window explicitly selects a character and its Nearby/existing resident IM,
   with one Shell-owned canonical composer per complete source (at most five).
