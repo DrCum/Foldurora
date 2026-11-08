@@ -237,8 +237,10 @@ impl WorldViewPlan {
         if view.blend_depth {
             let mut texture = Texture::d2(size, F::Depth32Float, ATT | U::COPY_DST);
             texture.samples = view.core.samples;
-            // The actual lazy factory uses COPY_DST even when multisampled;
-            // unsupported real descriptors refuse instead of hiding the cost.
+            // Actual Layered/Layers texture-to-texture copies preserve the
+            // source scene depth's sample count. Pinned wgpu-core permits
+            // equal-sample MSAA copies; do not lower samples or omit this cost.
+            // Descriptor accounting itself grants no command permission.
             self.view_texture(Factory::BlendDepth, 0, texture, caps)?;
         }
         if let Some(gtao) = view.gtao {

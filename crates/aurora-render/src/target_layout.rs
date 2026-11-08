@@ -1,9 +1,10 @@
 //! Dormant source-accounting prerequisite. The protected core covers direct
 //! make_targets textures; the extension describes a prospective complete family
 //! graph with mandatory external allocation inventories. Actual current wgpu
-//! factories/holders have not been migrated or recorder-verified. Requested
-//! payload excludes driver tiling, heaps and allocator metadata. No production
-//! allocator, render permission or numeric budget is changed.
+//! factories/holders have not been migrated or recorder-verified. Texture block
+//! payload and deterministic wgpu buffer backing exclude driver tiling, heaps
+//! and allocator metadata. No production allocator, render permission or numeric
+//! budget is changed.
 
 mod descriptor;
 mod generations;

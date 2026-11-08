@@ -531,7 +531,8 @@ no monitor authority or inactive producer is enabled.
 
 The separate `target_layout/{descriptor,inventory,ownership,world,world_tests}.rs`
 extension is also cfg(test) only. It describes the prospective nested/post/shared
-texture graph, D3/array/BC7 and buffer payloads, explicit capture CPU/image costs,
+texture graph, D3/array/BC7 payloads and deterministic wgpu buffer backing,
+explicit capture CPU/image costs,
 bounded metadata and exact allocation IDs across held/retiring owners. Its
 32-family catalogue requires an explicit inventory observation for each family;
 generic factory transactions reserve all descriptors before construction and
@@ -540,7 +541,16 @@ Synthetic last-use owners model storage retention, never real GPU completion.
 Current wgpu factories and holders are not migrated or recorder-verified. Dynamic
 scene/page/buffer inventories, actual queue adapters, numeric budgets/headroom and
 physical VRAM measurements remain required before any production admission.
-Seventeen new source tests are authored and unrun; the original nine remain exact.
+The source correction follows pinned wgpu 30.0.1 restrictions for D1 render
+attachments, transient usage/dimensions/mips/layers, unknown buffer usage and
+the 16-level HAL mip ceiling. Buffer charges include the checked VERTEX end byte
+and four-byte backing alignment. Same-sample texture-to-texture MSAA blend-depth
+copies retain their full descriptor/sample cost; they are valid in pinned wgpu,
+unlike the earlier prospective refusal. Copied capability metadata and descriptor
+costs prove neither enabled device support nor permission to execute a copy.
+Twenty-four extension source tests are authored and unrun, including seven new
+correction regressions; the original nine core tests remain exact. Independent
+review and Root-owned compiler/device evidence remain pending.
 
 `render_thread::Owner::try_submit_owned` is a generic ownership prerequisite:
 its Busy and WorkerGone errors return the intact rejected job, including any

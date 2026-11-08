@@ -159,8 +159,12 @@
   Checked D3/array/BC7/buffer descriptors and a bounded 32-family inventory
   distinguish new, borrowed, spare, old-copy and retiring physical identities.
   Generic recorder reserves before construction; opaque leases retain storage
-  credit through rollback and independent holders. Seventeen new source tests are
-  authored and unrun; original nine core tests remain exact. No current wgpu
+  credit through rollback and independent holders. Source corrections apply
+  pinned wgpu 30.0.1 D1/transient/mip/usage restrictions and checked VERTEX end-byte
+  plus four-byte buffer backing costs. Valid same-sample MSAA blend-depth copies
+  retain full samples and cost, replacing the earlier incorrect refusal.
+  Twenty-four extension source tests (seven correction regressions) are authored
+  and unrun; original nine core tests remain exact. No current wgpu
   factory/holder migration, real GPU completion, numeric resource capability or
   physical VRAM acceptance is claimed. Production rendering remains unchanged.
   ⬜ Migrate and recorder-verify actual reachable factories/holders, review all

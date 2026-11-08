@@ -4,6 +4,10 @@
 use super::{Error, PayloadCost};
 use wgpu::{BufferUsages, TextureDimension, TextureFormat as Format, TextureUsages as Usage};
 
+// Pinned wgpu-hal 30.0.1::MAX_MIP_LEVELS, also applied by wgpu-core's
+// create_texture_inner. Dimensional/caller-copied limits cannot raise it.
+const MAX_MIP_LEVELS: u32 = 16;
+
 #[derive(Clone, Copy)]
 pub(super) struct DeviceCaps<'a> {
     pub limits: &'a wgpu::Limits,
@@ -88,15 +92,23 @@ impl Texture {
                 w.max(h).max(z)
             }
         };
-        if self.mips > 32 - max_edge.leading_zeros()
+        if self.mips > (32 - max_edge.leading_zeros()).min(MAX_MIP_LEVELS)
             || self.dimension == TextureDimension::D1 && self.mips != 1
+            || self.dimension == TextureDimension::D1 && self.usage.contains(Usage::RENDER_ATTACHMENT)
             || self.dimension != TextureDimension::D2 && (self.samples > 1 || block > 1 || self.format == Format::Depth32Float)
             || block > 1 && (!w.is_multiple_of(block) || !h.is_multiple_of(block))
+            // Pinned wgpu-core 30.0.1::create_texture_inner. Descriptors here
+            // have no additional view formats; those need a separate review.
+            || self.usage.contains(Usage::TRANSIENT_ATTACHMENT)
+                && (self.dimension != TextureDimension::D2
+                    || self.usage != (Usage::RENDER_ATTACHMENT | Usage::TRANSIENT_ATTACHMENT)
+                    || self.mips != 1
+                    || z != 1)
             || self.samples > 1
                 && (self.mips != 1
                     || z != 1
                     || !self.usage.contains(Usage::RENDER_ATTACHMENT)
-                    || self.usage.intersects(Usage::STORAGE_BINDING | Usage::COPY_DST))
+                    || self.usage.contains(Usage::STORAGE_BINDING))
         {
             return Err(Error::Invalid);
         }
@@ -132,8 +144,15 @@ pub(super) struct Buffer {
     pub mapped: bool,
 }
 impl Buffer {
+    /// Deterministic HAL backing from pinned wgpu-core 30.0.1::create_buffer:
+    /// nonzero VERTEX size gains one byte, then every backing rounds to four.
+    /// This known expansion is mandatory credit, not driver-heap headroom.
     pub fn payload(self, caps: DeviceCaps<'_>) -> Result<PayloadCost, Error> {
-        if self.size == 0 || self.usage.is_empty() || self.mapped && !self.size.is_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT) {
+        if self.size == 0
+            || self.usage.is_empty()
+            || self.usage.contains_unknown_bits()
+            || self.mapped && !self.size.is_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT)
+        {
             return Err(Error::Invalid);
         }
         if self.size > caps.limits.max_buffer_size {
@@ -145,7 +164,20 @@ impl Buffer {
         {
             return Err(Error::Limits);
         }
-        Ok(PayloadCost(self.size))
+        let backing = if self.usage.contains(BufferUsages::VERTEX) {
+            self.size.checked_add(1).ok_or(Error::Overflow)?
+        } else {
+            self.size
+        };
+        let remainder = backing % wgpu::COPY_BUFFER_ALIGNMENT;
+        let aligned = if remainder == 0 {
+            backing
+        } else {
+            backing
+                .checked_add(wgpu::COPY_BUFFER_ALIGNMENT - remainder)
+                .ok_or(Error::Overflow)?
+        };
+        Ok(PayloadCost(aligned))
     }
 }
 

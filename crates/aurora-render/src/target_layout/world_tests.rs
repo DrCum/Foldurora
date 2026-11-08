@@ -265,6 +265,248 @@ fn prospective_buffer_mapping_limits_and_separate_pool_class_are_checked() {
 }
 
 #[test]
+fn prospective_d1_render_attachments_refuse_even_with_genuine_format_usage_support() {
+    let l = limits();
+    let f = [FormatSupport {
+        format: F::Rgba8Unorm,
+        features: F::Rgba8Unorm.guaranteed_format_features(wgpu::Features::empty()),
+    }];
+    let c = caps(&l, &f);
+    assert!(f[0].features.allowed_usages.contains(U::RENDER_ATTACHMENT));
+    let d1 = Texture {
+        dimension: D::D1,
+        ..Texture::d2([8, 1], F::Rgba8Unorm, U::TEXTURE_BINDING)
+    };
+    assert_eq!(d1.payload(c), Ok(PayloadCost(32)));
+    assert_eq!(
+        Texture {
+            usage: U::RENDER_ATTACHMENT,
+            ..d1
+        }
+        .payload(c),
+        Err(Error::Invalid)
+    );
+    for dimension in [D::D2, D::D3] {
+        assert_eq!(
+            Texture {
+                dimension,
+                usage: U::RENDER_ATTACHMENT,
+                ..d1
+            }
+            .payload(c),
+            Ok(PayloadCost(32))
+        );
+    }
+}
+
+#[test]
+fn prospective_transient_usage_dimension_mips_and_layers_obey_pinned_constraints() {
+    let l = limits();
+    let f = [FormatSupport {
+        format: F::Rgba8Unorm,
+        features: F::Rgba8Unorm.guaranteed_format_features(wgpu::Features::empty()),
+    }];
+    let c = caps(&l, &f);
+    let transient = Texture::d2([8, 8], F::Rgba8Unorm, U::RENDER_ATTACHMENT | U::TRANSIENT_ATTACHMENT);
+    assert!(f[0].features.allowed_usages.contains(transient.usage));
+    assert_eq!(transient.payload(c), Ok(PayloadCost(256)));
+    assert_eq!(Texture { samples: 4, ..transient }.payload(c), Ok(PayloadCost(1024)));
+    for invalid in [
+        Texture {
+            usage: U::TRANSIENT_ATTACHMENT,
+            ..transient
+        },
+        Texture {
+            usage: transient.usage | U::TEXTURE_BINDING,
+            ..transient
+        },
+        Texture {
+            usage: transient.usage | U::COPY_DST,
+            ..transient
+        },
+        Texture {
+            size: [8, 1, 1],
+            dimension: D::D1,
+            ..transient
+        },
+        Texture {
+            dimension: D::D3,
+            ..transient
+        },
+        Texture { mips: 2, ..transient },
+        Texture {
+            size: [8, 8, 2],
+            ..transient
+        },
+    ] {
+        assert_eq!(invalid.payload(c), Err(Error::Invalid));
+    }
+}
+
+#[test]
+fn prospective_mip_count_keeps_pinned_hal_ceiling_below_larger_copied_dimension_limit() {
+    let (mut l, f) = (limits(), formats());
+    l.max_texture_dimension_2d = 65536;
+    let texture = Texture {
+        mips: 16,
+        ..Texture::d2([65536, 1], F::Rgba8Unorm, U::TEXTURE_BINDING)
+    };
+    // The sixteen widths are 65536 through 2, totaling 131070 texels.
+    assert_eq!(texture.payload(caps(&l, &f)), Ok(PayloadCost(524_280)));
+    // Seventeen levels fit this extent and copied limit, but not pinned HAL.
+    assert_eq!(Texture { mips: 17, ..texture }.payload(caps(&l, &f)), Err(Error::Invalid));
+}
+
+#[test]
+fn prospective_multisampled_copy_destination_keeps_attachment_storage_mip_and_layer_rules() {
+    let l = limits();
+    let f = [FormatSupport {
+        format: F::Rgba8Unorm,
+        features: F::Rgba8Unorm.guaranteed_format_features(wgpu::Features::empty()),
+    }];
+    let c = caps(&l, &f);
+    let texture = Texture {
+        samples: 4,
+        ..Texture::d2([8, 8], F::Rgba8Unorm, U::RENDER_ATTACHMENT | U::COPY_DST)
+    };
+    assert_eq!(texture.payload(c), Ok(PayloadCost(1024)));
+    for invalid in [
+        Texture {
+            usage: U::COPY_DST,
+            ..texture
+        },
+        Texture {
+            usage: texture.usage | U::STORAGE_BINDING,
+            ..texture
+        },
+        Texture { mips: 2, ..texture },
+        Texture {
+            size: [8, 8, 2],
+            ..texture
+        },
+    ] {
+        assert_eq!(invalid.payload(c), Err(Error::Invalid));
+    }
+}
+
+#[test]
+fn prospective_buffer_unknown_usage_bits_refuse_before_backing_or_mapping_credit() {
+    let (l, f) = (limits(), formats());
+    let buffer = Buffer {
+        size: 4,
+        usage: B::COPY_DST,
+        mapped: false,
+    };
+    let unknown = B::from_bits_retain(!B::all().bits());
+    assert!(unknown.contains_unknown_bits());
+    assert_eq!(buffer.payload(caps(&l, &f)), Ok(PayloadCost(4)));
+    for mappable_primary_buffers in [false, true] {
+        assert_eq!(
+            Buffer {
+                usage: buffer.usage | unknown,
+                ..buffer
+            }
+            .payload(DeviceCaps {
+                mappable_primary_buffers,
+                ..caps(&l, &f)
+            }),
+            Err(Error::Invalid)
+        );
+    }
+}
+
+#[test]
+fn prospective_buffer_backing_charges_vertex_end_byte_and_alignment_with_checked_overflow() {
+    let (l, f) = (limits(), formats());
+    let c = caps(&l, &f);
+    for (size, usage, expected) in [
+        (1, B::COPY_DST, 4),
+        (3, B::COPY_DST, 4),
+        (4, B::COPY_DST, 4),
+        (5, B::COPY_DST, 8),
+        (1, B::VERTEX, 4),
+        (3, B::VERTEX, 4),
+        (4, B::VERTEX, 8),
+        (7, B::VERTEX, 8),
+        (8, B::VERTEX, 12),
+        (u64::MAX - 3, B::COPY_DST, u64::MAX - 3),
+        (u64::MAX - 4, B::VERTEX, u64::MAX - 3),
+    ] {
+        assert_eq!(
+            Buffer {
+                size,
+                usage,
+                mapped: false
+            }
+            .payload(c),
+            Ok(PayloadCost(expected))
+        );
+    }
+    for (size, usage) in [
+        (u64::MAX, B::VERTEX),     // the mandatory end byte overflows
+        (u64::MAX - 1, B::VERTEX), // the end byte fits, rounding overflows
+        (u64::MAX - 3, B::VERTEX),
+        (u64::MAX, B::COPY_DST), // rounding alone overflows
+    ] {
+        assert_eq!(
+            Buffer {
+                size,
+                usage,
+                mapped: false
+            }
+            .payload(c),
+            Err(Error::Overflow)
+        );
+    }
+    assert_eq!(
+        Buffer {
+            size: 0,
+            usage: B::COPY_DST,
+            mapped: false,
+        }
+        .payload(c),
+        Err(Error::Invalid),
+        "zero-size descriptors remain outside this prospective graph"
+    );
+}
+
+#[test]
+fn prospective_buffer_backing_is_reserved_before_factory_and_retained_by_derived_holder() {
+    let (l, f) = (limits(), formats());
+    let c = caps(&l, &f);
+    let e = Entry {
+        resource: Resource::Buffer(Buffer {
+            size: 4,
+            usage: B::VERTEX,
+            mapped: false,
+        }),
+        ..entry(0, Class::Buffer)
+    };
+    assert_eq!(e.validate(c), Ok(8));
+    let mut p = plan();
+    p.add(e, c).unwrap();
+    assert_eq!(p.payloads().unwrap().0, [0, 0, 8, 0]);
+    let insufficient = test_ledger(7);
+    assert!(matches!(
+        Transaction::<[u8; 8]>::begin(DeviceIds::new().unwrap(), &insufficient, p.entries().unwrap(), c),
+        Err(Error::Capacity)
+    ));
+    assert_eq!(insufficient.used(), Payloads::default());
+    assert_eq!(insufficient.preparation(), 0);
+    let ledger = test_ledger(8);
+    let mut transaction = Transaction::begin(DeviceIds::new().unwrap(), &ledger, p.entries().unwrap(), c).unwrap();
+    assert_eq!(ledger.used().0, [0, 0, 8, 0]);
+    let lease = transaction.create(0, e, || Ok([0u8; 8])).unwrap();
+    let holder = lease.clone().hold([0u8; 1]);
+    drop(transaction.finish().unwrap());
+    drop(lease);
+    assert_eq!(ledger.used().0, [0, 0, 8, 0]);
+    drop(holder);
+    assert_eq!(ledger.used(), Payloads::default());
+    assert_eq!(ledger.preparation(), 0);
+}
+
+#[test]
 fn prospective_core_gtao_contact_and_aa_match_independent_math_at_all_caps_and_qualities() {
     let (l, f) = (limits(), formats());
     let c = caps(&l, &f);
@@ -333,11 +575,32 @@ fn prospective_samples_ssr_reflections_and_lazy_depth_never_change_effective_qua
             lazy.view(v, c).unwrap();
             assert_eq!(family(&lazy, Factory::BlendDepth, c), 4 * n);
         } else {
-            // Actual lazy COPY_DST+MSAA descriptor is unsupported; it cannot be
-            // costed as a silently downgraded single-sample texture.
-            assert_eq!(lazy.view(v, c), Err(Error::Invalid));
-            assert_eq!(lazy.entries(), Err(Error::Invalid));
+            // The actual Layered/Layers texture-to-texture route preserves
+            // equal MSAA counts. Its descriptor is valid in pinned wgpu-core.
+            lazy.view(v, c).unwrap();
+            assert_eq!(family(&lazy, Factory::BlendDepth, c), 4 * n * u64::from(samples));
         }
+        let blend = lazy
+            .entries()
+            .unwrap()
+            .iter()
+            .find(|entry| entry.factory == Factory::BlendDepth)
+            .unwrap();
+        assert_eq!(
+            blend.resource,
+            Resource::Texture(Texture {
+                samples,
+                ..Texture::d2([319, 179], F::Depth32Float, U::RENDER_ATTACHMENT | U::COPY_DST)
+            })
+        );
+        assert!(lazy.entries().unwrap().iter().any(|entry| {
+            entry.factory == Factory::Core
+                && matches!(entry.resource, Resource::Texture(texture)
+                    if texture.size == [319, 179, 1]
+                        && texture.format == F::Depth32Float
+                        && texture.samples == samples
+                        && texture.usage.contains(U::RENDER_ATTACHMENT | U::COPY_SRC))
+        }));
     }
 }
 
