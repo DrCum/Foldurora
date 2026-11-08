@@ -12,8 +12,8 @@ concurrency:
   cancel-in-progress: true
 env:
   CARGO_TERM_COLOR: always
-  CARGO_INCREMENTAL: 0
-  CARGO_BUILD_JOBS: 2
+  CARGO_INCREMENTAL: '0'
+  CARGO_BUILD_JOBS: '2'
   SOURCE_SHA: 85191933c4ac42991f6cf841a0e1377e37f61b1d
 jobs:
   validate:
@@ -32,7 +32,7 @@ jobs:
           mkdir -p .scratch/validation
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           git rev-parse HEAD | tee .scratch/validation/source.txt
-          printf '%s\\n' "$GITHUB_SHA" > .scratch/validation/workflow.txt
+          echo "$GITHUB_SHA" > .scratch/validation/workflow.txt
           rustc --version | tee .scratch/validation/rust.txt
           cargo --version | tee .scratch/validation/cargo.txt
           df -h .
@@ -46,17 +46,23 @@ jobs:
         with:
           name: linux-tests
       - name: Formatting
-        run: cargo fmt --all -- --check 2>&1 | tee .scratch/validation/fmt.log
+        run: |
+          cargo fmt --all -- --check 2>&1 | tee .scratch/validation/fmt.log
       - name: Qualified workspace Clippy
-        run: cargo clippy --profile ci --workspace --all-targets --locked -- -D warnings -A dead-code 2>&1 | tee .scratch/validation/clippy.log
+        run: |
+          cargo clippy --profile ci --workspace --all-targets --locked -- -D warnings -A dead-code 2>&1 | tee .scratch/validation/clippy.log
       - name: Graphics presets and saved profiles
-        run: cargo test --profile ci --workspace --locked --offline graphics_presets:: 2>&1 | tee .scratch/validation/graphics.log
+        run: |
+          cargo test --profile ci --workspace --locked --offline graphics_presets:: 2>&1 | tee .scratch/validation/graphics.log
       - name: Voice continuity and channel restrictions
-        run: cargo test --profile ci --workspace --locked --offline voice::tests:: 2>&1 | tee .scratch/validation/voice.log
+        run: |
+          cargo test --profile ci --workspace --locked --offline voice::tests:: 2>&1 | tee .scratch/validation/voice.log
       - name: Safe graphics backup and restore
-        run: cargo test --profile ci --workspace --locked --offline safe_graphics:: 2>&1 | tee .scratch/validation/safe-graphics.log
+        run: |
+          cargo test --profile ci --workspace --locked --offline safe_graphics:: 2>&1 | tee .scratch/validation/safe-graphics.log
       - name: Theme guards
-        run: cargo test --profile ci --workspace --locked --offline theme_guard 2>&1 | tee .scratch/validation/theme.log
+        run: |
+          cargo test --profile ci --workspace --locked --offline theme_guard 2>&1 | tee .scratch/validation/theme.log
       - name: Translation catalogs
         run: |
           cargo test --profile ci --workspace --locked --offline every_language_has_english_keys_and_variables 2>&1 | tee .scratch/validation/catalog-keys.log
@@ -64,7 +70,7 @@ jobs:
       - name: Confirm the six new regressions executed
         run: |
           python3 - <<'PY'
-          import pathlib,re
+          import pathlib
           root=pathlib.Path('.scratch/validation')
           expected={
             'graphics.log':['levels_keep_the_glow_switch_of_the_user','graphics_saved_restores_the_glow_it_was_saved_with','former_level_migrations_keep_glow_and_still_upgrade_the_level'],
@@ -73,12 +79,13 @@ jobs:
           for filename,names in expected.items():
             log=(root/filename).read_text()
             for name in names:
-              assert re.search(r'test [^\\n]*'+re.escape(name)+r' \\.\\.\\. ok',log),name
+              assert '::'+name+' ... ok' in log,name
           print('All six new regressions executed and passed.')
           PY
       - name: Full workspace suite on the frozen port candidate
         timeout-minutes: 25
-        run: timeout 1200 cargo test --profile ci --workspace --locked --offline --no-fail-fast 2>&1 | tee .scratch/validation/full-suite.log
+        run: |
+          timeout 1200 cargo test --profile ci --workspace --locked --offline --no-fail-fast 2>&1 | tee .scratch/validation/full-suite.log
       - name: Verify source remained frozen
         if: always()
         run: |
