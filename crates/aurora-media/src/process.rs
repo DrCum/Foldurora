@@ -7,6 +7,8 @@
 //! Port of indra/llplugin/llpluginprocessparent.cpp (Copyright (C) Linden
 //! Research, Inc., originally LGPL 2.1). Everything runs from `idle()` with non-blocking
 //! sockets, like the parent's idle loop without its optional pump thread.
+//! Framing follows LLPluginMessagePipe::pumpInput/processInput
+//! (indra/llplugin/llpluginmessagepipe.cpp); the per-idle budget is Aurora's.
 
 use crate::message::PluginMessage;
 use crate::shm::SharedMemory;
@@ -795,6 +797,75 @@ mod tests {
         assert!(Instant::now() <= process.heartbeat);
         drop(writer.join().expect("writer"));
         process.state = ProcState::Done;
+    }
+
+    #[test]
+    fn a_plugin_disconnect_delivers_queued_messages_before_closing_or_returning_an_error() {
+        for exiting in [false, true] {
+            let (mut process, mut plugin) = running(Instant::now() + LOCKUP_TIMEOUT);
+            if exiting {
+                process.state = ProcState::Exiting;
+            }
+            plugin.write_all(&numbered(3)).expect("queued messages");
+            plugin.shutdown(std::net::Shutdown::Write).expect("close plugin output");
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let mut seen = Vec::new();
+            loop {
+                assert!(Instant::now() < deadline, "plugin disconnect was not observed");
+                let result = process.pump_input();
+                seen.extend(process.take_messages().iter().map(|m| m.s32("index")));
+                match result {
+                    Err(error) => {
+                        assert!(!exiting, "an expected exit closes without an error");
+                        assert_eq!(error.kind(), ErrorKind::ConnectionAborted);
+                        break;
+                    }
+                    Ok(()) if process.stream.is_none() => {
+                        assert!(exiting, "only an expected exit clears the stream");
+                        break;
+                    }
+                    Ok(()) => std::thread::sleep(Duration::from_millis(1)),
+                }
+            }
+            process.state = ProcState::Done;
+            assert_eq!(seen, vec![0, 1, 2], "messages survive disconnect (exiting {exiting})");
+        }
+    }
+
+    #[test]
+    fn interrupted_reads_and_a_later_error_preserve_complete_messages_and_the_partial_tail() {
+        struct ErrorAfterBytes<'a> {
+            data: &'a [u8],
+            interrupted: bool,
+        }
+        impl Read for ErrorAfterBytes<'_> {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                if self.interrupted {
+                    self.interrupted = false;
+                    return Err(ErrorKind::Interrupted.into());
+                }
+                if self.data.is_empty() {
+                    return Err(ErrorKind::ConnectionReset.into());
+                }
+                self.data.read(buf)
+            }
+        }
+        let mut bytes = numbered(2);
+        bytes.extend_from_slice(b"tail");
+        let mut reader = ErrorAfterBytes {
+            data: &bytes,
+            interrupted: true,
+        };
+        let mut framer = MessageFramer::default();
+        let error = read_budgeted(&mut reader, &mut framer, INPUT_BUDGET).expect_err("read error");
+        assert_eq!(error.kind(), ErrorKind::ConnectionReset);
+        let mut seen = Vec::new();
+        indices(&mut framer, &mut seen);
+        assert_eq!(seen, vec![0, 1]);
+        assert_eq!(framer.pending(), 4);
+        framer.push(b"-end\0");
+        assert_eq!(framer.next_message(), Some(b"tail-end".as_slice()));
+        assert!(framer.next_message().is_none());
     }
 
     fn folder(root: &Path, name: &str, launcher_inside: bool) -> PathBuf {
