@@ -1,5 +1,112 @@
 use super::*;
 
+/// Synthetic CPU capture of the production panel, using the existing capture
+/// path variable. Run alone with --ignored and AURORA_CAPTURE=<file.png>.
+#[test]
+#[ignore = "isolated folder-panel capture; requires AURORA_CAPTURE"]
+fn import_folder_order_cpu_capture() {
+    let output_path = std::path::PathBuf::from(std::env::var_os("AURORA_CAPTURE").expect("explicit capture path"));
+    let ctx = egui::Context::default();
+    let theme = crate::theme::Theme {
+        panel_alpha: 255,
+        ..Default::default()
+    };
+    theme.apply(&ctx, 1.0);
+    ctx.all_styles_mut(|style| style.animation_time = 0.0);
+    crate::ui::fonts::apply(&ctx, crate::ui::fonts::DEFAULT);
+    let mut world = crate::world::World::new(Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+    world.inventory.root = Uuid::from_u128(1);
+    world.inventory.created_folders(vec![aurora_net::inventory::InvFolder {
+        id: world.inventory.root,
+        name: "Inventory".into(),
+        type_default: 8,
+        ..Default::default()
+    }]);
+    let mut imports = Imports {
+        choice: Choice::Bulk,
+        ..Default::default()
+    };
+    for (name, folders) in [
+        ("texture10.png", vec!["Set10".into()]),
+        ("texture2.png", vec!["Set2".into()]),
+        ("loose.png", vec![]),
+    ] {
+        let mut entry = Entry::new(
+            name.into(),
+            Ok(Source::Texture(crate::imports::tests::image(16, 16))),
+            Default::default(),
+        );
+        entry.source_folders = folders;
+        imports.entries.push(entry);
+    }
+    imports.active = Some(imports.entries[0].id);
+    imports.folders.enabled = true;
+    imports.folders.destination = world.inventory.root;
+    imports.sync_folder_plan(&world);
+
+    let size = [1100usize, 760];
+    let mut painter = crate::crash::software::Painter::default();
+    let mut pixels = vec![0; size[0] * size[1]];
+    let mut text = Vec::new();
+    for frame in 0..4 {
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(size[0] as f32, size[1] as f32),
+                )),
+                time: Some(frame as f64 / 60.0),
+                ..Default::default()
+            },
+            |ui| show(ui, &theme.palette(), &mut imports, &world, 720.0, false),
+        );
+        text = output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(label) => Some((label.galley.text().to_owned(), label.pos)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let primitives = ctx.tessellate(output.shapes, output.pixels_per_point);
+        assert!(primitives.iter().all(|p| matches!(p.primitive, egui::epaint::Primitive::Mesh(_))));
+        painter.paint(
+            &mut pixels,
+            size,
+            &primitives,
+            &output.textures_delta,
+            output.pixels_per_point,
+            theme.palette().panel,
+        );
+    }
+    let rgba: Vec<u8> = pixels
+        .iter()
+        .flat_map(|pixel| [(*pixel >> 16) as u8, (*pixel >> 8) as u8, *pixel as u8, 255])
+        .collect();
+    image::save_buffer(&output_path, &rgba, size[0] as u32, size[1] as u32, image::ColorType::Rgba8).expect("synthetic panel PNG");
+    std::fs::write(
+        output_path.with_extension("json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "synthetic_cpu_capture": true,
+            "panel": "imports::ui::folder_panel::show",
+            "native_or_vulkan_acceptance": false,
+            "painted_text": text.iter().map(|(text, pos)| serde_json::json!({"text": text, "x": pos.x, "y": pos.y})).collect::<Vec<_>>()
+        }))
+        .unwrap(),
+    )
+    .expect("capture record");
+    let position = |name| {
+        text.iter()
+            .find(|(label, _)| label == name)
+            .unwrap_or_else(|| panic!("visible {name}"))
+            .1
+    };
+    assert!(position("Set2").y < position("Set10").y);
+    assert!(imports.entries.iter().all(|entry| entry.selected));
+    assert_eq!(world.inventory.folders.len(), 1, "capture creates no inventory folders");
+    assert!(!imports.busy());
+}
+
 #[test]
 fn import_folder_preview_folds_without_creating_folders_or_losing_edited_paths() {
     let ctx = egui::Context::default();

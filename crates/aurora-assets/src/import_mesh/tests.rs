@@ -203,6 +203,30 @@ fn collada_duplicate_controller_ids_require_equivalent_definitions() {
     );
 }
 
+#[test]
+fn collada_duplicate_controllers_ignore_formatting_but_reject_changed_attributes() {
+    let skeleton = crate::Skeleton::parse(include_bytes!("../../../aurora-viewer/assets/character/avatar_skeleton.xml")).expect("skeleton");
+    let document = collada_objects(r##"<node><instance_controller url="#a-skin"/></node>"##, true, true, false)
+        .replace("<controller id=\"a-skin\">", "<controller id=\"a-skin\" name=\"shared\">");
+    let second = document.rfind("<controller").expect("duplicate controller");
+    let (prefix, repeated) = document.split_at(second);
+    let formatted = format!(
+        "{prefix}{}",
+        repeated
+            .replacen("id=\"a-skin\" name=\"shared\"", "name=\"shared\" id=\"a-skin\"", 1)
+            .replacen(">mPelvis<", ">\n mPelvis\t <", 1)
+    );
+    collada::parse(formatted.as_bytes(), &skeleton).expect("equivalent XML attribute order and whitespace");
+
+    let conflicting = formatted.replacen("name=\"shared\" id=\"a-skin\"", "name=\"different\" id=\"a-skin\"", 1);
+    let error = collada::parse(conflicting.as_bytes(), &skeleton).expect_err("changed attributes conflict");
+    assert!(
+        error
+            .to_string()
+            .contains("duplicate Collada ID for non-equivalent elements: a-skin")
+    );
+}
+
 fn cube() -> Model {
     let vertices = [-0.5f32, 0.5]
         .into_iter()

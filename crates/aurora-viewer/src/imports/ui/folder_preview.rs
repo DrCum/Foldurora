@@ -187,6 +187,39 @@ mod tests {
     }
 
     #[test]
+    fn preview_collapse_keeps_original_file_indices() {
+        let mut preview = Preview::default();
+        let root = vec!["i:root".to_owned()];
+        let set2 = vec!["i:root".to_owned(), "p:Set2".to_owned()];
+        let set10 = vec!["i:root".to_owned(), "p:Set10".to_owned()];
+        let inner = vec!["i:root".to_owned(), "p:Set2".to_owned(), "p:Inner".to_owned()];
+        for (path, name) in [(&root, "Textures"), (&set2, "Set2"), (&set10, "Set10"), (&inner, "Inner")] {
+            preview.nodes.insert(
+                path.clone(),
+                Node {
+                    name: name.into(),
+                    edit: None,
+                },
+            );
+        }
+        for (path, index) in [(&root, 77), (&set2, 42), (&set10, 5), (&inner, 17)] {
+            preview.files.insert(path.clone(), vec![index]);
+        }
+        preview.files.insert(Vec::new(), vec![99]);
+        let expanded = preview.ordered_rows(&BTreeSet::new());
+        assert_eq!(
+            expanded.iter().filter_map(|(_, index)| *index).collect::<Vec<_>>(),
+            [17, 42, 5, 77, 99]
+        );
+
+        let collapsed = preview.ordered_rows(&BTreeSet::from([set2.clone()]));
+        assert!(collapsed.contains(&(set2, None)));
+        assert!(!collapsed.iter().any(|(path, _)| path == &inner));
+        assert_eq!(collapsed.iter().filter_map(|(_, index)| *index).collect::<Vec<_>>(), [5, 77, 99]);
+        assert_eq!(preview.ordered_rows(&BTreeSet::new()), expanded);
+    }
+
+    #[test]
     fn preview_follows_real_uuid_ancestry_and_shared_routing_instead_of_the_source_tree() {
         let ctx = egui::Context::default();
         let mut world = crate::world::World::new(Arc::new(crate::scene::avatar::AvatarLibrary::load()));
