@@ -68,7 +68,7 @@ pub(super) enum Reply {
 }
 pub(super) struct Worker {
     requests: SyncSender<Request>,
-    replies: Receiver<Reply>,
+    replies: Mutex<Receiver<Reply>>,
     cancellation: NativeStoreCancellation,
 }
 
@@ -123,7 +123,7 @@ impl Worker {
             .map_err(io_error)?;
         Ok(Some(Self {
             requests,
-            replies,
+            replies: Mutex::new(replies),
             cancellation,
         }))
     }
@@ -131,7 +131,14 @@ impl Worker {
         self.requests.try_send(request).map_err(|_| Error::Unavailable)
     }
     pub(super) fn poll(&self) -> Result<Option<Reply>, Error> {
-        match self.replies.try_recv() {
+        // Receiver is Send but not Sync. Protect only this GUI endpoint so
+        // immutable World readers retain safe auto-Sync; polling never waits.
+        let replies = match self.replies.try_lock() {
+            Ok(replies) => replies,
+            Err(std::sync::TryLockError::WouldBlock) => return Ok(None),
+            Err(std::sync::TryLockError::Poisoned(_)) => return Err(Error::Unavailable),
+        };
+        match replies.try_recv() {
             Ok(reply) => Ok(Some(reply)),
             Err(mpsc::TryRecvError::Empty) => Ok(None),
             Err(mpsc::TryRecvError::Disconnected) => Err(Error::Unavailable),

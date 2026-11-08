@@ -325,6 +325,11 @@ impl Deref for Browse<'_, '_> {
     }
 }
 impl Browse<'_, '_> {
+    /// The original qualified ordinary gate, even when the active tab uses
+    /// an explicit exemption. This copy still borrows the same actual read.
+    pub(super) fn ordinary(&self) -> Gate<'_> {
+        self.ordinary
+    }
     pub(super) fn request(&mut self, id: Uuid) {
         if self.gate.passes(id) {
             self.demands.request(id, matches!(self.gate, Gate::Ordinary { .. }));

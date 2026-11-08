@@ -116,7 +116,7 @@ pub(super) fn tabs(ui: &mut egui::Ui, p: &Palette, inv: &archive::Browse<'_, '_>
 
 /// The Marketplace and sender deliveries not acknowledged by this account.
 pub(super) fn unseen_received(inv: &archive::Browse<'_, '_>, st: &mut InventoryUi) -> usize {
-    st.received_badge.unseen_gated(inv, inv.ordinary)
+    st.received_badge.unseen_gated(inv, inv.ordinary())
 }
 
 /// The hint of the search field: what it searches.
