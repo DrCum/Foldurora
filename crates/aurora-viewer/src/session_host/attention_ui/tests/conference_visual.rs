@@ -41,7 +41,7 @@ fn conference_host_attention_and_composer_cpu_capture() {
         let mut painter = crate::crash::software::Painter::default();
         let mut pixels = vec![0; 640 * 640];
         for frame in 0..4 {
-            let output = context.run_ui(
+            let mut output = context.run_ui(
                 RawInput {
                     screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(640.0, 640.0))),
                     time: Some(f64::from(frame) / 60.0),
@@ -72,6 +72,7 @@ fn conference_host_attention_and_composer_cpu_capture() {
                 output.pixels_per_point,
                 theme.palette().panel,
             );
+            output.textures_delta.clear(); // The CPU painter consumed every delta.
         }
         let rgba: Vec<_> = pixels
             .iter()
