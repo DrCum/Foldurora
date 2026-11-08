@@ -14,6 +14,8 @@ use std::sync::OnceLock;
 use uuid::Uuid;
 
 pub(super) mod settings_file;
+#[cfg(any(windows, test))]
+mod windows_path;
 
 struct Active {
     root: PathBuf,
@@ -634,10 +636,7 @@ mod platform {
         directory: bool,
         create: impl FnOnce(*const u16, &SECURITY_ATTRIBUTES, PSID) -> io::Result<T>,
     ) -> io::Result<T> {
-        let name: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
-        if name[..name.len() - 1].contains(&0) {
-            return Err(invalid("host path contains a nul"));
-        }
+        let name = native_path_name(path)?;
         let mut user = current_user()?;
         // SAFETY: successful TokenUser query initialized an aligned TOKEN_USER in user.
         let sid = unsafe { (*user.as_mut_ptr().cast::<TOKEN_USER>()).User.Sid };
@@ -736,14 +735,23 @@ mod platform {
     }
 
     fn validate_path_security(path: &Path, directory: bool) -> io::Result<()> {
-        let name: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
-        if name[..name.len() - 1].contains(&0) {
-            return Err(invalid("host path contains a nul"));
-        }
+        let name = native_path_name(path)?;
         let mut user = current_user()?;
         // SAFETY: successful TokenUser query initialized an aligned TOKEN_USER in user.
         let sid = unsafe { (*user.as_mut_ptr().cast::<TOKEN_USER>()).User.Sid };
         verify_security(name.as_ptr(), sid, directory)
+    }
+
+    fn native_path_name(path: &Path) -> io::Result<Vec<u16>> {
+        if !path.is_absolute() || path.components().any(|component| matches!(component, Component::ParentDir)) {
+            return Err(invalid("private native path must be absolute without traversal"));
+        }
+        // Lexical Windows normalization, without canonicalizing/following an
+        // existing junction. Raw Win32 APIs do not perform std::fs's automatic
+        // long-path conversion. Security checks still inspect the same object.
+        let absolute = std::path::absolute(path)?;
+        let units: Vec<u16> = absolute.as_os_str().encode_wide().collect();
+        super::windows_path::encode_absolute(&units).ok_or_else(|| invalid("unsupported private native Windows path"))
     }
 
     fn verify_security(name: *const u16, sid: PSID, directory: bool) -> io::Result<()> {
@@ -896,6 +904,60 @@ mod tests {
         assert_eq!(boards.read().unwrap().unwrap(), b"boards");
         assert!(workspaces.path.join("named-v1.json").is_file());
         assert!(boards.path.join("boards-v1.json").is_file());
+    }
+    #[cfg(windows)]
+    #[test]
+    fn native_store_windows_long_ordinary_paths_preserve_private_publication_and_original_bytes() {
+        use std::ffi::OsString;
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+        use std::path::Prefix;
+        let root = host_root().unwrap();
+        let wide: Vec<u16> = root.as_os_str().encode_wide().collect();
+        let plain = match root.components().next().unwrap() {
+            Component::Prefix(prefix) => match prefix.kind() {
+                Prefix::VerbatimDisk(_) => PathBuf::from(OsString::from_wide(&wide[4..])),
+                Prefix::VerbatimUNC(_, _) => {
+                    let mut ordinary = vec![b'\\' as u16; 2];
+                    ordinary.extend_from_slice(&wide[8..]);
+                    PathBuf::from(OsString::from_wide(&ordinary))
+                }
+                Prefix::Disk(_) | Prefix::UNC(_, _) => root.clone(),
+                _ => panic!("native test host root must use a supported drive or UNC path"),
+            },
+            _ => panic!("native test host root must be absolute"),
+        };
+        // Only new synthetic descendants are created. This deliberately keeps
+        // the ordinary spelling which exposed the raw Win32 API defect; no
+        // environment, existing owner/DACL or Windows long-path policy changes.
+        let base = plain.join(format!("long-native-store-{}-{}", Uuid::new_v4(), "x".repeat(80)));
+        for kind in [
+            NativeStoreKind::Workspaces,
+            NativeStoreKind::Boards,
+            NativeStoreKind::InventoryArchive,
+        ] {
+            let account = Uuid::new_v4();
+            let grid = "a".repeat(64);
+            let directory = NativeDirectory {
+                kind,
+                path: base.join(kind.directory()).join(account.to_string()).join(&grid),
+                account,
+                grid,
+            };
+            assert!(directory.path.as_os_str().encode_wide().count() + 55 > 260);
+            let _lock = directory.lock().unwrap();
+            directory.publish(b"original", None).unwrap();
+            assert_eq!(directory.read().unwrap().as_deref(), Some(b"original".as_slice()));
+            assert!(directory.publish(b"wrong original", None).is_err());
+            assert_eq!(directory.read().unwrap().as_deref(), Some(b"original".as_slice()));
+            directory.publish(b"replacement", Some(b"original")).unwrap();
+            assert_eq!(directory.read().unwrap().as_deref(), Some(b"replacement".as_slice()));
+            assert!(
+                std::fs::read_dir(&directory.path)
+                    .unwrap()
+                    .all(|entry| { !entry.unwrap().file_name().to_string_lossy().starts_with(".native-store-") })
+            );
+        }
+        std::fs::remove_dir_all(base).unwrap();
     }
     #[test]
     fn native_store_cancellation_before_io_or_after_sync_never_replaces_original_bytes() {
