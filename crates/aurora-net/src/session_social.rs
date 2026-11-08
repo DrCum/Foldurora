@@ -156,7 +156,11 @@ impl Session<'_> {
                     }
                 }
             }
-            NetCommand::ChatSession { method, session } => self.chat_session_request(*method, *session),
+            NetCommand::ChatSession {
+                method,
+                session,
+                initialization,
+            } => self.chat_session_request(*method, *session, *initialization),
             NetCommand::Call {
                 method,
                 session,
@@ -219,37 +223,16 @@ impl Session<'_> {
     }
 
     /// POST to ChatSessionRequest (chatterBoxInvitationCoro, chatterBoxHistoryCoro).
-    fn chat_session_request(&mut self, method: SessionMethod, session: uuid::Uuid) {
+    fn chat_session_request(&mut self, method: SessionMethod, session: uuid::Uuid, initialization: Option<social::RosterInitialization>) {
         let Some(url) = self.main_cap("ChatSessionRequest") else {
             log::warn!("ChatSessionRequest: no capability ({})", method.name());
-            emit(
-                self.sh,
-                NetEvent::ChatSessionReply {
-                    method,
-                    session,
-                    result: None,
-                    not_found: false,
-                },
-            );
+            emit(self.sh, chat_session_failed(method, session, initialization, false));
             return;
         };
         let http = self.sh.caps_http.clone();
         let events = self.sh.events.clone();
         tokio::spawn(async move {
-            let body = llsd_map! { "method" => method.name(), "session-id" => session };
-            let (result, not_found) = match crate::caps::post_llsd(&http, &url, &body).await {
-                Ok(v) => (Some(v), false),
-                Err(e) => {
-                    log::warn!("ChatSessionRequest {} for {session}: {e}", method.name());
-                    (None, matches!(e, crate::caps::CapsError::Status(404)))
-                }
-            };
-            let _ = events.send(NetEvent::ChatSessionReply {
-                method,
-                session,
-                result,
-                not_found,
-            });
+            let _ = events.send(chat_session_reply(&http, &url, method, session, initialization).await);
         });
     }
 
@@ -467,7 +450,7 @@ impl Session<'_> {
                         session: b["session_id"].as_uuid(),
                         success: b["success"].as_bool(),
                         error: b["error"].as_str().to_owned(),
-                        agents: social::parse_session_agents(b),
+                        agents: social::parse_session_agent_batch(b, social::MAX_SESSION_ROSTER_ENTRIES),
                     },
                 );
             }
@@ -476,7 +459,7 @@ impl Session<'_> {
                     self.sh,
                     NetEvent::SessionAgents {
                         session: b["session_id"].as_uuid(),
-                        agents: social::parse_session_agents(b),
+                        agents: social::parse_session_agent_batch(b, social::MAX_SESSION_ROSTER_ENTRIES),
                     },
                 );
             }
@@ -561,6 +544,145 @@ fn rand_u64() -> u64 {
             .unwrap_or(0),
     );
     h.finish()
+}
+
+/// HTTP is deliberately unaware of roster ownership. It returns the exact
+/// captured local value on every outcome; only the native World may consume it.
+async fn chat_session_reply(
+    http: &reqwest::Client,
+    url: &str,
+    method: SessionMethod,
+    session: uuid::Uuid,
+    initialization: Option<social::RosterInitialization>,
+) -> NetEvent {
+    // LLIMMgr::chatterBoxInvitationCoro: no local owner/login/request metadata
+    // is sent to Second Life, including when the HTTP task outlives its owner.
+    let body = llsd_map! { "method" => method.name(), "session-id" => session };
+    match crate::caps::post_llsd(http, url, &body).await {
+        Ok(result) => NetEvent::ChatSessionReply {
+            method,
+            session,
+            initialization,
+            result: Some(result),
+            not_found: false,
+        },
+        Err(error) => {
+            log::warn!("ChatSessionRequest {} for {session}: {error}", method.name());
+            chat_session_failed(
+                method,
+                session,
+                initialization,
+                matches!(error, crate::caps::CapsError::Status(404)),
+            )
+        }
+    }
+}
+
+fn chat_session_failed(
+    method: SessionMethod,
+    session: uuid::Uuid,
+    initialization: Option<social::RosterInitialization>,
+    not_found: bool,
+) -> NetEvent {
+    NetEvent::ChatSessionReply {
+        method,
+        session,
+        initialization,
+        result: None,
+        not_found,
+    }
+}
+
+#[cfg(test)]
+mod session_correlation_tests {
+    use super::*;
+    use social::{NativeSessionScope, SessionRosterAuthority};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use uuid::Uuid;
+
+    #[tokio::test]
+    async fn conference_roster_http_keeps_the_original_capture_on_success_404_and_other_failure_without_wire_metadata() {
+        let http = reqwest::Client::builder().no_proxy().build().unwrap();
+        let session = Uuid::from_u128(100);
+        let scope = NativeSessionScope::new(Uuid::from_u128(1), 7).unwrap();
+        let mut roster = SessionRosterAuthority::new(scope, session, 4, 8).unwrap();
+        for status in ["200 OK", "404 Not Found", "503 Service Unavailable"] {
+            let capture = roster.begin_acceptance(scope, 1).unwrap();
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}/cap/session", listener.local_addr().unwrap());
+            let reply = aurora_llsd::to_xml(&llsd_map! { "agent_info" => llsd_map! {} });
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                let body = loop {
+                    let mut buffer = [0; 2048];
+                    let read = socket.read(&mut buffer).await.unwrap();
+                    assert_ne!(read, 0, "complete native request");
+                    request.extend_from_slice(&buffer[..read]);
+                    let text = String::from_utf8_lossy(&request);
+                    if let Some((_, body)) = text.split_once("\r\n\r\n")
+                        && body.contains("</llsd>")
+                    {
+                        break body.to_owned();
+                    }
+                };
+                let header = format!("HTTP/1.1 {status}\r\nConnection: close\r\nContent-Length: {}\r\n\r\n", reply.len());
+                socket.write_all(header.as_bytes()).await.unwrap();
+                socket.write_all(&reply).await.unwrap();
+                crate::test_http::finish(socket);
+                aurora_llsd::from_xml(body.as_bytes()).unwrap()
+            });
+            let pending = chat_session_reply(&http, &url, SessionMethod::AcceptInvitation, session, Some(capture));
+            // A newer request exists before the older callback is delivered.
+            let replacement = roster.begin_acceptance(scope, 1).unwrap();
+            let event = tokio::time::timeout(std::time::Duration::from_secs(5), pending).await.unwrap();
+            let NetEvent::ChatSessionReply {
+                method,
+                session: returned,
+                initialization,
+                result,
+                not_found,
+            } = event
+            else {
+                panic!("session reply")
+            };
+            assert_eq!(method, SessionMethod::AcceptInvitation);
+            assert_eq!(returned, session);
+            assert_eq!(initialization, Some(capture));
+            assert_ne!(initialization, Some(replacement));
+            assert_eq!(result.is_some(), status.starts_with("200"));
+            assert_eq!(not_found, status.starts_with("404"));
+            assert_eq!(
+                server.await.unwrap(),
+                llsd_map! { "method" => "accept invitation", "session-id" => session },
+                "the actual HTTP body contains only the native method and session"
+            );
+        }
+    }
+
+    #[test]
+    fn conference_roster_http_missing_capability_failure_keeps_the_original_capture_and_unproven_history_stays_unproven() {
+        let session = Uuid::from_u128(100);
+        let scope = NativeSessionScope::new(Uuid::from_u128(1), 7).unwrap();
+        let mut roster = SessionRosterAuthority::new(scope, session, 4, 8).unwrap();
+        let capture = roster.begin_acceptance(scope, 1).unwrap();
+        let NetEvent::ChatSessionReply {
+            initialization,
+            result,
+            not_found,
+            ..
+        } = chat_session_failed(SessionMethod::AcceptInvitation, session, Some(capture), false)
+        else {
+            panic!("missing capability reply")
+        };
+        assert_eq!(initialization, Some(capture));
+        assert!(result.is_none() && !not_found);
+        let NetEvent::ChatSessionReply { initialization, .. } = chat_session_failed(SessionMethod::FetchHistory, session, None, false)
+        else {
+            panic!("history reply")
+        };
+        assert!(initialization.is_none());
+    }
 }
 
 #[cfg(test)]

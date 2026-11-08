@@ -3074,7 +3074,11 @@ pub fn demo_reply(cmd: &aurora_net::NetCommand) -> Vec<NetEvent> {
             title: String::new(),
         }],
         aurora_net::NetCommand::LeaveGroup(id) => vec![NetEvent::GroupDropped(*id)],
-        aurora_net::NetCommand::ChatSession { method, session } => {
+        aurora_net::NetCommand::ChatSession {
+            method,
+            session,
+            initialization,
+        } => {
             let agents = |ids: &[Uuid]| {
                 ids.iter()
                     .map(|a| aurora_net::SessionAgent {
@@ -3092,12 +3096,13 @@ pub fn demo_reply(cmd: &aurora_net::NetCommand) -> Vec<NetEvent> {
                     let mut ev = vec![NetEvent::ChatSessionReply {
                         method: *method,
                         session: *session,
+                        initialization: *initialization,
                         result: Some(aurora_llsd::Llsd::Undef),
                         not_found: false,
                     }];
                     ev.push(NetEvent::SessionAgents {
                         session: *session,
-                        agents: agents(&[me, DEMO_NOVA, DEMO_TESS, DEMO_LOUP]),
+                        agents: agents(&[me, DEMO_NOVA, DEMO_TESS, DEMO_LOUP]).into(),
                     });
                     // the blocked member's message must not show
                     ev.push(NetEvent::InstantMessage(aurora_net::InstantMessage {
@@ -3158,6 +3163,7 @@ pub fn demo_reply(cmd: &aurora_net::NetCommand) -> Vec<NetEvent> {
                     vec![NetEvent::ChatSessionReply {
                         method: *method,
                         session: *session,
+                        initialization: *initialization,
                         result: Some(history),
                         not_found: false,
                     }]
@@ -3189,7 +3195,8 @@ pub fn demo_reply(cmd: &aurora_net::NetCommand) -> Vec<NetEvent> {
                 moderator: None,
                 text_muted: None,
                 entered: false,
-            }],
+            }]
+            .into(),
         }],
         // the typing notices are no lines
         aurora_net::NetCommand::Chat {

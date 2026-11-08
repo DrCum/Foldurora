@@ -7,7 +7,7 @@ use aurora_llsd::Llsd;
 use uuid::Uuid;
 
 mod agent_batch;
-pub use agent_batch::{SessionAgentBatch, parse_session_agent_batch};
+pub use agent_batch::{MAX_SESSION_ROSTER_ENTRIES, SessionAgentBatch, parse_session_agent_batch};
 mod roster_authority;
 pub use roster_authority::{NativeSessionScope, RosterCompletion, RosterInitialization, RosterSnapshot, SessionRosterAuthority};
 

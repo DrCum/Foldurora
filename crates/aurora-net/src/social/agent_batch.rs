@@ -11,6 +11,10 @@ use aurora_llsd::{Llsd, Map};
 use std::collections::HashSet;
 use uuid::Uuid;
 
+/// Local proof budget for a single native packet, not an SL participant limit.
+/// Larger packets still retain the unchanged legacy presentation vector.
+pub const MAX_SESSION_ROSTER_ENTRIES: usize = 4096;
+
 /// Immutable native presentation entries with sealed roster provenance.
 /// No caller can replace the entries while retaining a completeness witness.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -18,6 +22,19 @@ pub struct SessionAgentBatch {
     agents: Vec<SessionAgent>,
     baseline_count: Option<usize>,
     valid: bool,
+}
+
+impl std::ops::Deref for SessionAgentBatch {
+    type Target = [SessionAgent];
+    fn deref(&self) -> &Self::Target {
+        &self.agents
+    }
+}
+
+impl From<Vec<SessionAgent>> for SessionAgentBatch {
+    fn from(agents: Vec<SessionAgent>) -> Self {
+        Self::unproven(agents)
+    }
 }
 
 impl SessionAgentBatch {

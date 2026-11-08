@@ -248,6 +248,7 @@ mod tests {
     #[test]
     fn open_ims_groups_appear_before_the_mute_reply_and_only_then_join() {
         let mut w = world();
+        w.bind_session_test_login(Uuid::from_u128(99));
         let (resident, group, old_group) = (Uuid::from_u128(1), Uuid::from_u128(2), Uuid::from_u128(3));
         w.social.focus_im = Some(resident);
         w.reopen_ims = vec![
@@ -295,11 +296,11 @@ mod tests {
                 session: group,
                 success: true,
                 error: String::new(),
-                agents: Vec::new(),
+                agents: Vec::new().into(),
             });
         }
         assert!(
-            matches!(w.groups.take_commands()[..], [NetCommand::ChatSession { method: aurora_net::SessionMethod::FetchHistory, session }] if session == group)
+            matches!(w.groups.take_commands()[..], [NetCommand::ChatSession { method: aurora_net::SessionMethod::FetchHistory, session, .. }] if session == group)
         );
         w.restore_open_ims(true);
         assert!(w.groups.take_commands().is_empty());

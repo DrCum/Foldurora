@@ -1,5 +1,21 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Foldurora native Conference dependency (2026-11-08): stable actual-login
+  scope, native incarnation/original callback ownership independent of proof
+  budgets, typed EQ base/delta provenance and local-only HTTP correlation.
+  Native starts, acceptance, call remap, leave/snooze/restore/forced close and
+  replacement are joined. Close loss constrains only already-pending remaps;
+  proof refusal does not manufacture native closes. Latest explicit native self
+  mute survives proof loss and unknown-history overflow cannot infer unmute.
+  Twenty parser/model and two real loopback-HTTP cases passed before World
+  integration; nine World cases passed before the final reviewed loss/mute fixes.
+  Twelve current World regressions are authored, awaiting focused validation.
+  One disk-full link ran no tests; negative evidence is retained. The earlier
+  synthetic Group temp→final remap fixture is now an explicit fixed-target
+  refusal; real Conference remap/self-mute is covered by the new native fixture.
+  No Conference host enablement, full-group validation, Windows/native package
+  or human acceptance is claimed. Publication holds remain unchanged.
+
 - 🔧 Foldurora Conference roster authority prerequisite (2026-11-08): sealed
   owner/login/incarnation/original-request captures, bounded retained deltas,
   base-then-pending initialization, temporary/final merge and effective revision.

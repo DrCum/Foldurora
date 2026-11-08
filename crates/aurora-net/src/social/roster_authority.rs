@@ -378,6 +378,12 @@ impl SessionRosterAuthority {
         self.retired = true;
     }
 
+    /// The owner could not retain required native history. This cannot grant
+    /// or recover authority within the same native incarnation.
+    pub fn invalidate(&mut self) {
+        self.lose();
+    }
+
     pub fn snapshot(&self, scope: NativeSessionScope, incarnation: u64) -> Option<RosterSnapshot<'_>> {
         if scope != self.scope || incarnation == 0 || incarnation != self.incarnation || self.retired || self.lost || self.revision == 0 {
             return None;

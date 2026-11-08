@@ -12,6 +12,7 @@ impl World {
     pub(crate) fn bind_shared_chat_activity(&mut self, agent: Uuid, session: Uuid) {
         self.shared_chat_incoming_owner = None;
         self.shared_chat_incoming = None;
+        self.groups.rosters.bind(None);
         if agent.is_nil() || session.is_nil() {
             return;
         }
@@ -20,6 +21,9 @@ impl World {
         };
         self.shared_chat_incoming_owner = Some((agent, session));
         self.shared_chat_incoming = Some(NativeIncoming { stream, serial: 0 });
+        // This login generation outlives incoming-serial exhaustion. Native
+        // callbacks must not disappear merely because Close activity is lost.
+        self.groups.rosters.bind(aurora_net::social::NativeSessionScope::new(agent, stream));
     }
     fn shared_chat_activity_current(&self) -> Option<NativeIncoming> {
         let (agent, session) = self.shared_chat_incoming_owner?;

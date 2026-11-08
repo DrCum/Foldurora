@@ -503,6 +503,7 @@ impl World {
             if voice { ", with a call" } else { "" }
         );
         self.info_mut(session, &name).started_by_us = true;
+        self.begin_session_initialization(session, true);
         self.session_lines(session);
         self.social.focus_im = Some(session);
         self.calls.conferences.insert(session, agents.clone());
@@ -534,6 +535,7 @@ impl World {
             }
             Err(status) => {
                 log::warn!("conference: start failed ({status})");
+                self.cancel_session_initialization(session);
                 self.calls.conferences.remove(&session);
                 if self.calls.active.as_ref().is_some_and(|c| c.session == session) {
                     let name = aurora_i18n::tr!("world-groups-conference");
@@ -1001,9 +1003,12 @@ impl World {
             (CallKind::P2p { other: inv.from }, inv.from, inv.from_name.clone())
         } else {
             // accept the session (chatterBoxInvitationCoro)
+            self.info_mut(inv.session, &inv.session_name);
+            let initialization = self.begin_session_initialization(inv.session, false);
             self.groups.out.push(NetCommand::ChatSession {
                 method: SessionMethod::AcceptInvitation,
                 session: inv.session,
+                initialization,
             });
             let group = self.groups.is_member(&inv.session);
             let name = if inv.session_name.is_empty() {
@@ -1055,6 +1060,7 @@ impl World {
             self.groups.out.push(NetCommand::ChatSession {
                 method: SessionMethod::DeclineInvitation,
                 session: inv.session,
+                initialization: None,
             });
         }
     }
@@ -1076,7 +1082,7 @@ mod tests {
 
     fn world() -> World {
         let mut w = World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
-        w.agent_id = Uuid::from_u128(1);
+        w.bind_session_test_login(Uuid::from_u128(1));
         w.calls.voice_enabled = true;
         w
     }
@@ -1449,13 +1455,13 @@ mod tests {
         // a full list is no arrival; someone not invited is no news
         w.apply(NetEvent::SessionAgents {
             session,
-            agents: vec![agent(a, false), agent(c, true)],
+            agents: vec![agent(a, false), agent(c, true)].into(),
         });
         assert!(said(&mut w).is_empty());
         // both arrive: one message, names in the order of their usernames
         w.apply(NetEvent::SessionAgents {
             session,
-            agents: vec![agent(a, true), agent(b, true)],
+            agents: vec![agent(a, true), agent(b, true)].into(),
         });
         let names = format!(
             "{}, {}",
@@ -1469,7 +1475,7 @@ mod tests {
         // told once
         w.apply(NetEvent::SessionAgents {
             session,
-            agents: vec![agent(a, true)],
+            agents: vec![agent(a, true)].into(),
         });
         assert!(said(&mut w).is_empty());
         assert!(!w.calls.invited.contains_key(&session));
@@ -1489,7 +1495,7 @@ mod tests {
             session: real,
             success: true,
             error: String::new(),
-            agents: Vec::new(),
+            agents: Vec::new().into(),
         });
         assert_eq!(w.calls.active.as_ref().map(|c| c.session), Some(real));
         assert_eq!(calls_sent(&mut w), vec![(CallMethod::Call, real)]);

@@ -587,6 +587,22 @@ retain loss and final-session binding, including incomplete completions and
 initialization-kind changes. Only a genuine new native incarnation clears it.
 Live effective membership/mute changes advance a checked revision. The model
 has no network/UI effects; World lifecycle/callback integration is still required.
+`world/session_roster.rs` now owns that native integration. Each native SessionInfo
+retains the original local callback and checked incarnation independently of
+bounded roster proof. The actual LoggedIn hook binds the stable login scope;
+incoming-serial exhaustion cannot end it. ChatSession HTTP callbacks echo the
+capture on all outcomes without adding fields to the native HTTP body. The
+reducer matches/consumes it before success or failure; start witnesses survive
+until validation precedes call handoff and temporary-ID remapping. Native leave,
+replacement, forced close and login reset retire it; host-only Close does not.
+Sealed native EQ batches retain full-base/delta provenance. Proof keeps128 tracked
+sessions,1024 members/session and4096 pending entries/session (local limits).
+Unknown/lost/malformed history never truncates into completeness. Independent
+bounded close cutoffs constrain only original pending remaps; later genuine
+native starts and fixed-target callbacks continue after proof saturation. Native
+pending self-mute survives proof loss, including temp/final merge; unavailable
+mute history cannot infer unmute from an older bootstrap. These native foundations
+still do not enable Conference host catalogue/Send/Read/Close/Attention/Review.
 
 The Close-in-host producer retains its V4 closed data in `chat/close.rs`.
 `world/shared_chat_activity.rs` mints a checked native stream at actual LoggedIn,

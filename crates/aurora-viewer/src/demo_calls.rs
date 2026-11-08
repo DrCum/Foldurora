@@ -100,7 +100,11 @@ fn conference_started(temp: Uuid, agents: &[Uuid]) -> NetEvent {
         session: Uuid::from_u128(temp.as_u128() ^ 0xC0F),
         success: true,
         error: String::new(),
-        agents: std::iter::once(DEMO_AGENT).chain(agents.iter().copied()).map(present).collect(),
+        agents: std::iter::once(DEMO_AGENT)
+            .chain(agents.iter().copied())
+            .map(present)
+            .collect::<Vec<_>>()
+            .into(),
     }
 }
 
@@ -147,7 +151,8 @@ pub fn reply(method: CallMethod, session: Uuid) -> Vec<NetEvent> {
                         entered: true,
                         ..present(*a)
                     })
-                    .collect(),
+                    .collect::<Vec<_>>()
+                    .into(),
             };
             return vec![
                 NetEvent::CallReply {

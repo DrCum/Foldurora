@@ -95,6 +95,7 @@ pub mod rig_targets;
 pub mod rlva;
 pub mod script_debug;
 pub mod search;
+mod session_roster;
 mod shared_chat_activity;
 pub mod sim_console;
 pub mod social;
@@ -2984,12 +2985,6 @@ impl World {
             | NetEvent::SessionClosed { .. }
             | NetEvent::ChatSessionReply { .. }) => {
                 match &ev {
-                    NetEvent::SessionStarted {
-                        temp_session,
-                        session,
-                        success,
-                        ..
-                    } => self.call_session_started(*temp_session, *session, *success),
                     NetEvent::SessionClosed { session, .. } => self.call_session_closed(*session),
                     _ => {}
                 }

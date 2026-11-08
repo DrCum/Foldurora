@@ -461,12 +461,12 @@ pub enum NetEvent {
         session: Uuid,
         success: bool,
         error: String,
-        agents: Vec<crate::social::SessionAgent>,
+        agents: crate::social::SessionAgentBatch,
     },
     /// Participants joined / left a session (ChatterBoxSessionAgentListUpdates).
     SessionAgents {
         session: Uuid,
-        agents: Vec<crate::social::SessionAgent>,
+        agents: crate::social::SessionAgentBatch,
     },
     /// A session event failed (ChatterBoxSessionEventReply, e.g. muted by a moderator).
     SessionError {
@@ -490,6 +490,8 @@ pub enum NetEvent {
     ChatSessionReply {
         method: crate::social::SessionMethod,
         session: Uuid,
+        /// Original local request correlation, never a server-supplied value.
+        initialization: Option<crate::social::RosterInitialization>,
         result: Option<aurora_llsd::Llsd>,
         not_found: bool,
     },
@@ -1556,6 +1558,8 @@ pub enum NetCommand {
     ChatSession {
         method: crate::social::SessionMethod,
         session: Uuid,
+        /// Local callback correlation only; never serialized to SL.
+        initialization: Option<crate::social::RosterInitialization>,
     },
     /// Voice call request on ChatSessionRequest (credentials, P2P start /
     /// decline); `server_type` is the region's VoiceServerType.

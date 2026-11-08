@@ -39,6 +39,11 @@ pub mod dialog {
 
 #[derive(Debug, Clone, Default)]
 pub struct SessionInfo {
+    /// Minted only by this native owner; zero cannot authorize Conference chat.
+    pub(super) native_incarnation: u64,
+    pub(super) native_scope: Option<aurora_net::social::NativeSessionScope>,
+    pub(super) native_pending_text_mute: Option<(u64, bool)>,
+    pub(super) native_initialization: Option<super::session_roster::NativeInitialization>,
     pub name: String,
     /// Group chat (session id = group id); else an ad-hoc conference.
     pub group: bool,
@@ -59,6 +64,7 @@ pub struct SessionInfo {
 
 #[derive(Default)]
 pub struct GroupChats {
+    pub(super) rosters: super::session_roster::NativeSessionRosters,
     pub groups: Vec<GroupMembership>,
     pub sessions: HashMap<Uuid, SessionInfo>,
     /// Named login conversations shown before the mute reply; not joined yet.
@@ -298,9 +304,18 @@ impl World {
     }
 
     pub(super) fn info_mut(&mut self, session: Uuid, name: &str) -> &mut SessionInfo {
+        let fresh = !self.groups.sessions.contains_key(&session);
+        let incarnation = if fresh { self.allocate_session_incarnation(session) } else { 0 };
+        let native_scope = self.roster_scope();
+        let pending_mute = if fresh { self.take_pending_session_mute(session) } else { None };
         let group = self.groups.is_member(&session);
         let group_name = self.groups.group(&session).map(|g| g.name.clone());
         let s = self.groups.sessions.entry(session).or_default();
+        if fresh {
+            s.native_incarnation = incarnation;
+            s.native_scope = native_scope;
+            s.native_pending_text_mute = pending_mute;
+        }
         s.group |= group;
         if let Some(n) = group_name {
             s.name = n;
@@ -330,6 +345,7 @@ impl World {
         self.info_mut(group, &g.name);
         self.session_lines(group);
         if !known {
+            self.begin_session_initialization(group, true);
             // LLIMModel::sendStartSession(IM_SESSION_GROUP_START)
             self.groups.im(group, dialog::SESSION_GROUP_START, group, String::new());
             if let Some(s) = self.groups.sessions.get_mut(&group) {
@@ -421,6 +437,7 @@ impl World {
     /// (LLIMModel::sendLeaveSession), a 1:1 conversation only leaves the list
     /// (nothing is sent; the next message from that resident opens it again).
     pub fn leave_session(&mut self, session: Uuid) {
+        self.retire_session_roster(session);
         self.read_ledger.retire(Some(session));
         self.cancel_saved_im(session);
         self.groups.restoring.remove(&session);
@@ -443,6 +460,7 @@ impl World {
         if !self.groups.sessions.get(&group).is_some_and(|s| s.group) {
             return false;
         }
+        self.retire_session_roster(group);
         self.cancel_saved_im(group);
         self.groups.restoring.remove(&group);
         self.groups.deferred.retain(|id| *id != group);
@@ -504,6 +522,7 @@ impl World {
 
     pub(super) fn discard_restoring_group(&mut self, group: Uuid) {
         if self.groups.restoring.remove(&group) {
+            self.retire_session_roster(group);
             self.groups.sessions.remove(&group);
             self.social.ims.retain(|s| s.other != group);
         }
@@ -561,6 +580,7 @@ impl World {
     /// (LLIMMgr::addSession, LLIMModel::sendStartSession).
     fn reopen_group_chat(&mut self, group: Uuid, name: &str) {
         self.info_mut(group, name);
+        self.begin_session_initialization(group, true);
         self.session_lines(group);
         self.groups.im(group, dialog::SESSION_GROUP_START, group, String::new());
     }
@@ -609,6 +629,7 @@ impl World {
                 self.groups.active_received = true;
             }
             NetEvent::GroupDropped(id) => {
+                self.retire_session_roster(id);
                 self.cancel_saved_im(id);
                 self.discard_restoring_group(id);
                 self.groups.groups.retain(|g| g.id != id);
@@ -627,7 +648,14 @@ impl World {
                 error,
                 agents,
             } => {
+                let Some(capture) = self.session_start_capture(temp_session) else {
+                    return None;
+                };
                 if !success {
+                    if !self.fail_session_roster(temp_session, capture, true) {
+                        return None;
+                    }
+                    self.call_session_started(temp_session, session, false);
                     // LLIMMgr::showSessionStartError
                     let id = if self.groups.sessions.contains_key(&temp_session) {
                         temp_session
@@ -644,6 +672,15 @@ impl World {
                     self.groups.restoring.remove(&id);
                     return None;
                 }
+                if temp_session != session && self.groups.sessions.contains_key(&session) {
+                    return None;
+                }
+                let Some(completion) = self.complete_session_roster(temp_session, session, capture, &agents) else {
+                    return None;
+                };
+                // The original start witness is consumed before calls removes
+                // its pending conference map or native IDs are remapped.
+                self.call_session_started(temp_session, session, true);
                 if temp_session != session && !temp_session.is_nil() {
                     // processSessionInitializedReply: the server's id replaces ours
                     if let Some(info) = self.groups.sessions.remove(&temp_session) {
@@ -658,17 +695,22 @@ impl World {
                 let info = self.info_mut(session, "");
                 info.active = true;
                 info.closed = false;
-                apply_agents(info, &agents, me);
+                if completion != aurora_net::social::RosterCompletion::AcknowledgedExisting {
+                    apply_agents(info, &agents, me);
+                }
                 let fetch = !info.history_fetched;
                 info.history_fetched = true;
+                self.apply_completed_roster(session, completion);
                 if fetch {
                     self.groups.out.push(NetCommand::ChatSession {
                         method: SessionMethod::FetchHistory,
                         session,
+                        initialization: None,
                     });
                 }
             }
             NetEvent::SessionAgents { session, agents } => {
+                self.observe_session_roster(session, &agents);
                 let mute_change = self.groups.sessions.get_mut(&session).and_then(|s| {
                     let before = s.text_muted;
                     apply_agents(s, &agents, self.agent_id);
@@ -695,6 +737,7 @@ impl World {
                 self.session_system(session, format!("{what}{}", reason(&error)));
             }
             NetEvent::SessionClosed { session, reason: r } => {
+                self.retire_session_roster(session);
                 self.cancel_saved_im(session);
                 self.groups.restoring.remove(&session);
                 // LLIMMgr::showSessionForceClose
@@ -710,31 +753,48 @@ impl World {
             NetEvent::ChatSessionReply {
                 method,
                 session,
+                initialization,
                 result,
                 not_found,
             } => match method {
-                SessionMethod::AcceptInvitation => match result {
-                    Some(r) => {
-                        let agents = aurora_net::social::parse_session_agents(&r);
-                        if let Some(s) = self.groups.sessions.get_mut(&session) {
-                            s.active = true;
-                            apply_agents(s, &agents, self.agent_id);
+                SessionMethod::AcceptInvitation => {
+                    let Some(capture) = initialization.filter(|capture| self.session_capture_current(session, *capture, false)) else {
+                        return None;
+                    };
+                    match result {
+                        Some(r) => {
+                            let agents = aurora_net::social::parse_session_agent_batch(&r, aurora_net::social::MAX_SESSION_ROSTER_ENTRIES);
+                            let Some(completion) = self.complete_session_roster(session, session, capture, &agents) else {
+                                return None;
+                            };
+                            if let Some(s) = self.groups.sessions.get_mut(&session) {
+                                s.active = true;
+                                if completion != aurora_net::social::RosterCompletion::AcknowledgedExisting {
+                                    apply_agents(s, &agents, self.agent_id);
+                                }
+                            }
+                            self.apply_completed_roster(session, completion);
+                        }
+                        // chatterBoxInvitationCoro: only a 404 is shown
+                        // (session_does_not_exist_error), any other failure is
+                        // logged and the chat goes on
+                        None if not_found => {
+                            if !self.fail_session_roster(session, capture, true) {
+                                return None;
+                            }
+                            self.session_system(
+                                session,
+                                aurora_i18n::tr!("world-groups-could-not-join-the-session-it-no-longer-exists"),
+                            );
+                            if let Some(s) = self.groups.sessions.get_mut(&session) {
+                                s.closed = true;
+                            }
+                        }
+                        None => {
+                            self.fail_session_roster(session, capture, false);
                         }
                     }
-                    // chatterBoxInvitationCoro: only a 404 is shown
-                    // (session_does_not_exist_error), any other failure is
-                    // logged and the chat goes on
-                    None if not_found => {
-                        self.session_system(
-                            session,
-                            aurora_i18n::tr!("world-groups-could-not-join-the-session-it-no-longer-exists"),
-                        );
-                        if let Some(s) = self.groups.sessions.get_mut(&session) {
-                            s.closed = true;
-                        }
-                    }
-                    None => {}
-                },
+                }
                 SessionMethod::FetchHistory => {
                     if let Some(r) = result {
                         self.add_server_history(session, aurora_net::social::parse_history(&r));
@@ -816,9 +876,11 @@ impl World {
             self.session_push(session, l, true);
         }
         self.groups.restoring.remove(&session);
+        let initialization = self.begin_session_initialization(session, false);
         self.groups.out.push(NetCommand::ChatSession {
             method: SessionMethod::AcceptInvitation,
             session,
+            initialization,
         });
         // recent messages of a session we did not have yet (FetchGroupChatHistory)
         if let Some(s) = self.groups.sessions.get_mut(&session)
@@ -828,6 +890,7 @@ impl World {
             self.groups.out.push(NetCommand::ChatSession {
                 method: SessionMethod::FetchHistory,
                 session,
+                initialization: None,
             });
         }
     }
@@ -1239,6 +1302,7 @@ mod tests {
     fn a_refused_invitation_is_silent_unless_the_session_is_gone() {
         let (group, tess) = (Uuid::from_u128(10), Uuid::from_u128(7));
         let mut w = World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+        w.bind_session_test_login(Uuid::from_u128(99));
         w.groups.groups.push(aurora_net::GroupMembership {
             id: group,
             name: "Builders".into(),
@@ -1258,18 +1322,21 @@ mod tests {
             offline: false,
             timestamp: 0,
         });
-        let reply = |not_found| NetEvent::ChatSessionReply {
+        let reply = |not_found, initialization| NetEvent::ChatSessionReply {
             method: SessionMethod::AcceptInvitation,
             session: group,
+            initialization,
             result: None,
             not_found,
         };
         let lines = |w: &World| w.social.ims.iter().find(|s| s.other == group).map(|s| s.lines.len());
         assert_eq!(lines(&w), Some(1));
-        assert!(w.on_group_event(reply(false)).is_none());
+        let capture = w.begin_session_initialization(group, false);
+        assert!(w.on_group_event(reply(false, capture)).is_none());
         assert_eq!(lines(&w), Some(1), "no error line");
         assert!(!w.groups.sessions[&group].closed);
-        assert!(w.on_group_event(reply(true)).is_none());
+        let capture = w.begin_session_initialization(group, false);
+        assert!(w.on_group_event(reply(true, capture)).is_none());
         assert_eq!(lines(&w), Some(2), "the session no longer exists");
         assert!(w.groups.sessions[&group].closed);
     }
