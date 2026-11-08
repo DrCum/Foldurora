@@ -266,7 +266,7 @@ pub(super) fn contents_visible(
     });
     controls::init_filters(st, prefs);
     if st.scope.is_nil() {
-        st.counts.update_gated(inv, prefs, facts.worn.len(), inv.ordinary);
+        st.counts.update_gated(inv, prefs, facts.worn.len(), inv.ordinary());
     }
     // A folder window's explorer stays under its folder.
     let base = base(inv, st);

@@ -53,7 +53,7 @@ fn fixture(source: Source, pool: &WorkerPool) -> (Worker, Job) {
     (
         Worker {
             requests,
-            replies,
+            replies: Mutex::new(replies),
             cancellation: cancellation.clone(),
         },
         Job {
@@ -304,4 +304,47 @@ fn inventory_archive_store_full_or_disconnected_reply_sink_is_terminal_without_b
         }
         released(&pool);
     }
+}
+
+#[test]
+fn inventory_archive_store_sync_receiver_try_poll_preserves_queued_reply_under_real_held_mutex() {
+    fn assert_sync<T: Sync>() {}
+    assert_sync::<Worker>();
+    assert_sync::<crate::world::World>();
+    let source = source();
+    let ticket = LoadTicket { instance: 1, source };
+    let (requests, _incoming) = mpsc::sync_channel(1);
+    let (outgoing, replies) = mpsc::sync_channel(1);
+    let worker = Worker {
+        requests,
+        replies: Mutex::new(replies),
+        cancellation: NativeStoreCancellation::new(),
+    };
+    assert!(
+        outgoing
+            .try_send(Reply::Loaded {
+                ticket,
+                result: Err(Error::Invalid)
+            })
+            .is_ok()
+    );
+    let held = worker.replies.try_lock().unwrap();
+    for _ in 0..64 {
+        assert!(
+            worker.poll().unwrap().is_none(),
+            "contended real receiver is a nonconsuming try-only miss"
+        );
+    }
+    assert!(matches!(
+        outgoing.try_send(Reply::Loaded {
+            ticket,
+            result: Err(Error::Stale)
+        }),
+        Err(mpsc::TrySendError::Full(_))
+    ));
+    drop(held);
+    assert!(matches!(worker.poll().unwrap(), Some(Reply::Loaded { ticket: original, result: Err(Error::Invalid) }) if original == ticket));
+    assert!(worker.poll().unwrap().is_none());
+    drop(outgoing);
+    assert_eq!(worker.poll().err(), Some(Error::Unavailable));
 }
