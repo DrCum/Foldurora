@@ -126,3 +126,78 @@ fn inventory_archive_structure_real_same_outer_visual_ambiguity_changed_parent_a
         assert!(!control.committed(&ctx));
     }
 }
+
+#[test]
+fn inventory_archive_structure_previously_covered_control_cannot_seed_any_modality_when_visual_cover_disappears() {
+    for include in [false, true] {
+        for modality in MODALITIES {
+            let mut frames = Frames::new();
+            let original = original(&mut frames, include);
+            frames.frames.ctx.memory_mut(|memory| memory.request_focus(original.widget));
+            frames.cover_original = Some(original);
+            frames.run(Vec::new());
+            let previous = if include {
+                frames.state.archive_include_context.activation.control
+            } else {
+                frames.state.archive_context.activation.control
+            }
+            .unwrap();
+            assert!(
+                previous.registry(&frames.frames.ctx, true),
+                "metadata alone remains live beneath actual visual sibling"
+            );
+            assert!(!previous.committed(&frames.frames.ctx), "the original settled control was covered");
+            assert!(frames.frames.ctx.viewport(|viewport| {
+                viewport
+                    .prev_pass
+                    .widgets
+                    .get(egui::Id::unique("archive_authority_same_layer_cover"))
+                    .is_some()
+            }));
+            frames.cover_original = None;
+            controller_testing::reset_assignments();
+            match modality {
+                Modality::Pointer => {
+                    frames.pointer(original.rect.center(), egui::PointerButton::Primary, true);
+                    frames.pointer(original.rect.center(), egui::PointerButton::Primary, false);
+                }
+                Modality::Enter | Modality::Space => {
+                    let keycode = if matches!(modality, Modality::Enter) {
+                        egui::Key::Enter
+                    } else {
+                        egui::Key::Space
+                    };
+                    frames.run(vec![key(keycode, true)]);
+                    frames.run(vec![key(keycode, false)]);
+                }
+                Modality::Accessibility => {
+                    frames.run(vec![egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+                        action: egui::accesskit::Action::Click,
+                        target_tree: egui::accesskit::TreeId::ROOT,
+                        target_node: original.widget.accesskit_id(),
+                        data: None,
+                    })]);
+                }
+            }
+            assert!(
+                frames.proposals.is_empty(),
+                "removing the cover on activation does not grant an original gesture"
+            );
+            assert!(!frames.state.archive.as_ref().unwrap().policy.included());
+            assert_eq!(controller_testing::assignments(), 0);
+            frames.run(Vec::new());
+            assert!(frames.proposals.is_empty(), "no deferred replay");
+            egui::Popup::close_all(&frames.frames.ctx);
+            let fresh = super::original(&mut frames, include);
+            assert!(
+                fresh.committed(&frames.frames.ctx),
+                "a genuinely settled uncovered control can accept fresh input"
+            );
+            release(&mut frames, fresh, modality, Late::None);
+            assert_eq!(frames.proposals.len(), 1);
+            assert!(valid(&frames));
+            assert!(!frames.state.archive.as_ref().unwrap().policy.included());
+            assert_eq!(controller_testing::assignments(), 0);
+        }
+    }
+}
