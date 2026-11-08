@@ -141,12 +141,28 @@ impl Frames {
         command
     }
     fn control(&self, predicate: impl Fn(Intent) -> bool) -> Control {
-        *self
-            .model
+        self.model
             .controls
             .iter()
             .find(|control| predicate(control.intent))
-            .expect("settled visible control")
+            .copied()
+            .unwrap_or_else(|| {
+                let layers = self.ctx.memory(|memory| memory.layer_ids().collect::<Vec<_>>());
+                let widgets = self.ctx.viewport(|viewport| {
+                    layers
+                        .iter()
+                        .flat_map(|layer| viewport.prev_pass.widgets.get_layer(*layer).copied())
+                        .take(256)
+                        .collect::<Vec<_>>()
+                });
+                panic!(
+                    "settled visible control: controls={}, frame={}, pass={}, painted={:?}, layers={layers:?}, widgets={widgets:#?}",
+                    self.model.controls.len(),
+                    self.ctx.cumulative_frame_nr(),
+                    self.ctx.cumulative_pass_nr(),
+                    self.model.painted,
+                )
+            })
     }
     fn click(&mut self, control: Control, late: Late) -> Option<Command> {
         assert!(
