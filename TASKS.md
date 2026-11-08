@@ -3684,3 +3684,11 @@ Open-source technologies that could set Aurora apart (human request of 2026-10-1
   exact receipts and themed captured UI/overflow. Detached/lost recovery remains
   occupied/unavailable in this explicit first slice. Root alone compiles/tests;
   source presence is not runtime/native/human acceptance or completed parity.
+
+  - Show Viewer DATA/receipt prerequisite (2026-11-08): closed full binding/lease
+    and App/window/ordinary-mode observation, request and immutable bounded16
+    ledger. Exact pending duplicate is Busy; completed duplicate returns original
+    outcome; changed/evicted IDs cannot reserve another effect. Six pure tests
+    authored UNRUN. No control command/version, native/IO consumer, observation
+    minting or UI enablement is included. Actual consumers remain required; Root
+    owns compilation/execution and the separate native/control source review.
