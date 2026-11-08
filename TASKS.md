@@ -1,17 +1,5 @@
 # Aurora Viewer — task tracking
 
-- 🔧 Windows host-profile fixture ancestry correction (2026-11-08; no issue):
-  native component4fd9 proved the direct TEMP fixture and exact servicing-owner
-  cases pass, while eleven checkout-root cases still fail. Root's read-only
-  diagnostic42459627127 established an untrusted checkout-drive owner; no owner
-  exception is added. Windows cfg(test) host_root alone now uses a strict private
-  canonical TEMP namespace bound to the compile-time worktree digest, stable
-  across test processes. Production/Unix/Settings roots and every native ACL,
-  handle, path, lock and CAS policy remain unchanged. All old cases/attributes/
-  assertions are retained; one native namespace/private-ACL case is authored
-  UNRUN. Independent source review and Root's actual Windows component rerun
-  remain required; the author executed no native IO or compiler/tests.
-
 - 🔧 Windows selective-copy servicing-prefix owner compatibility (2026-11-08;
   no issue): Root's read-only runner diagnostic42454510345 on image20261103.298.1
   established exact TrustedInstaller root-prefix ownership for LocalAppData and
@@ -28,32 +16,9 @@
   obtaining bounded real Tab focus only after the native refusal/release trace.
   Existing assertion conditions, native guards and Undo checks are preserved.
   Bounded cfg(test) Source/Frame/focus/native metadata and failure messages now
-  distinguish the still-unresolved popup and late-refusal cases. Root's exact
-  6ac focused run measured 16 pass, four fail and one ignored. Two late fixtures
-  used an invisible first sizing pass or missed the actual control; they now
-  warm the same owners before input and require real final visible coverage.
-  Final consumption additionally rejects bounded finite actual higher-layer
-  widgets, including a modal backdrop beyond its Area body, retaining every
-  existing authority guard. A four-modality regression covers that backdrop.
-  Popup diagnostics prioritize exact response/registry bits and retained-frame
-  stages; no popup or scrollbar exception is added. New code remains author-
-  UNRUN; independent review and Root's next official-profile checks are required.
-  Root's d374 follow-up measured 19 pass, two popup failures and one ignored;
-  every overlay/backdrop case passed. Exact diagnostics identify a real 1.8 px
-  scrollbar interaction overlap during reserved-width animation. Source rows
-  now leave actual style-sized right padding, retained in content geometry so
-  auto-shrink cannot move the bar back over them. Overflow, wheel scrolling and
-  all final authority checks remain; a real five-choice/wrapped-label regression
-  checks the visible scrollbar, nonoverlap, committed rows and wheel movement.
-  This source-only atom is UNRUN pending independent review and Root execution.
-  Root's 83304 focused normal Profile run passed 22 cases (one ignored), but
-  all three explicit EN/FR/JA compact runs failed because the main-body Picker
-  overlaps its actual scrollbar by 2.1 px at scale 1.5. The body now respects
-  the ScrollArea's available width and retains full style-sized right padding
-  through allocation animation. Every guard and original locale assertion is
-  unchanged; an additional compact/scaled real-bar regression preserves the
-  same three post-resize layouts and requires committed Picker/popup controls.
-  This final layout follow-up is source-only and author-UNRUN.
+  distinguish the still-unresolved popup and late-refusal cases. No production
+  authority change or runtime pass is claimed; independent review and Root's
+  next focused/full official-profile checks remain required.
 
 - 🔧 Candidate Linux validation on standard native ancestry (no issue):
   The isolated Windows-candidate workflow now also runs the repository's existing
