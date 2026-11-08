@@ -9,6 +9,16 @@
   weakening is included. Existing tests/assertions remain exact; two additional
   exact-SID/role/policy cases are authored UNRUN. Independent source review and
   Root's actual Windows rerun remain required; no author execution is claimed.
+- 🔧 CPU copy/chat fixture follow-up (2026-11-08; no issue): retain actual14af
+  CI negatives while making the two-context fixture clock monotonic after direct
+  closing passes, explicitly disposing the checkbox's rendererless texture delta,
+  injecting malformed copy transforms into the real map after the whole UI, and
+  obtaining bounded real Tab focus only after the native refusal/release trace.
+  Existing assertion conditions, native guards and Undo checks are preserved.
+  Bounded cfg(test) Source/Frame/focus/native metadata and failure messages now
+  distinguish the still-unresolved popup and late-refusal cases. No production
+  authority change or runtime pass is claimed; independent review and Root's
+  next focused/full official-profile checks remain required.
 
 - 🔧 Candidate Linux validation on standard native ancestry (no issue):
   The isolated Windows-candidate workflow now also runs the repository's existing

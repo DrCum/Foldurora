@@ -829,6 +829,19 @@ struct SurfaceFrames {
 impl SurfaceFrames {
     const SURFACES: [ChatSurface; 2] = [ChatSurface::Shared, ChatSurface::Monitor1];
 
+    fn next_time(&mut self) -> f64 {
+        self.frame += 1;
+        // Closing/edit-prefix cases can advance one actual context directly.
+        // Canonical Undo moves between both contexts, so keep their shared
+        // fixture clock monotonic when ordinary rendering resumes.
+        let observed = self
+            .contexts
+            .iter()
+            .map(|context| context.input(|input| input.time))
+            .fold(0.0, f64::max);
+        (self.frame as f64 / 60.0).max(observed + 1.0 / 60.0)
+    }
+
     fn new() -> Self {
         let base = Frames::new();
         let contexts = std::array::from_fn(|_| {
@@ -852,7 +865,7 @@ impl SurfaceFrames {
     }
 
     fn show(&mut self, index: usize, events: Vec<Event>) -> Option<SendDraft> {
-        self.frame += 1;
+        let time = self.next_time();
         self.model.sync(&self.host, false);
         let surface = Self::SURFACES[index];
         let modifiers = events
@@ -865,7 +878,7 @@ impl SurfaceFrames {
             .unwrap_or_default();
         let mut raw = RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(680.0, 680.0))),
-            time: Some(self.frame as f64 / 60.0),
+            time: Some(time),
             focused: self.active == index,
             events: std::iter::once(Event::ModifiersChanged(modifiers)).chain(events).collect(),
             ..Default::default()
@@ -895,10 +908,10 @@ impl SurfaceFrames {
     /// a regression specifically concerns multiple IME events in one pass.
     fn raw_show(&mut self, index: usize, events: Vec<Event>) {
         self.model.sync(&self.host, false);
-        self.frame += 1;
+        let time = self.next_time();
         let raw = RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(680.0, 680.0))),
-            time: Some(self.frame as f64 / 60.0),
+            time: Some(time),
             focused: self.active == index,
             events,
             ..Default::default()

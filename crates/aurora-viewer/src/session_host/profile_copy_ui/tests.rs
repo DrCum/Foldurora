@@ -6,6 +6,32 @@ use crate::session_host::transport::copy_fixture::{self, Request};
 use aurora_session::{HostId, InstallationId};
 use egui::{Event, Modifiers, PointerButton, Pos2, Vec2};
 
+#[derive(Clone, Debug)]
+pub(super) struct SourceStackNode {
+    pub(super) id: Id,
+    pub(super) parent: Option<Id>,
+    pub(super) kind: Option<egui::UiKind>,
+}
+#[derive(Clone)]
+pub(super) struct SourceDiagnostic {
+    pub(super) control: Control,
+    pub(super) stack: Vec<SourceStackNode>,
+    pub(super) flags: [bool; 5],
+    pub(super) pass: usize,
+}
+
+fn bounded_diagnostic(mut text: String) -> String {
+    if text.len() > 65_536 {
+        let mut end = 65_500;
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        text.truncate(end);
+        text.push_str("\n[bounded diagnostic truncated]");
+    }
+    text
+}
+
 fn slot(index: u8) -> SlotId {
     SlotId::try_from(index).unwrap()
 }
@@ -38,7 +64,7 @@ fn key(key: Key, pressed: bool) -> Event {
         modifiers: Modifiers::NONE,
     }
 }
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum Late {
     None,
     Discard,
@@ -66,6 +92,8 @@ struct Frames {
     size: Vec2,
     scale: f32,
     frame: u64,
+    transform_layer: Option<egui::LayerId>,
+    last_diagnostic: String,
 }
 impl Frames {
     fn new() -> Self {
@@ -85,6 +113,8 @@ impl Frames {
             size: egui::vec2(760.0, 600.0),
             scale: 1.0,
             frame: 0,
+            transform_layer: None,
+            last_diagnostic: String::new(),
         };
         frames.show(vec![], Late::None);
         frames.show(vec![], Late::None);
@@ -118,6 +148,16 @@ impl Frames {
         panic!("actual modal/control geometry did not settle within eight empty frames");
     }
     fn show(&mut self, events: Vec<Event>, late: Late) -> Option<Command> {
+        if let Some(layer) = self.transform_layer.take() {
+            // Restore only this fixture's previous late injection. The next
+            // empty frame must remain silent even with valid geometry again.
+            self.ctx.memory_mut(|memory| {
+                memory.to_global.remove(&layer);
+            });
+        }
+        self.ctx.data_mut(|data| {
+            data.remove::<Vec<SourceDiagnostic>>(Id::unique("copy_fixture_source_diagnostics"));
+        });
         self.frame += 1;
         let p = crate::theme::Theme::default().palette();
         let mut action = None;
@@ -141,6 +181,7 @@ impl Frames {
                 }
                 Late::Close => self.model.close(),
                 Late::FocusLoss => ui.ctx().input_mut(|input| input.focused = false),
+                Late::Transform(_) => {}
                 Late::MoveWidget
                 | Late::ReclipWidget
                 | Late::ResenseWidget
@@ -149,7 +190,6 @@ impl Frames {
                 | Late::VisualWidgetCover
                 | Late::VisualLayerCover
                 | Late::FocusWidget
-                | Late::Transform(_)
                 | Late::StructuralFrameMove
                 | Late::StructuralFrameSense
                 | Late::AmbiguousFrame
@@ -163,9 +203,151 @@ impl Frames {
         // This CPU fixture has no renderer; pinned TexturesDelta requires
         // explicit disposal when its uploads/frees are deliberately discarded.
         output.textures_delta.clear();
+        if let Late::Transform(transform) = late {
+            let control = self
+                .model
+                .completed
+                .as_ref()
+                .expect("original release before actual late transform")
+                .control;
+            // The public setter compares against identity and NaN-panics before
+            // the final guard. Change the actual store AFTER the whole run.
+            self.ctx.memory_mut(|memory| {
+                memory.to_global.insert(control.layer, transform);
+            });
+            let actual = self.ctx.layer_transform_to_global(control.layer).unwrap();
+            assert_eq!(actual.scaling.to_bits(), transform.scaling.to_bits());
+            assert_eq!(actual.translation.x.to_bits(), transform.translation.x.to_bits());
+            assert_eq!(actual.translation.y.to_bits(), transform.translation.y.to_bits());
+            self.transform_layer = Some(control.layer);
+        }
+        let diagnostic = self.diagnostic(late, action);
         let command = action.and_then(|action| self.model.take_action(action, &self.ctx, &self.snapshot, false));
+        self.last_diagnostic = bounded_diagnostic(format!(
+            "completed_passes={}, discard={}, command={command:?}\n{diagnostic}",
+            output.platform_output.num_completed_passes,
+            self.ctx.will_discard(),
+        ));
         self.model.finish_frame(&self.ctx);
         command
+    }
+    fn diagnostic(&self, late: Late, action: Option<Action>) -> String {
+        let (focus, modal, layers) = self.ctx.memory(|memory| {
+            (
+                memory.focused(),
+                memory.top_modal_layer(),
+                memory.layer_ids().take(16).collect::<Vec<_>>(),
+            )
+        });
+        let input = self.ctx.input(|input| {
+            (
+                input.focused,
+                input.modifiers,
+                input.events.iter().take(16).cloned().collect::<Vec<_>>(),
+            )
+        });
+        let source = self
+            .ctx
+            .data(|data| data.get_temp::<Vec<SourceDiagnostic>>(Id::unique("copy_fixture_source_diagnostics")));
+        let popup = self.ctx.data(|data| data.get_temp::<Id>(Id::unique("host_copy_popup")));
+        let popup_widgets = self.ctx.viewport(|viewport| {
+            layers
+                .iter()
+                .filter(|layer| Some(layer.id) == popup)
+                .flat_map(|layer| viewport.prev_pass.widgets.get_layer(*layer).copied())
+                .take(128)
+                .collect::<Vec<_>>()
+        });
+        let areas = layers
+            .iter()
+            .map(|layer| (*layer, egui::AreaState::load(&self.ctx, layer.id).map(|area| area.rect())))
+            .collect::<Vec<_>>();
+        let describe = |control: &Control| {
+            let current = self
+                .ctx
+                .viewport(|viewport| viewport.prev_pass.widgets.get(control.widget).copied());
+            let final_frame = self
+                .ctx
+                .viewport(|viewport| FrameWitness::capture(&viewport.prev_pass.widgets, control));
+            format!(
+                "widget={:?}, layer={:?}, rect={:?}, registered={:?}, current={current:?}, origin={:?}, stored_frame={:?}, final_frame={final_frame:?}, registry={}, committed={}, hit={:?}",
+                control.widget,
+                control.layer,
+                control.rect,
+                control.registered,
+                control.frame_origin,
+                control.frame,
+                control.registry(&self.ctx, true),
+                control.committed(&self.ctx),
+                self.ctx.layer_id_at(control.rect.center())
+            )
+        };
+        let painting = self.model.painting.iter().take(MAX_CONTROLS).map(describe).collect::<Vec<_>>();
+        let sources = source
+            .unwrap_or_default()
+            .iter()
+            .map(|record| {
+                (
+                    describe(&record.control),
+                    record
+                        .stack
+                        .iter()
+                        .map(|node| (node.id, node.parent, node.kind))
+                        .collect::<Vec<_>>(),
+                    record.flags,
+                    record.pass,
+                )
+            })
+            .collect::<Vec<_>>();
+        let gesture = self
+            .model
+            .gesture
+            .map(|gesture| (gesture.control.widget, gesture.frame, gesture.index));
+        let completed = self
+            .model
+            .completed
+            .as_ref()
+            .map(|completed| (completed.control.widget, completed.focused, completed.frame, completed.pass));
+        let completed_control = self.model.completed.as_ref().map(|completed| describe(&completed.control));
+        format!(
+            "late={late:?}, action={action:?}, frame={}, pass={}, input_frame={:?}, painted={:?}, focus={focus:?}, modal={modal:?}, gesture={gesture:?}, completed={completed:?}, native_focused={}, rejected={:?}, native_modifiers={:?}, transition={}, alt_graph={}, input={input:?}, areas={areas:?}\ncompleted_control={completed_control:?}\nSource flags=[live, enabled, valid, registry_at_paint, allows_interaction], records={sources:#?}\npopup_widgets={popup_widgets:#?}\npainting={painting:#?}",
+            self.ctx.cumulative_frame_nr(),
+            self.ctx.cumulative_pass_nr(),
+            self.model.input_frame,
+            self.model.painted,
+            self.model.native_focused,
+            self.model.rejected_keys,
+            self.model.native_modifiers,
+            self.model.modifier_transition,
+            self.model.alt_graph
+        )
+    }
+    fn focus_with_tab(&mut self, control: Control) {
+        for step in 0..=MAX_CONTROLS {
+            if self.ctx.memory(|memory| memory.focused()) == Some(control.widget)
+                && self
+                    .model
+                    .controls
+                    .iter()
+                    .any(|current| current.widget == control.widget && current.committed(&self.ctx))
+            {
+                self.settle();
+                assert_eq!(self.ctx.memory(|memory| memory.focused()), Some(control.widget));
+                assert!(
+                    self.model
+                        .controls
+                        .iter()
+                        .any(|current| current.widget == control.widget && current.committed(&self.ctx))
+                );
+                return;
+            }
+            if step == MAX_CONTROLS {
+                break;
+            }
+            assert!(self.show(vec![key(Key::Tab, true)], Late::None).is_none());
+            assert!(self.show(vec![key(Key::Tab, false)], Late::None).is_none());
+        }
+        panic!("actual enabled command did not receive bounded Tab focus: {}", self.last_diagnostic);
     }
     fn control(&self, predicate: impl Fn(Intent) -> bool) -> Control {
         self.model
@@ -280,10 +462,6 @@ fn late_widget(ui: &mut egui::Ui, control: Control, change: Late) {
         );
         return;
     }
-    if let Late::Transform(transform) = change {
-        ui.ctx().set_transform_layer(control.layer, transform);
-        return;
-    }
     if matches!(change, Late::CoverLayer | Late::VisualLayerCover) {
         egui::Area::new(Id::unique("copy_guard_late_cover_area"))
             .order(egui::Order::Foreground)
@@ -395,7 +573,7 @@ fn profile_copy_ui_starts_main_saved_all_four_checked_and_five_bounded_sources()
         .iter()
         .filter(|control| matches!(control.intent, Intent::Source(_, _)))
         .count();
-    assert!((1..=MAX_SOURCES).contains(&visible_sources));
+    assert!((1..=MAX_SOURCES).contains(&visible_sources), "{}", frames.last_diagnostic);
     assert!(frames.model.controls.len() <= MAX_CONTROLS);
     frames.snapshot.slots[1].available = false;
     assert!(!sources(&frames.snapshot, slot(0)).contains(&Source::Slot(slot(1))));
@@ -461,7 +639,7 @@ fn profile_copy_ui_final_whole_run_guard_rejects_late_discard_modal_removal_focu
         let mut frames = Frames::new();
         frames.prepare();
         let apply = frames.control(|intent| matches!(intent, Intent::Apply(_)));
-        assert!(frames.click(apply, late).is_none());
+        assert!(frames.click(apply, late).is_none(), "late={late:?}: {}", frames.last_diagnostic);
         assert!(frames.show(vec![], Late::None).is_none(), "rejected release has no deferred replay");
     }
 }
@@ -799,7 +977,7 @@ fn profile_copy_ui_actual_compact_modal_and_source_popup_layout_explicit_locale(
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum Modality {
     Pointer,
     Enter,
@@ -878,7 +1056,7 @@ fn profile_copy_ui_actual_modal_and_popup_retain_unique_structural_frame_and_rea
         .iter()
         .filter(|control| matches!(control.intent, Intent::Source(_, _)))
         .collect::<Vec<_>>();
-    assert!(!sources.is_empty());
+    assert!(!sources.is_empty(), "{}", frames.last_diagnostic);
     assert!(sources.len() <= MAX_SOURCES);
     for control in sources {
         assert!(control.committed(&frames.ctx));
@@ -1049,7 +1227,11 @@ fn profile_copy_ui_final_committed_turnover_and_coverage_reject_every_modality_w
             let mut frames = Frames::new();
             frames.prepare();
             let original = frames.control(|intent| matches!(intent, Intent::Apply(_)));
-            assert!(release_with(&mut frames, original, modality, late).is_none());
+            assert!(
+                release_with(&mut frames, original, modality, late).is_none(),
+                "modality={modality:?}, late={late:?}: {}",
+                frames.last_diagnostic
+            );
             let committed = frames
                 .ctx
                 .viewport(|viewport| viewport.prev_pass.widgets.get(original.widget).copied())
@@ -1310,12 +1492,18 @@ fn profile_copy_ui_native_modifier_events_between_batches_preserve_physical_fenc
             frames.model.native_key(&native_key, ElementState::Released, false, false);
             assert!(frames.show(vec![key_event(key, false, Modifiers::NONE)], Late::None).is_none());
             frames.show(vec![], Late::None);
+            // The refused transition temporarily disables Apply, so egui
+            // legitimately drops its focus. After the real release, obtain
+            // fresh real focus before the positive fresh native gesture.
+            frames.focus_with_tab(apply);
             frames.model.native_key(&native_key, ElementState::Pressed, false, false);
             assert!(frames.show(vec![key_event(key, true, Modifiers::NONE)], Late::None).is_none());
             frames.model.native_key(&native_key, ElementState::Released, false, false);
             assert_eq!(
                 frames.show(vec![key_event(key, false, Modifiers::NONE)], Late::None),
-                Some(Command::Apply(exact))
+                Some(Command::Apply(exact)),
+                "native_key={native_key:?}, alt_graph={alt_graph}: {}",
+                frames.last_diagnostic
             );
         }
     }

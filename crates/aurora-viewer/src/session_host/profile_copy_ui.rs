@@ -1117,6 +1117,38 @@ impl CopyUi {
             frame_origin: FrameOrigin::capture(ui, response.layer_id, matches!(intent, Intent::Source(_, _))),
             frame: None,
         };
+        #[cfg(test)]
+        if matches!(intent, Intent::Source(_, _)) {
+            // Record actual Source capture eligibility before any refusal.
+            // This adds no Ui/ID scope and grants no input authority.
+            let record = tests::SourceDiagnostic {
+                control,
+                stack: ui
+                    .stack()
+                    .iter()
+                    .take(MAX_CONTROL_PARENTS)
+                    .map(|node| tests::SourceStackNode {
+                        id: node.unique_id,
+                        parent: node.parent.as_ref().map(|parent| parent.unique_id),
+                        kind: node.kind(),
+                    })
+                    .collect(),
+                flags: [
+                    live,
+                    response.enabled(),
+                    self.valid(intent, snapshot),
+                    control.registry(ui.ctx(), false),
+                    ui.ctx().memory(|memory| memory.allows_interaction(response.layer_id)),
+                ],
+                pass: ui.ctx().current_pass_index(),
+            };
+            ui.ctx().data_mut(|data| {
+                let records = data.get_temp_mut_or_default::<Vec<tests::SourceDiagnostic>>(Id::unique("copy_fixture_source_diagnostics"));
+                if records.len() < MAX_CONTROLS {
+                    records.push(record);
+                }
+            });
+        }
         if !live
             || !response.enabled()
             || response.rect != registered.rect
