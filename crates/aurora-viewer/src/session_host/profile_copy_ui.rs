@@ -38,6 +38,110 @@ struct Control {
     rect: Rect,
     layer: egui::LayerId,
     intent: Intent,
+    registered: egui::WidgetRect,
+    paint_clip: Rect,
+    transform: Option<egui::emath::TSTransform>,
+}
+
+fn finite_positive(rect: Rect) -> bool {
+    rect.is_finite() && rect.size().is_finite() && rect.is_positive()
+}
+fn finite_transform(transform: egui::emath::TSTransform) -> bool {
+    transform.scaling.is_finite() && transform.scaling > 0.0 && transform.translation.x.is_finite() && transform.translation.y.is_finite()
+}
+fn transformed_rect(rect: Rect, transform: Option<egui::emath::TSTransform>) -> Option<Rect> {
+    let transform = transform.unwrap_or(egui::emath::TSTransform::IDENTITY);
+    if !finite_positive(rect) || !finite_transform(transform) || !finite_transform(transform.inverse()) {
+        return None;
+    }
+    let global = transform * rect;
+    finite_positive(global).then_some(global)
+}
+impl Control {
+    fn geometry(&self, ctx: &egui::Context) -> bool {
+        // This modal supports untransformed native UI coordinates only. Check
+        // BOTH translations and the inverse before comparing identity: pinned
+        // TSTransform::is_valid does not validate translation.y.
+        let transform = self.transform.unwrap_or(egui::emath::TSTransform::IDENTITY);
+        let viewport = ctx.content_rect();
+        let Some(rect) = transformed_rect(self.registered.rect, self.transform) else {
+            return false;
+        };
+        let Some(interact) = transformed_rect(self.registered.interact_rect, self.transform) else {
+            return false;
+        };
+        let Some(clip) = transformed_rect(self.paint_clip, self.transform) else {
+            return false;
+        };
+        let visible = rect.intersect(interact).intersect(clip).intersect(viewport);
+        transform == egui::emath::TSTransform::IDENTITY
+            && finite_positive(viewport)
+            && finite_positive(visible)
+            && visible == self.rect
+            && ctx.layer_transform_to_global(self.layer) == self.transform
+    }
+    fn registry(&self, ctx: &egui::Context, committed: bool) -> bool {
+        if !self.geometry(ctx) || !ctx.memory(|memory| memory.allows_interaction(self.layer)) {
+            return false;
+        }
+        ctx.viewport(|viewport| {
+            let widgets = if committed {
+                &viewport.prev_pass.widgets
+            } else {
+                &viewport.this_pass.widgets
+            };
+            widgets.get(self.widget).is_some_and(|widget| {
+                widget.enabled
+                    && widget.visible
+                    && widget.sense.senses_click()
+                    && *widget == self.registered
+                    && widget.id == self.widget
+                    && widget.layer_id == self.layer
+            })
+        })
+    }
+    fn committed(&self, ctx: &egui::Context) -> bool {
+        if !self.registry(ctx, true) {
+            return false;
+        }
+        // A later visible widget in this same layer can cover the
+        // original even when focus and layer_id_at still name the old layer.
+        let unoccluded = ctx.viewport(|viewport| {
+            let widgets = &viewport.prev_pass.widgets;
+            let Some((layer, index)) = widgets.order(self.widget) else {
+                return false;
+            };
+            layer == self.layer
+                && !widgets
+                    .get_layer(layer)
+                    .skip(index + 1)
+                    .any(|widget| widget.visible && widget.interact_rect.intersect(self.rect).is_positive())
+        });
+        if !unoccluded {
+            return false;
+        }
+        // Resolve actual final Area order outside memory/viewport closures;
+        // never nest Context accessors while holding one of their locks.
+        let above = ctx.memory(|memory| {
+            memory
+                .layer_ids()
+                .skip_while(|layer| *layer != self.layer)
+                .skip(1)
+                .filter(|layer| memory.areas().is_visible(layer))
+                .collect::<Vec<_>>()
+        });
+        for layer in above {
+            if let Some(area) = egui::AreaState::load(ctx, layer.id) {
+                let Some(rect) = transformed_rect(area.rect(), ctx.layer_transform_to_global(layer)) else {
+                    return false;
+                };
+                if rect.intersect(self.rect).is_positive() {
+                    return false;
+                }
+            }
+        }
+        ctx.layer_id_at(self.rect.center()) == Some(self.layer)
+    }
 }
 #[derive(Clone, Copy)]
 enum Trigger {
@@ -65,6 +169,7 @@ struct Completed {
     frame: u64,
     pass: u64,
     modal: egui::LayerId,
+    focused: Option<Id>,
 }
 struct Dialog {
     selection: Selection,
@@ -102,6 +207,11 @@ pub(super) struct CopyUi {
     native_enter: super::chat_window::enter_release::EnterRelease,
     native_space: super::chat_window::enter_release::EnterRelease,
     rejected_keys: [bool; 2],
+    native_modifiers: winit::keyboard::ModifiersState,
+    modifier_transition: bool,
+    native_focused: bool,
+    alt_graph: bool,
+    alt_graph_before_focus: bool,
 }
 impl Default for CopyUi {
     fn default() -> Self {
@@ -126,6 +236,11 @@ impl Default for CopyUi {
             native_enter,
             native_space,
             rejected_keys: [false; 2],
+            native_modifiers: winit::keyboard::ModifiersState::empty(),
+            modifier_transition: false,
+            native_focused: true,
+            alt_graph: false,
+            alt_graph_before_focus: false,
         }
     }
 }
@@ -134,6 +249,13 @@ impl CopyUi {
     pub fn native_event(&mut self, event: &winit::event::WindowEvent) {
         match event {
             winit::event::WindowEvent::Focused(focused) => {
+                if self.native_focused != *focused {
+                    if *focused {
+                        self.alt_graph = self.alt_graph_before_focus;
+                    }
+                    self.alt_graph_before_focus = false;
+                    self.native_focused = *focused;
+                }
                 self.native_enter.focused(*focused);
                 self.native_space.focused(*focused);
                 if !*focused {
@@ -143,35 +265,64 @@ impl CopyUi {
             winit::event::WindowEvent::KeyboardInput { event, is_synthetic, .. } => {
                 self.native_key(&event.logical_key, event.state, event.repeat, *is_synthetic);
             }
+            winit::event::WindowEvent::ModifiersChanged(modifiers) => {
+                let next = modifiers.state();
+                if self.native_modifiers != next {
+                    self.native_modifiers = next;
+                    self.modifier_transition = true;
+                    self.cancel_gestures();
+                }
+            }
             _ => {}
         }
     }
     fn native_key(&mut self, key: &winit::keyboard::Key, state: winit::event::ElementState, repeat: bool, synthetic: bool) {
         use winit::keyboard::{Key as NativeKey, NamedKey};
+        if matches!(key, NativeKey::Named(NamedKey::AltGraph)) {
+            if state == winit::event::ElementState::Pressed {
+                self.alt_graph = true;
+                if !self.native_focused {
+                    self.alt_graph_before_focus = true;
+                }
+            } else if !synthetic {
+                self.alt_graph = false;
+                self.alt_graph_before_focus = false;
+            }
+            self.modifier_transition = true;
+            self.cancel_gestures();
+            return;
+        }
+        if matches!(
+            key,
+            NativeKey::Named(NamedKey::Alt | NamedKey::Control | NamedKey::Shift | NamedKey::Super | NamedKey::Meta)
+        ) {
+            self.modifier_transition = true;
+            self.cancel_gestures();
+        }
         let (guard, index) = match key {
             NativeKey::Named(NamedKey::Enter) => (&mut self.native_enter, 0),
             NativeKey::Named(NamedKey::Space) => (&mut self.native_space, 1),
             NativeKey::Character(value) if value.as_str() == " " => (&mut self.native_space, 1),
             _ => return,
         };
-        if guard.suppress(
-            &NativeKey::Named(NamedKey::Enter),
-            state,
-            repeat,
-            synthetic,
-            winit::keyboard::ModifiersState::empty(),
-        ) {
+        if guard.suppress(&NativeKey::Named(NamedKey::Enter), state, repeat, synthetic, self.native_modifiers) {
             // Keep a denied down rejected for its whole RawInput batch even
             // if a later native up/fresh down precedes the next paint.
             self.rejected_keys[index] = true;
         }
     }
     fn key_allowed(&self, key: Key) -> bool {
+        if !self.modifiers_plain() {
+            return false;
+        }
         match key {
             Key::Enter => !self.rejected_keys[0],
             Key::Space => !self.rejected_keys[1],
             _ => false,
         }
+    }
+    fn modifiers_plain(&self) -> bool {
+        self.native_modifiers.is_empty() && !self.alt_graph && !self.modifier_transition
     }
     pub fn is_open(&self) -> bool {
         self.dialog.is_some()
@@ -379,6 +530,7 @@ impl CopyUi {
         let completed = self.completed.take()?;
         let live = !other_modal
             && !self.ime
+            && self.modifiers_plain()
             && self.is_open()
             && !ctx.will_discard()
             && completed.nonce == action.0
@@ -386,14 +538,16 @@ impl CopyUi {
             && completed.pass.checked_add(1) == Some(ctx.cumulative_pass_nr())
             && ctx.input(|input| {
                 input.focused
-                    && !input
-                        .events
-                        .iter()
-                        .any(|event| matches!(event, egui::Event::WindowFocused(_) | egui::Event::Ime(_)))
+                    && input.modifiers.is_none()
+                    && !input.events.iter().any(|event| match event {
+                        egui::Event::WindowFocused(_) | egui::Event::Ime(_) => true,
+                        egui::Event::ModifiersChanged(modifiers) | egui::Event::Key { modifiers, .. } => !modifiers.is_none(),
+                        _ => false,
+                    })
             })
             && ctx.memory(|memory| memory.top_modal_layer()) == Some(completed.modal)
-            && completed.control.rect.is_finite()
-            && completed.control.rect.is_positive()
+            && ctx.memory(|memory| memory.focused()) == completed.focused
+            && completed.control.committed(ctx)
             && ctx.content_rect().contains_rect(completed.control.rect)
             && self.valid(completed.control.intent, snapshot)
             && (!egui::Popup::is_any_open(ctx) || matches!(completed.control.intent, Intent::Source(_, _) | Intent::Picker(_)))
@@ -429,6 +583,7 @@ impl CopyUi {
     pub fn finish_frame(&mut self, ctx: &egui::Context) {
         if self.is_open()
             && !self.ime
+            && self.modifiers_plain()
             && !ctx.will_discard()
             && ctx.input(|input| input.focused)
             && self.painted.is_some_and(|(frame, pass, modal)| {
@@ -437,6 +592,7 @@ impl CopyUi {
                     && ctx.memory(|memory| memory.top_modal_layer()) == Some(modal)
             })
         {
+            self.painting.retain(|control| control.committed(ctx));
             std::mem::swap(&mut self.controls, &mut self.painting);
             self.painting.clear();
         } else {
@@ -444,6 +600,7 @@ impl CopyUi {
         }
         self.completed = None;
         self.rejected_keys = [false; 2];
+        self.modifier_transition = false;
     }
     pub fn show(&mut self, ctx: &egui::Context, p: &Palette, snapshot: &HostSnapshot, blocked: bool) -> Option<Action> {
         self.sync(snapshot);
@@ -461,7 +618,19 @@ impl CopyUi {
                 }
             }
         });
+        let raw_modifiers = ctx.input(|input| {
+            !input.modifiers.is_none()
+                || input.events.iter().any(|event| match event {
+                    egui::Event::ModifiersChanged(modifiers) | egui::Event::Key { modifiers, .. } => !modifiers.is_none(),
+                    _ => false,
+                })
+        });
+        if raw_modifiers {
+            self.modifier_transition = true;
+            self.cancel_gestures();
+        }
         let focused = !self.ime
+            && self.modifiers_plain()
             && ctx.input(|input| {
                 input.focused
                     && !input
@@ -620,6 +789,7 @@ impl CopyUi {
                 frame: ctx.cumulative_frame_nr(),
                 pass: ctx.cumulative_pass_nr(),
                 modal: shown.response.layer_id,
+                focused: ctx.memory(|memory| memory.focused()),
             });
             return Some(Action(nonce));
         }
@@ -717,29 +887,46 @@ impl CopyUi {
         ui.ctx().data_mut(|data| {
             data.insert_temp(response.id.with("copy_rect"), response.rect);
         });
-        let rect = response.interact_rect.intersect(ui.clip_rect()).intersect(ui.ctx().content_rect());
-        if !live
-            || !response.enabled()
-            || !self.valid(intent, snapshot)
-            || !rect.is_finite()
-            || !rect.is_positive()
-            || self.painting.len() >= MAX_CONTROLS
-            || egui::Popup::is_any_open(ui.ctx()) && !matches!(intent, Intent::Source(_, _) | Intent::Picker(_))
-        {
+        let Some(registered) = ui.ctx().viewport(|viewport| viewport.this_pass.widgets.get(response.id).copied()) else {
             return;
-        }
+        };
+        let paint_clip = ui.clip_rect();
+        let transform = ui.ctx().layer_transform_to_global(response.layer_id);
+        let rect = response
+            .rect
+            .intersect(response.interact_rect)
+            .intersect(paint_clip)
+            .intersect(ui.ctx().content_rect());
         let control = Control {
             widget: response.id,
             rect,
             layer: response.layer_id,
             intent,
+            registered,
+            paint_clip,
+            transform,
         };
+        if !live
+            || !response.enabled()
+            || response.rect != registered.rect
+            || response.interact_rect != registered.interact_rect
+            || response.sense != registered.sense
+            || !self.valid(intent, snapshot)
+            || !control.registry(ui.ctx(), false)
+            || self.painting.len() >= MAX_CONTROLS
+            || egui::Popup::is_any_open(ui.ctx()) && !matches!(intent, Intent::Source(_, _) | Intent::Picker(_))
+        {
+            return;
+        }
         self.painting.push(control);
         let Some(gesture) = self.gesture.filter(|gesture| {
             gesture.control.widget == control.widget
                 && gesture.control.intent == intent
                 && gesture.control.layer == control.layer
                 && gesture.control.rect == control.rect
+                && gesture.control.registered == control.registered
+                && gesture.control.paint_clip == control.paint_clip
+                && gesture.control.transform == control.transform
         }) else {
             return;
         };
@@ -749,7 +936,7 @@ impl CopyUi {
             Trigger::Pointer => ui.input(|input| input.events.iter().enumerate().find_map(|(index,event)| match event {
                 egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, .. } if after(index) => Some(*pos), _ => None,
             })).filter(|pos| rect.contains(*pos) && ui.ctx().layer_id_at(*pos) == Some(control.layer)).map(Release::Pointer),
-            Trigger::Key(key) => (self.key_allowed(key) && response.has_focus() && ui.input(|input| input.events.iter().enumerate().any(|(index,event)| matches!(event, egui::Event::Key { key: released, pressed:false, .. } if *released == key && after(index))))).then_some(Release::Key(key)),
+            Trigger::Key(key) => (self.key_allowed(key) && response.has_focus() && ui.input(|input| input.modifiers.is_none() && input.events.iter().enumerate().any(|(index,event)| matches!(event, egui::Event::Key { key: released, pressed:false, modifiers, .. } if *released == key && modifiers.is_none() && after(index))))).then_some(Release::Key(key)),
             Trigger::Accessibility => (response.has_focus() && ui.input(|input| input.has_accesskit_action_request(response.id, egui::accesskit::Action::Click))).then_some(Release::Accessibility),
         };
         if let Some(release) = release
@@ -825,6 +1012,7 @@ impl CopyUi {
         };
         if let Some((index, trigger, control)) = captured.filter(|(_, _, control)| {
             self.valid(control.intent, snapshot)
+                && control.committed(ctx)
                 && (!egui::Popup::is_any_open(ctx) || matches!(control.intent, Intent::Source(_, _) | Intent::Picker(_)))
         }) {
             self.gesture = Some(Gesture {
