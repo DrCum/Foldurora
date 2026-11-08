@@ -565,7 +565,12 @@ closed preference schemaV2 reads V1 without eager rewriting and retains prior
 non-Nearby silence via its Direct choice. Old binaries refuse V2 rather than
 misread it. Review still requires the original source/policy/read incarnation
 and exact acknowledged foreground input grant; it never joins/leaves/reads or
-sends. Conference remains excluded pending participant-authority work.
+sends. Initial self moderator text mute is folded through both native initialization
+paths and ordered membership updates; absent/voice-only/malformed optional text
+metadata cannot clear an existing mute. Only explicit Boolean metadata changes
+it, and actual update notices preserve final-state change semantics. This does
+not establish complete Conference roster or asynchronous reply authority.
+Conference remains excluded pending participant-authority work.
 
 The Close-in-host producer retains its V4 closed data in `chat/close.rs`.
 `world/shared_chat_activity.rs` mints a checked native stream at actual LoggedIn,

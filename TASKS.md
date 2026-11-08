@@ -708,6 +708,21 @@
   pending. The earlier first-click observation remains unexplained by native
   frame evidence; no earlier candidate's validation transfers to this change.
 
+- 🔧 Initial native session moderator text mute (2026-11-08; Folderstorm port
+  follow-up, no issue): initialization through SessionStarted or accepted
+  invitation now folds the account's explicit text mute before exposing its
+  native policy. Membership updates preserve base-then-delta order and their
+  existing notice only on a final state change. Optional missing/voice-only/
+  malformed text metadata stays unknown, never an inferred unmute; another
+  participant's mute remains independent. Five actual parser/native/host cases
+  cover both init paths, temp→final remap, ordered/repeated/unknown deltas and
+  explicit unmute. Source review cleared the correction after its concrete
+  optional-field finding was fixed. Compiled/focused/full checks remain pending.
+  This joins the separately held long-path correction and Group source locally;
+  no public source approval, Windows/native package or Conference support is
+  implied. Complete Conference roster/pending-update and stale-response authority
+  remain separate required work.
+
 - 🔧 Group Attention and explicit native Review (Folderstorm port, 2026-11-08;
   no issue): existing initialized Group rows join body-free Attention with an
   independent category filter. Fresh defaults include Groups per Folderstorm

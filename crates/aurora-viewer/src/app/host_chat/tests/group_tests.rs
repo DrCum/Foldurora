@@ -55,6 +55,191 @@ fn native() -> Harness {
     }
 }
 
+fn moderator_body(own_mute: Option<bool>, other_mute: bool) -> aurora_llsd::Llsd {
+    let own = own_mute.map_or_else(
+        || aurora_llsd::llsd_map! {},
+        |muted| {
+            aurora_llsd::llsd_map! { "mutes" => aurora_llsd::llsd_map! { "text" => muted } }
+        },
+    );
+    aurora_llsd::llsd_map! {
+        "agent_info" => aurora_llsd::llsd_map! {
+            OWNER.to_string() => own,
+            PEER.to_string() => aurora_llsd::llsd_map! { "mutes" => aurora_llsd::llsd_map! { "text" => other_mute } }
+        }
+    }
+}
+
+#[test]
+fn group_initial_mute_actual_start_and_accept_snapshots_gate_literal_send_without_blocking_read() {
+    for start in [false, true] {
+        for own_mute in [None, Some(false), Some(true)] {
+            let mut world = group_world();
+            world.groups.sessions.get_mut(&GROUP).unwrap().active = false;
+            let body = moderator_body(own_mute, own_mute != Some(true));
+            let event = if start {
+                aurora_net::NetEvent::SessionStarted {
+                    temp_session: GROUP,
+                    session: GROUP,
+                    success: true,
+                    error: String::new(),
+                    agents: aurora_net::social::parse_session_agents(&body),
+                }
+            } else {
+                aurora_net::NetEvent::ChatSessionReply {
+                    method: aurora_net::SessionMethod::AcceptInvitation,
+                    session: GROUP,
+                    result: Some(body),
+                    not_found: false,
+                }
+            };
+            let count = world.social.ims.len();
+            world.apply(event);
+            let muted = own_mute == Some(true);
+            assert_eq!(world.groups.sessions[&GROUP].text_muted, muted, "start={start}, own={own_mute:?}");
+            let policy = snapshot(&world, group(), true).unwrap();
+            assert!(policy.ready && policy.can_read);
+            assert_eq!(policy.can_send, !muted);
+            assert_eq!(literal_command(&world, group(), "Literal only").is_some(), !muted);
+            assert_eq!(world.social.ims.len(), count);
+            assert!(world.social.focus_im.is_none());
+            assert!(
+                world.groups.out.iter().all(|command| matches!(command,
+                    aurora_net::NetCommand::ChatSession { method: aurora_net::SessionMethod::FetchHistory, session } if *session == GROUP
+                )),
+                "initialization never emitted a send, join or leave"
+            );
+            assert_eq!(world.social.ims.iter().find(|im| im.other == GROUP).unwrap().unread, 0);
+        }
+    }
+}
+
+#[test]
+fn group_initial_mute_voice_only_missing_and_malformed_metadata_cannot_unmute_either_native_initialization_path() {
+    for info in [
+        aurora_llsd::llsd_map! {},
+        aurora_llsd::llsd_map! { "mutes" => aurora_llsd::llsd_map! { "voice" => true } },
+        aurora_llsd::llsd_map! { "mutes" => aurora_llsd::llsd_map! {} },
+        aurora_llsd::llsd_map! { "mutes" => false },
+        aurora_llsd::llsd_map! { "mutes" => aurora_llsd::llsd_map! { "text" => 0 } },
+        aurora_llsd::llsd_map! { "mutes" => aurora_llsd::llsd_map! { "text" => "false" } },
+    ] {
+        for start in [false, true] {
+            let mut world = group_world();
+            world.groups.sessions.get_mut(&GROUP).unwrap().text_muted = true;
+            let body = aurora_llsd::llsd_map! { "agent_info" => aurora_llsd::llsd_map! { OWNER.to_string() => info.clone() } };
+            world.apply(if start {
+                aurora_net::NetEvent::SessionStarted {
+                    temp_session: GROUP,
+                    session: GROUP,
+                    success: true,
+                    error: String::new(),
+                    agents: aurora_net::social::parse_session_agents(&body),
+                }
+            } else {
+                aurora_net::NetEvent::ChatSessionReply {
+                    method: aurora_net::SessionMethod::AcceptInvitation,
+                    session: GROUP,
+                    result: Some(body),
+                    not_found: false,
+                }
+            });
+            assert!(world.groups.sessions[&GROUP].text_muted, "start={start}, info={info:?}");
+            assert!(!snapshot(&world, group(), true).unwrap().can_send);
+            assert!(literal_command(&world, group(), "No inferred unmute").is_none());
+            world.apply(aurora_net::NetEvent::SessionAgents {
+                session: GROUP,
+                agents: vec![aurora_net::SessionAgent {
+                    agent: OWNER,
+                    text_muted: Some(false),
+                    ..Default::default()
+                }],
+            });
+            assert!(
+                snapshot(&world, group(), true).unwrap().can_send,
+                "an explicit native unmute remains effective"
+            );
+        }
+    }
+}
+
+#[test]
+fn group_initial_mute_ordered_base_and_delta_keep_final_self_state_and_emit_only_changed_notices() {
+    let mut world = group_world();
+    let mut body = moderator_body(Some(false), true);
+    if let aurora_llsd::Llsd::Map(map) = &mut body {
+        map.insert(
+            "agent_updates".into(),
+            aurora_llsd::llsd_map! {
+                OWNER.to_string() => aurora_llsd::llsd_map! {
+                    "info" => aurora_llsd::llsd_map! { "mutes" => aurora_llsd::llsd_map! { "text" => true } }
+                }
+            },
+        );
+    }
+    let agents = aurora_net::social::parse_session_agents(&body);
+    let initial_lines = world.social.ims.iter().find(|im| im.other == GROUP).unwrap().lines.len();
+    world.apply(aurora_net::NetEvent::SessionAgents {
+        session: GROUP,
+        agents: agents.clone(),
+    });
+    assert!(world.groups.sessions[&GROUP].text_muted);
+    assert!(!snapshot(&world, group(), true).unwrap().can_send);
+    let lines = world.social.ims.iter().find(|im| im.other == GROUP).unwrap().lines.len();
+    assert_eq!(lines, initial_lines + 1);
+    world.apply(aurora_net::NetEvent::SessionAgents { session: GROUP, agents });
+    world.apply(aurora_net::NetEvent::SessionAgents {
+        session: GROUP,
+        agents: vec![aurora_net::SessionAgent {
+            agent: OWNER,
+            ..Default::default()
+        }],
+    });
+    assert!(
+        world.groups.sessions[&GROUP].text_muted,
+        "missing mute information is not an unmute"
+    );
+    assert_eq!(world.social.ims.iter().find(|im| im.other == GROUP).unwrap().lines.len(), lines);
+    for _ in 0..2 {
+        world.apply(aurora_net::NetEvent::SessionAgents {
+            session: GROUP,
+            agents: vec![aurora_net::SessionAgent {
+                agent: OWNER,
+                text_muted: Some(false),
+                ..Default::default()
+            }],
+        });
+    }
+    assert!(!world.groups.sessions[&GROUP].text_muted);
+    assert!(snapshot(&world, group(), true).unwrap().can_send);
+    assert_eq!(world.social.ims.iter().find(|im| im.other == GROUP).unwrap().lines.len(), lines + 1);
+    assert!(world.groups.out.is_empty());
+    assert!(world.social.focus_im.is_none());
+}
+
+#[test]
+fn group_initial_mute_temp_to_final_native_session_remap_retains_account_mute_before_host_policy() {
+    let mut world = group_world();
+    let temporary = Uuid::from_u128(600);
+    let info = world.groups.sessions.remove(&GROUP).unwrap();
+    world.groups.sessions.insert(temporary, info);
+    world.social.ims.iter_mut().find(|im| im.other == GROUP).unwrap().other = temporary;
+    world.apply(aurora_net::NetEvent::SessionStarted {
+        temp_session: temporary,
+        session: GROUP,
+        success: true,
+        error: String::new(),
+        agents: aurora_net::social::parse_session_agents(&moderator_body(Some(true), false)),
+    });
+    assert!(!world.groups.sessions.contains_key(&temporary));
+    assert!(!world.social.has_session(&temporary));
+    assert!(world.groups.sessions[&GROUP].text_muted);
+    let policy = snapshot(&world, group(), true).unwrap();
+    assert!(policy.can_read && !policy.can_send);
+    assert!(literal_command(&world, group(), "No bypass after remap").is_none());
+    assert!(world.social.focus_im.is_none());
+}
+
 #[test]
 fn shared_group_native_requires_existing_initialized_group_and_transcript() {
     for fault in 0..6 {

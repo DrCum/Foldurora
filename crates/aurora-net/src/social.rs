@@ -92,8 +92,10 @@ pub fn parse_session_agents(body: &Llsd) -> Vec<SessionAgent> {
         if i.as_map().is_some_and(|m| m.contains_key("is_moderator")) {
             a.moderator = Some(i["is_moderator"].as_bool());
         }
-        if i.as_map().is_some_and(|m| m.contains_key("mutes")) {
-            a.text_muted = Some(i["mutes"]["text"].as_bool());
+        // This optional permission field must be explicit: voice-only or
+        // malformed metadata cannot turn an existing text mute into false.
+        if let Llsd::Boolean(muted) = &i["mutes"]["text"] {
+            a.text_muted = Some(*muted);
         }
     };
     if let Some(m) = body["agent_info"].as_map() {
@@ -416,6 +418,35 @@ mod tests {
         assert!(!v.iter().find(|x| x.agent == a).unwrap().entered);
         let body = llsd_map! { "agents" => Llsd::Array(vec![a.into(), b.into()]) };
         assert_eq!(parse_session_agents(&body).len(), 2);
+    }
+
+    #[test]
+    fn group_initial_mute_parser_preserves_absent_voice_only_and_invalid_text_as_unknown() {
+        let own = Uuid::from_u128(1);
+        for (info, expected) in [
+            (llsd_map! {}, None),
+            (llsd_map! { "mutes" => llsd_map! { "voice" => true } }, None),
+            (llsd_map! { "mutes" => llsd_map! {} }, None),
+            (llsd_map! { "mutes" => false }, None),
+            (llsd_map! { "mutes" => llsd_map! { "text" => Llsd::Undef } }, None),
+            (llsd_map! { "mutes" => llsd_map! { "text" => 0 } }, None),
+            (llsd_map! { "mutes" => llsd_map! { "text" => "false" } }, None),
+            (llsd_map! { "mutes" => llsd_map! { "text" => true } }, Some(true)),
+            (llsd_map! { "mutes" => llsd_map! { "text" => false } }, Some(false)),
+        ] {
+            for delta in [false, true] {
+                let body = if delta {
+                    llsd_map! { "agent_updates" => llsd_map! { own.to_string() => llsd_map! { "info" => info.clone() } } }
+                } else {
+                    llsd_map! { "agent_info" => llsd_map! { own.to_string() => info.clone() } }
+                };
+                let parsed = parse_session_agents(&body);
+                assert_eq!(parsed.len(), 1);
+                assert_eq!(parsed[0].agent, own);
+                assert_eq!(parsed[0].text_muted, expected, "{body:?}");
+                assert!(!parsed[0].entered);
+            }
+        }
     }
 
     #[test]

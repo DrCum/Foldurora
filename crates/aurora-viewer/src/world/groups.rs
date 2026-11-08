@@ -654,10 +654,11 @@ impl World {
                     }
                 }
                 self.groups.restoring.remove(&session);
+                let me = self.agent_id;
                 let info = self.info_mut(session, "");
                 info.active = true;
                 info.closed = false;
-                apply_agents(info, &agents);
+                apply_agents(info, &agents, me);
                 let fetch = !info.history_fetched;
                 info.history_fetched = true;
                 if fetch {
@@ -668,25 +669,20 @@ impl World {
                 }
             }
             NetEvent::SessionAgents { session, agents } => {
-                if let Some(s) = self.groups.sessions.get_mut(&session) {
-                    apply_agents(s, &agents);
-                }
+                let mute_change = self.groups.sessions.get_mut(&session).and_then(|s| {
+                    let before = s.text_muted;
+                    apply_agents(s, &agents, self.agent_id);
+                    (before != s.text_muted).then_some(s.text_muted)
+                });
                 // the residents we invited who joined are announced
                 self.conference_joined(session, &agents);
-                let me = self.agent_id;
-                if let Some(a) = agents.iter().find(|a| a.agent == me)
-                    && let (Some(muted), Some(s)) = (a.text_muted, self.groups.sessions.get_mut(&session))
-                {
-                    let changed = s.text_muted != muted;
-                    s.text_muted = muted;
-                    if changed {
-                        let text = if muted {
-                            aurora_i18n::tr!("world-groups-a-moderator-has-muted-your-chat-in-this-session")
-                        } else {
-                            aurora_i18n::tr!("world-groups-a-moderator-has-unmuted-you")
-                        };
-                        self.session_system(session, text);
-                    }
+                if let Some(muted) = mute_change {
+                    let text = if muted {
+                        aurora_i18n::tr!("world-groups-a-moderator-has-muted-your-chat-in-this-session")
+                    } else {
+                        aurora_i18n::tr!("world-groups-a-moderator-has-unmuted-you")
+                    };
+                    self.session_system(session, text);
                 }
             }
             NetEvent::SessionError { session, event, error } => {
@@ -722,7 +718,7 @@ impl World {
                         let agents = aurora_net::social::parse_session_agents(&r);
                         if let Some(s) = self.groups.sessions.get_mut(&session) {
                             s.active = true;
-                            apply_agents(s, &agents);
+                            apply_agents(s, &agents, self.agent_id);
                         }
                     }
                     // chatterBoxInvitationCoro: only a 404 is shown
@@ -899,7 +895,7 @@ impl World {
     }
 }
 
-fn apply_agents(s: &mut SessionInfo, agents: &[SessionAgent]) {
+fn apply_agents(s: &mut SessionInfo, agents: &[SessionAgent], own_id: Uuid) {
     for a in agents {
         match a.present {
             Some(true) => {
@@ -919,6 +915,16 @@ fn apply_agents(s: &mut SessionInfo, agents: &[SessionAgent]) {
                 s.moderators.remove(&a.agent);
             }
             None => {}
+        }
+        // LLIMSpeakerMgr::setSpeakers/updateSpeakers (Folderstorm abbe3cb0,
+        // LGPL-2.1): an initial self moderator mute is native send authority,
+        // not merely a later notification. Preserve base-then-delta order and
+        // absent information; another participant's mute never becomes ours.
+        if !own_id.is_nil()
+            && a.agent == own_id
+            && let Some(muted) = a.text_muted
+        {
+            s.text_muted = muted;
         }
     }
 }
