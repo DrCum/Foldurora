@@ -1,0 +1,96 @@
+name: Windows profile ancestor diagnostics
+
+on:
+  push:
+    branches: [diagnostics/windows-profile-owners-20261108]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  owners:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Read runner ancestor ownership and ACL classes
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $currentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          function Get-PrincipalClass([System.Security.Principal.SecurityIdentifier] $Sid) {
+            if ($null -eq $Sid) { return 'Missing' }
+            switch ($Sid.Value) {
+              $currentSid { return 'CurrentUser' }
+              'S-1-5-18' { return 'LocalSystem' }
+              'S-1-5-32-544' { return 'Administrators' }
+              'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464' { return 'TrustedInstaller' }
+              default { return 'Other' }
+            }
+          }
+          $rows = @()
+          $readFailures = 0
+          $diagnosticScopes = [ordered]@{ LocalAppData = $env:LOCALAPPDATA; Temp = $env:TEMP }
+          foreach ($scope in $diagnosticScopes.Keys) {
+            $ancestors = @()
+            $directory = [System.IO.DirectoryInfo]::new($diagnosticScopes[$scope])
+            while ($null -ne $directory) {
+              if ($ancestors.Count -ge 128) { throw 'Ancestor bound exceeded.' }
+              $ancestors += $directory.FullName
+              $directory = $directory.Parent
+            }
+            for ($index = $ancestors.Count - 1; $index -ge 0; $index--) {
+              try {
+                $acl = Get-Acl -LiteralPath $ancestors[$index]
+                $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier])
+                $grants = @()
+                foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
+                  if ($grants.Count -ge 256) { throw 'ACL bound exceeded.' }
+                  $grants += [pscustomobject]@{
+                    principal = Get-PrincipalClass $rule.IdentityReference
+                    rights = [int64]$rule.FileSystemRights
+                    type = [string]$rule.AccessControlType
+                    inherited = $rule.IsInherited
+                    inheritance = [string]$rule.InheritanceFlags
+                    propagation = [string]$rule.PropagationFlags
+                  }
+                }
+                $rows += [pscustomobject]@{
+                  scope = $scope
+                  depth = $ancestors.Count - 1 - $index
+                  owner = Get-PrincipalClass $owner
+                  read = 'success'
+                  grants = $grants
+                }
+              } catch {
+                $readFailures++
+                $rows += [pscustomobject]@{
+                  scope = $scope
+                  depth = $ancestors.Count - 1 - $index
+                  read = 'failure'
+                  errorType = $_.Exception.GetType().FullName
+                }
+              }
+            }
+          }
+          $report = [ordered]@{
+            source = $env:GITHUB_SHA
+            imageOS = $env:ImageOS
+            imageVersion = $env:ImageVersion
+            scope = 'Read-only runner ancestor metadata; no paths, user SIDs, settings, credentials, or ACL changes.'
+            readFailures = $readFailures
+            ancestors = $rows
+          }
+          $report | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath profile-owner-diagnostics.json -Encoding utf8
+          Get-Content -LiteralPath profile-owner-diagnostics.json
+          if ($readFailures -ne 0) { throw 'Some ancestor metadata could not be read.' }
+      - name: Preserve diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-profile-owner-diagnostics
+          path: profile-owner-diagnostics.json
+          if-no-files-found: error
+          retention-days: 14
