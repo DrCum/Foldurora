@@ -98,7 +98,7 @@ fn published_checkbox_reports_accessible_activation_without_changing_confirmed_v
     fn frame(ctx: &egui::Context, published: bool, enabled: bool, events: Vec<egui::Event>) -> (egui::Response, Vec<egui::WidgetInfo>) {
         let p = crate::theme::Theme::default().palette();
         let mut response = None;
-        let output = ctx.run_ui(
+        let mut output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(400.0, 200.0))),
                 focused: true,
@@ -112,6 +112,7 @@ fn published_checkbox_reports_accessible_activation_without_changing_confirmed_v
                 );
             },
         );
+        output.textures_delta.clear();
         let infos = output
             .platform_output
             .events
