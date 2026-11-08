@@ -17,6 +17,11 @@
   remain required before that consumer joins.
 
 - 🔧 Account-local named landmark Favorite menus (2026-11-07; no issue):
+  Runtime follow-up (2026-11-08): member contexts use the real child-menu
+  hierarchy without replacing their sole viewport popup; real-egui fixtures now
+  open the actual F1 button/dropdown and exercise edits in all three layouts.
+  Root4ff passed21 cases and failed3 editor cases; this source correction still
+  requires independent review and root execution, with the negative run retained.
   first-member folders share the original ordered landmarks across menu, row and
   grid. Separate bounded account/profile/grid metadata uses original submitted
   login provenance, exact stale-editor checks, IO-only atomic publication and a

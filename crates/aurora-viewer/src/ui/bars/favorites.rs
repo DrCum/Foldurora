@@ -179,35 +179,20 @@ fn grouped_entries<'a>(view: &'a View, filter: &str) -> Vec<Entry<'a>> {
 #[derive(Clone)]
 struct GroupEditor {
     owner: Id,
+    pos: Pos2,
+    open: bool,
+    shown_frame: u64,
     ticket: Option<GroupEditTicket>,
     text: String,
     stale: bool,
 }
-fn group_editor(
-    ui: &mut egui::Ui,
-    p: &Palette,
-    favorite: &Favorite,
-    owner: Id,
-    editor: &mut Option<GroupEditor>,
-    out: &mut Option<FavAction>,
-) {
-    if editor.as_ref().is_none_or(|editor| editor.owner != owner) {
-        *editor = Some(GroupEditor {
-            owner,
-            text: favorite.group_ticket.as_ref().map_or("", GroupEditTicket::previous).to_owned(),
-            ticket: favorite.group_ticket.clone(),
-            stale: false,
-        });
-    }
-    if let Some(editor) = editor.as_mut()
-        && editor.ticket.is_some()
-        && editor.ticket.as_ref() != favorite.group_ticket.as_ref()
-    {
+fn group_editor(ui: &mut egui::Ui, p: &Palette, favorite: &Favorite, owner: Id, editor: &mut GroupEditor, out: &mut Option<FavAction>) {
+    if editor.owner != owner || (editor.ticket.is_some() && editor.ticket.as_ref() != favorite.group_ticket.as_ref()) {
         editor.ticket = None;
         editor.text.clear();
         editor.stale = true; // Never adopt another source/base into an old editor.
     }
-    if editor.as_ref().is_some_and(|editor| editor.stale) {
+    if editor.stale {
         ui.add(
             egui::Label::new(
                 egui::RichText::new(aurora_i18n::tr!("favorites-folder-stale"))
@@ -217,20 +202,17 @@ fn group_editor(
             .wrap(),
         );
     }
-    let current = editor.as_ref().is_some_and(|editor| {
-        editor
-            .ticket
-            .as_ref()
-            .is_some_and(|ticket| favorite.group_ticket.as_ref() == Some(ticket))
-    });
+    let current = editor
+        .ticket
+        .as_ref()
+        .is_some_and(|ticket| favorite.group_ticket.as_ref() == Some(ticket));
     menu::submenu(
         ui,
         p,
         "folder-filled",
         aurora_i18n::tr!("favorites-folder-set"),
-        editor.as_ref().is_some_and(|editor| editor.ticket.is_some()),
+        editor.ticket.is_some(),
         |ui| {
-            let Some(editor) = editor else { return };
             ui.set_min_width(240.0);
             ui.push_id(
                 ("favorite_group_name", editor.ticket.as_ref().map(GroupEditTicket::namespace)),
@@ -348,10 +330,38 @@ fn cut(ui: &egui::Ui, text: &str, font: FontId, color: Color32, width: f32) -> s
 }
 
 /// Firestorm's favourites menu (menu_favorites.xml) on a favourite.
-fn fav_menu(resp: &egui::Response, p: &Palette, fav: &Favorite, out: &mut Option<FavAction>) {
+fn fav_menu(parent: &egui::Ui, resp: &egui::Response, p: &Palette, fav: &Favorite, out: &mut Option<FavAction>) {
     let editor_id = Id::unique("favorite_folder_editor");
+    if menu::dismiss_on_window_change(&resp.ctx) {
+        resp.ctx.data_mut(|data| data.remove::<GroupEditor>(editor_id));
+        return;
+    }
+    let frame = resp.ctx.cumulative_frame_nr();
     let mut editor = resp.ctx.data(|data| data.get_temp::<GroupEditor>(editor_id));
-    let open = menu::context_menu(resp, p, |ui| {
+    if editor.as_ref().is_some_and(|editor| editor.shown_frame.saturating_add(1) < frame) {
+        resp.ctx.data_mut(|data| data.remove::<GroupEditor>(editor_id));
+        editor = None; // A closed/filtered owner cannot revive a hidden editor.
+    }
+    if resp.secondary_clicked() {
+        editor = Some(GroupEditor {
+            owner: resp.id,
+            pos: resp.interact_pointer_pos().unwrap_or(resp.rect.center()),
+            open: true,
+            shown_frame: frame,
+            text: fav.group_ticket.as_ref().map_or("", GroupEditTicket::previous).to_owned(),
+            ticket: fav.group_ticket.clone(),
+            stale: false,
+        });
+    }
+    let Some(mut editor) = editor.filter(|editor| editor.owner == resp.id && editor.open) else {
+        return;
+    };
+    editor.shown_frame = frame;
+    let mut open = true;
+    // A viewport has one memory-owned popup. Opening a standard context menu
+    // here would replace the Favorites dropdown and destroy this row next
+    // frame. Use its real child-menu hierarchy and retain the captured editor.
+    menu::choice_panel(parent, p, resp.id.with("favorite_member_context"), editor.pos, &mut open, |ui| {
         group_editor(ui, p, fav, resp.id, &mut editor, out);
         if menu::item(ui, p, "location-filled", aurora_i18n::tr!("common-teleport-3")) {
             *out = Some(FavAction::Teleport(fav.asset));
@@ -375,14 +385,16 @@ fn fav_menu(resp: &egui::Response, p: &Palette, fav: &Favorite, out: &mut Option
         menu::todo(ui, p, "trash-filled", aurora_i18n::tr!("common-delete"));
     });
     resp.ctx.data_mut(|data| {
-        if open {
-            if let Some(editor) = editor {
-                data.insert_temp(editor_id, editor);
-            }
-        } else if editor.as_ref().is_some_and(|editor| editor.owner == resp.id) {
+        if open && out.is_none() {
+            editor.open = true;
+            data.insert_temp(editor_id, editor);
+        } else {
             data.remove::<GroupEditor>(editor_id);
         }
     });
+    if !open || out.is_some() {
+        egui::Popup::close_all(&resp.ctx);
+    }
 }
 
 /// The choice of where the favourites live, as a sub-menu (also the dock's
@@ -647,7 +659,7 @@ fn menu_row(
     if resp.drag_started() {
         drag_source(&resp, fav);
     }
-    fav_menu(&resp, p, fav, out);
+    fav_menu(ui, &resp, p, fav, out);
     let tip = if fav.region.is_empty() {
         fav.name.clone()
     } else {
@@ -996,7 +1008,7 @@ pub fn row(ctx: &egui::Context, p: &Palette, icons: &Icons, view: &View, under: 
             if resp.drag_started() {
                 drag_source(&resp, fav);
             }
-            fav_menu(&resp, p, fav, &mut out);
+            fav_menu(ui, &resp, p, fav, &mut out);
             let rating = match fav.rating {
                 "PG" => aurora_i18n::tr!("common-general"),
                 "Mature" => aurora_i18n::tr!("common-moderate"),
@@ -1160,7 +1172,7 @@ pub fn grid_body(ui: &mut egui::Ui, p: &Palette, icons: &Icons, view: &View, out
                     if resp.drag_started() {
                         drag_source(&resp, fav);
                     }
-                    fav_menu(&resp, p, fav, out);
+                    fav_menu(ui, &resp, p, fav, out);
                     if resp.on_hover_text(&fav.name).clicked() {
                         *out = Some(FavAction::Teleport(fav.asset));
                         ui.close();
