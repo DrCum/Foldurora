@@ -21,12 +21,12 @@ const CONFIRMATION: Duration = Duration::from_secs(30);
 static NEXT_INSTANCE: AtomicU64 = AtomicU64::new(1);
 static PHYSICAL_WORKER: AtomicBool = AtomicBool::new(false);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct Instance(u64);
 impl Instance {
     pub(crate) fn fresh() -> Option<Self> {
         NEXT_INSTANCE
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_add(1))
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_add(1))
             .ok()
             .map(Self)
     }

@@ -1,5 +1,24 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Manual selective profile copy, real Manage UI and production promotion
+  (2026-11-08; no issue): stopped target, Main Saved read-only or another stopped
+  slot source, four initially checked typed families, actual Inspect counters and
+  exact captured Apply. Persistent cancellation survives modal/source changes;
+  Applied/uncertain outcomes retain the original target. Real Shell routing sends
+  metadata only after the entire egui run and final input/capture proof checks;
+  native Enter/Space reuse the existing held-key release fence. The full adapter
+  callee chain is promoted together; EN/FR/JA and compact scroll/footer/source
+  popup layout join the same atom. Thirteen actual-egui/model/channel cases are
+  authored UNRUN (one isolated EN/FR/JA font/layout case). Prior31 adapter,
+  19 projection,3 mouse and59 old Settings tests/assertions remain preserved.
+  Combined adapter source review cleared d2304807; this actual UI/promotion atom
+  still needs independent review, Root checks/native execution and human UI/
+  Windows ACL validation before shipment. No default loader or disk IO is added
+  to the GUI/control pump; original30-second deadline and physical lease remain.
+  - ⬜ Later: first-Open offer and archive/Legacy XML import; broader preference
+    families, account/toolbars/RLVa/movement imports remain outside this manual
+    four-family copy. No automatic Open/login or raw backup is included.
+
 - 🔧 Read-only source capability for stopped-profile copy (2026-11-08; no issue):
   distinct native source/target wrappers capture immutable security roles through
   preparation and all final rereads/CAS. Current-user ordinary0644 source settings
@@ -11,8 +30,8 @@
   saver are unchanged. Four additional synthetic cases are authored UNRUN
   (31 adapter definitions; six Unix-only, one Windows-only), including native
   ordinary saver/read fixtures without supplied confidentiality evidence and
-  source-CAS/writability refusal. Independent source review and Root execution
-  precede the mandatory actual Manage modal and production promotion.
+  source-CAS/writability refusal. Combined source review cleared d2304807; Root
+  execution and the actual Manage modal/promotion atom are tracked above.
 
 - 🔧 Windows existing-prefix ACL compatibility for stopped-profile copy
   (2026-11-08; no issue): retained native directory roles distinguish creating a
@@ -22,26 +41,26 @@
   remain refused. Final settings parent/file, owner trust, Unix policy and strict
   lock/temp validators are unchanged. Two pure role cases plus one Windows-only
   ordinary-temp ancestry/native saver case are authored UNRUN (27 adapter
-  definitions; three Unix-only, one Windows-only). Independent source review,
-  Root execution and native owner/ACL acceptance remain required before actual
-  Manage UI/production promotion. No existing permissions are repaired.
+  definitions; three Unix-only, one Windows-only). Prefix source review cleared
+  1f271ad2. Root execution and native owner/ACL acceptance remain required; the actual
+  Manage UI/production atom is tracked above. No existing permissions are repaired.
 
 - 🔧 Ordinary-saver compatibility for the stopped-profile copy adapter
   (2026-11-08; no issue): settings-specific retained native ancestor/file handle
   identity and permission/ACL checks accept ordinary confined saved settings
   without weakening strict profile lock/private-temp validators. Unix0644 needs
   genuine same-user0700 confinement for targets; the separate read-only source
-  capability above no longer needs confidentiality. Writable/link/ancestor turnover refuses.
+  capability above no longer needs confidentiality. Writable/link/ancestor
+  turnover refuses.
   Windows inherited ACLs use closed TokenUser/System/Administrators applicable
   grants; administrator-owned settings require same-user private ancestry.
   Existing permissions are never repaired; Settings and atomic_file are
   unchanged. Seven new synthetic cases are authored UNRUN (24 adapter definitions,
-  three Unix-specific); independent correction source review and Root-owned
-  execution remain required. Actual Manage modal/production promotion stays
-  gated until this compatibility correction independently clears.
+  three Unix-specific). Combined adapter source review cleared d2304807;
+  Root-owned execution and actual Manage modal/production promotion are tracked above.
 
 - 🔧 Selective character preference copy, stopped-profile IO/controller atom
-  (2026-11-08; no issue): cfg(test)-only real Broker/HostController metadata
+  (2026-11-08; no issue): real Broker/HostController metadata
   Inspect/Apply/Cancel routing, immutable operation/selection captures, actual
   child/queued-Open refusal and held copy reservations. A persistent process-wide
   worker owns SlotId-ordered profile try-locks, worker-only native defaults,
@@ -52,8 +71,8 @@
   permission repair, arbitrary path, global Settings loader/saver or automatic
   Open/login is added. Seventeen synthetic regressions are authored UNRUN
   (one Unix-specific); Root alone owns compilation/native/filesystem execution.
-  Independent source review and the next real Manage modal plus full production
-  promotion remain required before this feature is enabled.
+  Combined adapter source review cleared d2304807. The actual Manage modal/full
+  production-promotion atom and its remaining execution gates are tracked above.
 
 - 🔧 Selective character preference copy, typed projection prerequisite (2026-11-07;
   no issue): explicit16 Graphics,18 Interface,37 native byte-color fields and
@@ -63,18 +82,17 @@
   source fields. Unselected numeric lexemes remain lossless through recursively
   validated raw values. Nineteen contract/bounds/native-input cases are authored
   UNRUN. Native default acquisition may query keyboard layout and belongs off
-  the GUI/control pump under the real adapter's bounded worker lease. Projection remains cfg(test); stopped-profile lease/CAS/cancellation IO,
-  bounded physical worker lifetime and real Manage Inspect/Apply/Cancel entry are
-  still required after independent source review. No new profile-copy behavior
-  or file access is enabled by this prerequisite.
+  the GUI/control pump under the real adapter's bounded worker lease. The
+  stopped-profile worker now consumes the projection; the real manual Manage
+  UI/promotion atom and Root/human execution gates are tracked above.
 
 - 🔧 Locale-independent mouse binding identity prerequisite (2026-11-07; no issue):
   preserve the Input JSON shape while recognizing earlier EN/FR/JA stored aliases;
   constructors/defaults and re-encoding use stable native tokens. Visible labels
   remain localized, unknown tokens and Other buttons remain unchanged. Three
-  pure native-input/serde/explicit-locale regressions are authored UNRUN. No
-  selective profile-copy UI/IO is enabled; independent review and Root checks
-  remain required before that consumer joins.
+  pure native-input/serde/explicit-locale regressions are authored UNRUN. The manual
+  profile-copy consumer now joins the same production atom tracked above;
+  independent UI/promotion review and Root checks remain required.
 
 - 🔧 Account-local named landmark Favorite menus (2026-11-07; no issue):
   first-member folders share the original ordered landmarks across menu, row and
