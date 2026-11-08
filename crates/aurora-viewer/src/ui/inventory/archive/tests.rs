@@ -313,7 +313,6 @@ fn inventory_archive_ui_ordinary_none_denies_while_explicit_exemptions_are_named
     );
     let read = left.read(&world).unwrap();
     assert!(State::ordinary(left_id, Some(&read), world.inventory_archive_instance).passes(id(2)));
-    drop(read);
     let read = right.read(&world).unwrap();
     assert!(!State::ordinary(right_id, Some(&read), world.inventory_archive_instance).passes(id(2)));
     for reason in [
@@ -390,10 +389,10 @@ impl Frames {
                 *classic,
             );
             for action in actions {
-                if let InvAction::Archive(proposal) = action {
-                    if !proposals.iter().any(|old| old.same(&proposal)) {
-                        proposals.push(*proposal);
-                    }
+                if let InvAction::Archive(proposal) = action
+                    && !proposals.iter().any(|old| old.same(&proposal))
+                {
+                    proposals.push(*proposal);
                 }
             }
             if let Some(proposal) = proposals.last() {
@@ -479,7 +478,6 @@ fn inventory_archive_ui_real_context_only_posts_original_proposal_and_never_atte
         let read = state.read(&frames.world);
         let gate = State::ordinary(instance, read.as_ref(), frames.world.inventory_archive_instance);
         assert!(proposal.current_gate(gate));
-        drop(read);
         // This codec/load-ticket fixture owns no Worker. The post-context data
         // boundary is attempted exactly once and cannot claim native IO success.
         assert_eq!(
@@ -566,7 +564,6 @@ fn inventory_archive_ui_include_only_changes_original_owner_policy_after_whole_c
     let desired = proposal
         .include_desired(read.as_ref(), gate)
         .expect("same original policy/source/publication");
-    drop(read);
     assert!(state.assign_include(&frames.world, desired));
     assert!(state.policy.included());
     assert_eq!(controller_testing::assignments(), 0, "local Include cannot dispatch metadata IO");

@@ -114,7 +114,6 @@ fn inventory_archive_controller_actual_save_publishes_only_exact_original_and_fa
     assert!(!read.passes(id(3)));
     assert!(read.passes(id(4)));
     assert!(read.passes(id(6)));
-    drop(read);
     assert_eq!(controller.assign(&world, ticket, true), Err(Error::Stale));
     // A semantically identical outside replacement still fails original-byte
     // CAS. The old published mark remains; there is no optimistic unarchive.

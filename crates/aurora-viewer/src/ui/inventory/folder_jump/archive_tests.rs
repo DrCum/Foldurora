@@ -153,8 +153,10 @@ fn folder_jump_archive_checked_owner_incarnation_and_mask_policy_revisions_never
     let world = world(&[id(2)]);
     let mut left = archive::State::default();
     let mut right = archive::State::default();
-    let mut chooser = Chooser::default();
-    chooser.owner = Some(Uuid::nil());
+    let mut chooser = Chooser {
+        owner: Some(Uuid::nil()),
+        ..Default::default()
+    };
     let first;
     {
         let instance = left.instance();
