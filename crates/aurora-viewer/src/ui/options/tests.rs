@@ -1661,3 +1661,266 @@ fn a_borrowed_row_edits_the_setting_of_its_page() {
     assert!(!s.reduce_motion);
     assert_eq!(s.font_scale, 1.2, "the text size is reset with Appearance");
 }
+
+/// Optional synthetic CPU evidence from the production Preferences test below.
+/// AURORA_CAPTURE supplies a PNG prefix; each screen height/stage gets its own
+/// image and record. This creates no native window or graphics adapter.
+struct FontSearchCapture {
+    path: std::path::PathBuf,
+    size: [usize; 2],
+    painter: crate::crash::software::Painter,
+    pixels: Vec<u32>,
+    texts: Vec<(String, egui::Rect)>,
+}
+
+impl FontSearchCapture {
+    fn new(path: std::ffi::OsString, height: f32) -> Self {
+        let size = [1600, height as usize];
+        Self {
+            path: path.into(),
+            size,
+            painter: Default::default(),
+            pixels: vec![0; size[0] * size[1]],
+            texts: Vec::new(),
+        }
+    }
+
+    fn paint(&mut self, ctx: &egui::Context, output: &egui::FullOutput, background: egui::Color32) {
+        assert!((output.pixels_per_point - 1.0).abs() < 0.001);
+        self.texts = output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some((text.galley.text().to_owned(), text.visual_bounding_rect())),
+                _ => None,
+            })
+            .collect();
+        let primitives = ctx.tessellate(output.shapes.clone(), output.pixels_per_point);
+        assert!(primitives.iter().all(|p| matches!(p.primitive, egui::epaint::Primitive::Mesh(_))));
+        self.painter.paint(
+            &mut self.pixels,
+            self.size,
+            &primitives,
+            &output.textures_delta,
+            output.pixels_per_point,
+            background,
+        );
+    }
+
+    fn save(&self, stage: &str) {
+        let stem = self.path.file_stem().expect("capture file stem").to_string_lossy();
+        let path = self.path.with_file_name(format!("{stem}-{}-{stage}.png", self.size[1]));
+        let rgba: Vec<u8> = self
+            .pixels
+            .iter()
+            .flat_map(|pixel| [(*pixel >> 16) as u8, (*pixel >> 8) as u8, *pixel as u8, 255])
+            .collect();
+        image::save_buffer(&path, &rgba, self.size[0] as u32, self.size[1] as u32, image::ColorType::Rgba8).expect("CPU font-search PNG");
+        std::fs::write(path.with_extension("json"), serde_json::to_vec_pretty(&serde_json::json!({
+            "synthetic_cpu_capture": true,
+                "skin": "opaque test skin (panel_alpha=255)",
+            "native_or_vulkan_acceptance": false,
+            "production_surface": "ui::options::show / Appearance",
+            "screen": self.size,
+            "stage": stage,
+            "painted_text": self.texts.iter().map(|(text, rect)| serde_json::json!({"text": text, "min": [rect.min.x, rect.min.y], "max": [rect.max.x, rect.max.y]})).collect::<Vec<_>>()
+        })).unwrap()).expect("capture record");
+    }
+}
+
+/// #2136: the System fonts search filters the list, the list grows back when
+/// the search is cleared or the list reopened, and a click in the room a
+/// filtered list left closes it. `screen_h` short enough opens it above its
+/// button.
+fn font_search(screen_h: f32) {
+    let capture_path = std::env::var_os("AURORA_CAPTURE");
+    let mut theme = crate::theme::Theme::default();
+    if capture_path.is_some() {
+        // The supported opaque skin needs no GPU glass callbacks in this CPU
+        // fixture. The ordinary regression run retains the default skin.
+        theme.panel_alpha = 255;
+    }
+    let p = theme.palette();
+    let ctx = egui::Context::default();
+    crate::ui::fonts::apply(&ctx, crate::ui::fonts::INTER);
+    theme.apply(&ctx, 1.0);
+    let names = ["Alpha", "Beta", "Gamma", "Delta"];
+    let mut settings = Settings::default();
+    let mut state = OptionsUi {
+        page: Page::Appearance,
+        system_fonts: Some(
+            names
+                .iter()
+                .map(|n| crate::ui::fonts::SystemFont {
+                    name: (*n).into(),
+                    path: format!("/nonexistent/{n}.ttf").into(),
+                })
+                .collect(),
+        ),
+        ..Default::default()
+    };
+    let mut open = true;
+    let mut frame = 0;
+    let capture = capture_path.map(|path| std::cell::RefCell::new(FontSearchCapture::new(path, screen_h)));
+    let record = |stage| {
+        if let Some(capture) = &capture {
+            capture.borrow().save(stage);
+        }
+    };
+    let mut draw = |events: Vec<egui::Event>, state: &mut OptionsUi, settings: &mut Settings| -> Vec<(String, egui::Rect)> {
+        frame += 1;
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1600.0, screen_h))),
+                time: Some(frame as f64 / 60.0),
+                events,
+                focused: true,
+                ..Default::default()
+            },
+            |_| {
+                show(&ctx, &p, &Icons::default(), settings, state, &mut open);
+            },
+        );
+        if let Some(capture) = &capture {
+            capture.borrow_mut().paint(&ctx, &output, p.panel);
+        }
+        output.textures_delta.clear();
+        output
+            .shapes
+            .iter()
+            .filter_map(|c| match &c.shape {
+                egui::Shape::Text(t) => Some((t.galley.text().to_owned(), t.visual_bounding_rect())),
+                _ => None,
+            })
+            .collect()
+    };
+    let shown = |texts: &[(String, egui::Rect)]| -> Vec<String> {
+        names
+            .iter()
+            .filter(|n| texts.iter().any(|(t, _)| t == *n))
+            .map(|n| (*n).to_owned())
+            .collect()
+    };
+    // the list's popup, the top area once open
+    let popup = || {
+        ctx.memory(|m| m.areas().top_layer_id(egui::Order::Foreground).and_then(|l| m.area_rect(l.id)))
+            .expect("the list's popup")
+    };
+    let height = || popup().height();
+    let all: Vec<String> = names.iter().map(|n| (*n).to_owned()).collect();
+    let mut texts = vec![];
+    for _ in 0..12 {
+        texts = draw(vec![], &mut state, &mut settings);
+    }
+    let click = |at: egui::Pos2| {
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        vec![
+            vec![egui::Event::PointerMoved(at)],
+            vec![button(true)],
+            vec![button(false)],
+            vec![],
+            vec![],
+        ]
+    };
+    let key = |key| egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let erase = || {
+        vec![
+            vec![key(egui::Key::Backspace)],
+            vec![key(egui::Key::Backspace)],
+            vec![],
+            vec![],
+            vec![],
+        ]
+    };
+    let typed = || vec![vec![egui::Event::Text("Be".into())], vec![], vec![]];
+    let none = aurora_i18n::tr!("ui-options-no-system-font");
+    let button = texts.iter().find(|(t, _)| t == none).expect("the System fonts list").1;
+    let combo = button.center();
+    // every row drawn inside the popup, against its button: below, or
+    // above near the screen's bottom (egui picks the side by the list's size)
+    let in_place = |texts: &[(String, egui::Rect)]| {
+        let rect = popup();
+        let beside = (rect.top() - button.bottom()).max(button.top() - rect.bottom());
+        (0.0..24.0).contains(&beside)
+            && texts
+                .iter()
+                .filter(|(t, _)| names.contains(&t.as_str()))
+                .all(|(_, r)| rect.expand(0.5).contains_rect(*r))
+    };
+    for events in click(combo) {
+        texts = draw(events, &mut state, &mut settings);
+    }
+    assert_eq!(shown(&texts), all, "opened");
+    let whole = height();
+    let above = popup().bottom() <= button.top();
+    assert_eq!(above, screen_h < 500.0, "the list opens on the expected side");
+    assert!(in_place(&texts));
+    record("opened");
+    for events in typed() {
+        texts = draw(events, &mut state, &mut settings);
+    }
+    assert_eq!(shown(&texts), ["Beta"], "typed in the focused search field");
+    assert!(height() < whole - 1.0, "the list shrinks to its matches");
+    assert!(in_place(&texts));
+    record("filtered");
+    for events in erase() {
+        texts = draw(events, &mut state, &mut settings);
+    }
+    assert_eq!(shown(&texts), all, "a cleared search shows the whole list again");
+    assert!((height() - whole).abs() < 0.5, "and its whole height");
+    assert!(in_place(&texts), "its rows where they can be clicked");
+    record("restored");
+    for events in typed() {
+        texts = draw(events, &mut state, &mut settings);
+    }
+    // the room the whole list took, which the filtered list left
+    let rect = popup();
+    let room = if rect.bottom() <= button.top() {
+        egui::pos2(rect.left() + 20.0, rect.bottom() - whole + 10.0)
+    } else {
+        egui::pos2(rect.left() + 20.0, (rect.top() + whole - 10.0).min(screen_h - 5.0))
+    };
+    assert!(!rect.contains(room));
+    for events in click(room) {
+        texts = draw(events, &mut state, &mut settings);
+    }
+    assert!(shown(&texts).is_empty(), "a click outside the filtered list closes it");
+    for events in click(combo) {
+        texts = draw(events, &mut state, &mut settings);
+    }
+    for events in typed() {
+        texts = draw(events, &mut state, &mut settings);
+    }
+    for events in [vec![key(egui::Key::Escape)], vec![], vec![]] {
+        texts = draw(events, &mut state, &mut settings);
+    }
+    assert!(shown(&texts).is_empty(), "Escape closes the list");
+    for events in click(combo) {
+        texts = draw(events, &mut state, &mut settings);
+    }
+    assert_eq!(shown(&texts), all, "the list reopens on the whole list");
+    assert!((height() - whole).abs() < 0.5);
+    assert!(state.font_filter.is_empty());
+    record("reopened");
+}
+
+#[test]
+fn the_system_font_search_filters_and_resets() {
+    font_search(1000.0);
+}
+
+#[test]
+fn the_system_font_search_resets_above_its_button() {
+    font_search(420.0);
+}
