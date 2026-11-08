@@ -111,13 +111,12 @@ impl Frames {
         if discarded {
             assert!(output.platform_output.num_completed_passes > 1);
         }
-        if let Some(Action::Open(ticket)) = result {
-            if !self
+        if let Some(Action::Open(ticket)) = result
+            && !self
                 .body
                 .take_open(ticket, &self.ctx, &self.inventory, Some(self.source), self.policy)
-            {
-                result = None;
-            }
+        {
+            result = None;
         }
         self.body.finish_batch(&self.ctx);
         result
