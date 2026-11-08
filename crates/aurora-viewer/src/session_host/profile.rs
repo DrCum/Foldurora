@@ -305,24 +305,32 @@ fn validate_opened_single_link(file: &File) -> io::Result<()> {
 pub(crate) enum NativeStoreKind {
     Workspaces,
     Boards,
+    #[cfg(test)]
+    InventoryArchive,
 }
 impl NativeStoreKind {
     fn directory(self) -> &'static str {
         match self {
             Self::Workspaces => "named-workspaces",
             Self::Boards => "gesture-boards",
+            #[cfg(test)]
+            Self::InventoryArchive => "inventory-archive",
         }
     }
     fn filename(self) -> &'static str {
         match self {
             Self::Workspaces => "named-v1.json",
             Self::Boards => "boards-v1.json",
+            #[cfg(test)]
+            Self::InventoryArchive => "archive-v1.json",
         }
     }
     pub(crate) const fn max_bytes(self) -> usize {
         match self {
             Self::Workspaces => 256 * 1024,
             Self::Boards => 4 * 1024 * 1024,
+            #[cfg(test)]
+            Self::InventoryArchive => 128 * 1024,
         }
     }
 }

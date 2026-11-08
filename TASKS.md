@@ -26,6 +26,18 @@
   actual-helper/codec/model regressions are authored/unrun. Projection, private
   IO, real menus and Folder Jump visibility integration remain separate required
   stages; this prerequisite alone enables no archive behavior.
+- 🔧 Local Inventory archive prerequisites (2026-11-08; no issue): test-only
+  closed codec (2048 UUIDs/128KiB), actual source/eligibility/RLVa checks, exact
+  original edit/publication intents and bounded shared incremental projection.
+  Stage 1 adds the closed hardened NativeDirectory InventoryArchive kind,
+  original-byte/revision CAS and an independent TWO physical-worker pool through
+  canceled/blocked exit; GUI polls/replies are try-only and binding starts no IO.
+  Missing differs from corrupt metadata; failed saves keep published flags.
+  All26 pure tests are preserved and14 actual Store/controller/lifetime fixtures
+  are authored UNRUN (40 total). Independent source review and Root execution
+  remain required. Actual World/source/App turn ownership, every ordinary
+  Inventory consumer and Folder Jump index/final-parent gating must join before
+  ANY Archive production enablement; same-generation replacement must rebind.
 
 - 🔧 Local Inventory archive prerequisite, shared origin (2026-11-07; no issue):
   World now owns one pure actual-request digest/ambiguity state, captured before
@@ -153,6 +165,8 @@
   stopped-profile worker now consumes the projection; the real manual Manage
   UI/promotion atom and Root/human execution gates are tracked above.
 
+  remain. Test-only Archive projection/store stages are separate; actual
+  consumers and Folder Jump visibility integration remain unimplemented.
 - 🔧 Locale-independent mouse binding identity prerequisite (2026-11-07; no issue):
   preserve the Input JSON shape while recognizing earlier EN/FR/JA stored aliases;
   constructors/defaults and re-encoding use stable native tokens. Visible labels

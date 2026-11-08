@@ -1,9 +1,11 @@
 //! Local Inventory visibility, not Inventory mutation or access permission.
 //! Behavior: fsinventoryarchive.h / LLInventoryFilter::passesArchive
 //! (Folderstorm abbe3cb0, indra/newview, LGPL-2.1-or-later).
-//! This pure prerequisite has no IO, App action or production UI registration.
+//! Registration remains test-only until the complete actual consumer join.
 
 mod codec;
+pub(crate) mod controller;
+mod store;
 pub(crate) mod visibility;
 use super::{World, account_metadata_origin::GridDigest, inventory::Inventory};
 pub(crate) use codec::Document;
