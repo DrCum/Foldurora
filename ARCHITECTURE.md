@@ -46,6 +46,27 @@ and World reset clears pending provenance. Consumers copy the original digest
 with the accepted account/session independently of IO readiness; no form value,
 raw URI or credential is persisted. Favorites retains its original file identity
 and behavior. Archive projection, private storage and UI are separate stages.
+`profile/settings_file/security.rs` adds the ordinary-settings compatibility
+boundary for that adapter, separate from unchanged strict lock/temp policy.
+It retains at most128 opened no-follow ancestor handles per native file, with
+native paths at most32KiB, through confirmation and final CAS. Current path and
+retained handle identities/confinement are rechecked; ordinary file owner/link/
+mode or opened-handle DACL evidence is checked before and after each bounded
+read. Unix0644 ordinary saver output is accepted only behind a retained existing
+same-user0700 ancestor; group/other writes always refuse, and unconfined files
+must be private. Windows permits ordinary inherited ACL spelling with a closed
+applicable allow set of TokenUser, LocalSystem and BuiltinAdministrators. A
+TokenUser owner is required unless a BuiltinAdministrators-owned settings file
+is confined by a retained same-user private ancestor. Broad read-only grants can
+occur above confinement, never on the settings file; untrusted mutation grants,
+unsupported applicable object/callback ACEs and unsafe owners refuse. Inherit-only
+ACEs grant nothing on the current object and never supply confinement evidence;
+each descendant receives its own check. Deny ACEs never excuse a broad allow.
+No existing chmod/ACL repair or Settings/atomic_file saver change is made.
+Seven additional synthetic compatibility cases are authored UNRUN, bringing this
+adapter to24 definitions (three Unix-specific). Actual Windows inherited/elevated
+native acceptance remains Root/human work; unsupported ACL layouts fail closed.
+
 `session_host/profile_copy.rs`, `profile_copy/io.rs` and
 `profile/settings_file.rs` are a temporary cfg(test)-only stopped-profile adapter
 checkpoint. The real Broker/HostController metadata route captures installation,
@@ -64,13 +85,14 @@ all unselected raw source before destination output, and retains original target
 bytes plus a source digest. A durable private temporary file precedes fresh
 source/target CAS, held-lock file-identity checks and final controller/cancel/
 original-deadline checks. Rename has no delayed retry after these checks. Main
-saved settings is strictly read-only; foreign ownership/public permissions,
+saved settings is strictly read-only; unsafe ownership, unconfined public access,
 symlinks/reparse points and hard links are refused without repair. There is no
 raw backup or global Settings load/save. Logical cancellation never releases a
 reservation before actual worker terminal; a completed rename reports Applied
 for its original capture, and a missing terminal receipt reports uncertainty.
 Resource accounting is bounded raw/string payload up to 16MiB (plus bounded read
-sentinel bytes), selected payload up to 256KiB, and separate bounded JSON metadata;
+sentinel bytes), selected payload up to 256KiB, and separate bounded JSON and
+retained-directory metadata (two native files, at most128 paths/handles each);
 it makes no whole-process memory claim. Seventeen synthetic cases are authored
 UNRUN (one Unix-specific). Independent IO/controller source review precedes the
 mandatory actual Manage Inspect/Apply/Cancel modal and production promotion.

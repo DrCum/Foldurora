@@ -4,9 +4,12 @@ use super::*;
 use crate::settings::profile_seed::MAX_FILE;
 use std::io::{Read, Write};
 
+mod security;
+
 pub(in crate::session_host) struct ProfileSettingsFile {
     path: PathBuf,
     slot: bool,
+    confinement: security::Confinement,
 }
 
 impl ProfileSettingsFile {
@@ -15,17 +18,16 @@ impl ProfileSettingsFile {
         if !directory.is_absolute() {
             return Err(invalid("main settings directory is not absolute"));
         }
-        Ok(Self {
-            path: directory.join("settings.json"),
-            slot: false,
-        })
+        Self::selected(directory.join("settings.json"), false)
     }
 
     pub(in crate::session_host) fn slot(installation: &str, slot: super::super::slots::SlotId) -> io::Result<Self> {
-        Ok(Self {
-            path: slot_root(installation, slot)?.join("config/settings.json"),
-            slot: true,
-        })
+        Self::selected(slot_root(installation, slot)?.join("config/settings.json"), true)
+    }
+
+    fn selected(path: PathBuf, slot: bool) -> io::Result<Self> {
+        let confinement = security::Confinement::capture(&path)?;
+        Ok(Self { path, slot, confinement })
     }
 
     fn checked_parent(&self) -> io::Result<&Path> {
@@ -41,18 +43,10 @@ impl ProfileSettingsFile {
                 plain_directory(&current)?;
             }
         }
-        platform::validate_directory(parent)?;
+        self.confinement.check()?;
         if self.slot {
             let root = host_root()?;
             relative_beneath(&root, &self.path)?;
-            let mut current = parent;
-            loop {
-                platform::validate_directory(current)?;
-                if current == root {
-                    break;
-                }
-                current = current.parent().ok_or_else(|| invalid("settings file escapes host root"))?;
-            }
         }
         Ok(parent)
     }
@@ -67,14 +61,14 @@ impl ProfileSettingsFile {
             }
             Ok(_) => {}
         }
-        let mut file = read_only_private(&self.path)?;
+        let mut file = security::open_settings(&self.path)?;
         let metadata = file.metadata()?;
         if !metadata.is_file() || platform::is_reparse(&metadata) || metadata.len() > MAX_FILE as u64 {
             return Err(invalid("settings file is not plain or exceeds its bound"));
         }
         #[cfg(windows)]
         validate_opened_single_link(&file)?;
-        platform::validate_file(&self.path, &metadata)?;
+        self.confinement.validate_settings(&file)?;
         let mut bytes = vec![0; MAX_FILE + 1];
         let mut length = 0;
         while length < bytes.len() {
@@ -89,6 +83,16 @@ impl ProfileSettingsFile {
             return Err(invalid("settings file exceeds its bound"));
         }
         bytes.truncate(length);
+        // Ordinary saves replace settings with normal native ACL/mode. Validate
+        // the same opened object and retained confinement after the bounded
+        // read as well; no permissions are repaired or inferred from a path.
+        self.confinement.validate_settings(&file)?;
+        self.confinement.check()?;
+        let current = security::open_settings(&self.path)?;
+        self.confinement.validate_settings(&current)?;
+        if !same_file(&file, &current)? {
+            return Err(invalid("settings file was replaced during read"));
+        }
         Ok(Some(bytes))
     }
 
