@@ -1,4 +1,4 @@
-# Foldurora port status — 7 November 2026 UTC
+# Foldurora port status — 8 November 2026 UTC
 
 This is the coordination ledger for the Folderstorm port. Source, automated
 checks, native Windows acceptance and human grid acceptance are separate results.
@@ -9,15 +9,36 @@ Monitor, Workspace and Board slices and the remaining Folderstorm behavior.
 The late initial port-order table below is historical; newer exact-build entries
 and the backlog supersede its implementation inventory.
 
-## Current Monitor, Workspace, Boards and Favorites candidate
+## Current integration: checks found failures
 
 Exact source [`4ff12e60948336bd1b16499beaa2c8beed35a213`](https://github.com/DrCum/Foldurora/commit/4ff12e60948336bd1b16499beaa2c8beed35a213),
-tree `847501d002cd7640ed9a7a666b2d55349a83c449`, is frozen on
-`feat/monitor-runtime-integration`. [Windows run 42426186025](https://github.com/DrCum/Foldurora/actions/runs/42426186025),
-attempt 1, and the full Linux workspace run are **in progress**. No package or
-full-suite acceptance is established for this source. Linux formatting and
-qualified Clippy passed; the qualification retains the existing Linux
-`-A dead_code`, while Windows requires strict warnings without that allowance.
+tree `847501d002cd7640ed9a7a666b2d55349a83c449`, remains the last Windows integration
+checkpoint on `feat/monitor-runtime-integration`. Its checks are **negative**.
+Linux completed with **8,511 passed, 20 failed, 57 ignored**, across 33 summaries.
+Nineteen failures reproduced individually: 15 Board fixture failures, three
+Favorites menu failures and one Poser fixture path mismatch. The other failure is
+the inherited terrain case. The six Monitor/Workspace failures from fd44 passed.
+Linux formatting and qualified Clippy passed; that qualification retains the
+existing Linux `-A dead_code`.
+
+[Windows run 42426186025](https://github.com/DrCum/Foldurora/actions/runs/42426186025),
+attempt 1, completed with **8,480 passed, 19 failed, 55 ignored**, across 33
+summaries. All 711 required names appeared once: 693 passed and 18 failed.
+Strict Clippy failed with 28 diagnostic groups. Parsing, formatting, build and
+packaging passed, but the final gate failed. Raw and packaged test logs agree.
+[Artifact 13597105828](https://github.com/DrCum/Foldurora/actions/runs/42426186025/artifacts/13597105828)
+contains a verified portable package, but its failed checks make it unsuitable as
+the next acceptance recommendation. Receipt SHA-256:
+`808ef4e47ad2d38adfb6ceffea3374558011ad22d79a86513645f6d0cdf9068c`.
+
+Source corrections for Board setup and final-control validation, Favorites menu
+ownership and location privacy, the Poser fixture and Windows lint issues have
+independent reviews. They are being combined with Folder Jump, actual-login
+metadata origin and locale-independent mouse binding identity. A subsequent
+Linux compilation exposed Folder Jump calls against older egui APIs; that
+correction is in progress. These source reviews are not passing execution results
+or a new Windows package. The all-green Attention Review package below remains
+the latest package with passing automated checks.
 
 This joins actual Windows monitor windows with canonical Chat and retained
 **last-active** images, the first named Workspace slice, native gesture/sound
@@ -32,7 +53,7 @@ remain pending.
 The source-derived inventory requires **711 Windows / 709 applicable Linux tests**.
 Conditional totals are Windows 8,499/0/55 and Linux 8,530/1/57, with the Linux
 failure representing the known inherited terrain case, across 33 summaries.
-These are **expectations, not measured results**. Inventory SHA-256:
+These were source expectations; measured failures are recorded above. Inventory SHA-256:
 `fdbdb0e3bfae24a53ec4e4824457f132a0f71922efad474a03a8441bc39fe148`.
 
 ### Preserved negative Monitor checkpoint
@@ -41,7 +62,7 @@ Earlier exact [`fd44cd4bfbe654525136136e13745901b9b1c06b`](https://github.com/Dr
 completed Linux tests with **8,441 passed, seven failed, 57 ignored**, across 33
 summaries. Besides the inherited terrain failure, six new failures reproduced
 in isolated execution. Workspace fixture setup and actual logical-Space handling
-have source corrections in the current candidate, pending its full run.
+were corrected in 4ff and passed its full run.
 
 [Windows run 42421192531](https://github.com/DrCum/Foldurora/actions/runs/42421192531)
 completed **negative**: parser and formatting passed; strict Clippy, tests and

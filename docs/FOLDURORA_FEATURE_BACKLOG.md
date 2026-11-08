@@ -1,4 +1,4 @@
-# Folderstorm feature backlog — 7 November 2026
+# Folderstorm feature backlog — 8 November 2026
 
 This is the current implementation backlog, separate from exact-build acceptance
 in [the status ledger](FOLDURORA_PORT_STATUS.md). The comparison uses Folderstorm
@@ -11,10 +11,12 @@ source review and staged code do not establish a working product or test pass.
 
 Exact `4ff12e60` joins the reviewed Monitor/Workspace/Board/Favorites consumers.
 [Windows run 42426186025](https://github.com/DrCum/Foldurora/actions/runs/42426186025)
-and full Linux workspace tests are in progress. Linux formatting and qualified
-Clippy pass; no new package or full-suite outcome is established. See the ledger
-for the preserved negative fd44 Windows and Linux runs. Do not transfer earlier
-package/component results to this candidate.
+and full Linux workspace tests finished negative: Windows 8,480/19/55 and Linux
+8,511/20/57 (passed/failed/ignored), each across 33 summaries. The Windows package
+exists but failed the final gate. Board, Favorites, Poser and Windows lint source
+corrections are being combined with Folder Jump and its prerequisites; current
+execution remains pending. See the ledger for exact results. Earlier passing
+packages and component captures do not establish acceptance of newer source.
 
 ## Available test package
 
@@ -28,15 +30,15 @@ and human grid acceptance remain pending; see the ledger for checks and hashes.
 
 | Feature | Current scope and next gate |
 | --- | --- |
-| Monitors with chat | Actual host projection, native producer, CPU window and Shell consumers are joined in frozen `4ff12e60`. The producer captures ordinary already-active frames and retains last-active images; live inactive rendering remains separate. Current full Linux and Windows checks are pending. |
-| Named workspaces | The reviewed first slice provides Save/Rename/Delete, Preview/Cancel, Switch and session-only Previous for four native geometry roles plus viewport/bar presentation. Joined with actual fixture corrections in `4ff12e60`; current validation is pending. HUD/folder, graphics/camera/background groups, startup restore and Workspace favorites remain later stages. |
-| Gesture/sound boards | Real native Floater, item-reference catalogue, exact owned-run Stop, actual guarded gesture/sound effects and hardened storage are joined in `4ff12e60`. The slice adds 56 Board cases and three shared-store cases; current execution is pending. Loading/opening does not play. |
-| Named Favorite menus | Local display metadata, all three layouts, original landmark actions, exact-source editor and bounded actual worker lifetime are joined in `4ff12e60`; 24 new cases await current execution. Inventory items are not moved. |
-| About report location choice | Per-open, source-qualified opt-in and copied-report filtering are joined in `4ff12e60`, preserving native restrictions. Current full-candidate checks remain pending. |
-| Folder Jump | Frozen `e9d4d80a` has a loaded-only chooser, real Inventory-local entry/shortcut and 21 authored unrun cases. Independent review found clipped activation, queued-key, IME and discarded-pass issues; a separate follow-up is being implemented before root integration. |
-| Inventory archive | Pinned local-visibility behavior and bounded shared projection/store/UI plan are approved. Shared actual-login origin prerequisite `fa96072f` is source-reviewed; pure archive model work is beginning separately. No archive UI or mask is enabled. |
-| Selective profile preferences | Four typed families, stopped-target ownership and real Inspect/Apply/Cancel transaction are planned. Mouse identity canonicalization prerequisite `4bb8e405` is source-reviewed; typed projection/reader work is separate and unrun. No copy UI is enabled. |
-| Fixed-slot quick actions | Pinned five-slot truth table, exact actor tickets and guarded ordinary-window Show Viewer plan are approved. Real actor/native/UI implementation and validation remain; detached/recovery Show is explicitly a later stage. |
+| Monitors with chat | Actual host projection, native producer, CPU window and Shell consumers are joined in `4ff12e60`. The producer retains last-active images; live inactive rendering remains separate. Whole-candidate checks failed; revised Windows lint gates await execution. |
+| Named workspaces | Save/Rename/Delete, Preview/Cancel, Switch and session-only Previous cover four native geometry roles plus viewport/bar presentation. Earlier six Monitor/Workspace failures passed in 4ff. Whole-candidate acceptance remains negative. HUD/folder, graphics/camera/background groups, startup restore and Workspace favorites remain later stages. |
+| Gesture/sound boards | Native Floater, reference catalogue, guarded playback/Stop and private storage are joined. The 15 failing fixtures have source corrections; final-pass and finite-control corrections are independently reviewed through `9503a999` (66 Board definitions, unrun at that source). Combined execution is next. Loading/opening does not play. |
+| Named Favorite menus | Actual menu ownership, immutable original context, visible owner validation and current location privacy are corrected through independently reviewed `7382df8c` (29 definitions, unrun). Combined execution is next. Inventory items are not moved. |
+| About report location choice | Per-open, source-qualified opt-in and copied-report filtering are joined in `4ff12e60`, preserving native restrictions. Whole-candidate checks failed; no new product acceptance. |
+| Folder Jump | Reviewed loaded-only chooser and Inventory-local entry/shortcut through `f6ddc960` are joined. All 27 definitions remain unrun; current egui API corrections are required by the measured compilation failure. Archive-policy integration remains mandatory before enabling archives. |
+| Inventory archive | Pure model `cb922cad` and bounded projection `c5f26f36` total 25 unrun definitions. Projection independent review is active; native store, actual Inventory/Folder Jump consumers and UI remain required. No archive UI or mask is enabled. |
+| Selective profile preferences | Typed projection `7ca6a42b` is source-reviewed (19 unrun cases). IO/controller atom `f8e20703` adds 17 unrun cases and is under review; ordinary settings-file compatibility needs correction. Actual Manage UI and production promotion are still required. No copy UI is enabled. |
+| Fixed-slot quick actions | Reviewed pure fixed-slot model has eight unrun cases. Data-only Show Viewer ledger `0ea03e4f` adds six unrun cases and is under independent review. Actual versioned native consumer, actor, private preferences and UI remain; detached/recovery Show is later work. |
 
 The intermediate monitor component source `df213a08` completed Linux workspace
 tests with **8,293 passed, five failed, 57 ignored**. Failures comprise the inherited
