@@ -377,7 +377,7 @@ mod tests {
             frame += 1;
             let mut overlays = Overlays::default();
             let mut button = egui::Rect::NOTHING;
-            let _ = context.run_ui(
+            let mut output = context.run_ui(
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
                     time: Some(f64::from(frame) / 60.0),
@@ -400,6 +400,7 @@ mod tests {
                     overlays = Overlays::collect(ui.ctx(), world);
                 },
             );
+            output.textures_delta.clear();
             (button, overlays)
         };
         let mut button = egui::Rect::NOTHING;
@@ -448,7 +449,7 @@ mod tests {
         let mut show = |count: usize, order| {
             frame += 1;
             let mut overlays = Overlays::default();
-            let _ = context.run_ui(
+            let mut output = context.run_ui(
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0))),
                     time: Some(f64::from(frame) / 60.0),
@@ -468,6 +469,7 @@ mod tests {
                     overlays = Overlays::collect(ui.ctx(), world);
                 },
             );
+            output.textures_delta.clear();
             overlays
         };
         for _ in 0..4 {

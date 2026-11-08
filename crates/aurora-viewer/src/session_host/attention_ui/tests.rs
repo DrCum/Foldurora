@@ -171,7 +171,7 @@ impl Frames {
         };
         let palette = crate::theme::Theme::default().palette();
         let mut action = None;
-        let output = self.context.run_ui(raw, |ui| {
+        let mut output = self.context.run_ui(raw, |ui| {
             if let Some(rect) = self.overlay {
                 egui::Area::new(Id::unique("synthetic_attention_blocker"))
                     .order(egui::Order::Foreground)
@@ -182,6 +182,7 @@ impl Frames {
             }
             action = action.take().or(self.body.show(ui, &palette, &mut self.model, &self.host, mode));
         });
+        output.textures_delta.clear();
         self.text.clear();
         fn collect(shape: &egui::Shape, output: &mut Vec<String>) {
             match shape {

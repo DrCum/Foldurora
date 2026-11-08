@@ -100,7 +100,7 @@ impl Frames {
         };
         let palette = crate::theme::Theme::default().palette();
         let discarded = self.discard_next;
-        let output = self.ctx.run_ui(raw, |ui| {
+        let mut output = self.ctx.run_ui(raw, |ui| {
             if self.discard_next {
                 self.discard_next = false;
                 ui.ctx().request_discard("folder jump fixture layout changed before release paint");
@@ -109,6 +109,7 @@ impl Frames {
                 result = Some(action);
             }
         });
+        output.textures_delta.clear();
         if discarded {
             assert!(output.platform_output.num_completed_passes > 1);
         }
@@ -150,7 +151,7 @@ impl Frames {
             ..Default::default()
         };
         let palette = crate::theme::Theme::default().palette();
-        let output = self.ctx.run_ui(raw, |ui| {
+        let mut output = self.ctx.run_ui(raw, |ui| {
             owner.prepare_input(ui.ctx());
             if clip_final && ui.ctx().current_pass_index() > 0 {
                 ui.set_clip_rect(Rect::NOTHING);
@@ -161,6 +162,7 @@ impl Frames {
                 ui.ctx().request_discard("a later widget changed the layout after the chooser");
             }
         });
+        output.textures_delta.clear();
         if discard_after {
             assert!(output.platform_output.num_completed_passes > 1);
         }
@@ -860,7 +862,7 @@ fn folder_jump_ime_quarantine_never_claims_another_actual_editors_preedit_or_com
             events,
             ..Default::default()
         };
-        let _output = frames.ctx.run_ui(raw, |ui| {
+        let mut output = frames.ctx.run_ui(raw, |ui| {
             owner.prepare_input(ui.ctx());
             ui.add(egui::TextEdit::singleline(&mut text).id(editor));
             if owner.owner.is_some() {
@@ -873,6 +875,7 @@ fn folder_jump_ime_quarantine_never_claims_another_actual_editors_preedit_or_com
                 ));
             }
         });
+        output.textures_delta.clear();
         owner.finish_consumed_batch(&frames.ctx);
     };
     for _ in 0..4 {
