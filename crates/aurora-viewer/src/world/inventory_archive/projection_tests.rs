@@ -420,3 +420,41 @@ fn inventory_archive_projection_default_initialization_budget_and_canceled_build
         VisibilityStatus::Unavailable
     );
 }
+
+#[test]
+fn inventory_archive_projection_qualified_read_reuses_one_borrowed_source_privacy_and_policy_proof() {
+    let mut world = loaded();
+    let mut model = masked(&world);
+    let mut projection = testing::projection(32, 16, 16, MAX_DEPTH, false);
+    finish(&mut projection, &world, &model, &mut CpuTurn::default());
+    let mut owner = OwnerPolicy::default();
+    {
+        // World, Model and owner policy are all borrowed for the entire read:
+        // none can be changed while consumers use this once-qualified proof.
+        let read = projection.read(&world, &model, &mut owner);
+        let revision = read.revision();
+        for _ in 0..512 {
+            assert!(read.passes(id(4)));
+            assert!(!read.passes(id(3)));
+            assert!(!read.passes(id(9)), "item uses its actual archived parent");
+            assert!(!read.passes(id(999)));
+            assert_eq!(read.revision(), revision);
+        }
+    }
+    // End the immutable borrow, then change actual policy/source facts before
+    // acquiring another read. No event observer is needed for stale denial.
+    restriction(&mut world, "@showinv=n");
+    assert!(!projection.read(&world, &model, &mut owner).passes(id(4)));
+    restriction(&mut world, "@showinv=y");
+    assert!(
+        !projection.read(&world, &model, &mut owner).passes(id(4)),
+        "privacy ABA invalidates the old table key"
+    );
+    finish(&mut projection, &world, &model, &mut CpuTurn::default());
+    assert!(projection.read(&world, &model, &mut owner).passes(id(4)));
+    assert!(owner.set_include(&world, &model, true));
+    assert!(projection.read(&world, &model, &mut owner).passes(id(3)));
+    model.retire();
+    assert!(!projection.read(&world, &model, &mut owner).passes(id(3)));
+    assert!(world.inventory.queue.is_empty());
+}
