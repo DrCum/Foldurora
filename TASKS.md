@@ -1,5 +1,17 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Windows host-profile fixture ancestry correction (2026-11-08; no issue):
+  native component4fd9 proved the direct TEMP fixture and exact servicing-owner
+  cases pass, while eleven checkout-root cases still fail. Root's read-only
+  diagnostic42459627127 established an untrusted checkout-drive owner; no owner
+  exception is added. Windows cfg(test) host_root alone now uses a strict private
+  canonical TEMP namespace bound to the compile-time worktree digest, stable
+  across test processes. Production/Unix/Settings roots and every native ACL,
+  handle, path, lock and CAS policy remain unchanged. All old cases/attributes/
+  assertions are retained; one native namespace/private-ACL case is authored
+  UNRUN. Independent source review and Root's actual Windows component rerun
+  remain required; the author executed no native IO or compiler/tests.
+
 - 🔧 Windows selective-copy servicing-prefix owner compatibility (2026-11-08;
   no issue): Root's read-only runner diagnostic42454510345 on image20261103.298.1
   established exact TrustedInstaller root-prefix ownership for LocalAppData and

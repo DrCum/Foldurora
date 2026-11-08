@@ -176,6 +176,14 @@ owners remain refused. Existing retained/current handles, native path identities
 and owner/DACL checks remain mandatory before and after reads/CAS, with no
 permission repair. The Unix source fixture discards optional privacy evidence
 while retaining every real opened ancestor, avoiding CI-private-parent assumptions.
+Windows unit-test host profiles alone use a strict TokenUser-private namespace
+beneath canonical native TEMP, named by the full SHA256 of the compile-time
+worktree path. The checkout-drive owner measured outside the accepted policy is
+never trusted. The namespace is stable across processes of the same compiled
+worktree, without PID/random/executable-root selection or a root override;
+existing canonical/verbatim paths and strict creation/revalidation remain in use.
+Production ProjectDirs, Unix host fixtures and the general Settings test root
+are unchanged; only synthetic host-profile IO moves to supported ancestry.
 
 The projection retains only four explicit native typed families:16 Graphics,
 18 Interface,37 byte-color fields and bounded native action/two-slot bindings.
