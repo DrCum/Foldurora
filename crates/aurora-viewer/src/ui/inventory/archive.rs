@@ -1,6 +1,7 @@
 //! One source-qualified ordinary browse mask and bounded existing fetch demand.
 //! Exemptions are explicit; unavailable ordinary metadata never means exempt.
 mod input;
+mod structure;
 pub(crate) use input::{InputRead, NativeInput};
 
 use super::*;
@@ -551,6 +552,8 @@ struct Control {
     paint_clip: egui::Rect,
     transform: Option<egui::emath::TSTransform>,
     input_epoch: u64,
+    structure_origin: structure::Origin,
+    structure: Option<structure::Witness>,
 }
 fn finite_positive(rect: egui::Rect) -> bool {
     rect.is_finite() && rect.size().is_finite() && rect.is_positive()
@@ -599,6 +602,8 @@ impl Control {
             paint_clip,
             transform,
             input_epoch: input.epoch(),
+            structure_origin: structure::Origin::capture(ui, registered)?,
+            structure: None,
         };
         control.registry(ui.ctx(), false).then_some(control)
     }
@@ -613,6 +618,7 @@ impl Control {
             && self.paint_clip == other.paint_clip
             && self.transform == other.transform
             && self.input_epoch == other.input_epoch
+            && self.structure_origin == other.structure_origin
     }
     fn geometry(self, ctx: &egui::Context) -> bool {
         let viewport = ctx.content_rect();
@@ -657,6 +663,10 @@ impl Control {
         if !self.registry(ctx, true) {
             return false;
         }
+        let Some(structure) = self.structure else { return false };
+        if ctx.viewport(|viewport| structure::Witness::capture(&viewport.prev_pass.widgets, &self)) != Some(structure) {
+            return false;
+        }
         let local = self
             .registered
             .rect
@@ -671,7 +681,7 @@ impl Control {
                 && !widgets
                     .get_layer(layer)
                     .skip(index + 1)
-                    .any(|widget| widget.visible && widget.interact_rect.intersect(local).is_positive())
+                    .any(|widget| widget.visible && !structure.contains(widget.id) && widget.interact_rect.intersect(local).is_positive())
         });
         if !unoccluded {
             return false;
@@ -961,11 +971,22 @@ impl Activation {
         }
         Some((gesture.control, release))
     }
+    fn settle(&mut self, ctx: &egui::Context) {
+        if let Some(control) = &mut self.control {
+            if control.frame == ctx.cumulative_frame_nr() && control.pass == ctx.cumulative_pass_nr() {
+                control.structure = ctx.viewport(|viewport| structure::Witness::capture(&viewport.this_pass.widgets, control));
+            } else {
+                control.structure = None;
+            }
+        }
+    }
     fn validates(&self, ctx: &egui::Context, original: Control, release: Release) -> bool {
         let Some(control) = self.control else { return false };
         self.released
             .is_some_and(|(gesture, actual)| gesture.control == original && actual == release)
             && control.same_widget(original)
+            && control.structure.is_some()
+            && control.structure == original.structure
             && control.committed(ctx)
             && control.visible()
             && original.visible()
@@ -1020,6 +1041,7 @@ impl Context {
         self.seen = Some(frame);
     }
     fn finish_owner(&mut self, ctx: &egui::Context) {
+        self.activation.settle(ctx);
         if self.seen != Some(ctx.cumulative_frame_nr()) {
             *self = Self::default();
         }
@@ -1073,6 +1095,7 @@ pub(super) struct IncludeContext {
 }
 impl IncludeContext {
     fn finish_owner(&mut self, ctx: &egui::Context) {
+        self.activation.settle(ctx);
         if self.seen != Some(ctx.cumulative_frame_nr()) {
             *self = Self::default();
         }

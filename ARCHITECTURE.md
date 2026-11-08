@@ -239,6 +239,15 @@ and hidden AltGraph transitions retire only Archive gestures and the original
 input epoch. They preserve editable popup drafts and never rearm a physically
 held key. New actual-consumer registry/transform/modifier cases are authored
 UNRUN; Root compilation/runtime and final independent review remain required.
+Pinned egui Frame paint is reserved before children, but its separate outer
+hover allocation is registered afterwards. The Archive correction now records
+bounded actual popup Frame markers/configuration and the real control-parent
+chain, seals each unique exact structural allocation after popup completion,
+and rechecks the same witness at release/final commit. Only those verified
+structural IDs are excluded from coverage; ambiguity, altered parent/frame,
+all other visual siblings and higher layers still fail closed. All earlier
+103 Archive/Folder Jump test bodies remain exact; new actual popup/nested Frame
+and ambiguity cases are authored UNRUN pending independent review and Root.
 Offline ordinary Inventory browsing is supported by the separate readonly
 Scope. The actual demo's nil session still fails the pre-existing native Folder
 Jump source gate, so demo Folder Jump remains unavailable; no native session or

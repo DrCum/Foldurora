@@ -577,3 +577,5 @@ fn inventory_archive_authority_modifier_revocation_preserves_context_ticket_popu
     );
     assert!(input.read().key_allowed(egui::Key::Enter));
 }
+
+mod structure_tests;
