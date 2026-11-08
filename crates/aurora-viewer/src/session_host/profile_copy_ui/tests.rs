@@ -721,6 +721,111 @@ fn profile_copy_ui_starts_main_saved_all_four_checked_and_five_bounded_sources()
 }
 
 #[test]
+fn profile_copy_ui_overflowing_five_sources_reserve_real_scrollbar_strip_and_remain_scrollable() {
+    let mut frames = Frames::new();
+    assert_eq!(sources(&frames.snapshot, slot(0)).len(), 5);
+    assert!(frames.snapshot.slots.iter().all(|slot| slot.label.as_str().len() == 64));
+    let picker = frames.control(|intent| matches!(intent, Intent::Picker(_)));
+    assert!(frames.click(picker, Late::None).is_none());
+    assert!(frames.show(vec![], Late::None).is_none());
+    // Check the opening animation too, before a fully reserved nonfloating
+    // strip would otherwise hide its full-width interaction overlap.
+    let records = frames
+        .ctx
+        .data(|data| data.get_temp::<Vec<SourceDiagnostic>>(Id::unique("copy_fixture_source_diagnostics")))
+        .unwrap();
+    assert_eq!(records.len(), 5);
+    let source = frames.control(|intent| matches!(intent, Intent::Source(_, _)));
+    let outer = source.frame_origin.unwrap().outer[0].unwrap();
+    // Pinned ComboBox's ScrollArea registers its vertical CLICK|DRAG bar on
+    // this actual outer Frame content Ui; the background catcher is DRAG only.
+    let bars = frames.ctx.viewport(|viewport| {
+        viewport
+            .prev_pass
+            .widgets
+            .get_layer(source.layer)
+            .filter(|widget| {
+                widget.parent_id == outer.content
+                    && widget.visible
+                    && widget.enabled
+                    && widget.sense.senses_click()
+                    && widget.sense.senses_drag()
+                    && widget.rect.height() > widget.rect.width()
+            })
+            .copied()
+            .collect::<Vec<_>>()
+    });
+    assert_eq!(
+        bars.len(),
+        1,
+        "the actual overflowing popup must retain its real vertical scrollbar"
+    );
+    let bar = bars[0];
+    assert!(finite_positive(bar.interact_rect));
+    assert!(
+        records
+            .iter()
+            .any(|record| record.control.registered.rect.bottom() > bar.interact_rect.bottom())
+    );
+    let main = records
+        .iter()
+        .find(|record| matches!(record.control.intent, Intent::Source(_, Source::MainSaved)))
+        .unwrap();
+    assert!(
+        records
+            .iter()
+            .filter(|record| matches!(record.control.intent, Intent::Source(_, Source::Slot(_))))
+            .all(|record| record.control.registered.rect.height() > main.control.registered.rect.height()),
+        "long slot labels must genuinely wrap"
+    );
+    for record in &records {
+        assert!(record.control.registered.rect.right() <= bar.interact_rect.left());
+        assert!(!record.control.registered.interact_rect.intersect(bar.interact_rect).is_positive());
+    }
+    assert!(
+        frames
+            .model
+            .controls
+            .iter()
+            .filter(|control| matches!(control.intent, Intent::Source(_, _)))
+            .all(|control| control.committed(&frames.ctx))
+    );
+    let original_y = records[0].control.registered.rect.top();
+    let point = source.rect.center();
+    assert!(
+        frames
+            .show(
+                vec![
+                    Event::PointerMoved(point),
+                    Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Point,
+                        phase: egui::TouchPhase::Move,
+                        source: egui::MouseWheelSource::Wheel,
+                        delta: egui::vec2(0.0, -80.0),
+                        modifiers: Modifiers::NONE,
+                    }
+                ],
+                Late::None
+            )
+            .is_none()
+    );
+    let mut moved = false;
+    for _ in 0..8 {
+        assert!(frames.show(vec![], Late::None).is_none());
+        let current = frames
+            .ctx
+            .data(|data| data.get_temp::<Vec<SourceDiagnostic>>(Id::unique("copy_fixture_source_diagnostics")))
+            .unwrap();
+        if current[0].control.registered.rect.top() < original_y {
+            moved = true;
+            break;
+        }
+    }
+    assert!(moved, "real wheel input must still scroll the overflowing source list");
+    assert_eq!(frames.model.dialog.as_ref().unwrap().selection.source, Source::MainSaved);
+}
+
+#[test]
 fn profile_copy_ui_actual_inspect_controller_inbox_and_prepared_apply_use_exact_capture() {
     let mut frames = Frames::new();
     let capture = frames.prepare();

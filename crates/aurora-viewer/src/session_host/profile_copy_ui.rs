@@ -901,7 +901,14 @@ impl CopyUi {
                                 .selected_text(egui::RichText::new(source_name))
                                 .show_ui(ui, |ui| {
                                     let inner = (picker_width - egui::Frame::popup(ui.style()).total_margin().sum().x).max(1.0);
-                                    ui.set_max_width(ui.available_width().min(inner));
+                                    let available = ui.available_width().min(inner);
+                                    let content_right = ui.cursor().min.x + available;
+                                    // Pinned ScrollArea animates its reserved width, but
+                                    // its late scrollbar always senses the full bar width.
+                                    // Keep real right padding even during that animation.
+                                    let scroll = ui.spacing().scroll;
+                                    let strip = scroll.bar_width + scroll.bar_inner_margin + scroll.bar_outer_margin;
+                                    ui.set_max_width((available - strip).max(1.0));
                                     #[cfg(test)]
                                     ctx.data_mut(|data| {
                                         data.insert_temp(Id::unique("host_copy_popup"), ui.layer_id().id);
@@ -914,6 +921,9 @@ impl CopyUi {
                                         let response = ui.add(egui::Button::new(label).selected(selection.source == source).wrap());
                                         self.control(ui, response, Intent::Source(selection, source), snapshot, live, &mut candidate);
                                     }
+                                    // Preserve the padding in actual content geometry:
+                                    // auto_shrink must not move the bar over the rows.
+                                    ui.expand_to_include_x(content_right);
                                 })
                         })
                         .inner;

@@ -38,6 +38,14 @@
   Popup diagnostics prioritize exact response/registry bits and retained-frame
   stages; no popup or scrollbar exception is added. New code remains author-
   UNRUN; independent review and Root's next official-profile checks are required.
+  Root's d374 follow-up measured 19 pass, two popup failures and one ignored;
+  every overlay/backdrop case passed. Exact diagnostics identify a real 1.8 px
+  scrollbar interaction overlap during reserved-width animation. Source rows
+  now leave actual style-sized right padding, retained in content geometry so
+  auto-shrink cannot move the bar back over them. Overflow, wheel scrolling and
+  all final authority checks remain; a real five-choice/wrapped-label regression
+  checks the visible scrollbar, nonoverlap, committed rows and wheel movement.
+  This source-only atom is UNRUN pending independent review and Root execution.
 
 - 🔧 Candidate Linux validation on standard native ancestry (no issue):
   The isolated Windows-candidate workflow now also runs the repository's existing
