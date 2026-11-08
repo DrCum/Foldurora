@@ -336,6 +336,7 @@ struct Frames {
     discard: bool,
     classic: bool,
     covered: Option<egui::Pos2>,
+    late: authority_tests::Late,
 }
 impl Frames {
     fn new() -> Self {
@@ -353,6 +354,7 @@ impl Frames {
             discard: false,
             classic,
             covered: None,
+            late: authority_tests::Late::None,
         }
     }
     fn run(&mut self, events: Vec<egui::Event>) -> Vec<crate::ui::widgets::elide_tests::Text> {
@@ -366,6 +368,7 @@ impl Frames {
             discard,
             classic,
             covered,
+            late,
         } = self;
         frames.run(events, |ui| {
             let actions = crate::ui::inventory::show(
@@ -388,6 +391,15 @@ impl Frames {
                     if !proposals.iter().any(|old| old.same(&proposal)) {
                         proposals.push(*proposal);
                     }
+                }
+            }
+            if let Some(proposal) = proposals.last() {
+                let control = match proposal.intent {
+                    Intent::Edit { .. } => state.archive_context.activation.control,
+                    Intent::Include { .. } => state.archive_include_context.activation.control,
+                };
+                if let Some(control) = control {
+                    late.apply(ui, control);
                 }
             }
             if let Some(position) = *covered {
@@ -598,3 +610,5 @@ fn inventory_archive_ui_late_cover_and_bounded_input_overflow_cannot_apply_origi
     assert!(frames.proposals.is_empty());
     assert_eq!(controller_testing::assignments(), 0);
 }
+
+mod authority_tests;

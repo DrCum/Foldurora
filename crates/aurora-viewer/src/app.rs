@@ -10958,6 +10958,7 @@ impl App {
         self.tick_boards_presented(Some(gesture_board::Presentation::new(&gfx.renderer, &gfx.window)));
         self.pump_inventory_archive();
         self.inventory_archive_ui.begin();
+        self.inventory_ui.archive_input(self.inventory_archive_ui.input());
         let mut full = ctx.run_ui(raw, |ui| {
             self.observe_inventory_archive();
             self.observe_folder_jump();
@@ -11006,6 +11007,7 @@ impl App {
         });
         self.finish_folder_jump_input(&ctx);
         self.finish_inventory_archive(&ctx);
+        self.inventory_archive_ui.finish_input();
         self.commit_board_ui(
             &ctx,
             actions.board.take(),
@@ -20553,14 +20555,14 @@ impl ApplicationHandler for App {
         let folder_jump_window = self.gfx.as_ref().is_some_and(|gfx| gfx.window.id() == id);
         if folder_jump_window {
             self.observe_inventory_archive();
-            let invalid_archive_key =
-                matches!(&event, WindowEvent::KeyboardInput { event, is_synthetic, .. } if *is_synthetic || event.repeat);
-            if invalid_archive_key
-                || matches!(
-                    &event,
-                    WindowEvent::Focused(false) | WindowEvent::Occluded(true) | WindowEvent::Destroyed
-                )
-            {
+            if self.inventory_archive_ui.native_event(&event) {
+                self.inventory_ui.revoke_archive_gestures();
+                self.inventory_archive_ui.begin();
+            }
+            if matches!(
+                &event,
+                WindowEvent::Focused(false) | WindowEvent::Occluded(true) | WindowEvent::Destroyed
+            ) {
                 self.inventory_ui.retire_archive_input(&self.egui_ctx);
                 self.inventory_archive_ui.begin();
             }

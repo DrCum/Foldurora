@@ -21,6 +21,12 @@
   joins the complete consumer graph together; independent final source review
   and all Root compiler/runtime/native/private-FS checks are still pending.
   No grid/visual/full parity acceptance or release is claimed.
+  Follow-up source correction resolves final actual committed widget/finite
+  transform/coverage for both Archive and Include and preserves App-owned
+  physical release fencing through native modifier/AltGraph ABA. Seven new
+  real-consumer/input-history tests are authored UNRUN, with every earlier
+  assertion retained. Offline ordinary browsing retains the demo's nil session;
+  demo Folder Jump remains unavailable under its unchanged native source gate.
 
 - 🔧 Local Inventory archive prerequisite, shared origin (2026-11-07; no issue):
   World now owns one pure actual-request digest/ambiguity state, captured before
