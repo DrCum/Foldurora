@@ -93,7 +93,7 @@ impl Late {
         }
     }
 }
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum Modality {
     Pointer,
     Enter,
@@ -131,9 +131,11 @@ fn original(frames: &mut Frames, include: bool) -> Control {
     }
 }
 fn release(frames: &mut Frames, control: Control, modality: Modality, late: Late) {
+    trace_release(frames, control, modality, "before");
     match modality {
         Modality::Pointer => {
             frames.pointer(control.rect.center(), egui::PointerButton::Primary, true);
+            trace_release(frames, control, modality, "down");
             frames.late = late;
             frames.pointer(control.rect.center(), egui::PointerButton::Primary, false);
         }
@@ -146,6 +148,7 @@ fn release(frames: &mut Frames, control: Control, modality: Modality, late: Late
             frames.frames.ctx.memory_mut(|memory| memory.request_focus(control.widget));
             frames.run(Vec::new());
             frames.run(vec![key(keycode, true)]);
+            trace_release(frames, control, modality, "down");
             frames.late = late;
             frames.run(vec![key(keycode, false)]);
         }
@@ -159,6 +162,68 @@ fn release(frames: &mut Frames, control: Control, modality: Modality, late: Late
                 target_node: control.widget.accesskit_id(),
                 data: None,
             })]);
+        }
+    }
+    trace_release(frames, control, modality, "after");
+}
+
+fn trace_release(frames: &Frames, original: Control, modality: Modality, phase: &str) {
+    let ctx = &frames.frames.ctx;
+    let include = frames
+        .state
+        .archive_include_context
+        .activation
+        .control
+        .is_some_and(|control| control.widget == original.widget);
+    eprintln!(
+        "ARCHIVE_RELEASE phase={phase} include={include} modality={modality:?} original={:?} rect={:?} frame={} pass={} proposals={} popup={} focus={:?} raw={:?}",
+        original.widget,
+        original.rect,
+        ctx.cumulative_frame_nr(),
+        ctx.cumulative_pass_nr(),
+        frames.proposals.len(),
+        egui::Popup::is_any_open(ctx),
+        ctx.memory(|memory| memory.focused()),
+        ctx.input(|input| (
+            input.focused,
+            input.modifiers,
+            input.pointer.button_down(egui::PointerButton::Primary),
+            input.key_down(egui::Key::Enter),
+            input.key_down(egui::Key::Space)
+        ))
+    );
+    for (kind, activation) in [
+        ("edit", &frames.state.archive_context.activation),
+        ("include", &frames.state.archive_include_context.activation),
+    ] {
+        eprintln!(
+            "ARCHIVE_ACTIVATION kind={kind} blocked={} input_frame={:?} frame={:?} gesture={:?} released={} settled_focus={:?}",
+            activation.blocked,
+            activation.input_frame,
+            activation.frame,
+            activation
+                .gesture
+                .map(|gesture| (gesture.control.widget, gesture.key, gesture.control.frame)),
+            activation.released.is_some(),
+            activation.settled_focus
+        );
+        for (label, control) in [("current", activation.control), ("previous", activation.previous)] {
+            if let Some(control) = control {
+                eprintln!(
+                    "ARCHIVE_RELEASE_CONTROL {kind}/{label} widget={:?} frame={} pass={} same_original={} geometry={} registry={} committed={} rect={:?} registered={:?} structure_present={} same_structure={}",
+                    control.widget,
+                    control.frame,
+                    control.pass,
+                    control.same_widget(original),
+                    control.geometry(ctx),
+                    control.registry(ctx, true),
+                    control.committed(ctx),
+                    control.rect,
+                    control.registered,
+                    control.structure.is_some(),
+                    control.structure == original.structure
+                );
+            }
         }
     }
 }

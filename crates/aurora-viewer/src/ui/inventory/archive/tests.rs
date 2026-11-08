@@ -528,6 +528,35 @@ impl Frames {
                 ui.ctx().request_discard("synthetic later widget discarded Archive release paint");
             }
         });
+        if let Some(position) = *covered {
+            let ctx = &frames.ctx;
+            let layer = egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("archive_later_cover"));
+            let widgets = ctx.viewport(|viewport| viewport.prev_pass.widgets.get_layer(layer).take(4).copied().collect::<Vec<_>>());
+            eprintln!(
+                "ARCHIVE_LATE_AREA position={position:?} current_area={:?} visible={} widgets={widgets:?} center_layer={:?}",
+                egui::AreaState::load(ctx, layer.id).map(|area| area.rect()),
+                ctx.memory(|memory| memory.areas().is_visible(&layer)),
+                ctx.layer_id_at(position)
+            );
+            if let Some(proposal) = proposals.last() {
+                let rect = egui::AreaState::load(ctx, layer.id).unwrap().rect();
+                assert!(rect.contains(position) && rect.intersect(proposal.control.rect).is_positive());
+                assert!(
+                    widgets
+                        .iter()
+                        .any(|widget| widget.enabled && widget.visible && widget.interact_rect.contains(position))
+                );
+                let order = ctx.memory(|memory| memory.layer_ids().collect::<Vec<_>>());
+                assert!(
+                    order.iter().position(|id| *id == layer).unwrap() > order.iter().position(|id| *id == proposal.control.layer).unwrap()
+                );
+                assert_eq!(
+                    ctx.layer_id_at(position),
+                    Some(layer),
+                    "actual visible covering Area is above the original control"
+                );
+            }
+        }
         if mode != 0 {
             let actual = frames
                 .ctx
@@ -574,6 +603,31 @@ impl Frames {
             },
         ]);
     }
+    fn warm_late_cover(&mut self) {
+        // Egui first sizes a new Area invisibly. Warm this SAME real Area
+        // away from the original control, then remove it through normal UI.
+        let position = egui::pos2(64.0, 64.0);
+        self.covered = Some(position);
+        let layer = egui::LayerId::new(egui::Order::Foreground, egui::Id::unique("archive_later_cover"));
+        for _ in 0..8 {
+            self.run(Vec::new());
+            let visible = self.frames.ctx.viewport(|viewport| {
+                viewport
+                    .prev_pass
+                    .widgets
+                    .get_layer(layer)
+                    .any(|widget| widget.enabled && widget.visible && widget.interact_rect.contains(position))
+            });
+            if visible && self.frames.ctx.memory(|memory| memory.areas().is_visible(&layer)) {
+                self.covered = None;
+                self.run(Vec::new());
+                assert!(!self.frames.ctx.memory(|memory| memory.areas().is_visible(&layer)));
+                return;
+            }
+        }
+        panic!("actual late-cover Area did not finish visible sizing before original input");
+    }
+
     fn open_context(&mut self) -> egui::Pos2 {
         self.state.show_original(&self.world.inventory, id(2));
         let mut texts = Vec::new();
@@ -797,6 +851,7 @@ fn inventory_archive_ui_include_only_changes_original_owner_policy_after_whole_c
 fn inventory_archive_ui_late_cover_and_bounded_input_overflow_cannot_apply_original_context_release() {
     controller_testing::reset_assignments();
     let mut frames = Frames::new();
+    frames.warm_late_cover();
     let position = frames.open_context();
     frames.pointer(position, egui::PointerButton::Primary, true);
     frames.covered = Some(position);
