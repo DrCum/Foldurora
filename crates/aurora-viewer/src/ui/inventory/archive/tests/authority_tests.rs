@@ -192,6 +192,21 @@ fn trace_release(frames: &Frames, original: Control, modality: Modality, phase: 
             input.key_down(egui::Key::Space)
         ))
     );
+    if include {
+        let heading = ctx.data(|data| data.get_temp::<(egui::WidgetRect, egui::Frame, egui::Vec2)>(visibility_heading_key()));
+        eprintln!(
+            "ARCHIVE_INCLUDE_PLACEMENT heading={heading:?} child_area={:?} pointer={:?}",
+            egui::AreaState::load(ctx, original.layer.id).map(|area| (area.rect(), area.size)),
+            ctx.pointer_hover_pos()
+        );
+        if let Some((heading, _, _)) = heading {
+            eprintln!(
+                "ARCHIVE_INCLUDE_PARENT area={:?} bounds={:?}",
+                egui::AreaState::load(ctx, heading.layer_id.id).map(|area| (area.rect(), area.size)),
+                crate::ui::layout::toolbar_layer_bounds(ctx, heading.layer_id)
+            );
+        }
+    }
     for (kind, activation) in [
         ("edit", &frames.state.archive_context.activation),
         ("include", &frames.state.archive_include_context.activation),

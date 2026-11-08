@@ -400,6 +400,17 @@ fn inventory_archive_ui_operation_and_canonical_browse_loading_complete_independ
     assert!(world.inventory.queue.is_empty());
 }
 
+fn visibility_heading_key() -> egui::Id {
+    egui::Id::unique("archive_fixture_visibility_heading")
+}
+pub(super) fn record_visibility_heading(ui: &egui::Ui, id: egui::Id) {
+    let registered = ui.ctx().viewport(|viewport| viewport.this_pass.widgets.get(id).copied());
+    if let Some(registered) = registered {
+        let snapshot = (registered, egui::Frame::menu(ui.style()), ui.spacing().item_spacing);
+        ui.ctx().data_mut(|data| data.insert_temp(visibility_heading_key(), snapshot));
+    }
+}
+
 fn presentation_key() -> egui::Id {
     egui::Id::unique("archive_fixture_presentation")
 }

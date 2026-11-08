@@ -164,6 +164,8 @@ pub(super) struct Controls {
 pub(super) fn visibility_menu(ui: &mut egui::Ui, p: &Palette, st: &mut InventoryUi) {
     let Some(controls) = st.archive_controls else { return };
     let Some(revision) = st.archive_key else { return };
+    #[cfg(test)]
+    let heading = ui.next_auto_id();
     super::super::menu::submenu(
         ui,
         p,
@@ -183,6 +185,8 @@ pub(super) fn visibility_menu(ui: &mut egui::Ui, p: &Palette, st: &mut Inventory
             }
         },
     );
+    #[cfg(test)]
+    tests::record_visibility_heading(ui, heading);
 }
 
 #[derive(Clone, Copy)]
