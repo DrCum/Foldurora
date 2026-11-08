@@ -659,6 +659,7 @@ pub(in crate::ui::inventory) fn process_deferred(inv: &mut Inventory, st: &mut I
     st.cleanup_generation = Some(inv.generation);
     if !inv.folders.contains_key(&folder) {
         st.pending_cleanup = None;
+        st.update_fetch_all();
         st.message = aurora_i18n::tr!("common-folder-not-found").into();
         return;
     }
@@ -674,6 +675,7 @@ pub(in crate::ui::inventory) fn process_deferred(inv: &mut Inventory, st: &mut I
     }
     let Some(items) = descendant_items(inv, folder) else { return };
     st.pending_cleanup = None;
+    st.update_fetch_all();
     let broken: Vec<_> = items
         .into_iter()
         .filter(|id| {
@@ -981,6 +983,64 @@ mod tests {
         process_deferred(&mut inv, &mut state, &prefs, &Facts::default());
         assert!(state.pending_cleanup.is_none());
         assert!(matches!(&state.dialog,Some(EditDialog::Delete(ids,false)) if ids.contains(&broken)));
+    }
+
+    #[test]
+    fn cleanup_library_loading_outlives_personal_and_browse_completion_without_losing_either_owner() {
+        let mut inv = seed();
+        let folder = Uuid::from_u128(8000);
+        let mut root = inv.folders[&folder].clone();
+        root.info.id = inv.root;
+        root.info.type_default = 8;
+        root.items.clear();
+        root.children = vec![folder];
+        inv.folders.insert(inv.root, root);
+        for loaded in inv.folders.values_mut() {
+            loaded.state = FetchState::Fetched;
+        }
+        inv.folders.get_mut(&inv.lib_root).unwrap().state = FetchState::Unknown;
+        let mut state = InventoryUi {
+            pending_cleanup: Some(folder),
+            ..Default::default()
+        };
+        let prefs = InventoryPreferences::default();
+        let facts = Facts::default();
+        state.set_browse_fetch(true);
+        process_deferred(&mut inv, &mut state, &prefs, &facts);
+        assert_eq!(state.pending_cleanup, Some(folder));
+        assert!(state.operation_fetch && state.fetch_all);
+        assert!(inv.queue.iter().any(|(id, _)| *id == inv.lib_root));
+        super::super::super::fetch_whole_inventory(&mut inv, &mut state);
+        assert!(!state.operation_fetch, "the personal tree is already complete");
+        state.set_browse_fetch(false);
+        assert!(state.fetch_all, "pending Library cleanup still owns loading");
+        let queued = inv.queue.clone();
+        process_deferred(&mut inv, &mut state, &prefs, &facts);
+        assert_eq!(inv.queue, queued, "same-generation suppression adds no requests");
+        assert_eq!(state.pending_cleanup, Some(folder));
+        assert!(state.fetch_all, "suppression cannot clear the original cleanup owner");
+
+        state.set_browse_fetch(true);
+        inv.folders.get_mut(&inv.lib_root).unwrap().state = FetchState::Fetched;
+        inv.generation += 1;
+        process_deferred(&mut inv, &mut state, &prefs, &facts);
+        assert!(state.pending_cleanup.is_none());
+        assert!(
+            state.browse_fetch && state.fetch_all,
+            "cleanup completion retains the pending browse"
+        );
+        state.set_browse_fetch(false);
+        assert!(!state.fetch_all);
+
+        let mut missing = InventoryUi {
+            pending_cleanup: Some(Uuid::from_u128(999_999)),
+            ..Default::default()
+        };
+        missing.update_fetch_all();
+        assert!(missing.fetch_all);
+        process_deferred(&mut inv, &mut missing, &prefs, &facts);
+        assert!(missing.pending_cleanup.is_none());
+        assert!(!missing.fetch_all, "a missing-folder terminal retires its own loading owner");
     }
 
     #[test]
