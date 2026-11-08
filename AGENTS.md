@@ -6,7 +6,9 @@ instructions override inherited Aurora process requirements and this policy.
 
 ## Scope and ownership
 
-- Start from [the current handoff](docs/FOLDURORA_CURRENT_HANDOFF.md). Read
+- Start from `docs/FOLDURORA_CURRENT_HANDOFF.md` when present; otherwise use
+  the handoff supplied for the task and verify the intended branch and source
+  before editing. Do not assume `main` includes active integration work. Read
   relevant architecture, task and technical-reference sections on demand;
   repeated whole-document reading and upstream project-board administration
   are not required.
@@ -54,14 +56,40 @@ instructions override inherited Aurora process requirements and this policy.
 
 ## Checks and Windows builds
 
-- During development, test changed behavior with focused tests. Prefer
-  workspace-filtered Cargo commands where feature resolution requires them,
-  for example `cargo test --profile ci --workspace --locked <filter>`.
-- Run the appropriate full suite on the frozen combined candidate. Repeat
-  full validation only when subsequent changes, failures or unresolved risks
-  justify it. Use normal Linux CI for ownership tests this sandbox cannot
-  execute correctly; report the limitation without security exceptions or
-  silent skips.
+- Plan one full-validation checkpoint for each related feature group in the
+  current handoff. A small change, implementation slice, review fix or frozen
+  commit is not, by itself, another checkpoint. Batch related work before
+  paying for another full suite or native package.
+- Between those checkpoints, run focused regressions for changed behavior,
+  applicable formatting and scoped lint/build checks. Prefer workspace-filtered
+  Cargo commands where feature resolution requires them, for example
+  `cargo test --profile ci --workspace --locked <filter>`. A filter can still
+  compile a large test binary: reuse compatible outputs and check disk first.
+- Once the group is integrated, freeze its combined source SHA and run the
+  appropriate unfiltered full suite and required aggregate checks. Complete
+  this checkpoint before declaring the group fully validated or handing it
+  off as a release candidate. Keep required CI and acceptance gates intact;
+  focused passes do not establish a full pass.
+- Run or repeat the full suite earlier only for a concrete reason: a
+  cross-cutting change whose risk focused checks cannot cover, a new unexplained
+  regression, integration/conflict resolution that invalidates earlier
+  evidence, or an explicit user request. Record the reason and why focused
+  checks are insufficient before starting. Merely making another commit or
+  re-observing an unchanged, documented deferred failure is not a reason.
+- Tie results to the full source SHA, configuration and command. After later
+  edits, rerun affected checks; do not relabel an older full run as a pass for
+  the new source. Preserve failures, totals, logs and deferred status. Do not
+  weaken checks, alter fixtures to hide failures or silently filter failures
+  from a run described as full. Use normal Linux CI for ownership tests this
+  sandbox cannot execute correctly; report the limitation without security
+  exceptions. Honor explicit user deferrals.
+- For UI changes, inspect affected workflows and relevant neighboring controls;
+  cover both styles when affected. Use representative screenshots and expand
+  language/DPI/scenario coverage only for a specific layout, localization or
+  behavior risk. Do not repeat an unrelated screenshot matrix for every slice.
+- For documentation-only policy edits, check the diff, links and consistency;
+  no viewer build, full runtime suite or screenshot run is needed. Changes to
+  executable scripts, CI or configuration still need their relevant checks.
 - Windows builds normally use the existing **Foldurora Windows Builder** on
   **Cumputer**, thread `01a1af77-a465-71c3-be08-cd9d1b927f83`, through the user's
   Dot **Slick**. Project build/test communication through that relay is
