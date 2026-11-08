@@ -24,6 +24,9 @@ jobs:
       GIT_CONFIG_KEY_0: core.autocrlf
       GIT_CONFIG_VALUE_0: 'false'
       BASE_COMMIT: 6ac6fbe1dae2ec69f8512949b54f6ccfbdf6e374
+      PROFILE_PATH: crates/aurora-viewer/src/session_host/profile.rs
+      PROFILE_BLOB: 33369a8eb6a60b0e5f1e17ee23ce11337d82565d
+      PROFILE_SHA256: 72849399542c86a91169cf5fe59d7d4316e05f13ce7d0d74fc99e6bcfc688109
       SECURITY_PATH: crates/aurora-viewer/src/session_host/profile/settings_file/security.rs
       SECURITY_BLOB: 023a9bb0bb975d49e06a0ebc3408827ffb819f4a
       SECURITY_SHA256: be94b8199d470d2e070695a08f6af17dcf4cb55f0baa5c4916fa58742ac4bdb9
@@ -46,11 +49,15 @@ jobs:
           git merge-base --is-ancestor $env:BASE_COMMIT HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Frozen base is not an ancestor.' }
           $changed = @(git diff --name-status $env:BASE_COMMIT HEAD)
-          if ($LASTEXITCODE -ne 0 -or $changed.Count -ne 1 -or $changed[0] -ne "A`t.github/workflows/windows-profile-native.yml") { throw 'Unexpected source changes.' }
+          if ($LASTEXITCODE -ne 0 -or $changed.Count -ne 2 -or $changed[0] -ne "A`t.github/workflows/windows-profile-native.yml" -or $changed[1] -ne "M`tcrates/aurora-viewer/src/session_host/profile.rs") { throw 'Unexpected source changes.' }
           $blob = (git rev-parse "HEAD:$env:SECURITY_PATH").Trim()
           if ($LASTEXITCODE -ne 0 -or $blob -ne $env:SECURITY_BLOB) { throw 'Unexpected security blob.' }
           $hash = (Get-FileHash -LiteralPath $env:SECURITY_PATH -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($hash -ne $env:SECURITY_SHA256) { throw 'Unexpected security bytes.' }
+          $profileBlob = (git rev-parse "HEAD:$env:PROFILE_PATH").Trim()
+          if ($LASTEXITCODE -ne 0 -or $profileBlob -ne $env:PROFILE_BLOB) { throw 'Unexpected fixture profile blob.' }
+          $profileHash = (Get-FileHash -LiteralPath $env:PROFILE_PATH -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($profileHash -ne $env:PROFILE_SHA256) { throw 'Unexpected fixture profile bytes.' }
           $dirty = git status --porcelain --untracked-files=no
           if ($LASTEXITCODE -ne 0 -or $dirty) { throw 'Tracked source is dirty.' }
       - name: Rust stable
@@ -84,6 +91,16 @@ jobs:
           $code = $LASTEXITCODE
           "exit_code=$code" >> $env:GITHUB_OUTPUT
           exit $code
+      - name: Exact Windows fixture namespace test
+        id: namespace
+        continue-on-error: true
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          cargo test --profile ci -p aurora-viewer --locked session_host::profile::tests::windows_host_fixture_namespace_is_private_native_temp_scoped_and_stable -- --exact --test-threads=1 2>&1 |
+            Tee-Object -FilePath .scratch/windows-profile-native/namespace.log
+          $code = $LASTEXITCODE
+          "exit_code=$code" >> $env:GITHUB_OUTPUT
+          exit $code
       - name: Record component provenance and actual results
         id: manifest
         if: always()
@@ -97,6 +114,8 @@ jobs:
           SETTINGS_EXIT: ${{ steps.settings.outputs.exit_code }}
           COPY_RESULT: ${{ steps.copy.outcome }}
           COPY_EXIT: ${{ steps.copy.outputs.exit_code }}
+          NAMESPACE_RESULT: ${{ steps.namespace.outcome }}
+          NAMESPACE_EXIT: ${{ steps.namespace.outputs.exit_code }}
         run: |
           $actual = (git rev-parse HEAD).Trim()
           $headOk = $LASTEXITCODE -eq 0 -and $actual -eq $env:EXPECTED_COMMIT
@@ -105,9 +124,12 @@ jobs:
           $blob = (git rev-parse "HEAD:$env:SECURITY_PATH").Trim()
           $blobOk = $LASTEXITCODE -eq 0 -and $blob -eq $env:SECURITY_BLOB
           $hash = (Get-FileHash -LiteralPath $env:SECURITY_PATH -Algorithm SHA256).Hash.ToLowerInvariant()
+          $profileBlob = (git rev-parse "HEAD:$env:PROFILE_PATH").Trim()
+          $profileOk = $LASTEXITCODE -eq 0 -and $profileBlob -eq $env:PROFILE_BLOB
+          $profileHash = (Get-FileHash -LiteralPath $env:PROFILE_PATH -Algorithm SHA256).Hash.ToLowerInvariant()
           $workflowHash = (Get-FileHash -LiteralPath .github/workflows/windows-profile-native.yml -Algorithm SHA256).Hash.ToLowerInvariant()
           $checks = [ordered]@{}
-          foreach ($entry in @(@('settings', 'session_host::profile::settings_file', $env:SETTINGS_RESULT, $env:SETTINGS_EXIT), @('copy', 'session_host::profile_copy::tests::', $env:COPY_RESULT, $env:COPY_EXIT))) {
+          foreach ($entry in @(@('settings', 'session_host::profile::settings_file', $env:SETTINGS_RESULT, $env:SETTINGS_EXIT), @('copy', 'session_host::profile_copy::tests::', $env:COPY_RESULT, $env:COPY_EXIT), @('namespace', 'session_host::profile::tests::windows_host_fixture_namespace_is_private_native_temp_scoped_and_stable', $env:NAMESPACE_RESULT, $env:NAMESPACE_EXIT))) {
             $log = Join-Path .scratch/windows-profile-native "$($entry[0]).log"
             $cases = @()
             if (Test-Path -LiteralPath $log) {
@@ -115,15 +137,16 @@ jobs:
             }
             $checks[$entry[0]] = [ordered]@{ filter = $entry[1]; outcome = $entry[2]; exit_code = $entry[3]; passed_cases = $cases; passed_count = $cases.Count }
           }
-          $passed = $headOk -and $clean -and $blobOk -and $hash -eq $env:SECURITY_SHA256 -and $env:SOURCE_RESULT -eq 'success' -and $env:TOOLCHAIN_RESULT -eq 'success'
+          $passed = $headOk -and $clean -and $blobOk -and $hash -eq $env:SECURITY_SHA256 -and $profileOk -and $profileHash -eq $env:PROFILE_SHA256 -and $env:SOURCE_RESULT -eq 'success' -and $env:TOOLCHAIN_RESULT -eq 'success'
           foreach ($check in $checks.Values) { $passed = $passed -and $check.outcome -eq 'success' -and $check.exit_code -eq '0' -and $check.passed_count -gt 0 }
           $manifest = [ordered]@{
             schema = 1; commit = $actual; expected_commit = $env:EXPECTED_COMMIT; base_commit = $env:BASE_COMMIT
-            source_clean = [bool]$clean; security_path = $env:SECURITY_PATH; security_blob = $blob; expected_security_blob = $env:SECURITY_BLOB
+            source_clean = [bool]$clean; profile_path = $env:PROFILE_PATH; profile_blob = $profileBlob; expected_profile_blob = $env:PROFILE_BLOB
+            profile_sha256 = $profileHash; expected_profile_sha256 = $env:PROFILE_SHA256; security_path = $env:SECURITY_PATH; security_blob = $blob; expected_security_blob = $env:SECURITY_BLOB
             security_sha256 = $hash; expected_security_sha256 = $env:SECURITY_SHA256; workflow_sha256 = $workflowHash
             workflow_run = $env:RUN_URL; compiler = $env:RUST_COMPILER; profile = 'ci'; target = 'x86_64-pc-windows-msvc'
             source_verification = $env:SOURCE_RESULT; toolchain = $env:TOOLCHAIN_RESULT; checks = $checks; all_checks_passed = [bool]$passed
-            scope = 'Native Windows Profile settings-file and copy-core components on frozen 6ac6fbe1 only; not final integration, UI, human, grid, packaging or product acceptance.'
+            scope = 'Native Windows Profile settings-file, copy-core and exact Windows fixture namespace components on frozen 6ac6fbe1 plus reviewed e4f735ad profile.rs only; not final integration, UI, human, grid, packaging or product acceptance.'
           }
           New-Item -ItemType Directory -Force .scratch/windows-profile-native | Out-Null
           $manifest | ConvertTo-Json -Depth 8 | Set-Content .scratch/windows-profile-native/component-manifest.json -Encoding utf8NoBOM

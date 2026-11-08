@@ -108,12 +108,14 @@ fn profile_relative(installation: &str, session: Uuid, generation: u64) -> io::R
 /// There is deliberately no current-directory fallback and no environment
 /// variable accepting an arbitrary profile root.
 pub(super) fn host_root() -> io::Result<PathBuf> {
-    #[cfg(test)]
+    #[cfg(all(test, not(windows)))]
     let data = Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
         .nth(2)
         .ok_or_else(|| invalid("unit-test worktree root is unavailable"))?
         .join("target/unit-test-user-data");
+    #[cfg(all(test, windows))]
+    let data = windows_test_data_root()?;
     #[cfg(not(test))]
     let data = directories::ProjectDirs::from("org", "Aurora", "AuroraViewer")
         .map(|dirs| dirs.data_local_dir().to_path_buf())
@@ -128,6 +130,34 @@ pub(super) fn host_root() -> io::Result<PathBuf> {
     platform::private_directory(&root)?;
     plain_directory(&root)?;
     Ok(root)
+}
+
+#[cfg(all(test, windows))]
+fn windows_test_data_root() -> io::Result<PathBuf> {
+    // The runner's checkout-drive owner is outside production trust. Keep the
+    // same compile-time worktree namespace across test processes, but put only
+    // synthetic host fixtures beneath the measured supported native TEMP root.
+    // No PID, random per-call root, executable location or root override is used.
+    let worktree = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .ok_or_else(|| invalid("unit-test worktree root is unavailable"))?;
+    let namespace: String = Sha256::digest(worktree.as_os_str().as_encoded_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    let temporary = std::env::temp_dir();
+    if !temporary.is_absolute() {
+        return Err(invalid("native temporary test directory must be absolute"));
+    }
+    ordinary_directories(&temporary)?;
+    // Retain Windows' canonical/verbatim path spelling for long descendants.
+    let data = std::fs::canonicalize(temporary)?.join(format!("aurora-host-tests-{namespace}"));
+    // Existing foreign ownership/ACLs/reparse objects are refused, never fixed.
+    // The descriptor assigns TokenUser even under an elevated default owner.
+    platform::private_directory(&data)?;
+    plain_directory(&data)?;
+    Ok(data)
 }
 
 /// Create/validate only descendants of the derived production host root. The
@@ -815,6 +845,29 @@ mod platform {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_host_fixture_namespace_is_private_native_temp_scoped_and_stable() {
+        let root = host_root().expect("private synthetic host root");
+        let repeated = host_root().expect("same compile-time worktree namespace");
+        assert_eq!(root, repeated, "no process-local/random-per-call fixture root");
+        assert_eq!(root.file_name(), Some(std::ffi::OsStr::new("session-host")));
+        let data = root.parent().expect("private namespace parent");
+        let temporary = std::fs::canonicalize(std::env::temp_dir()).expect("canonical native temporary root");
+        assert_eq!(
+            data.parent(),
+            Some(temporary.as_path()),
+            "no checkout-drive or actual Aurora profile namespace"
+        );
+        let name = data.file_name().and_then(|name| name.to_str()).expect("ASCII test namespace");
+        let digest = name.strip_prefix("aurora-host-tests-").expect("test-only namespace prefix");
+        assert_eq!(digest.len(), 64);
+        assert!(digest.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()));
+        platform::validate_directory(data).expect("strict TokenUser owner-only namespace, without permission repair");
+        platform::validate_directory(&root).expect("strict original host-root policy");
+        assert_eq!(std::fs::canonicalize(&root).expect("canonical host root"), root);
+    }
     #[test]
     fn native_store_kinds_have_fixed_disjoint_profile_paths_and_captured_identity() {
         let account = Uuid::new_v4();
