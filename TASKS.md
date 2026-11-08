@@ -3753,5 +3753,11 @@ Open-source technologies that could set Aurora apart (human request of 2026-10-1
     and editor focus, with existing valid retry/native-run tests strengthened.
     All 64 Board test definitions are retained and author-UNRUN; independent
     follow-up source review and root-owned runtime validation remain pending.
+    A further source correction checks finite local/global geometry, visible
+    viewport intersection, pointer positions and the full invertible transform
+    before capture and final consumption. Two added cases cover finite-bound
+    predicates and actual focused egui keys with stable invalid transforms or
+    infinite rectangles versus valid original-proof retries. All 66 definitions
+    remain author-UNRUN; no runtime acceptance is claimed.
   - ⬜ Later parity: custom labels/colors/defaults, bulk edits/search/reordering,
     paging, persistent last selection, multiple windows and import/export.

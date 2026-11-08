@@ -172,6 +172,35 @@ fn next(counter: &mut u64) -> Option<u64> {
     *counter = current.checked_add(1).unwrap_or(0);
     (current != 0 && *counter != 0).then_some(current)
 }
+fn finite_positive(rect: egui::Rect) -> bool {
+    rect.is_finite() && rect.size().is_finite() && rect.is_positive()
+}
+/// Validate both local and actual transformed bounds. egui's pinned transform
+/// validator omits translation.y; positive rectangles alone admit infinity.
+fn control_geometry(
+    rect: egui::Rect,
+    clip: egui::Rect,
+    transform: Option<egui::emath::TSTransform>,
+    viewport: egui::Rect,
+) -> Option<egui::Rect> {
+    if !finite_positive(rect) || !finite_positive(clip) || !finite_positive(rect.intersect(clip)) || !finite_positive(viewport) {
+        return None;
+    }
+    let transform = transform.unwrap_or(egui::emath::TSTransform::IDENTITY);
+    let finite_transform = |transform: egui::emath::TSTransform| {
+        transform.scaling.is_finite()
+            && transform.scaling != 0.0
+            && transform.translation.x.is_finite()
+            && transform.translation.y.is_finite()
+    };
+    if !finite_transform(transform) || !finite_transform(transform.inverse()) {
+        return None;
+    }
+    let rect = transform * rect;
+    let clip = transform * clip;
+    let visible = rect.intersect(clip).intersect(viewport);
+    (finite_positive(rect) && finite_positive(clip) && finite_positive(visible)).then_some(visible)
+}
 impl State {
     pub(crate) fn cancel(&mut self) {
         self.retire_focus = self
@@ -257,8 +286,10 @@ impl State {
             return false;
         }
         self.released = None;
+        let viewport = ctx.content_rect();
         let valid = self.instance != 0
             && ticket.instance == self.instance
+            && control_geometry(ticket.rect, ticket.clip, ticket.transform, viewport).is_some()
             && self.frame == Some(ticket.frame)
             && ticket.frame.checked_add(1) == Some(ctx.cumulative_frame_nr())
             && self.finished_pass.and_then(|pass| pass.checked_add(1)) == Some(ctx.cumulative_pass_nr())
@@ -268,12 +299,13 @@ impl State {
             && !egui::Popup::is_any_open(ctx)
             && ctx.memory(|memory| memory.allows_interaction(ticket.layer))
             && ctx.layer_transform_to_global(ticket.layer) == ticket.transform
-            && ctx.viewport(|viewport| {
+            && ctx.viewport(|state| {
                 // end_pass swaps this exact committed widget set into prev_pass.
                 // The local map alone cannot establish that egui kept the widget.
-                viewport.prev_pass.widgets.get(ticket.id).is_some_and(|widget| {
+                state.prev_pass.widgets.get(ticket.id).is_some_and(|widget| {
                     widget.enabled
                         && widget.visible
+                        && control_geometry(widget.rect, widget.interact_rect, ticket.transform, viewport).is_some()
                         && widget.rect == ticket.rect
                         && widget.interact_rect == ticket.clip
                         && widget.layer_id == ticket.layer
@@ -286,10 +318,14 @@ impl State {
                     && painted.clip == ticket.clip
                     && painted.layer == ticket.layer
                     && painted.transform == ticket.transform
-                    && painted.clip.is_positive()
-                    && painted.rect.intersect(painted.clip).is_positive()
+                    && control_geometry(painted.rect, painted.clip, painted.transform, viewport).is_some()
                     && match (ticket.key, ticket.position) {
-                        (None, Some(position)) => painted.clip.contains(position) && ctx.layer_id_at(position) == Some(ticket.layer),
+                        (None, Some(position)) => {
+                            position.is_finite()
+                                && control_geometry(painted.rect, painted.clip, painted.transform, viewport)
+                                    .is_some_and(|visible| visible.contains(position))
+                                && ctx.layer_id_at(position) == Some(ticket.layer)
+                        }
                         (Some(_), None) => painted.focused && ctx.memory(|memory| memory.focused() == Some(ticket.id)),
                         _ => false,
                     }
@@ -346,10 +382,15 @@ impl State {
                 }),
             )
         });
-        let interactive = response.ctx.memory(|memory| memory.allows_interaction(response.layer_id)) && !self.suspended;
+        let transform = response.ctx.layer_transform_to_global(response.layer_id);
+        let viewport = response.ctx.content_rect();
+        let visible = control_geometry(response.rect, response.interact_rect, transform, viewport);
+        let interactive =
+            response.ctx.memory(|memory| memory.allows_interaction(response.layer_id)) && !self.suspended && visible.is_some();
         let pointer = pointer_press.filter(|(_, pos)| {
             interactive
-                && response.interact_rect.contains(*pos)
+                && pos.is_finite()
+                && visible.is_some_and(|visible| visible.contains(*pos))
                 && response.ctx.layer_id_at(*pos) == Some(response.layer_id)
                 && (response.is_pointer_button_down_on() || response.clicked_by(egui::PointerButton::Primary))
         });
@@ -377,6 +418,8 @@ impl State {
                     painted.rect == response.rect
                         && painted.clip == response.interact_rect
                         && painted.layer == response.layer_id
+                        && painted.transform == transform
+                        && control_geometry(painted.rect, painted.clip, painted.transform, viewport).is_some()
                         && (key.is_none() || painted.focused)
                 })
                 .map(|painted| Held {
@@ -406,7 +449,7 @@ impl State {
                         && painted.rect == response.rect
                         && painted.clip == response.interact_rect
                         && painted.layer == response.layer_id
-                        && painted.transform == response.ctx.layer_transform_to_global(response.layer_id)
+                        && painted.transform == transform
                 })
                 .map(|painted| painted.control)
                 .or_else(|| next(&mut self.next_control));
@@ -418,7 +461,7 @@ impl State {
                     action,
                     rect: response.rect,
                     layer: response.layer_id,
-                    transform: response.ctx.layer_transform_to_global(response.layer_id),
+                    transform,
                     clip: response.interact_rect,
                     focused: response.has_focus(),
                 },
@@ -433,7 +476,11 @@ impl State {
             let held = self.held.take()?;
             let owns_release = position.map_or_else(
                 || response.has_focus(),
-                |pos| response.interact_rect.contains(pos) && response.ctx.layer_id_at(pos) == Some(response.layer_id),
+                |pos| {
+                    pos.is_finite()
+                        && visible.is_some_and(|visible| visible.contains(pos))
+                        && response.ctx.layer_id_at(pos) == Some(response.layer_id)
+                },
             );
             if interactive && !self.input_blocked && response.enabled() && owns_release {
                 let ticket = ActivationControlTicket {
@@ -743,4 +790,115 @@ pub(crate) fn show(ctx: &egui::Context, p: &Palette, state: &mut State, open: &m
     }
     state.finish(ctx);
     output
+}
+
+#[cfg(test)]
+pub(crate) mod finite_geometry_tests {
+    use super::*;
+
+    /// CPU-only egui input fixture using an existing synthetic standalone Action.
+    /// It exercises the same capture/final gate without creating native authority
+    /// or performing effects. The transform stays unchanged through every pass.
+    pub(crate) fn key_run(
+        mut action: Action,
+        rect: egui::Rect,
+        clip: egui::Rect,
+        transform: Option<egui::emath::TSTransform>,
+    ) -> (Option<Action>, bool, bool, bool) {
+        let ctx = egui::Context::default();
+        let id = egui::Id::unique("board_finite_key_control");
+        let mut state = State::default();
+        let mut captured = None;
+        action.activation = None;
+        {
+            let mut draw = |events, retry| {
+                let mut passes = 0;
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 400.0))),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        passes += 1;
+                        ui.ctx().set_transform_layer(ui.layer_id(), transform.unwrap_or_default());
+                        state.bind(Some(action.proof));
+                        state.begin(ui.ctx());
+                        ui.set_clip_rect(clip);
+                        let response = ui.interact(rect, id, egui::Sense::click());
+                        response.request_focus();
+                        if let Some(found) = state.capture(&response, || Some(action.clone()))
+                            && captured.is_none()
+                        {
+                            captured = Some(found);
+                        }
+                        state.finish(ui.ctx());
+                        if retry && ui.ctx().current_pass_index() == 0 {
+                            ui.ctx().request_discard("finite control fixture late retry");
+                        }
+                    },
+                );
+                output.textures_delta.clear();
+                assert!(!retry || passes >= 2);
+            };
+            draw(Vec::new(), false);
+            draw(Vec::new(), false);
+            let key = |pressed| egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers: Default::default(),
+            };
+            draw(vec![key(true)], false);
+            draw(vec![key(false)], true);
+        }
+        let focused_widget =
+            ctx.memory(|memory| memory.focused() == Some(id)) && ctx.viewport(|viewport| viewport.prev_pass.widgets.get(id).is_some());
+        let accepted = captured.as_ref().is_some_and(|action| state.take_activation(&ctx, action));
+        let replayed = captured.as_ref().is_some_and(|action| state.take_activation(&ctx, action));
+        (captured, accepted, replayed, focused_widget)
+    }
+
+    #[test]
+    fn board_ui_finite_geometry_rejects_nonfinite_bounds_clip_and_full_transform() {
+        use egui::emath::TSTransform;
+        let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 400.0));
+        let control_geometry = |rect, clip, transform| super::control_geometry(rect, clip, transform, viewport).is_some();
+        let rect = egui::Rect::from_min_max(egui::pos2(10.0, 10.0), egui::pos2(90.0, 40.0));
+        let clip = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(120.0, 60.0));
+        assert!(control_geometry(rect, clip, None));
+        assert!(control_geometry(rect, clip, Some(TSTransform::new(egui::vec2(3.0, 5.0), 1.5))));
+        for invalid in [
+            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(f32::INFINITY, 60.0)),
+            egui::Rect::from_min_max(egui::pos2(f32::NEG_INFINITY, 0.0), egui::pos2(120.0, 60.0)),
+            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(120.0, f32::NAN)),
+            egui::Rect::from_min_max(egui::pos2(-f32::MAX, 0.0), egui::pos2(f32::MAX, 60.0)),
+            egui::Rect::ZERO,
+        ] {
+            assert!(!control_geometry(invalid, clip, None));
+            assert!(!control_geometry(rect, invalid, None));
+        }
+        for invalid in [
+            TSTransform::new(egui::vec2(f32::INFINITY, 0.0), 1.0),
+            TSTransform::new(egui::vec2(0.0, f32::INFINITY), 1.0),
+            TSTransform::new(egui::vec2(0.0, f32::NAN), 1.0),
+            TSTransform::from_scaling(f32::INFINITY),
+            TSTransform::from_scaling(f32::NAN),
+            TSTransform::from_scaling(0.0),
+            TSTransform::from_scaling(f32::from_bits(1)),
+            TSTransform::from_scaling(f32::MAX),
+        ] {
+            assert!(!control_geometry(rect, clip, Some(invalid)));
+        }
+        let disjoint = clip.translate(egui::vec2(200.0, 0.0));
+        assert!(!control_geometry(rect, disjoint, None));
+        assert!(!control_geometry(
+            rect,
+            clip,
+            Some(TSTransform::from_translation(egui::vec2(10000.0, 10000.0)))
+        ));
+        assert!(super::control_geometry(rect, clip, None, egui::Rect::EVERYTHING).is_none());
+        assert!(super::control_geometry(rect, clip, None, egui::Rect::ZERO).is_none());
+    }
 }

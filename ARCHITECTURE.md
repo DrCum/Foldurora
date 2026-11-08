@@ -5355,6 +5355,9 @@ An opaque local release ticket retains the original action across input-free
 retries; after the complete run the App consumes it only against the final exact
 egui control, geometry, positive clip, layer, modal and key-focus ownership. This
 correlation never renews the original native/source proof or playback ticket.
+Local and transformed bounds, positive visible viewport intersection, pointer
+positions and the complete invertible layer transform must remain finite before
+capture and at final consumption, including both translation coordinates.
 Add rejects duplicate resolved aliases and never plays. Gesture cache
 requests preserve shared Load flags; only separate still-current Board intent
 may start cached playback. The controller owns exact Manager run IDs before
