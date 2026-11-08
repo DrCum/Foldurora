@@ -7,7 +7,8 @@ fn double_click_opens_a_texture_preview_and_both_sources_drag_the_actual_item() 
     let ctx = egui::Context::default();
     let mut world = World::new(Arc::new(crate::scene::avatar::AvatarLibrary::load()));
     world.agent_id = Uuid::from_u128(2);
-    world.inventory = super::tests::view_inventory(false);
+    world.inventory = super::tests::view_inventory(false).into_inventory();
+    world.bind_archive_offline_fixture();
     let item = Uuid::from_u128(91001);
     let asset = Uuid::from_u128(91002);
     world.inventory.add_items(vec![aurora_net::inventory::InvItem {

@@ -1,3 +1,4 @@
+use super::super::fixtures::InventoryFixture;
 use super::*;
 use aurora_net::inventory::InvFolder;
 use egui::{Event, Modifiers, PointerButton, RawInput, vec2};
@@ -28,7 +29,7 @@ fn key(key: Key, down: bool) -> Event {
 struct Frames {
     ctx: egui::Context,
     body: Body,
-    inventory: Inventory,
+    inventory: InventoryFixture,
     source: Source,
     policy: Policy,
     frame: u64,
@@ -65,7 +66,7 @@ impl Frames {
         let mut frames = Self {
             ctx,
             body: Body::default(),
-            inventory,
+            inventory: InventoryFixture::new(inventory),
             source,
             policy: Policy {
                 allowed: true,

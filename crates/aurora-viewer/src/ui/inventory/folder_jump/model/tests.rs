@@ -1,3 +1,4 @@
+use super::super::fixtures::InventoryFixture;
 use super::*;
 use crate::world::inventory::FetchState;
 use aurora_net::inventory::InvFolder;
@@ -11,14 +12,14 @@ fn id(value: u128) -> Uuid {
     Uuid::from_u128(value)
 }
 
-fn inventory() -> Inventory {
+fn inventory() -> InventoryFixture {
     let mut inventory = Inventory {
         owner: id(900),
         root: id(1),
         ..Default::default()
     };
     loaded(&mut inventory, vec![folder(1, 0, "Inventory", 8)]);
-    inventory
+    InventoryFixture::new(inventory)
 }
 
 fn folder(value: u128, parent: u128, name: &str, kind: i32) -> InvFolder {
@@ -48,7 +49,7 @@ fn source(inventory: &Inventory) -> Source {
     }
 }
 
-fn ready(model: &mut Model, inventory: &Inventory) {
+fn ready(model: &mut Model, inventory: &InventoryFixture) {
     for _ in 0..100_000 {
         if !matches!(model.phase(), Phase::Indexing | Phase::Matching) {
             return;
@@ -58,7 +59,7 @@ fn ready(model: &mut Model, inventory: &Inventory) {
     panic!("bounded synthetic index did not finish");
 }
 
-fn start(inventory: &Inventory) -> Model {
+fn start(inventory: &InventoryFixture) -> Model {
     let mut model = Model::default();
     model.sync(inventory, Some(source(inventory)), ALLOWED);
     ready(&mut model, inventory);

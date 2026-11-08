@@ -305,7 +305,6 @@ fn validate_opened_single_link(file: &File) -> io::Result<()> {
 pub(crate) enum NativeStoreKind {
     Workspaces,
     Boards,
-    #[cfg(test)]
     InventoryArchive,
 }
 impl NativeStoreKind {
@@ -313,7 +312,6 @@ impl NativeStoreKind {
         match self {
             Self::Workspaces => "named-workspaces",
             Self::Boards => "gesture-boards",
-            #[cfg(test)]
             Self::InventoryArchive => "inventory-archive",
         }
     }
@@ -321,7 +319,6 @@ impl NativeStoreKind {
         match self {
             Self::Workspaces => "named-v1.json",
             Self::Boards => "boards-v1.json",
-            #[cfg(test)]
             Self::InventoryArchive => "archive-v1.json",
         }
     }
@@ -329,7 +326,6 @@ impl NativeStoreKind {
         match self {
             Self::Workspaces => 256 * 1024,
             Self::Boards => 4 * 1024 * 1024,
-            #[cfg(test)]
             Self::InventoryArchive => 128 * 1024,
         }
     }

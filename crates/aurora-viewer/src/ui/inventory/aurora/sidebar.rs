@@ -40,6 +40,14 @@ pub struct Sidebar {
 }
 
 impl Sidebar {
+    #[cfg(test)]
+    pub(in crate::ui::inventory) fn fixture_prepare(&mut self, view: &ViewCache, inv: &Inventory, base: Uuid, library: bool) {
+        self.prepare(view, inv, base, library);
+    }
+    #[cfg(test)]
+    pub(in crate::ui::inventory) fn fixture_ids(&self) -> Vec<Uuid> {
+        self.rows.iter().map(|row| row.id).collect()
+    }
     /// Open the ancestors of `folder` when it is new; whether it is.
     fn follow(&mut self, inv: &Inventory, folder: Uuid, base: Uuid) -> bool {
         if self.shown == folder {
@@ -287,7 +295,7 @@ pub(super) fn show(
     ui: &mut egui::Ui,
     p: &Palette,
     _icons: &Icons,
-    inv: &mut Inventory,
+    inv: &mut archive::Browse<'_, '_>,
     st: &mut InventoryUi,
     prefs: &mut InventoryPreferences,
     facts: &Facts,
@@ -386,7 +394,8 @@ pub(super) fn show(
     crate::ui::menu::section(ui, p, aurora_i18n::tr!("inventory-folders"));
     ui.add_space(2.0);
     // The folders.
-    st.view.prepare(inv, prefs.sort_for(st.tab));
+    archive::tab(ui.ctx(), st, inv);
+    st.view.prepare_gated(inv, prefs.sort_for(st.tab), inv.gate);
     let follow = st.side.follow(inv, st.browse, base);
     if !st.result_view()
         && let Some(open) = st.expand_all.take()
@@ -399,7 +408,7 @@ pub(super) fn show(
         }
     }
     st.side.prepare(&st.view, inv, base, prefs.show_library);
-    let trash = rules::system(inv, 14).filter(|_| !scoped);
+    let trash = rules::system(inv, 14).filter(|id| !scoped && inv.gate.passes(*id));
     let foot = if trash.is_some() { ROW + 8.0 } else { 0.0 };
     let height = (ui.available_height() - foot).max(ROW);
     let rows = st.side.rows.clone();

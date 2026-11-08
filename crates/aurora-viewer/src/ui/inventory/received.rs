@@ -197,6 +197,14 @@ impl Badge {
         self.prepare(inv);
         self.unread
     }
+    pub(super) fn unseen_gated(&mut self, inv: &Inventory, gate: super::archive::Gate<'_>) -> usize {
+        self.prepare(inv);
+        self.saved
+            .unread
+            .iter()
+            .filter(|id| self.deliveries.contains(id) && gate.passes(**id))
+            .count()
+    }
 
     pub(super) fn acknowledge(&mut self, inv: &Inventory, shown: &[Uuid]) {
         self.prepare(inv);

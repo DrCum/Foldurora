@@ -13595,3 +13595,18 @@ inventory-jump-count = { $count ->
     [one] { $count } dossier chargé correspond
    *[other] { $count } dossiers chargés correspondent
     }
+
+## Local Inventory visibility
+inventory-archive-archive = Archiver le dossier
+inventory-archive-unarchive = Désarchiver le dossier
+inventory-archive-visibility = Visibilité
+inventory-archive-include = Inclure les dossiers archivés
+inventory-archive-loading = Chargement de la visibilité des archives…
+inventory-archive-limited = Limité aux dossiers chargés vérifiés. Utilisez Inclure les dossiers archivés pour afficher les autres.
+inventory-archive-unavailable = Paramètres d’archive indisponibles
+inventory-archive-saving = Enregistrement des paramètres d’archive…
+inventory-archive-save-failed = Échec de l’enregistrement. Rouvrez le menu pour réessayer.
+inventory-archive-show-original = Consultez Visibilité → Inclure les dossiers archivés pour afficher les emplacements masqués.
+inventory-archive-offline-readonly = Visibilité hors ligne — lecture seule
+inventory-archive-load-failed = Impossible de charger les paramètres d’archive. Les données enregistrées sont conservées. Utilisez Inclure les dossiers archivés pour afficher le contenu.
+inventory-archive-readonly = Les paramètres d’archive sont en lecture seule

@@ -17,6 +17,7 @@ pub struct WearCopyGroup {
     pub pending: usize,
     pub failed: bool,
 }
+pub(crate) mod archive;
 mod aurora;
 mod bulk_permissions;
 pub use bulk_permissions::demo_menu as bulk_permissions_demo;
@@ -116,6 +117,7 @@ pub fn show_document(
 }
 
 pub enum InvAction {
+    Archive(Box<archive::Proposal>),
     DefaultPermissions,
     ExportMenuNotecard {
         name: String,
@@ -465,6 +467,11 @@ struct TabFilters {
 
 #[derive(Default)]
 pub struct InventoryUi {
+    archive: Option<archive::State>,
+    archive_key: Option<archive::Key>,
+    archive_change_frame: Option<u64>,
+    archive_drawing: bool,
+    archive_context: archive::Context,
     pub default_permissions_open: bool,
     context_folders: std::cell::RefCell<context_catalog::FolderCache>,
     pub marketplace_commands: std::collections::HashMap<Uuid, Vec<crate::ui::marketplace_listings::OptionState>>,
@@ -509,6 +516,7 @@ pub struct InventoryUi {
     pub ui_id: Uuid,
     pub demo_menu: Option<Uuid>,
     pub fetch_all: bool,
+    operation_fetch: bool,
     pub search: String,
     searches: [String; 5],
     pub tab: usize,
@@ -591,6 +599,11 @@ pub struct InventoryUi {
     counts: aurora::Counts,
     /// A row's "more actions" menu, opened by its button: the row, where.
     row_menu: Option<(Uuid, egui::Pos2)>,
+    row_menu_opened_frame: Option<u64>,
+    archive_summary: Option<archive::Summary>,
+    archive_controls: Option<archive::Controls>,
+    archive_include_context: archive::IncludeContext,
+    archive_include_proposal: Option<archive::Proposal>,
     /// The folder a folder window shows (nil: the whole inventory). Its
     /// lists, searches, column and breadcrumb stay under it.
     scope: Uuid,
@@ -648,6 +661,7 @@ impl InventoryUi {
     pub fn begin_replace_links(&mut self, id: Uuid) {
         self.dialog = Some(EditDialog::ReplaceLinks(Box::new(replace_links::ReplaceLinks::new(id))));
         self.fetch_all = true;
+        self.operation_fetch = true;
     }
 
     pub fn filter_move_to(&mut self, filter: &str) {
@@ -1306,11 +1320,11 @@ pub(crate) fn inventory_path(inv: &Inventory, mut id: Uuid) -> String {
     parts.join(" / ")
 }
 
-fn folder_window_contents(
+fn folder_window_contents_visible(
     ui: &mut egui::Ui,
     p: &Palette,
     icons: &Icons,
-    inv: &mut Inventory,
+    inv: &mut archive::Browse<'_, '_>,
     root: Uuid,
     st: &mut InventoryUi,
     prefs: &mut InventoryPreferences,
@@ -1324,12 +1338,12 @@ fn folder_window_contents(
     let q = st.search.trim().to_lowercase();
     let filtered = !q.is_empty() || st.links_filter.is_some() || st.filters.active();
     if filtered {
-        request_search(inv, root, st, prefs);
+        request_search_visible(inv, root, st, prefs);
     } else if st.fetch_all {
-        st.fetch_all = !rules::request_tree(inv, root);
+        st.fetch_all = !inv.request_tree(root);
     }
     if filtered {
-        st.view.search(
+        st.view.search_gated(
             inv,
             root,
             &q,
@@ -1340,6 +1354,7 @@ fn folder_window_contents(
             facts,
             facts.agent,
             view::now(),
+            inv.gate,
         );
     }
     let list_h = list_height(ui);
@@ -1347,10 +1362,10 @@ fn folder_window_contents(
         clipboard::list_focus(ui, st, list_h);
         if filtered {
             prepare_result_tree(st, inv, root);
-            search_scroll(ui, p, icons, inv, st, prefs, facts, actions, list_h);
+            search_scroll_visible(ui, p, icons, inv, st, prefs, facts, actions, list_h);
             return;
         }
-        rows::scroll(ui, p, icons, inv, st, prefs, facts, actions, list_h, root, false);
+        rows::scroll_visible(ui, p, icons, inv, st, prefs, facts, actions, list_h, root, false);
     });
     task_drop::target(ui, p, &zone.response, inv, root, actions);
     drag::target(ui, p, &zone.response, inv, root, st, prefs, facts, actions);
@@ -1391,7 +1406,7 @@ fn scroll_to_row(ui: &egui::Ui, row: &egui::Response, align: egui::Align) {
 fn status(
     ui: &mut egui::Ui,
     p: &Palette,
-    inv: &Inventory,
+    inv: &archive::Browse<'_, '_>,
     st: &mut InventoryUi,
     prefs: &mut InventoryPreferences,
     facts: &Facts,
@@ -1405,10 +1420,13 @@ fn status(
         aurora_i18n::tr!(
             "ui-inventory-results-objects-loaded",
             value0 = format!("{}", st.view.results.len()),
-            value1 = format!("{}", inv.item_count())
+            value1 = format!("{}", st.archive_summary.map_or(0, |summary| summary.count))
         )
     } else {
-        aurora_i18n::tr!("ui-inventory-objects-loaded", value0 = format!("{}", inv.item_count()))
+        aurora_i18n::tr!(
+            "ui-inventory-objects-loaded",
+            value0 = format!("{}", st.archive_summary.map_or(0, |summary| summary.count))
+        )
     };
     ui.horizontal(|ui| {
         let to = st
@@ -1417,7 +1435,15 @@ fn status(
             .or_else(|| st.selected.and_then(|id| rules::parent(inv, id)))
             .unwrap_or(inv.root);
         super::widgets::icon_menu(ui, p, "plus", aurora_i18n::tr!("common-new-folder"), |ui| {
-            context::new_menu(ui, p, to, st.pending.is_none() && rules::destination(inv, to), st, prefs, actions);
+            context::new_menu(
+                ui,
+                p,
+                to,
+                inv.gate.passes(to) && st.pending.is_none() && rules::destination(inv, to),
+                st,
+                prefs,
+                actions,
+            );
         });
         additional_button(ui, p, st);
         ui.label(
@@ -1467,7 +1493,7 @@ fn additional_button_drawn(ui: &egui::Ui, rect: egui::Rect) {
     }
 }
 
-fn request_search(inv: &mut Inventory, root: Uuid, st: &mut InventoryUi, prefs: &InventoryPreferences) {
+fn request_search_visible(inv: &mut archive::Browse<'_, '_>, root: Uuid, st: &mut InventoryUi, prefs: &InventoryPreferences) {
     let received = st.tab == RECEIVED_TAB && st.scope.is_nil();
     let library = !received && root == inv.root && prefs.search_library;
     let key = (root, inv.generation, library, prefs.search_trash, prefs.search_outfits);
@@ -1494,7 +1520,7 @@ fn request_search(inv: &mut Inventory, root: Uuid, st: &mut InventoryUi, prefs: 
     let mut requests = Vec::new();
     let mut complete = true;
     while let Some(id) = todo.pop() {
-        if !seen.insert(id) {
+        if !inv.gate.passes(id) || !seen.insert(id) {
             continue;
         }
         let Some(folder) = inv.folders.get(&id) else {
@@ -1522,11 +1548,11 @@ fn request_search(inv: &mut Inventory, root: Uuid, st: &mut InventoryUi, prefs: 
 }
 
 #[allow(clippy::too_many_arguments)]
-fn search_scroll(
+fn search_scroll_visible(
     ui: &mut egui::Ui,
     p: &Palette,
     icons: &Icons,
-    inv: &mut Inventory,
+    inv: &mut archive::Browse<'_, '_>,
     st: &mut InventoryUi,
     prefs: &mut InventoryPreferences,
     facts: &Facts,
@@ -1557,7 +1583,7 @@ fn search_scroll(
     } else {
         scroll.show_rows(ui, row_height, total, |ui, range| {
             ui.set_min_width(st.result_width);
-            search_rows(ui, p, icons, inv, st, prefs, facts, actions, range);
+            search_rows_visible(ui, p, icons, inv, st, prefs, facts, actions, range);
             ui.set_min_width(st.result_width);
         })
     };
@@ -1567,11 +1593,11 @@ fn search_scroll(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn search_rows(
+fn search_rows_visible(
     ui: &mut egui::Ui,
     p: &Palette,
     icons: &Icons,
-    inv: &mut Inventory,
+    inv: &mut archive::Browse<'_, '_>,
     st: &mut InventoryUi,
     prefs: &mut InventoryPreferences,
     facts: &Facts,
@@ -1784,7 +1810,7 @@ fn list_destination(st: &InventoryUi, root: Uuid) -> Uuid {
 /// The root of the tab shown and whether its list is the result tree (a
 /// search, a filter or a tab other than the plain inventory), searched and
 /// its folders fetched.
-fn list_scope(inv: &mut Inventory, st: &mut InventoryUi, prefs: &InventoryPreferences, facts: &Facts) -> (Uuid, bool) {
+fn list_scope(inv: &mut archive::Browse<'_, '_>, st: &mut InventoryUi, prefs: &InventoryPreferences, facts: &Facts) -> (Uuid, bool) {
     // LLSidepanelInventory::observeInboxModifications/onInboxChanged
     // (indra/newview/llsidepanelinventory.cpp): scope and fetch the full FT_INBOX.
     // Aurora presents it as a tab, as requested, instead of a second bottom pane.
@@ -1802,10 +1828,10 @@ fn list_scope(inv: &mut Inventory, st: &mut InventoryUi, prefs: &InventoryPrefer
     } else if !filtered && st.fetch_all && !st.scope.is_nil() {
         // a folder window loads its whole tree when an operation asks (the
         // main window does it for the root in `show`)
-        st.fetch_all = !rules::request_tree(inv, root);
+        st.fetch_all = !inv.request_tree(root);
     } else if filtered {
-        request_search(inv, root, st, prefs);
-        st.view.search(
+        request_search_visible(inv, root, st, prefs);
+        st.view.search_gated(
             inv,
             root,
             &st.search,
@@ -1816,6 +1842,7 @@ fn list_scope(inv: &mut Inventory, st: &mut InventoryUi, prefs: &InventoryPrefer
             facts,
             facts.agent,
             view::now(),
+            inv.gate,
         );
     }
     (root, filtered)
@@ -1828,7 +1855,7 @@ fn list(
     ui: &mut egui::Ui,
     p: &Palette,
     icons: &Icons,
-    inv: &mut Inventory,
+    inv: &mut archive::Browse<'_, '_>,
     st: &mut InventoryUi,
     prefs: &mut InventoryPreferences,
     facts: &Facts,
@@ -1865,16 +1892,16 @@ fn list(
             st.received_badge.acknowledge(inv, &st.view.results);
         }
         prepare_result_tree(st, inv, root);
-        return search_scroll(ui, p, icons, inv, st, prefs, facts, actions, list_h);
+        return search_scroll_visible(ui, p, icons, inv, st, prefs, facts, actions, list_h);
     }
-    rows::scroll(ui, p, icons, inv, st, prefs, facts, actions, list_h, root, show_root)
+    rows::scroll_visible(ui, p, icons, inv, st, prefs, facts, actions, list_h, root, show_root)
 }
 
-fn inventory_contents(
+fn inventory_contents_visible(
     ui: &mut egui::Ui,
     p: &Palette,
     icons: &Icons,
-    inv: &mut Inventory,
+    inv: &mut archive::Browse<'_, '_>,
     st: &mut InventoryUi,
     prefs: &mut InventoryPreferences,
     facts: &Facts,
@@ -1901,6 +1928,7 @@ fn inventory_contents(
     let mut visible_tab = tab_ids.iter().position(|id| *id == st.tab).unwrap_or(0);
     super::widgets::tabs(ui, p, &mut visible_tab, &labels);
     set_tab(st, prefs, tab_ids[visible_tab]);
+    archive::tab(ui.ctx(), st, inv);
     let (root, filtered) = list_scope(inv, st, prefs, facts);
     ui.add_space(6.0);
     next_owner_control(ui, p, st);
@@ -1908,7 +1936,11 @@ fn inventory_contents(
     let zone = tree::frame(ui, p, |ui| {
         list(ui, p, icons, inv, st, prefs, facts, actions, list_h, root, filtered, true);
     });
-    let target = list_destination(st, root);
+    let target = if inv.gate.passes(root) {
+        list_destination(st, root)
+    } else {
+        Uuid::nil()
+    };
     task_drop::target(ui, p, &zone.response, inv, target, actions);
     drag::target(ui, p, &zone.response, inv, target, st, prefs, facts, actions);
     status(ui, p, inv, st, prefs, facts, actions, filtered);
@@ -1919,8 +1951,9 @@ fn inventory_contents(
 /// the window showing the whole inventory is closed, independently of
 /// search scopes.
 fn fetch_whole_inventory(inv: &mut Inventory, st: &mut InventoryUi) {
-    if st.fetch_all && st.search.trim().is_empty() && !st.filters.active() && st.links_filter.is_none() && st.tab == 0 {
-        st.fetch_all = !rules::request_tree(inv, inv.root);
+    if st.operation_fetch && st.search.trim().is_empty() && !st.filters.active() && st.links_filter.is_none() && st.tab == 0 {
+        st.operation_fetch = !rules::request_tree(inv, inv.root);
+        st.fetch_all |= st.operation_fetch;
     }
 }
 
@@ -1957,6 +1990,10 @@ pub fn show(
     classic: bool,
 ) -> Vec<InvAction> {
     let mut actions = Vec::new();
+    archive::preflight(ctx, world, st, st.scope);
+    for window in &mut st.windows {
+        archive::preflight(ctx, world, &mut window.state, window.root);
+    }
     st.focus_search = *open && (st.focus_search || !st.was_open);
     // What is worn, the attachment points and the names are read for the
     // windows and dialogs that show them, not every frame while closed.
@@ -2062,6 +2099,8 @@ pub fn show(
         }
         st.clipboard_loaded = loaded.then(|| (inv.generation, st.clipboard.clone()));
     }
+    let mut demands = archive::Demands::new(inv);
+    let mut owner_restore = None;
     let screen = ctx.content_rect();
     let mut floater = super::widgets::Floater::new(
         "inventory",
@@ -2075,26 +2114,56 @@ pub fn show(
     if classic {
         st.aurora = None;
         floater.show(ctx, p, open, |ui| {
-            inventory_contents(ui, p, icons, inv, st, prefs, &facts, &mut actions)
+            owner_restore = Some(archive::owner(
+                ui,
+                p,
+                icons,
+                world,
+                st,
+                prefs,
+                &facts,
+                images,
+                &mut actions,
+                true,
+                Uuid::nil(),
+                &mut demands,
+            ));
         });
     } else {
         // The title bar follows the width the window had last frame.
         let layout = aurora::Layout::of_window(ctx, "inventory");
-        floater = floater.title_note(aurora::item_count(inv, layout));
+        floater = floater.title_note(aurora::item_count(st.archive_summary.map_or(0, |summary| summary.count), layout));
         if layout != aurora::Layout::Compact {
-            let (dot, text) = aurora::sync_state(p, inv, st);
+            let (dot, text) = aurora::sync_state(p, st);
             floater = floater.title_state(dot, text);
         }
         if layout == aurora::Layout::Compact {
             floater = floater.action("arrow-autofit-width-filled", aurora_i18n::tr!("inventory-widen"), &mut widen);
         }
         floater.show(ctx, p, open, |ui| {
-            aurora::contents(ui, p, icons, inv, st, prefs, &facts, images, &mut actions)
+            owner_restore = Some(archive::owner(
+                ui,
+                p,
+                icons,
+                world,
+                st,
+                prefs,
+                &facts,
+                images,
+                &mut actions,
+                false,
+                Uuid::nil(),
+                &mut demands,
+            ));
         });
         if widen {
             aurora::widen(ctx, "inventory");
         }
     }
+    if let Some((owner, source)) = owner_restore {
+        archive::restore(world, st, owner, source, &mut demands);
+    }
+    let inv = &mut world.inventory;
     st.hover.show(p, inv, prefs, hover_images, &mut st.wanted_hover_images);
     st.was_open = *open && !super::widgets::floater_minimized(ctx, "inventory");
     controls::dialogs(ctx, p, st, prefs);
@@ -2166,36 +2235,37 @@ pub fn show(
             )
         }
         .compact_header();
+        let mut owner_restore = None;
         if classic {
             w.state.aurora = None;
             floater.show(ctx, p, &mut w.open, |ui| {
-                if w.additional {
-                    inventory_contents(ui, p, icons, &mut world.inventory, &mut w.state, prefs, &facts, &mut actions);
-                } else {
-                    folder_window_contents(
-                        ui,
-                        p,
-                        icons,
-                        &mut world.inventory,
-                        w.root,
-                        &mut w.state,
-                        prefs,
-                        &facts,
-                        &mut actions,
-                    );
-                }
+                owner_restore = Some(archive::owner(
+                    ui,
+                    p,
+                    icons,
+                    world,
+                    &mut w.state,
+                    prefs,
+                    &facts,
+                    images,
+                    &mut actions,
+                    true,
+                    w.root,
+                    &mut demands,
+                ));
             });
         } else {
-            // Aurora's window, kept under its folder (the whole inventory
-            // for the additional window).
             w.state.scope = w.root;
             let mut widen = false;
             let layout = aurora::Layout::of_window(ctx, &window_id);
             let mut floater = floater;
             if w.additional {
-                floater = floater.title_note(aurora::item_count(&world.inventory, layout));
+                floater = floater.title_note(aurora::item_count(
+                    w.state.archive_summary.map_or(0, |summary| summary.count),
+                    layout,
+                ));
                 if layout != aurora::Layout::Compact {
-                    let (dot, text) = aurora::sync_state(p, &world.inventory, &w.state);
+                    let (dot, text) = aurora::sync_state(p, &w.state);
                     floater = floater.title_state(dot, text);
                 }
             }
@@ -2203,21 +2273,27 @@ pub fn show(
                 floater = floater.action("arrow-autofit-width-filled", aurora_i18n::tr!("inventory-widen"), &mut widen);
             }
             floater.show(ctx, p, &mut w.open, |ui| {
-                aurora::contents(
+                owner_restore = Some(archive::owner(
                     ui,
                     p,
                     icons,
-                    &mut world.inventory,
+                    world,
                     &mut w.state,
                     prefs,
                     &facts,
                     images,
                     &mut actions,
-                )
+                    false,
+                    w.root,
+                    &mut demands,
+                ));
             });
             if widen {
                 aurora::widen(ctx, &window_id);
             }
+        }
+        if let Some((owner, source)) = owner_restore {
+            archive::restore(world, &mut w.state, owner, source, &mut demands);
         }
         w.state
             .hover
@@ -2323,6 +2399,80 @@ fn headless_output(mut output: egui::FullOutput) -> egui::FullOutput {
     // These tests inspect shapes/events without a renderer to apply texture uploads.
     output.textures_delta.clear();
     output
+}
+
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+fn inventory_contents(
+    ui: &mut egui::Ui,
+    p: &Palette,
+    icons: &Icons,
+    inv: &mut crate::ui::inventory::folder_jump::fixtures::InventoryFixture,
+    st: &mut InventoryUi,
+    prefs: &mut InventoryPreferences,
+    facts: &Facts,
+    actions: &mut Vec<InvAction>,
+) {
+    inv.browse(|inv| inventory_contents_visible(ui, p, icons, inv, st, prefs, facts, actions))
+}
+
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+fn folder_window_contents(
+    ui: &mut egui::Ui,
+    p: &Palette,
+    icons: &Icons,
+    inv: &mut crate::ui::inventory::folder_jump::fixtures::InventoryFixture,
+    root: Uuid,
+    st: &mut InventoryUi,
+    prefs: &mut InventoryPreferences,
+    facts: &Facts,
+    actions: &mut Vec<InvAction>,
+) {
+    inv.browse(|inv| folder_window_contents_visible(ui, p, icons, inv, root, st, prefs, facts, actions))
+}
+
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+fn request_search(
+    inv: &mut crate::ui::inventory::folder_jump::fixtures::InventoryFixture,
+    root: Uuid,
+    st: &mut InventoryUi,
+    prefs: &InventoryPreferences,
+) {
+    inv.browse(|inv| request_search_visible(inv, root, st, prefs))
+}
+
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+fn search_scroll(
+    ui: &mut egui::Ui,
+    p: &Palette,
+    icons: &Icons,
+    inv: &mut crate::ui::inventory::folder_jump::fixtures::InventoryFixture,
+    st: &mut InventoryUi,
+    prefs: &mut InventoryPreferences,
+    facts: &Facts,
+    actions: &mut Vec<InvAction>,
+    height: f32,
+) -> egui::scroll_area::ScrollAreaOutput<()> {
+    inv.browse(|inv| search_scroll_visible(ui, p, icons, inv, st, prefs, facts, actions, height))
+}
+
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+fn search_rows(
+    ui: &mut egui::Ui,
+    p: &Palette,
+    icons: &Icons,
+    inv: &mut crate::ui::inventory::folder_jump::fixtures::InventoryFixture,
+    st: &mut InventoryUi,
+    prefs: &mut InventoryPreferences,
+    facts: &Facts,
+    actions: &mut Vec<InvAction>,
+    range: std::ops::Range<usize>,
+) {
+    inv.browse(|inv| search_rows_visible(ui, p, icons, inv, st, prefs, facts, actions, range))
 }
 
 #[cfg(test)]
@@ -2557,6 +2707,7 @@ mod tests {
             let icons = Icons::load(&ctx, None);
             let mut world = World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
             crate::world::appearance::seed_demo(&mut world.inventory, crate::demo::DEMO_AGENT);
+            world.bind_archive_offline_fixture();
             let mut st = InventoryUi::default();
             let mut prefs = InventoryPreferences::default();
             let images = Default::default();
@@ -2630,6 +2781,7 @@ mod tests {
             let icons = Icons::load(&ctx, None);
             let mut world = World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
             crate::world::appearance::seed_demo(&mut world.inventory, crate::demo::DEMO_AGENT);
+            world.bind_archive_offline_fixture();
             let mut st = InventoryUi::default();
             let mut prefs = InventoryPreferences::default();
             let images = Default::default();
@@ -3048,7 +3200,7 @@ mod tests {
         assert_eq!(facts.worn_label(&world.inventory, link), None);
     }
 
-    pub(super) fn view_inventory(large: bool) -> Inventory {
+    pub(super) fn view_inventory(large: bool) -> crate::ui::inventory::folder_jump::fixtures::InventoryFixture {
         let mut inv = Inventory {
             root: Uuid::from_u128(1),
             ..Default::default()
@@ -3071,7 +3223,7 @@ mod tests {
         let agent = Uuid::from_u128(2);
         crate::world::inventory::demo::seed(&mut inv, agent);
         crate::world::inventory::demo::seed_view(&mut inv, agent, large);
-        inv
+        crate::ui::inventory::folder_jump::fixtures::InventoryFixture::new(inv)
     }
 
     #[test]
@@ -3496,6 +3648,7 @@ mod tests {
                     let mut items: Vec<_> = (1000..1200).map(|n| item(n + 10000, n, format!("Filler {n}"))).collect();
                     items.push(item(100, 21, "Needle item".into()));
                     inv.add_items(items);
+                    let mut inv = crate::ui::inventory::folder_jump::fixtures::InventoryFixture::new(inv);
                     let mut st = InventoryUi {
                         search: "Needle".into(),
                         filters_initialized: true,
@@ -3657,6 +3810,7 @@ mod tests {
             inv_type: 6,
             ..Default::default()
         }]);
+        let mut inv = crate::ui::inventory::folder_jump::fixtures::InventoryFixture::new(inv);
         let mut st = InventoryUi {
             filters_initialized: true,
             ..Default::default()
@@ -3885,7 +4039,7 @@ mod tests {
             ..Default::default()
         };
         let mut actions = vec![];
-        let mut frame = |inv: &mut Inventory, st: &mut InventoryUi| {
+        let mut frame = |inv: &mut crate::ui::inventory::folder_jump::fixtures::InventoryFixture, st: &mut InventoryUi| {
             st.visible.clear();
             headless_output(ctx.run_ui(
                 egui::RawInput {
@@ -4095,6 +4249,7 @@ mod tests {
         let trash = rules::system(&inv, 14).expect("trash");
         inv.folders.get_mut(&trash).expect("trash").state = FetchState::Unknown;
         let mut prefs = InventoryPreferences::default();
+        let mut inv = crate::ui::inventory::folder_jump::fixtures::InventoryFixture::new(inv);
         let mut st = InventoryUi::default();
         let root = inv.root;
         request_search(&mut inv, root, &mut st, &prefs);
@@ -4245,7 +4400,12 @@ mod tests {
         }
     }
 
-    fn folder_window_frame(ctx: &egui::Context, inv: &mut Inventory, root: Uuid, st: &mut InventoryUi) -> egui::FullOutput {
+    fn folder_window_frame(
+        ctx: &egui::Context,
+        inv: &mut crate::ui::inventory::folder_jump::fixtures::InventoryFixture,
+        root: Uuid,
+        st: &mut InventoryUi,
+    ) -> egui::FullOutput {
         st.visible.clear();
         headless_output(ctx.run_ui(
             egui::RawInput {
@@ -4285,6 +4445,7 @@ mod tests {
         let mut inv = Inventory::default();
         crate::world::inventory::demo::seed(&mut inv, Uuid::from_u128(2));
         let root = Uuid::from_u128(8000);
+        let mut inv = crate::ui::inventory::folder_jump::fixtures::InventoryFixture::new(inv);
         let mut st = InventoryUi::default();
         let output = folder_window_frame(&ctx, &mut inv, root, &mut st);
         assert!(st.visible.contains(&Uuid::from_u128(8001)));
@@ -4320,6 +4481,7 @@ mod tests {
         outside.id = Uuid::from_u128(8200);
         outside.parent = Uuid::from_u128(8002);
         inv.add_items(vec![nested, outside]);
+        let mut inv = crate::ui::inventory::folder_jump::fixtures::InventoryFixture::new(inv);
         let mut st = InventoryUi {
             search: "instructions".into(),
             ..Default::default()
@@ -4344,6 +4506,7 @@ mod tests {
             for id in [root, Uuid::from_u128(8001), Uuid::from_u128(8002)] {
                 inv.folders.get_mut(&id).expect("folder").state = FetchState::Unknown;
             }
+            let mut inv = crate::ui::inventory::folder_jump::fixtures::InventoryFixture::new(inv);
             let mut st = InventoryUi {
                 search: search.into(),
                 fetch_all,
@@ -4536,6 +4699,7 @@ mod tests {
                 },
             );
         }
+        let mut inv = crate::ui::inventory::folder_jump::fixtures::InventoryFixture::new(inv);
         let mut st = InventoryUi::default();
         let mut output = None;
         for frame in 0..4 {

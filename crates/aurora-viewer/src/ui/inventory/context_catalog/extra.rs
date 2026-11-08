@@ -669,6 +669,7 @@ pub(in crate::ui::inventory) fn process_deferred(inv: &mut Inventory, st: &mut I
         || !inv.lib_root.is_nil() && !discover_originals(inv, inv.lib_root)
     {
         st.fetch_all = true;
+        st.operation_fetch = true;
         st.message = aurora_i18n::tr!("ui-inventory-dialogs-loading-all-folders-before-replacing").into();
         return;
     }
@@ -741,6 +742,7 @@ pub(super) fn execute(
             st.pending_cleanup = Some(id);
             st.cleanup_generation = None;
             st.fetch_all = true;
+            st.operation_fetch = true;
         }
         Command::ShowMain(id) => {
             actions.push(InvAction::ShowMain(id));

@@ -108,6 +108,11 @@ fn restriction(world: &mut World, text: &str) {
     }));
 }
 
+/// Metadata-only native-model fixture; no App/native action or Store authority.
+pub(crate) fn native_fixture_world() -> World {
+    world()
+}
+
 #[path = "projection_tests.rs"]
 mod projection_tests;
 
@@ -116,6 +121,9 @@ mod runtime_tests;
 
 #[path = "adapter_tests.rs"]
 mod adapter_tests;
+
+#[path = "readonly_tests.rs"]
+mod readonly_tests;
 
 #[test]
 fn inventory_archive_eligibility_uses_actual_ordinary_outfit_own_ancestry_without_fetches() {

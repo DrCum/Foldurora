@@ -175,6 +175,7 @@ pub fn init_filters(st: &mut InventoryUi, prefs: &InventoryPreferences) {
 }
 
 fn filter_actions(ui: &mut egui::Ui, p: &Palette, st: &mut InventoryUi) {
+    super::archive::visibility_menu(ui, p, st);
     if super::folder_jump::supported(st) && underlined_button(ui, p, aurora_i18n::tr!("inventory-jump-title"), false).clicked() {
         st.jump_requested = true;
     }

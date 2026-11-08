@@ -592,6 +592,7 @@ mod tests {
                 folder.children.retain(|id| folders.contains(id));
                 folder.items.retain(|id| (8100..=8113).contains(&id.as_u128()));
             }
+            world.bind_archive_offline_fixture();
             super::super::super::widgets::place_floater(&ctx, "inventory", egui::pos2(900.0, 40.0), egui::vec2(680.0, 950.0));
             let mut harness = Self {
                 ctx,

@@ -123,9 +123,9 @@ pub fn short_date(seconds: i64, now: i64) -> String {
 
 /// The name of an item's type, as the type column shows it: "Clothing ·
 /// Skirt", "Object", "Link · Notecard"…
-pub fn kind_name(inv: &Inventory, id: Uuid) -> String {
+pub fn kind_name(inv: &Inventory, id: Uuid, view: &super::super::view::ViewCache) -> String {
     if let Some(folder) = inv.folders.get(&id) {
-        let count = folder.items.len() + folder.children.len();
+        let count = view.children_iter(id, true, inv.lib_root).count();
         return if folder.state == FetchState::Fetched {
             aurora_i18n::tr!("inventory-kind-folder-count", count = count)
         } else {
@@ -297,6 +297,7 @@ fn show_quick(
                 {
                     st.select(ui, id, true);
                     st.row_menu = Some((id, rect.left_bottom()));
+                    st.row_menu_opened_frame = Some(ui.ctx().cumulative_frame_nr());
                 }
             }
         }
@@ -319,7 +320,7 @@ fn paint_columns(
 ) {
     let ink = if selected { p.violet_pale } else { p.muted };
     if let Some(kind) = cols.kind {
-        let galley = cut(ui, &kind_name(inv, id), SMALL, ink, kind.span(), false);
+        let galley = cut(ui, &kind_name(inv, id, view), SMALL, ink, kind.span(), false);
         widgets::paint_row_text(ui.painter(), galley, kind.min, center_y, ink);
     }
     if let (Some(range), Some(permissions)) = (cols.rights, permissions) {
@@ -526,7 +527,7 @@ pub(in super::super) fn folder(
     };
     // A tree counts what a folder holds at its end; the columns say it.
     let count = (cols.kind.is_none() && folder.state == FetchState::Fetched)
-        .then(|| aurora_i18n::integer((folder.items.len() + folder.children.len()) as i64));
+        .then(|| aurora_i18n::integer(st.view.children_iter(id, true, inv.lib_root).count() as i64));
     let count_w = count.as_ref().map_or(0.0, |count| {
         ui.painter()
             .layout_no_wrap(count.clone(), egui::FontId::proportional(11.5), p.muted)

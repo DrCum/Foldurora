@@ -61,7 +61,7 @@ fn details_button(ui: &mut egui::Ui, p: &Palette, prefs: &mut InventoryPreferenc
 
 /// The tabs of the narrow width: an icon over a short name each; the
 /// Received tab counts deliveries not looked at yet.
-pub(super) fn tabs(ui: &mut egui::Ui, p: &Palette, inv: &Inventory, st: &mut InventoryUi, prefs: &InventoryPreferences) {
+pub(super) fn tabs(ui: &mut egui::Ui, p: &Palette, inv: &archive::Browse<'_, '_>, st: &mut InventoryUi, prefs: &InventoryPreferences) {
     let mut entries = vec![(0, "briefcase-filled", aurora_i18n::tr!("inventory-tab-all"))];
     for (tab, icon, label, shown) in [
         (2, "clock-filled", aurora_i18n::tr!("inventory-tab-recent"), prefs.show_recent),
@@ -115,8 +115,8 @@ pub(super) fn tabs(ui: &mut egui::Ui, p: &Palette, inv: &Inventory, st: &mut Inv
 }
 
 /// The Marketplace and sender deliveries not acknowledged by this account.
-pub(super) fn unseen_received(inv: &Inventory, st: &mut InventoryUi) -> usize {
-    st.received_badge.unseen(inv)
+pub(super) fn unseen_received(inv: &archive::Browse<'_, '_>, st: &mut InventoryUi) -> usize {
+    st.received_badge.unseen_gated(inv, inv.ordinary)
 }
 
 /// The hint of the search field: what it searches.
@@ -207,20 +207,21 @@ fn new_target(inv: &Inventory, st: &InventoryUi, layout: Layout) -> Uuid {
 fn new_menu(
     ui: &mut egui::Ui,
     p: &Palette,
-    inv: &Inventory,
+    inv: &archive::Browse<'_, '_>,
     st: &mut InventoryUi,
     prefs: &mut InventoryPreferences,
     layout: Layout,
     actions: &mut Vec<InvAction>,
 ) {
     let to = new_target(inv, st, layout);
-    let enabled = st.pending.is_none() && rules::destination(inv, to);
+    let enabled = inv.gate.passes(to) && st.pending.is_none() && rules::destination(inv, to);
     context::new_menu(ui, p, to, enabled, st, prefs, actions);
 }
 
 /// The "Sort" menu: the order, Collapse / Expand for the tree, what the
 /// search searches, and the inventory's preferences.
 fn sort_menu(ui: &mut egui::Ui, p: &Palette, st: &mut InventoryUi, prefs: &mut InventoryPreferences, layout: Layout) {
+    archive::visibility_menu(ui, p, st);
     if super::super::folder_jump::supported(st) && menu::item(ui, p, "folder-open-filled", aurora_i18n::tr!("inventory-jump-title")) {
         st.jump_requested = true;
     }
@@ -382,7 +383,7 @@ fn search_line(ui: &mut egui::Ui, p: &Palette, inv: &Inventory, st: &mut Invento
 pub(super) fn search_row(
     ui: &mut egui::Ui,
     p: &Palette,
-    inv: &Inventory,
+    inv: &archive::Browse<'_, '_>,
     st: &mut InventoryUi,
     prefs: &mut InventoryPreferences,
     layout: Layout,
@@ -445,7 +446,7 @@ fn counted_button(ui: &mut egui::Ui, p: &Palette, icon: &str, label: &str, count
 pub(super) fn explorer_row(
     ui: &mut egui::Ui,
     p: &Palette,
-    inv: &Inventory,
+    inv: &archive::Browse<'_, '_>,
     st: &mut InventoryUi,
     prefs: &mut InventoryPreferences,
     layout: Layout,
@@ -583,7 +584,7 @@ fn breadcrumb(ui: &mut egui::Ui, p: &Palette, inv: &Inventory, st: &mut Inventor
 }
 
 /// The medium width's line over the list: where it is, how much it holds.
-pub(super) fn breadcrumb_row(ui: &mut egui::Ui, p: &Palette, inv: &Inventory, st: &mut InventoryUi) {
+pub(super) fn breadcrumb_row(ui: &mut egui::Ui, p: &Palette, inv: &archive::Browse<'_, '_>, st: &mut InventoryUi) {
     ui.allocate_ui_with_layout(
         Vec2::new(ui.available_width(), 26.0),
         egui::Layout::left_to_right(egui::Align::Center),
@@ -592,7 +593,7 @@ pub(super) fn breadcrumb_row(ui: &mut egui::Ui, p: &Palette, inv: &Inventory, st
                 .then(|| inv.folders.get(&st.browse))
                 .flatten()
                 .filter(|f| f.state == FetchState::Fetched)
-                .map(|f| f.items.len() + f.children.len());
+                .map(|f| f.items.iter().chain(&f.children).filter(|id| inv.gate.passes(**id)).count());
             let count_w = 110.0;
             ui.allocate_ui_with_layout(
                 Vec2::new((ui.available_width() - count_w).max(40.0), 26.0),
