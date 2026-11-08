@@ -32,7 +32,7 @@ jobs:
           }
           $rows = @()
           $readFailures = 0
-          $diagnosticScopes = [ordered]@{ LocalAppData = $env:LOCALAPPDATA; Temp = $env:TEMP }
+          $diagnosticScopes = [ordered]@{ LocalAppData = $env:LOCALAPPDATA; Temp = $env:TEMP; Workspace = $env:GITHUB_WORKSPACE }
           foreach ($scope in $diagnosticScopes.Keys) {
             $ancestors = @()
             $directory = [System.IO.DirectoryInfo]::new($diagnosticScopes[$scope])
