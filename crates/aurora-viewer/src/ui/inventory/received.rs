@@ -193,6 +193,7 @@ impl Badge {
         std::mem::take(&mut self.fresh)
     }
 
+    #[cfg(test)]
     pub(super) fn unseen(&mut self, inv: &Inventory) -> usize {
         self.prepare(inv);
         self.unread
