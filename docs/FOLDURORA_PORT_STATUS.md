@@ -9,46 +9,72 @@ Monitor, Workspace and Board slices and the remaining Folderstorm behavior.
 The late initial port-order table below is historical; newer exact-build entries
 and the backlog supersede its implementation inventory.
 
-## Current candidate: full checks running
+## Current candidate: profile-copy checks
 
-Exact source [`6e51ba4c7cd1959fa4e29a8fa50691e54ce1a563`](https://github.com/DrCum/Foldurora/commit/6e51ba4c7cd1959fa4e29a8fa50691e54ce1a563),
-tree `633116df671c2d5689e853348a8c3812e1d3bdf5`, is frozen on
-`feat/monitor-runtime-integration`. Linux formatting and qualified Clippy passed.
-The full Linux workspace suite and [Windows run 42436902578](https://github.com/DrCum/Foldurora/actions/runs/42436902578),
-attempt 1, are running. No final counts, new package or native acceptance are
-established yet. The earlier negative checkpoints below remain preserved.
+Exact source [`072bef3af9b4cf655f0838b8754907f2de855255`](https://github.com/DrCum/Foldurora/commit/072bef3af9b4cf655f0838b8754907f2de855255),
+tree `1dfceeee6f9a7d9d87f2f4fd19f7e0de8a929ca8`, is frozen on
+`feat/monitor-runtime-integration`. Independent combined source review,
+formatting and qualified Linux Clippy passed. The full Linux suite awaits build
+space recovery. [Windows run 42443002624](https://github.com/DrCum/Foldurora/actions/runs/42443002624),
+attempt 1, is running. Neither final counts nor native acceptance are established.
 
-This candidate includes the reviewed Board final-control/fixture corrections,
-Favorites menu ownership and location privacy, Poser fixture correction and
-Windows lint cleanup. It also adds the loaded-only Folder Jump chooser, shared
-actual-login metadata origin and locale-independent mouse binding identity.
-Subsequent egui API and mechanical lint corrections passed independent review.
-Archive visibility, profile copying, fixed-slot quick actions and true live
-inactive rendering remain separate unfinished work.
+This candidate adds explicit selective preference copying in Manage for a
+stopped target character slot. Graphics, interface, colors and bindings are
+separate choices; Inspect precedes Apply, and Cancel retains the original target.
+Sources are saved main-viewer settings or another stopped slot. The adapter uses
+role-specific file access, real profile ownership, bounded worker admission and
+an exact captured source/target check before publication. It does not log in a
+character. The actual UI and EN/FR/JA strings are joined; first-open offers and
+broader copy families remain later work.
 
-The exact source inventory requires 763 Windows / 761 applicable Linux names.
-Conditional totals are Windows 8,551/0/55 and Linux 8,582/1/57 across 33 summaries,
-with the inherited terrain case included in the Linux expectation. These are
-**source expectations, not measured results**. Inventory SHA-256:
-`807ac42f9d62521608b997671bd0430b0d87469d778ffa4d4514c3c257988d6e`.
+All 8,677 baseline test definitions are retained; 69 Profile definitions join,
+including one ignored isolated layout capture. The source inventory requires
+825 Windows / 828 applicable Linux names. Conditional totals are Windows
+8,613/0/56 and Linux 8,649/1/58 across 33 summaries, with the inherited terrain
+case included in the Linux expectation. These are **source expectations, not
+measured results**. Inventory SHA-256:
+`72759569a188a163d468e3350829aa6a5969c56021ebedf17930bfc2aa7d4caf`.
+Independent combined review SHA-256:
+`9eeb6c5494fcd7eb860e2258eacbfe6cdf6a8da39ea4d4c127d3bb831f36772f`.
 
-The preceding exact `d9f50d0f` completed Linux with **8,572 passed, nine failed,
-57 ignored**, and Windows with **8,541 passed, eight failed, 55 ignored**, each
-across 33 summaries. The same five Board, one Favorites and two Folder Jump
-failures occurred on both platforms; all eight also failed individually on the
-frozen Linux executable. Linux additionally retained the inherited terrain
-failure. Windows parsing, formatting, strict Clippy, build and packaging passed;
-tests and the final gate failed. Raw and packaged logs match, with all 761
-required Windows names appearing once (753 passing).
+### Preceding integration: Linux qualified, Windows negative
 
-[Artifact 13599970893](https://github.com/DrCum/Foldurora/actions/runs/42433785594/artifacts/13599970893)
-is a verified **negative-checkpoint package**, not the next acceptance
-recommendation. Receipt SHA-256:
+Exact [`6e51ba4c7cd1959fa4e29a8fa50691e54ce1a563`](https://github.com/DrCum/Foldurora/commit/6e51ba4c7cd1959fa4e29a8fa50691e54ce1a563)
+completed Linux with **8,582 passed, one failed, 57 ignored**, across 33 summaries.
+All 761 required Linux names passed exactly once. The sole failure is the retained
+inherited software-Vulkan terrain case; this is a qualified result, not all green.
+Linux receipt SHA-256:
+`c568d540871b8a8be17535f4f9ad10811f0b1b18a90b20d026c4d660bbdaf95b`.
+
+[Windows run 42436902578](https://github.com/DrCum/Foldurora/actions/runs/42436902578),
+attempt 1, completed with **8,550 passed, one failed, 55 ignored**, across 33
+summaries. All 763 required names appeared once, with 762 passing. Parsing,
+formatting, strict Clippy, build and package passed; tests and the final gate
+failed. The one preview test rejected a legitimate nonblocking Busy observation.
+The current candidate corrects only that test helper, preserving the production
+operation, original capture, deadline and assertions.
+
+Raw and packaged logs agree. [Artifact 13600619118](https://github.com/DrCum/Foldurora/actions/runs/42436902578/artifacts/13600619118)
+is a verified **negative-checkpoint package**, not the acceptance recommendation.
+Windows receipt SHA-256:
+`e1ba0aafce2d1bda5a4816b927cc8b0078c75ed94f3aaf798add65e001276470`.
+
+The eight earlier Board/Favorites/Folder Jump UI failures passed on both platforms
+in 6e51. Its source includes retained last-active Monitor images with canonical
+Chat, the first Workspace slice, gesture/sound Boards, named Favorite menus,
+About location choice, Folder Jump, actual-login metadata origin and stable mouse
+binding identity. True live inactive rendering remains unfinished. Profile copy,
+archive visibility and quick actions are separate additions; native Windows,
+human grid and NVIDIA device-loss acceptance remain pending.
+
+The earlier exact `d9f50d0f` measured Linux **8,572/9/57** and Windows
+**8,541/8/55** (passed/failed/ignored), each across 33 summaries. The same eight UI
+fixture failures occurred on both; Linux also retained the inherited terrain
+failure. [Artifact 13599970893](https://github.com/DrCum/Foldurora/actions/runs/42433785594/artifacts/13599970893)
+and its negative receipt remain preserved, SHA-256
 `7877e35468c17d87d0bc9696c82c76e2768c6a757cd756af0d3c7764ce62fbf8`.
-The current candidate changes only three test files and documentation relative
-to d9: actual focus/modal setup, visible Favorite ordering and two new Board
-regressions. All production bytes and prior assertions are preserved. These
-fixture corrections are source-reviewed; their execution is still pending.
+The three fixture-file corrections in 6e51 preserved all production bytes and
+prior assertions, and added two Board regressions.
 
 ## Preserved negative integration checkpoint
 

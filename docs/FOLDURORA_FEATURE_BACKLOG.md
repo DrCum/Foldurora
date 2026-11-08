@@ -9,15 +9,19 @@ source review and staged code do not establish a working product or test pass.
 
 ## Current candidate
 
-Exact `6e51ba4c` is now frozen for full Linux tests and
-[Windows run 42436902578](https://github.com/DrCum/Foldurora/actions/runs/42436902578),
-attempt 1. Formatting, qualified Linux Clippy and independent source integration
-review passed. It combines the Board/Favorites/Poser/Windows corrections with
-Folder Jump, actual-login metadata origin and mouse binding identity. Full
-counts, a new package and native acceptance are still pending. Preceding exact
-`d9f50d0f` measured Linux 8,572/9/57 and Windows 8,541/8/55. The same eight UI
-fixture failures occurred on both; the current candidate corrects their setup
-with production code unchanged. See the ledger for exact negative evidence.
+Exact `072bef3a` adds the actual selective Profile Copy UI, adapter and typed
+projection, plus a test-only preview Busy correction. Independent combined source
+review, formatting and qualified Linux Clippy passed. Full Linux tests await
+resource recovery; [Windows run 42443002624](https://github.com/DrCum/Foldurora/actions/runs/42443002624)
+is running. No final counts or new acceptance package are established.
+
+Preceding exact `6e51ba4c` measured Linux **8,582/1/57** and Windows
+**8,550/1/55** (passed/failed/ignored), each across 33 summaries. All 761 required
+Linux names passed; its sole failure is inherited terrain. Windows parsing,
+formatting, strict Clippy, build and package passed, but one preview Busy fixture
+failed and the final gate failed. All eight prior UI fixture failures passed on
+both platforms. The verified Windows package remains a negative checkpoint.
+See the ledger for exact results and receipts.
 
 Exact `4ff12e60` joins the reviewed Monitor/Workspace/Board/Favorites consumers.
 [Windows run 42426186025](https://github.com/DrCum/Foldurora/actions/runs/42426186025)
@@ -40,15 +44,15 @@ and human grid acceptance remain pending; see the ledger for checks and hashes.
 
 | Feature | Current scope and next gate |
 | --- | --- |
-| Monitors with chat | Actual host projection, native producer, CPU window and Shell consumers are joined in `4ff12e60`. The producer retains last-active images; live inactive rendering remains separate. Whole-candidate checks failed; revised Windows lint gates await execution. |
-| Named workspaces | Save/Rename/Delete, Preview/Cancel, Switch and session-only Previous cover four native geometry roles plus viewport/bar presentation. Earlier six Monitor/Workspace failures passed in 4ff. Whole-candidate acceptance remains negative. HUD/folder, graphics/camera/background groups, startup restore and Workspace favorites remain later stages. |
-| Gesture/sound boards | Native Floater, reference catalogue, guarded playback/Stop and private storage are joined. Final-pass/finite-control work has reviewed fixture setup corrections through `0b3711b9` (68 cases, current execution pending). Loading/opening does not play. |
-| Named Favorite menus | Actual menu ownership, immutable context, clipped-owner validation and location privacy are joined. Fixture-only visible-order correction `2e4de465` preserves all 29 cases and production bytes; current execution is pending. Inventory items are not moved. |
-| About report location choice | Per-open, source-qualified opt-in and copied-report filtering are joined in `4ff12e60`, preserving native restrictions. Whole-candidate checks failed; no new product acceptance. |
-| Folder Jump | Loaded-only chooser, real Inventory-local shortcut and current egui API corrections are joined. Focus-setup correction `3cce3f49` preserves all 29 cases and production bytes; current execution is pending. Archive-policy integration remains mandatory before enabling archives. |
-| Inventory archive | Model/projection and native store/controller are source-reviewed (40 unrun cases). Actual World/App adapters `bc87fa8b` add six unrun cases and are under review; ordinary Inventory and full Folder Jump integration remain. No archive UI or mask is enabled. |
-| Selective profile preferences | Typed projection has 19 unrun cases; combined IO/controller source-role atom `d2304807` is source-reviewed with 31 unrun adapter cases. Actual Manage UI, translations and production promotion are in progress. No copy UI is enabled in the current candidate. |
-| Fixed-slot quick actions | Reviewed pure fixed-slot model has eight unrun cases. Data-only Show Viewer ledger `0ea03e4f` adds six unrun cases and is under independent review. Actual versioned native consumer, actor, private preferences and UI remain; detached/recovery Show is later work. |
+| Monitors with chat | Actual host projection, native producer, CPU window and Shell consumers are joined in `4ff12e60`. The producer retains last-active images; live inactive rendering remains separate. All required 6e51 Linux checks passed; Windows has one unrelated preview fixture failure. Native acceptance is pending. |
+| Named workspaces | Save/Rename/Delete, Preview/Cancel, Switch and session-only Previous cover four native geometry roles plus viewport/bar presentation. Earlier six Monitor/Workspace failures passed in 4ff. 6e51 automated checks pass these cases; native acceptance is pending. HUD/folder, graphics/camera/background groups, startup restore and Workspace favorites remain later stages. |
+| Gesture/sound boards | Native Floater, reference catalogue, guarded playback/Stop and private storage are joined. Final-pass/finite-control work has reviewed fixture setup corrections through `0b3711b9` (68 cases, all passed in 6e51 on Linux and Windows). Loading/opening does not play. |
+| Named Favorite menus | Actual menu ownership, immutable context, clipped-owner validation and location privacy are joined. Fixture-only visible-order correction `2e4de465` preserves all 29 cases and production bytes; these passed in 6e51 on Linux and Windows. Inventory items are not moved. |
+| About report location choice | Per-open, source-qualified opt-in and copied-report filtering are joined in `4ff12e60`, preserving native restrictions. Required cases passed in 6e51; native acceptance remains pending. |
+| Folder Jump | Loaded-only chooser, real Inventory-local shortcut and current egui API corrections are joined. Focus-setup correction `3cce3f49` preserves all 29 cases and production bytes; these passed in 6e51 on Linux and Windows. Archive-policy integration remains mandatory before enabling archives. |
+| Inventory archive | Model/projection and native store/controller are source-reviewed (40 unrun cases). Actual World/App adapters `bc87fa8b` add six unrun cases and passed source review; ordinary Inventory and full Folder Jump integration are in progress. No archive UI or mask is enabled. |
+| Selective profile preferences | Actual Manage UI, translations, adapter and typed projection are joined in `072bef3a` after independent review. Its 69 new definitions are unrun; full and native acceptance are pending. First-open offers and broader families remain later work. |
+| Fixed-slot quick actions | Reviewed pure fixed-slot model has eight unrun cases. Data-only Show Viewer ledger and first actual Control V2 API `f9002ebe` passed source review. The IO/native consumer is in progress; actual actor, private preferences and UI remain; detached/recovery Show is later work. |
 
 The intermediate monitor component source `df213a08` completed Linux workspace
 tests with **8,293 passed, five failed, 57 ignored**. Failures comprise the inherited
@@ -79,7 +83,7 @@ validation before parity can be claimed.
 | Group/conference chat | Existing initialized channel export, literal send and native read integration; tags alone are insufficient | `fssessionchatmodel.h`; worker chat paths |
 | Automatic read | Explicit host settings, actual displayed-tail receipts and the separate optional active-character delay | `fssessionchatprefs.h`, `fssessionreadpolicy.h`; host `automaticRead` |
 | Notification Attention | Stable body-free offer/permission/notification identities and open-only native review | Worker `ReviewAttention` |
-| Profile setup/copy | Explicit selective typed Aurora settings copy into a stopped, exclusively owned target profile | `fssessionprofileseed.h`; host profile-copy paths |
+| Profile setup/copy | Validate the joined explicit selective copy; first-open offers and broader families remain | `fssessionprofileseed.h`; host profile-copy paths |
 | Session sets | Bounded named saved slot rosters, explicit open/cancel; preserve already-open viewers and profiles | `fssessionsets.h` |
 | Restart/recovery | Typed restart/logout/cancel lifecycle and process-exit/profile-lock proof before relaunch | Host restart/recovery paths |
 | Audio/voice | Native ownership, background mute/voice-follow policies and controls | `fssessionaudio.h` |
