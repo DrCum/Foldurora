@@ -55,6 +55,18 @@ impl Harness {
         for _ in 0..4 {
             h.frame(Vec::new());
         }
+        if mode == 0 {
+            let button = h
+                .ctx
+                .read_response(Id::unique("bars_place_favorites"))
+                .expect("real F1 Favorites button");
+            let position = button.rect.center();
+            assert!(h.frame(pointer(position, PointerButton::Primary, true)).1.is_none());
+            assert!(h.frame(pointer(position, PointerButton::Primary, false)).1.is_none());
+            for _ in 0..4 {
+                h.frame(Vec::new());
+            }
+        }
         h
     }
     fn view(&mut self) -> View {
@@ -115,7 +127,15 @@ impl Harness {
                 } else {
                     egui::CentralPanel::default().show(root_ui, |ui| {
                         if self.mode == 0 {
-                            menu_body(ui, &self.palette, &self.icons, &view, &mut action);
+                            if let Some(BarAction::Favorite(found)) = place_button(
+                                ui,
+                                &self.palette,
+                                &self.icons,
+                                Rect::from_min_size(egui::pos2(20.0, 20.0), Vec2::new(PLACE_BUTTON_W, 30.0)),
+                                &view,
+                            ) {
+                                action = Some(found);
+                            }
                         } else {
                             grid_body(ui, &self.palette, &self.icons, &view, &mut action);
                         }
@@ -127,11 +147,22 @@ impl Harness {
     }
     fn position(&mut self, text: &str) -> Pos2 {
         let (output, _) = self.frame(Vec::new());
+        let painted = || {
+            output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                    _ => None,
+                })
+                .take(48)
+                .collect::<Vec<_>>()
+        };
         output
             .shapes
             .iter()
             .find_map(|shape| text_rect(&shape.shape, text))
-            .unwrap_or_else(|| panic!("missing Favorite control: {text}"))
+            .unwrap_or_else(|| panic!("missing Favorite control: {text}; painted: {:?}", painted()))
             .center()
     }
     fn click(&mut self, text: &str, button: PointerButton) -> (egui::FullOutput, Option<FavAction>) {
@@ -152,9 +183,34 @@ impl Harness {
     }
     fn open_editor(&mut self) {
         self.open_folder();
+        let popup = if self.mode == 0 {
+            let button = self.ctx.read_response(Id::unique("bars_place_favorites")).unwrap();
+            egui::Popup::default_response_id(&button)
+        } else {
+            let view = self.view();
+            let first = &view.list[0];
+            let id = Id::unique((
+                if self.mode == 1 {
+                    "bars_favorites_folder_pill"
+                } else {
+                    "bars_favorites_folder_tile"
+                },
+                first.group.as_deref().unwrap(),
+                first.group_ticket.as_ref().map(GroupEditTicket::namespace),
+            ));
+            egui::Popup::default_response_id(&self.ctx.read_response(id).expect("actual folder parent"))
+        };
         assert!(self.click("First landmark", PointerButton::Secondary).1.is_none());
+        assert!(
+            egui::Popup::is_id_open(&self.ctx, popup),
+            "member context keeps its actual Favorites owner"
+        );
         self.click(aurora_i18n::tr!("favorites-folder-set"), PointerButton::Primary);
         self.frame(Vec::new());
+        assert!(
+            egui::Popup::is_id_open(&self.ctx, popup),
+            "nested name editor keeps the actual Favorites dropdown"
+        );
     }
     fn edit_name(&mut self, text: &str) {
         let editor = self
@@ -232,7 +288,7 @@ fn favorites_group_projection_keeps_first_original_rank_and_member_order_through
 
 #[test]
 fn favorites_real_egui_grouped_end_drop_uses_full_original_list_not_last_heading_rank() {
-    let mut h = Harness::new(0, 1.0);
+    let mut h = Harness::new(1, 1.0);
     let view = h.view();
     let entries = grouped_entries(&view, "");
     // Presentation ranks are [0, 1], but the folder also owns flat item 2.
@@ -303,46 +359,49 @@ fn favorites_real_egui_folder_buttons_in_all_layouts_open_exact_member_actions_w
 }
 #[test]
 fn favorites_real_egui_captured_name_apply_and_empty_ungroup_preserve_inventory_and_order() {
-    let mut h = Harness::new(0, 1.0);
-    let order = h.data.favorites.list(&h.data.inventory).to_vec();
-    let original = h.data.inventory.items[&Uuid::from_u128(10)].clone();
-    h.open_editor();
-    h.edit_name("New menu");
-    let (_, action) = h.click(aurora_i18n::tr!("common-apply"), PointerButton::Primary);
-    let Some(FavAction::AssignGroup { ticket, name }) = action else {
-        panic!("typed captured group action")
-    };
-    assert_eq!(name, "New menu");
-    h.data
-        .favorites
-        .assign_group(ticket, h.data.account, h.data.session, &h.data.inventory, &name)
-        .unwrap();
-    h.data.settle();
-    assert_eq!(h.data.name(10), Some("New menu"));
-    assert_eq!(h.data.name(12), Some("Trips"));
-    assert_eq!(h.data.favorites.list(&h.data.inventory), order.as_slice());
-    assert_eq!(h.data.inventory.items[&Uuid::from_u128(10)], original);
-    let mut empty = Harness::new(0, 1.0);
-    empty.open_editor();
-    empty.edit_name("");
-    let (_, action) = empty.click(aurora_i18n::tr!("common-apply"), PointerButton::Primary);
-    let Some(FavAction::AssignGroup { ticket, name }) = action else {
-        panic!("typed empty assignment")
-    };
-    assert!(name.is_empty());
-    empty
-        .data
-        .favorites
-        .assign_group(ticket, empty.data.account, empty.data.session, &empty.data.inventory, &name)
-        .unwrap();
-    empty.data.settle();
-    assert_eq!(empty.data.name(10), None);
-    assert_eq!(empty.data.favorites.list(&empty.data.inventory), order.as_slice());
-    let view = empty.view();
-    let entries = grouped_entries(&view, "");
-    assert!(matches!(entries[0], Entry::Item(0, _)));
-    assert_eq!(entries[2].label(), "Trips");
+    for mode in 0..3 {
+        let mut h = Harness::new(mode, 1.0);
+        let order = h.data.favorites.list(&h.data.inventory).to_vec();
+        let original = h.data.inventory.items[&Uuid::from_u128(10)].clone();
+        h.open_editor();
+        h.edit_name("New menu");
+        let (_, action) = h.click(aurora_i18n::tr!("common-apply"), PointerButton::Primary);
+        let Some(FavAction::AssignGroup { ticket, name }) = action else {
+            panic!("typed captured group action")
+        };
+        assert_eq!(name, "New menu");
+        h.data
+            .favorites
+            .assign_group(ticket, h.data.account, h.data.session, &h.data.inventory, &name)
+            .unwrap();
+        h.data.settle();
+        assert_eq!(h.data.name(10), Some("New menu"));
+        assert_eq!(h.data.name(12), Some("Trips"));
+        assert_eq!(h.data.favorites.list(&h.data.inventory), order.as_slice());
+        assert_eq!(h.data.inventory.items[&Uuid::from_u128(10)], original);
+        let mut empty = Harness::new(mode, 1.0);
+        empty.open_editor();
+        empty.edit_name("");
+        let (_, action) = empty.click(aurora_i18n::tr!("common-apply"), PointerButton::Primary);
+        let Some(FavAction::AssignGroup { ticket, name }) = action else {
+            panic!("typed empty assignment")
+        };
+        assert!(name.is_empty());
+        empty
+            .data
+            .favorites
+            .assign_group(ticket, empty.data.account, empty.data.session, &empty.data.inventory, &name)
+            .unwrap();
+        empty.data.settle();
+        assert_eq!(empty.data.name(10), None);
+        assert_eq!(empty.data.favorites.list(&empty.data.inventory), order.as_slice());
+        let view = empty.view();
+        let entries = grouped_entries(&view, "");
+        assert!(matches!(entries[0], Entry::Item(0, _)));
+        assert_eq!(entries[2].label(), "Trips");
+    }
 }
+
 #[test]
 fn favorites_real_egui_held_apply_cannot_substitute_a_replaced_source_or_previous_assignment() {
     for replace_source in [true, false] {
