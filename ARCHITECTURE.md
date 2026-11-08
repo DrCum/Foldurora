@@ -1,5 +1,24 @@
 # Aurora Viewer architecture
 
+Windows ordinary-settings ACL classification distinguishes retained directory
+prefixes from the final settings parent/file. A native-derived prefix with an
+independently retained existing next-directory child may grant other principals
+FILE_ADD_FILE/FILE_ADD_SUBDIRECTORY without gaining replacement authority; those
+grants always remain nonprivate and cannot establish confinement. Parent
+DELETE_CHILD and existing-child DELETE/WRITE_DAC/WRITE_OWNER, generic mutation,
+unknown rights and applicable object/callback grants still refuse. Actual
+capture stores each directory's role and reuses it for retained/current-path
+security and identity checks before and after reads/CAS. The final parent/file
+keeps conservative closed-object classification; file masks2/4 remain mutation.
+The owner trust set is unchanged: unestablished prefix owners, including any
+TrustedInstaller-owned layout, remain unsupported pending native evidence.
+Two additional pure role/rights cases and one Windows-only ordinary-temp/native
+saver ancestry case are authored UNRUN:27 adapter definitions, three Unix-only
+and one Windows-only. No native ACL was inspected by the author. Linux MainSaved
+without genuine private ancestry is still refused by the existing policy; any
+read-only-source exception is a separate Root decision. Actual Manage UI and
+production promotion remain gated on independent exact-source clearance.
+
 `profile/settings_file/security.rs` adds the ordinary-settings compatibility
 boundary for that adapter, separate from unchanged strict lock/temp policy.
 It retains at most128 opened no-follow ancestor handles per native file, with
@@ -17,8 +36,8 @@ unsupported applicable object/callback ACEs and unsafe owners refuse. Inherit-on
 ACEs grant nothing on the current object and never supply confinement evidence;
 each descendant receives its own check. Deny ACEs never excuse a broad allow.
 No existing chmod/ACL repair or Settings/atomic_file saver change is made.
-Seven additional synthetic compatibility cases are authored UNRUN, bringing this
-adapter to24 definitions (three Unix-specific). Actual Windows inherited/elevated
+That earlier compatibility checkpoint authored seven extra synthetic cases,
+then24 definitions (three Unix-specific). Actual Windows inherited/elevated
 native acceptance remains Root/human work; unsupported ACL layouts fail closed.
 
 `session_host/profile_copy.rs`, `profile_copy/io.rs` and
