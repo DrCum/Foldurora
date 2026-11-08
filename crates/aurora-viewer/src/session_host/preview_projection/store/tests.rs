@@ -472,7 +472,19 @@ impl Owned {
     }
     fn pending_claim(&mut self) -> CaptureClaim {
         let proof = self.control.capture(&self.runtime, self.reader.0.frontdoor.clone()).unwrap();
-        let set = self.channel.try_observations().unwrap();
+        // The IO publisher can hold its mailbox after capture admission. Keep
+        // this original proof while retrying only that try-read contention.
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let set = loop {
+            match self.channel.try_observations() {
+                Ok(set) => break set,
+                Err(crate::session_host::preview_io::Error::Busy) => {
+                    assert!(Instant::now() < deadline, "bounded pending-claim observation read timed out");
+                    std::thread::yield_now();
+                }
+                Err(error) => panic!("pending-claim observation read failed: {error:?}"),
+            }
+        };
         self.apply(&set).unwrap();
         let token = set.sources()[0].observation().token;
         let claim = {

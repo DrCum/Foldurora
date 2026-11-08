@@ -1,5 +1,15 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Preview observation fixture contention correction (2026-11-08; no issue):
+  Exact 6e51 Windows CI measured one `Busy` panic in the test-only
+  `pending_claim` observation read. The fixture now yields and retries only
+  `Busy` within three seconds after its one original capture; every other
+  error still fails, with no peer pumping, recapture or receipt-time renewal.
+  Production try-only reads, publication, source guards and budgets remain
+  unchanged. Existing actual-mutex contention coverage is reused; all test
+  names, attributes and assertions remain. This source correction is author
+  unrun; independent review and Root-owned execution remain required.
+
 - 🔧 Local Inventory archive prerequisite, shared origin (2026-11-07; no issue):
   World now owns one pure actual-request digest/ambiguity state, captured before
   Net submission, cleared before failure retry and consumed once on LoggedIn.
