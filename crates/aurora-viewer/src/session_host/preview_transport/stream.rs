@@ -30,6 +30,8 @@ pub(super) fn worker_framing_bound(pair: &Pair) -> (usize, [usize; 2], [usize; 2
     // Each role consumes at most ROLE_OPERATIONS reads, hence output <=2*that;
     // the Vec's power-of-two growth fits this already power-of-two allowance.
     let bytes = std::mem::size_of::<Pair>()
+        + pair.metadata.incoming.metadata.capacity()
+        + pair.pixels.as_ref().map_or(0, |p| p.incoming.metadata.capacity())
         + capacities.iter().sum::<usize>() * std::mem::size_of::<Outgoing>()
         + 2 * ROLE_OPERATIONS * std::mem::size_of::<Received>()
         + 6 * 96
@@ -41,6 +43,7 @@ pub(super) fn worker_framing_bound(pair: &Pair) -> (usize, [usize; 2], [usize; 2
 #[cfg(test)]
 pub(crate) fn worker_storage_ceiling() -> usize {
     std::mem::size_of::<Pair>()
+        + 2 * MAX_METADATA_BYTES
         + (METADATA_QUEUE + 4) * std::mem::size_of::<Outgoing>()
         + 2 * ROLE_OPERATIONS * std::mem::size_of::<Received>()
         + 6 * 96
@@ -330,7 +333,10 @@ impl Outgoing {
 struct Incoming {
     header_bytes: [u8; HEADER_BYTES],
     header: Option<Header>,
-    metadata: [u8; MAX_METADATA_BYTES],
+    // Pair/Connected move through several Result/Option values on the worker.
+    // Keep receive scratch heap-first even in the unoptimized CI profile.
+    // Its actual capacity is checked once and reused for this role's lifetime.
+    metadata: Vec<u8>,
     header_tag: [u8; TAG_BYTES],
     finish: [u8; TAG_BYTES],
     position: usize,
@@ -342,11 +348,17 @@ struct Incoming {
     body: Option<hmac::Context>,
 }
 impl Incoming {
-    fn new() -> Self {
-        Self {
+    fn new() -> Result<Self, Error> {
+        let mut metadata = Vec::new();
+        metadata.try_reserve_exact(MAX_METADATA_BYTES).map_err(|_| Error::Capacity)?;
+        if metadata.capacity() > MAX_METADATA_BYTES {
+            return Err(Error::Capacity);
+        }
+        metadata.resize(MAX_METADATA_BYTES, 0);
+        Ok(Self {
             header_bytes: [0; HEADER_BYTES],
             header: None,
-            metadata: [0; MAX_METADATA_BYTES],
+            metadata,
             header_tag: [0; TAG_BYTES],
             finish: [0; TAG_BYTES],
             position: 0,
@@ -356,7 +368,21 @@ impl Incoming {
             decoded: None,
             pixels: None,
             body: None,
-        }
+        })
+    }
+    fn reset(&mut self) {
+        self.header_bytes.fill(0);
+        self.header = None;
+        self.metadata.fill(0);
+        self.header_tag.fill(0);
+        self.finish.fill(0);
+        self.position = 0;
+        self.began = None;
+        self.local_began = None;
+        self.live = false;
+        self.decoded = None;
+        self.pixels = None;
+        self.body = None;
     }
     fn read(
         &mut self,
@@ -493,20 +519,20 @@ struct Endpoint {
     closed: bool,
 }
 impl Endpoint {
-    fn new(auth: Authenticated) -> Self {
-        Self {
+    fn new(auth: Authenticated) -> Result<Self, Error> {
+        Ok(Self {
             auth,
-            incoming: Incoming::new(),
+            incoming: Incoming::new()?,
             outgoing: VecDeque::new(),
             sent: 0,
             received: 0,
             flushed: 0,
             closed: false,
-        }
+        })
     }
     fn close(&mut self) {
         self.closed = true;
-        self.incoming = Incoming::new();
+        self.incoming.reset();
         self.outgoing.clear();
     }
     fn enqueue(&mut self, metadata: MetadataBytes, pixels: Option<OutgoingPixels>) -> Result<(), Error> {
@@ -573,7 +599,7 @@ impl Endpoint {
                 match self.incoming.read(io, &self.auth, budget, self.received, now, allowance) {
                     Ok(Some(packet)) => {
                         self.received = self.incoming.header.ok_or(Error::Invalid)?.sequence();
-                        self.incoming = Incoming::new();
+                        self.incoming.reset();
                         output.push(packet);
                     }
                     Ok(None) => {}
@@ -641,7 +667,7 @@ impl Pair {
         }
         let mut pair = Self::metadata(metadata, budget)?;
         pair.pixel_epoch = pixels.scope.role_epoch;
-        pair.pixels = Some(Endpoint::new(pixels));
+        pair.pixels = Some(Endpoint::new(pixels)?);
         Ok(pair)
     }
     /// Metadata can authenticate while parked, before any pixel connection.
@@ -650,7 +676,7 @@ impl Pair {
             return Err(Error::Binding);
         }
         Ok(Self {
-            metadata: Endpoint::new(metadata),
+            metadata: Endpoint::new(metadata)?,
             pixels: None,
             pixel_epoch: 0,
             budget,
@@ -854,9 +880,10 @@ impl Pair {
         {
             return Err(Error::Sequence);
         }
-        self.pixel_epoch = auth.scope.role_epoch;
+        let endpoint = Endpoint::new(auth)?;
+        self.pixel_epoch = endpoint.auth.scope.role_epoch;
         self.validity = Arc::new(AtomicU64::new(1));
-        self.pixels = Some(Endpoint::new(auth));
+        self.pixels = Some(endpoint);
         Ok(())
     }
     #[cfg(test)]
@@ -1123,6 +1150,47 @@ mod service_deadline_tests {
         }
     }
     #[test]
+    fn preview_receive_scratch_is_bounded_heap_storage_reused_on_frame_reset_and_close() {
+        // A pair carries two receive roles through by-value Result/Option
+        // moves. Those protocol buffers must not travel on the thread stack.
+        assert!(std::mem::size_of::<Incoming>() < MAX_METADATA_BYTES);
+        assert!(std::mem::size_of::<Pair>() < 2 * MAX_METADATA_BYTES);
+        let (_, worker) = scoped_sessions(scope(Lane::Metadata));
+        let mut pair = Pair::metadata(worker, None).unwrap();
+        let incoming = &mut pair.metadata.incoming;
+        let pointer = incoming.metadata.as_ptr();
+        let capacity = incoming.metadata.capacity();
+        assert_eq!((incoming.metadata.len(), capacity), (MAX_METADATA_BYTES, MAX_METADATA_BYTES));
+        incoming.metadata.fill(255);
+        incoming.header_bytes.fill(255);
+        incoming.header_tag.fill(255);
+        incoming.finish.fill(255);
+        incoming.position = 1;
+        incoming.began = Some(1);
+        incoming.local_began = Some(Instant::now());
+        incoming.live = true;
+        incoming.reset();
+        assert_eq!((incoming.metadata.as_ptr(), incoming.metadata.capacity()), (pointer, capacity));
+        assert!(
+            incoming
+                .metadata
+                .iter()
+                .chain(&incoming.header_bytes)
+                .chain(&incoming.header_tag)
+                .chain(&incoming.finish)
+                .all(|b| *b == 0)
+        );
+        assert_eq!(incoming.position, 0);
+        assert!(incoming.header.is_none() && incoming.began.is_none() && incoming.local_began.is_none());
+        assert!(!incoming.live && incoming.decoded.is_none() && incoming.pixels.is_none() && incoming.body.is_none());
+        pair.close();
+        assert_eq!(
+            (pair.metadata.incoming.metadata.as_ptr(), pair.metadata.incoming.metadata.capacity()),
+            (pointer, capacity)
+        );
+        assert!(worker_framing_bound(&pair).0 <= worker_storage_ceiling());
+    }
+    #[test]
     fn preview_io_partial_frame_actual_deadline_precedes_io_even_when_loop_clock_is_stale() {
         let (host, worker) = scoped_sessions(scope(Lane::Metadata));
         let metadata = Metadata::Stop {
@@ -1136,7 +1204,7 @@ mod service_deadline_tests {
         outgoing.live = true;
         outgoing.began = Some(0);
         outgoing.local_began = Some(Instant::now() - Duration::from_secs(2));
-        let mut incoming = Incoming::new();
+        let mut incoming = Incoming::new().unwrap();
         incoming.live = true;
         incoming.began = Some(0);
         incoming.local_began = Some(Instant::now() - Duration::from_secs(2));
