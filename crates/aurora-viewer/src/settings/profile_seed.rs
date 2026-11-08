@@ -5,7 +5,7 @@
 //! Native default construction may lazily query the keyboard layout; the real
 //! adapter must acquire defaults off the GUI/control pump under its worker lease.
 //! Unknown unselected JSON VALUES survive successful writes; refusals emit no
-//! replacement bytes. This prerequisite is test-only until its real IO consumer.
+//! replacement bytes. The stopped-profile worker owns native IO and defaults.
 use super::{ChatStyle, ColorSettings, FavoritesAccess, NotificationsStyle, Rgba, Settings, WorldMapStyle, presentation};
 use crate::keybinds::{Action, Binding, Input};
 use serde::{Deserialize, Serialize};
@@ -600,6 +600,7 @@ impl ProfileSeed {
             summaries,
         })
     }
+    #[cfg(test)]
     pub(crate) fn summary(&self) -> &[Summary] {
         &self.summaries
     }

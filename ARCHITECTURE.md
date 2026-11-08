@@ -46,112 +46,107 @@ and World reset clears pending provenance. Consumers copy the original digest
 with the accepted account/session independently of IO readiness; no form value,
 raw URI or credential is persisted. Favorites retains its original file identity
 and behavior. Archive projection, private storage and UI are separate stages.
-Stopped-profile copy now captures distinct closed native `SourceSettingsFile`
-and `TargetSettingsFile` capabilities. Only the target wrapper exposes publish;
-the private underlying file and retained ancestry capture an immutable
-`ReadOnlySource` or `PrivateTarget` role. Preparation, every bounded reread and
-final source digest/target byte CAS use those same captured capabilities. Main
-saved and stopped-slot sources may read current-user-owned ordinary0644 files
-without private-ancestor evidence, while still requiring plain/single-link,
-no-follow, non-other-writable files and safe opened ancestry/current-path
-identity before and after the read. Windows permits broad read-only source
-grants only after the existing opened-handle parser refuses untrusted mutation
-and unsupported ACE forms; administrator-owned sources retain the narrower
-closed-ACL plus same-user private-ancestor exception. Source capabilities cannot
-publish or supply private-target evidence. A stopped target requires an actual
-retained private ancestor even when its file is0600; strict lock/temp validators,
-native path factories, reservations, source raw-drop order and original deadline
-are unchanged. Four additional cases are authored UNRUN (31 adapter definitions,
-six Unix-only and one Windows-only). The Unix no-private-evidence fixture drops
-optional confinement evidence while retaining all real opened ancestors, so it
-does not depend on the test workspace itself being public. Independent source
-review and Root execution precede actual Manage UI/production promotion.
+Manual selective preference copy is a real Manage action in the CPU HostUi.
+The modal freezes its stopped target SlotId, starts with Main Saved as a strictly
+read-only source and all four families checked, and offers only Main Saved or
+another stopped slot (at most five source choices). Inspect shows the actual
+four-family typed fields/changed/defaulted counters; Apply carries the exact
+Prepared backend Capture. No copy action opens a profile or logs in. The first-
+Open offer, archive/Legacy XML import and broader settings families remain gaps.
+The modal, source popup and wrapped footer use bounded compact-width layout;
+the body scrolls while Inspect/Apply/Cancel remain outside it. EN/FR/JA labels
+are added together, including honest original-target Applied/uncertain results.
 
-Windows ordinary-settings ACL classification distinguishes retained directory
-prefixes from the final settings parent/file. A native-derived prefix with an
-independently retained existing next-directory child may grant other principals
-FILE_ADD_FILE/FILE_ADD_SUBDIRECTORY without gaining replacement authority; those
-grants always remain nonprivate and cannot establish confinement. Parent
-DELETE_CHILD and existing-child DELETE/WRITE_DAC/WRITE_OWNER, generic mutation,
-unknown rights and applicable object/callback grants still refuse. Actual
-capture stores each directory's role and reuses it for retained/current-path
-security and identity checks before and after reads/CAS. The final parent/file
-keeps conservative closed-object classification; file masks2/4 remain mutation.
-The owner trust set is unchanged: unestablished prefix owners, including any
-TrustedInstaller-owned layout, remain unsupported pending native evidence.
-Two additional pure role/rights cases and one Windows-only ordinary-temp/native
-saver ancestry case are authored UNRUN:27 adapter definitions, three Unix-only
-and one Windows-only. No native ACL was inspected by the author. The following
-earlier policy was superseded for read-only source capabilities as described
-above; private-target confinement remains required. Actual Manage UI and
-production promotion remain gated on independent exact-source clearance.
+The persistent CopyUi owns metadata only: one original request ledger, captured
+selection/incarnation and exact cancellation latch survive source/family changes
+and modal close. A -> B -> A cannot restore old Apply authority. Close queues
+cancellation through normal Shell try-only polling until admitted; local state
+never asserts cancellation beat publication. No acknowledged terminal means
+uncertainty, with the original request retained. A later matching Applied receipt
+still names its original target. Snapshot comparison includes copy state even
+when the completed metadata ticket did not change. Shell copy actions return
+before generic presentation notices, so they cannot alter an acknowledged world.
 
-`profile/settings_file/security.rs` adds the ordinary-settings compatibility
-boundary for that adapter, separate from unchanged strict lock/temp policy.
-It retains at most128 opened no-follow ancestor handles per native file, with
-native paths at most32KiB, through confirmation and final CAS. Current path and
-retained handle identities/confinement are rechecked; ordinary file owner/link/
-mode or opened-handle DACL evidence is checked before and after each bounded
-read. For targets, Unix0644 ordinary saver output is accepted only behind a retained existing
-same-user0700 ancestor; group/other writes always refuse, and unconfined files
-must be private. Windows permits ordinary inherited ACL spelling with a closed
-applicable allow set of TokenUser, LocalSystem and BuiltinAdministrators. A
-TokenUser owner is required unless a BuiltinAdministrators-owned settings file
-is confined by a retained same-user private ancestor. Broad read-only grants can
-occur above confinement, or on a current-user-owned read-only source as described
-above; target settings retain closed applicable grants. Untrusted mutation grants,
-unsupported applicable object/callback ACEs and unsafe owners refuse. Inherit-only
-ACEs grant nothing on the current object and never supply confinement evidence;
-each descendant receives its own check. Deny ACEs never excuse a broad allow.
-No existing chmod/ACL repair or Settings/atomic_file saver change is made.
-That earlier compatibility checkpoint authored seven extra synthetic cases,
-then24 definitions (three Unix-specific). Actual Windows inherited/elevated
-native acceptance remains Root/human work; unsupported ACL layouts fail closed.
+Input authority starts from a previously settled clipped enabled control, its
+exact intent/widget/layer and one original pointer, Enter/Space or AccessKit
+press. Newly enabled Apply cannot consume Inspect's Enter or the Modal helper's
+synthetic primary click. At most24 controls are retained (five source choices,
+picker, four groups and three footer buttons fit); native Enter/Space observation
+reuses the existing release fence without changing chat behavior or suppressing
+unrelated Host input. Discard, focus/IME, geometry, modal, selection or operation
+turnover revokes authority. After the ENTIRE Context::run_ui, Shell redeems a
+single-use proof against final frame/pass, modal/focus/control geometry and a
+fresh backend Capture snapshot before sending metadata. Rejected proof has no
+retry. Only that final Shell path starts a real HostController Inspect or Apply;
+exact-request cancellation uses bounded Shell polling after its original revoke.
 
-`session_host/profile_copy.rs`, `profile_copy/io.rs` and
-`profile/settings_file.rs` are a temporary cfg(test)-only stopped-profile adapter
-checkpoint. The real Broker/HostController metadata route captures installation,
-controller, nonreused manager/UI instance, operation, selection incarnation,
-stable source/target slots and four typed families. Current child/queued-Open
-proof and copy reservations precede worker-only SlotId-ordered try-locks; physical
-profile locks remain through Inspect, the original 30-second confirmation and
-Apply/cancel. One persistent process-wide physical worker permit survives modal
-reset, controller drop, blocked IO and actual thread retirement. Controller/GUI
-channel admission and polling are try-only; only the IO worker can wait for its
-bounded command/result channel. The channel cannot lose a definitive terminal
-receipt merely because its earlier Prepared result has not been consumed.
+The production callee chain includes settings/profile_seed, profile/settings_file,
+profile_copy, Broker's Inspect/Apply/Cancel metadata variants, copy reservations
+in Open admission and slot availability, snapshot state, worker polling/stop and
+the real Manage consumer. Test fixtures and inspection-only summary helpers stay
+cfg(test); there is no dormant parallel endpoint or blanket dead-code allowance.
+The 31 independently source-cleared adapter cases and19 projection cases are
+preserved. Thirteen additional actual-egui/model/real-channel cases are authored
+UNRUN, including one explicitly isolated locale/font/layout case using the existing
+AURORA_COMPACT_HOST_VISUAL_LANGUAGE setting. This production-promotion atom still
+requires independent exact-source review, Root compilation/tests/native fixtures
+and human UI/native Windows acceptance before shipment. No native ACL/profile
+was inspected or fixture executed by the author.
 
-The worker reads native-derived files only, acquires native defaults there, drops
-all unselected raw source before destination output, and retains original target
-bytes plus a source digest. A durable private temporary file precedes fresh
-source/target CAS, held-lock file-identity checks and final controller/cancel/
-original-deadline checks. Rename has no delayed retry after these checks. Main
-saved settings is strictly read-only; unsafe ownership, unsafe writable access,
-symlinks/reparse points and hard links are refused without repair. There is no
-raw backup or global Settings load/save. Logical cancellation never releases a
-reservation before actual worker terminal; a completed rename reports Applied
-for its original capture, and a missing terminal receipt reports uncertainty.
-Resource accounting is bounded raw/string payload up to 16MiB (plus bounded read
-sentinel bytes), selected payload up to 256KiB, and separate bounded JSON and
-retained-directory metadata (two native files, at most128 paths/handles each);
-it makes no whole-process memory claim. Seventeen synthetic cases are authored
-UNRUN (one Unix-specific). Independent IO/controller source review precedes the
-mandatory actual Manage Inspect/Apply/Cancel modal and production promotion.
+The Broker/Lane transaction captures installation, controller, nonreused manager/
+UI instance, operation, selection incarnation, stable source/target slots and four
+typed families. Current ActorChild/detached ownership, queued Open and retained
+copy reservations precede worker-only SlotId-ordered profile TRY-locks. Locks
+remain through Inspect, the original 30-second confirmation and Apply/cancel.
+One process-wide persistent physical worker permit survives modal reset,
+controller drop, blocked IO and actual thread retirement. Controller/GUI channel
+admission/polling never waits for disk; only the physical worker can wait on its
+bounded command/result channels. Prepared cannot crowd out a definitive terminal.
+A durable strict-private temporary precedes fresh source digest/target byte CAS,
+held-lock identity and final controller/cancel/original-deadline checks immediately
+before one native rename, without delayed retry. Post-rename cancellation reports
+Applied for the original capture; lost terminal reports uncertainty without replay.
 
-`settings/profile_seed.rs` and its strict JSON reader are a cfg(test)-only
-selective-profile data prerequisite: four closed typed presentation/control families,
-explicit field lists, current native defaults, duplicate/depth/node/byte limits,
-selected-field refusal and lossless preservation of unselected target JSON values.
-The existing serde_json raw_value feature retains numeric lexemes; all raw trees
-still receive duplicate/depth/node checks, and only selected typed values decode.
-Native default construction may lazily query keyboard layout; the real adapter
-must schedule it off the GUI/control pump under its bounded worker lease.
-The seed retains no raw source, path, account, unknown value or native authority;
-Debug and summaries contain counters/enums only. `settings/presentation.rs` shares
-the existing ordinary normalization ranges without changing their call order.
-No profile IO, management button, first-open prompt, login or copy operation is
-enabled by this prerequisite. The actual stopped-profile adapter/Manage consumer
-and its one-worker lifetime/resource inventory follow independent source review.
+Distinct closed SourceSettingsFile and TargetSettingsFile wrappers carry immutable
+ReadOnlySource/PrivateTarget roles through capture, every bounded reread and final
+CAS. Native factories accept only catalogue_dir/settings.json or native stopped
+slot_root/config/settings.json. Sources expose no publish or target conversion.
+Current-user ordinary0644 source files need no confidential ancestor, while plain/
+single-link/no-follow ownership, no other write, safe opened ancestry and stable
+current-path identity remain mandatory. Targets require an actual retained same-
+user private ancestor even for0600 files. Shared strict profile-lock/newtemp
+validators and the ordinary Settings/atomic_file savers are unchanged; no chmod,
+ACL repair, arbitrary path DTO or raw backup is added.
+
+At most128 no-follow opened ancestor handles per native file and at most32KiB
+native paths remain through confirmation and CAS; all retained/current-path
+security and identities are rechecked before and after bounded reads. Windows
+retained prefixes distinguish creating a different child (FILE_ADD_FILE/ADD_SUBDIR)
+from replacing the retained existing child (DELETE_CHILD/DELETE/WRITE_DAC/OWNER).
+Permitted prefix creation never supplies confinement. Final settings parent/file
+keep the conservative object role; file masks2/4 remain mutation. Applicable
+object/callback/unknown grants and untrusted mutation fail closed. Current-user
+source files can have broad read-only grants; administrator-owned source/target
+settings still require closed TokenUser/System/Administrators applicable allows
+plus a same-user private ancestor. Inherit-only ACEs supply no current-object
+confinement; deny ACEs never excuse unsafe allows. Unestablished prefix owners,
+including TrustedInstaller layouts, remain a native acceptance gate without
+speculative trust. The Unix source fixture discards optional privacy evidence
+while retaining every real opened ancestor, avoiding CI-private-parent assumptions.
+
+The projection retains only four explicit native typed families:16 Graphics,
+18 Interface,37 byte-color fields and bounded native action/two-slot bindings.
+Current schema32,4MiB/depth32/nodes8192 validation rejects malformed/duplicate/newer
+or invalid selected values and preserves unselected target RawValue lexemes,
+including large integers. The existing serde_json raw_value feature does not
+introduce arbitrary_precision. Source whole raw is dropped before target output;
+no unselected source value reaches Debug, UI, logs or DTOs. Missing selected source
+fields use this build's actual defaults, acquired only inside the leased worker
+because keyboard layout may initialize lazily. No global Settings load/save runs.
+Peak bounded raw/string payload is up to16MiB plus bounded read sentinels, selected
+payload up to256KiB and separately bounded parse/retained-ancestor metadata; no
+whole-process memory claim is made. Native presentation ranges remain shared with
+ordinary normalization in its original order.
 
 `keybinds::Input` persists Middle/Back/Forward mouse identities independently of
 UI locale. Serde accepts earlier EN/FR/JA token aliases and emits the stable

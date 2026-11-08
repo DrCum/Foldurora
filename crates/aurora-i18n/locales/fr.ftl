@@ -13384,6 +13384,34 @@ host-start-flush-failed = L’hôte de sessions n’a pas pu terminer l’écrit
     Journal de diagnostic : { $path }
 
 # Profils de personnage persistants : le nom du profil ne remplace pas le compte connecté.
+host-profile-copy-open = Copier les préférences…
+host-profile-copy-title = Copier les préférences
+host-profile-copy-source = Source
+host-profile-copy-destination = Destination : { $destination }
+host-profile-copy-main = Préférences principales enregistrées
+host-profile-copy-main-help = Enregistrez ou fermez la fenêtre principale pour utiliser ses dernières préférences enregistrées. Cette source est en lecture seule.
+host-profile-copy-graphics = Graphismes
+host-profile-copy-interface = Interface
+host-profile-copy-colors = Couleurs
+host-profile-copy-bindings = Raccourcis clavier et souris
+host-profile-copy-selected-help = Seuls les groupes cochés sont remplacés. Les entrées absentes de la source utilisent les valeurs par défaut de cette version.
+host-profile-copy-choose = Sélectionnez au moins un groupe.
+host-profile-copy-inspect = Examiner
+host-profile-copy-inspecting = Examen des préférences enregistrées…
+host-profile-copy-prepared = Prêt à appliquer. Cet examen expire après 30 secondes.
+host-profile-copy-summary = { $family } : { $fields } entrées, { $changed } modifiées, { $defaulted } valeurs par défaut
+host-profile-copy-applying = Enregistrement des préférences…
+host-profile-copy-cancel-requested = Annulation demandée…
+host-profile-copy-applied = Enregistré dans { $destination }. Ouvrez ce profil séparément quand vous le souhaitez.
+host-profile-copy-canceled = Annulé avant l’enregistrement des préférences.
+host-profile-copy-expired = Examen expiré. Examinez à nouveau avant d’appliquer.
+host-profile-copy-changed = Les préférences enregistrées ont changé. Examinez-les à nouveau.
+host-profile-copy-uncertain = Le résultat de l’enregistrement est inconnu. Examinez à nouveau { $destination } avant de continuer.
+host-profile-copy-failed = Impossible de copier les préférences. Les fichiers existants ont été conservés.
+host-profile-copy-invalid-file = Le fichier enregistré est invalide ou non pris en charge. Les fichiers existants ont été conservés.
+host-profile-copy-unavailable = La demande n’a pas pu être mise en attente. Examinez à nouveau lorsque le contrôleur est disponible.
+host-profile-copy-retiring = Fin de l’examen précédent…
+
 host-profile-select = Profil de personnage
 host-profile-default = Personnage { $number }
 host-profile-occupied = Utilisé

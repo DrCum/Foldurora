@@ -38,8 +38,8 @@ mod preview_bootstrap;
 #[cfg(any(windows, test))]
 mod preview_projection;
 pub(crate) mod profile;
-#[cfg(test)]
 mod profile_copy;
+mod profile_copy_ui;
 mod review;
 // App and WorkerBridge consume the genuine image proofs on every platform.
 // Linux does not gain a native monitor window or an image bootstrap fallback.
@@ -202,6 +202,27 @@ impl Shell {
             return;
         }
         let result = match action.clone() {
+            Action::CopyPreferences(proof) => {
+                // This runs after the WHOLE run_ui, against a fresh bounded
+                // controller snapshot. No paint callback sends metadata.
+                let snapshot = self.controller.snapshot();
+                self.ui.copy_preferences.sync(&snapshot);
+                let blocked = self.ui.copy_blocked()
+                    || self
+                        .surface
+                        .as_ref()
+                        .is_none_or(|surface| !surface.window.has_focus() || surface.window.is_minimized() == Some(true));
+                if let Some(command) = self.ui.copy_preferences.take_action(proof, &self.context, &snapshot, blocked) {
+                    let result = match command {
+                        profile_copy_ui::Command::Inspect(selection) => self.controller.inspect_preferences(selection),
+                        profile_copy_ui::Command::Apply(capture) => self.controller.apply_preferences(capture),
+                    };
+                    self.ui.copy_preferences.queued(command, result);
+                }
+                self.flush_copy_cancellation();
+                self.request_repaint();
+                return;
+            }
             #[cfg(windows)]
             Action::OpenMonitor(source) => {
                 self.open_monitor(event_loop, Some(source));
@@ -233,6 +254,7 @@ impl Shell {
             },
             Action::Detach(worker) => self.controller.detach(worker),
             Action::Close => {
+                self.ui.copy_preferences.close();
                 #[cfg(windows)]
                 self.hide_monitors(event_loop);
                 self.cancel_attention_review();
@@ -254,7 +276,9 @@ impl Shell {
                 // The broker's pending row can name the old renderer while
                 // the requested target is also a transaction participant.
                 Action::Detach(worker) => self.snapshot.active == Some(worker) || self.snapshot.pending.is_some(),
-                Action::OpenChat(_) | Action::OpenAttention | Action::RenameSlot(_, _) | Action::Close => false,
+                Action::OpenChat(_) | Action::OpenAttention | Action::RenameSlot(_, _) | Action::CopyPreferences(_) | Action::Close => {
+                    false
+                }
                 #[cfg(windows)]
                 Action::OpenMonitor(_) | Action::OpenCyclingMonitor | Action::ResumeCyclingMonitor(_) => false,
             };
@@ -321,6 +345,8 @@ impl Shell {
         let snapshot = self.controller.snapshot();
         let changed = !ui::same_snapshot(&snapshot, &self.snapshot);
         self.snapshot = snapshot;
+        self.ui.copy_preferences.sync(&self.snapshot);
+        self.flush_copy_cancellation();
         self.chat_changed |= self.shared_chat.sync(&self.snapshot, self.closing.is_some());
         self.sync_attention();
         self.attention_changed |= changed;
@@ -476,6 +502,8 @@ impl Shell {
         if let Some(action) = action {
             self.action(event_loop, action, viewport);
         }
+        self.ui.copy_preferences.finish_frame(&context);
+        self.flush_copy_cancellation();
         self.sync_native()?;
         Ok(())
     }
@@ -491,6 +519,8 @@ impl Shell {
             self.repaint = Some(now);
         }
         self.snapshot = snapshot;
+        self.ui.copy_preferences.sync(&self.snapshot);
+        self.flush_copy_cancellation();
         self.chat_changed |= self.shared_chat.sync(&self.snapshot, self.closing.is_some());
         self.sync_attention();
         self.attention_changed |= changed;
@@ -510,6 +540,14 @@ impl Shell {
             viewport,
             self.closing.is_some() || self.ui.modal_open() || self.transition.waiting() || self.geometry_dirty,
         )
+    }
+
+    fn flush_copy_cancellation(&mut self) {
+        if let Some((selection, request)) = self.ui.copy_preferences.cancellation()
+            && self.controller.cancel_preferences(selection, request).is_ok()
+        {
+            self.ui.copy_preferences.cancellation_queued(selection, request);
+        }
     }
 
     fn close_region(&mut self) {
@@ -742,6 +780,7 @@ impl ApplicationHandler for Shell {
         if surface.window.id() != id {
             return;
         }
+        self.ui.copy_preferences.native_event(&event);
         if matches!(event, WindowEvent::CloseRequested) {
             // Closing the host is distinct from quitting any running viewer.
             self.ui.close_prompt = true;
@@ -755,6 +794,7 @@ impl ApplicationHandler for Shell {
             self.hide_monitors(event_loop);
         }
         if matches!(event, WindowEvent::Focused(false)) {
+            self.ui.copy_preferences.cancel_gestures();
             // A world-hole click goes to the independent worker, outside
             // egui's event stream. Native focus loss dismisses the old menu
             // without capturing the worker's mouse or changing its grant.
@@ -774,6 +814,7 @@ impl ApplicationHandler for Shell {
             event,
             WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } | WindowEvent::Moved(_)
         ) {
+            self.ui.copy_preferences.cancel_gestures();
             self.close_region();
             self.geometry_dirty = true;
             self.requested_viewport = None;

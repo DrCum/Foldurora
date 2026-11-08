@@ -13388,6 +13388,34 @@ host-start-flush-failed = The session host could not finish writing its diagnost
     Diagnostic log: { $path }
 
 # Persistent character profiles: a label never replaces the logged-in account.
+host-profile-copy-open = Copy preferences…
+host-profile-copy-title = Copy preferences
+host-profile-copy-source = Source
+host-profile-copy-destination = Destination: { $destination }
+host-profile-copy-main = Main saved preferences
+host-profile-copy-main-help = Save or close the main viewer for its latest saved preferences. This source is read-only.
+host-profile-copy-graphics = Graphics
+host-profile-copy-interface = Interface
+host-profile-copy-colors = Colors
+host-profile-copy-bindings = Keyboard and mouse bindings
+host-profile-copy-selected-help = Only checked groups are replaced. Missing source entries use this build’s defaults.
+host-profile-copy-choose = Select at least one group.
+host-profile-copy-inspect = Inspect
+host-profile-copy-inspecting = Inspecting saved preferences…
+host-profile-copy-prepared = Ready to apply. This inspection expires after 30 seconds.
+host-profile-copy-summary = { $family }: { $fields } entries, { $changed } changed, { $defaulted } defaults
+host-profile-copy-applying = Saving preferences…
+host-profile-copy-cancel-requested = Cancellation requested…
+host-profile-copy-applied = Saved to { $destination }. Open it separately when ready.
+host-profile-copy-canceled = Canceled before preferences were saved.
+host-profile-copy-expired = Inspection expired. Inspect again before applying.
+host-profile-copy-changed = Saved preferences changed. Inspect again.
+host-profile-copy-uncertain = The save outcome is unknown. Inspect { $destination } again before continuing.
+host-profile-copy-failed = Preferences could not be copied. Existing files were preserved.
+host-profile-copy-invalid-file = The saved file is invalid or unsupported. Existing files were preserved.
+host-profile-copy-unavailable = The request could not be queued. Inspect again when the controller is available.
+host-profile-copy-retiring = Finishing the previous inspection…
+
 host-profile-select = Character profile
 host-profile-default = Character { $number }
 host-profile-occupied = In use

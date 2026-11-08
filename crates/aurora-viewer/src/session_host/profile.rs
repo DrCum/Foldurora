@@ -13,7 +13,6 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
 use uuid::Uuid;
 
-#[cfg(test)]
 pub(super) mod settings_file;
 
 struct Active {
