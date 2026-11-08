@@ -1662,6 +1662,71 @@ fn a_borrowed_row_edits_the_setting_of_its_page() {
     assert_eq!(s.font_scale, 1.2, "the text size is reset with Appearance");
 }
 
+/// Optional synthetic CPU evidence from the production Preferences test below.
+/// AURORA_CAPTURE supplies a PNG prefix; each screen height/stage gets its own
+/// image and record. This creates no native window or graphics adapter.
+struct FontSearchCapture {
+    path: std::path::PathBuf,
+    size: [usize; 2],
+    painter: crate::crash::software::Painter,
+    pixels: Vec<u32>,
+    texts: Vec<(String, egui::Rect)>,
+}
+
+impl FontSearchCapture {
+    fn new(path: std::ffi::OsString, height: f32) -> Self {
+        let size = [1600, height as usize];
+        Self {
+            path: path.into(),
+            size,
+            painter: Default::default(),
+            pixels: vec![0; size[0] * size[1]],
+            texts: Vec::new(),
+        }
+    }
+
+    fn paint(&mut self, ctx: &egui::Context, output: &egui::FullOutput, background: egui::Color32) {
+        assert!((output.pixels_per_point - 1.0).abs() < 0.001);
+        self.texts = output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some((text.galley.text().to_owned(), text.visual_bounding_rect())),
+                _ => None,
+            })
+            .collect();
+        let primitives = ctx.tessellate(output.shapes.clone(), output.pixels_per_point);
+        assert!(primitives.iter().all(|p| matches!(p.primitive, egui::epaint::Primitive::Mesh(_))));
+        self.painter.paint(
+            &mut self.pixels,
+            self.size,
+            &primitives,
+            &output.textures_delta,
+            output.pixels_per_point,
+            background,
+        );
+    }
+
+    fn save(&self, stage: &str) {
+        let stem = self.path.file_stem().expect("capture file stem").to_string_lossy();
+        let path = self.path.with_file_name(format!("{stem}-{}-{stage}.png", self.size[1]));
+        let rgba: Vec<u8> = self
+            .pixels
+            .iter()
+            .flat_map(|pixel| [(*pixel >> 16) as u8, (*pixel >> 8) as u8, *pixel as u8, 255])
+            .collect();
+        image::save_buffer(&path, &rgba, self.size[0] as u32, self.size[1] as u32, image::ColorType::Rgba8).expect("CPU font-search PNG");
+        std::fs::write(path.with_extension("json"), serde_json::to_vec_pretty(&serde_json::json!({
+            "synthetic_cpu_capture": true,
+            "native_or_vulkan_acceptance": false,
+            "production_surface": "ui::options::show / Appearance",
+            "screen": self.size,
+            "stage": stage,
+            "painted_text": self.texts.iter().map(|(text, rect)| serde_json::json!({"text": text, "min": [rect.min.x, rect.min.y], "max": [rect.max.x, rect.max.y]})).collect::<Vec<_>>()
+        })).unwrap()).expect("capture record");
+    }
+}
+
 /// #2136: the System fonts search filters the list, the list grows back when
 /// the search is cleared or the list reopened, and a click in the room a
 /// filtered list left closes it. `screen_h` short enough opens it above its
@@ -1689,6 +1754,12 @@ fn font_search(screen_h: f32) {
     };
     let mut open = true;
     let mut frame = 0;
+    let capture = std::env::var_os("AURORA_CAPTURE").map(|path| std::cell::RefCell::new(FontSearchCapture::new(path, screen_h)));
+    let record = |stage| {
+        if let Some(capture) = &capture {
+            capture.borrow().save(stage);
+        }
+    };
     let mut draw = |events: Vec<egui::Event>, state: &mut OptionsUi, settings: &mut Settings| -> Vec<(String, egui::Rect)> {
         frame += 1;
         let mut output = ctx.run_ui(
@@ -1703,6 +1774,9 @@ fn font_search(screen_h: f32) {
                 show(&ctx, &p, &Icons::default(), settings, state, &mut open);
             },
         );
+        if let Some(capture) = &capture {
+            capture.borrow_mut().paint(&ctx, &output, p.panel);
+        }
         output.textures_delta.clear();
         output
             .shapes
@@ -1785,18 +1859,21 @@ fn font_search(screen_h: f32) {
     let above = popup().bottom() <= button.top();
     assert_eq!(above, screen_h < 500.0, "the list opens on the expected side");
     assert!(in_place(&texts));
+    record("opened");
     for events in typed() {
         texts = draw(events, &mut state, &mut settings);
     }
     assert_eq!(shown(&texts), ["Beta"], "typed in the focused search field");
     assert!(height() < whole - 1.0, "the list shrinks to its matches");
     assert!(in_place(&texts));
+    record("filtered");
     for events in erase() {
         texts = draw(events, &mut state, &mut settings);
     }
     assert_eq!(shown(&texts), all, "a cleared search shows the whole list again");
     assert!((height() - whole).abs() < 0.5, "and its whole height");
     assert!(in_place(&texts), "its rows where they can be clicked");
+    record("restored");
     for events in typed() {
         texts = draw(events, &mut state, &mut settings);
     }
@@ -1828,6 +1905,7 @@ fn font_search(screen_h: f32) {
     assert_eq!(shown(&texts), all, "the list reopens on the whole list");
     assert!((height() - whole).abs() < 0.5);
     assert!(state.font_filter.is_empty());
+    record("reopened");
 }
 
 #[test]
