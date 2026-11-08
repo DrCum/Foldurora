@@ -28,6 +28,37 @@ pub const FOLDER_FAVORITES: i32 = 23;
 /// LLAssetType::AT_LANDMARK.
 const ASSET_LANDMARK: i32 = 3;
 
+/// Opaque, session-only provenance for all commands of a Favorite context.
+/// Retaining both allocations prevents an address reused by a new model from
+/// making an old context current. This is independent of group-edit tickets.
+#[derive(Clone)]
+pub struct ContextSource {
+    favorites: std::sync::Arc<()>,
+    inventory: std::sync::Arc<()>,
+    account: Uuid,
+    session: Uuid,
+    owner: Uuid,
+    root: Uuid,
+    folder: Option<Uuid>,
+}
+impl PartialEq for ContextSource {
+    fn eq(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.favorites, &other.favorites)
+            && std::sync::Arc::ptr_eq(&self.inventory, &other.inventory)
+            && self.account == other.account
+            && self.session == other.session
+            && self.owner == other.owner
+            && self.root == other.root
+            && self.folder == other.folder
+    }
+}
+impl Eq for ContextSource {}
+impl std::fmt::Debug for ContextSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ContextSource([redacted])")
+    }
+}
+
 /// The account's file, read and written by a thread of its own.
 struct Storage {
     loaded: Receiver<HashMap<Uuid, i32>>,
@@ -46,6 +77,7 @@ impl Drop for Storage {
 
 #[derive(Default)]
 pub struct Favorites {
+    context_instance: std::sync::Arc<()>,
     groups: Option<groups::Groups>,
     group_workers: groups::WorkerPool,
     group_start_status: GroupStatus,
@@ -66,9 +98,39 @@ pub struct Favorites {
 }
 
 impl Favorites {
+    /// Native landmark contexts remain usable without group metadata, but
+    /// cannot follow a replaced Inventory, Favorites model or login source.
+    pub fn context_source(&self, account: Uuid, session: Uuid, inventory: &Inventory) -> ContextSource {
+        ContextSource {
+            favorites: self.context_instance.clone(),
+            inventory: inventory.favorite_context_instance.clone(),
+            account,
+            session,
+            owner: inventory.owner,
+            root: inventory.root,
+            folder: crate::world::appearance::system_folder(inventory, FOLDER_FAVORITES),
+        }
+    }
+    /// Repeat the source and actual landmark checks immediately before the
+    /// App performs a captured command, including clipboard effects.
+    pub fn context_current(
+        &self,
+        source: &ContextSource,
+        account: Uuid,
+        session: Uuid,
+        inventory: &Inventory,
+        item: Uuid,
+        asset: Uuid,
+    ) -> bool {
+        *source == self.context_source(account, session, inventory)
+            && inventory.owner == account
+            && inventory.items.get(&item).is_some_and(|item| item.asset_id == asset)
+            && groups::current_favorite(inventory, item)
+    }
     /// A missing/ambiguous login attempt never falls back to mutable settings.
     /// The old order format/path/worker remains independent and unchanged.
     pub fn bind_groups(&mut self, scope: Option<GroupScope>, directory: PathBuf) {
+        self.context_instance = std::sync::Arc::new(());
         self.groups = None;
         self.group_start_status = GroupStatus::Unavailable;
         if let Some(scope) = scope {

@@ -14021,6 +14021,34 @@ impl App {
     fn favorite_action(&mut self, action: ui::bars::favorites::FavAction) {
         use ui::bars::favorites::FavAction;
         match action {
+            FavAction::Context {
+                source,
+                item,
+                asset,
+                command,
+            } => {
+                let account = self.world.agent_id;
+                let session = self
+                    .world
+                    .login
+                    .as_ref()
+                    .filter(|login| login.agent_id == account)
+                    .map_or(uuid::Uuid::nil(), |login| login.session_id);
+                if !self
+                    .world
+                    .favorites
+                    .context_current(&source, account, session, &self.world.inventory, item, asset)
+                {
+                    return;
+                }
+                use ui::bars::favorites::ContextCommand;
+                match command {
+                    ContextCommand::Teleport => self.favorite_action(FavAction::Teleport(asset)),
+                    ContextCommand::ShowOnMap(global) => self.favorite_action(FavAction::ShowOnMap(global)),
+                    ContextCommand::Edit => self.favorite_action(FavAction::Edit(item)),
+                    ContextCommand::CopySlurl(slurl) => self.egui_ctx.copy_text(slurl),
+                }
+            }
             // LLFavoritesBarCtrl::onButtonClick: no confirmation
             FavAction::Teleport(asset) => {
                 self.request_user_teleport(
@@ -14199,6 +14227,7 @@ impl App {
                 crate::slurl::make(region, glam::Vec3::new(x as f32, y as f32, g.z as f32))
             });
             list.push(ui::bars::favorites::Favorite {
+                source: Some(self.world.favorites.context_source(account, session, &self.world.inventory)),
                 item: id,
                 asset,
                 name,

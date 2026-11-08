@@ -37,6 +37,9 @@ pub struct Folder {
 
 #[derive(Default)]
 pub struct Inventory {
+    /// Session-only identity retained by captured Favorite contexts. A model
+    /// replacement gets a fresh allocation even when its contents match.
+    pub(crate) favorite_context_instance: std::sync::Arc<()>,
     /// Root/system lookups retained until the inventory changes.
     pub(crate) system_folders: system::Cache,
     /// Full-permission assets retained until the inventory changes.

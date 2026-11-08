@@ -32,6 +32,8 @@ struct Harness {
     data: GroupFixture,
     mode: usize,
     time: f64,
+    without_tickets: bool,
+    member_panel: bool,
 }
 impl Harness {
     fn new(mode: usize, zoom: f32) -> Self {
@@ -51,6 +53,8 @@ impl Harness {
             data,
             mode,
             time: 0.0,
+            without_tickets: false,
+            member_panel: false,
         };
         for _ in 0..4 {
             h.frame(Vec::new());
@@ -69,6 +73,15 @@ impl Harness {
         }
         h
     }
+    fn members() -> Self {
+        let mut h = Self::new(2, 1.0);
+        h.member_panel = true;
+        h.without_tickets = true;
+        for _ in 0..4 {
+            h.frame(Vec::new());
+        }
+        h
+    }
     fn view(&mut self) -> View {
         let ids = self.data.favorites.list(&self.data.inventory).to_vec();
         View {
@@ -77,6 +90,11 @@ impl Harness {
                 .map(|id| {
                     let item = &self.data.inventory.items[&id];
                     Favorite {
+                        source: Some(
+                            self.data
+                                .favorites
+                                .context_source(self.data.account, self.data.session, &self.data.inventory),
+                        ),
                         item: id,
                         asset: item.asset_id,
                         name: item.name.clone(),
@@ -85,10 +103,13 @@ impl Harness {
                             .favorites
                             .group_name(self.data.account, self.data.session, &self.data.inventory, id)
                             .map(str::to_owned),
-                        group_ticket: self
-                            .data
-                            .favorites
-                            .group_ticket(self.data.account, self.data.session, &self.data.inventory, id),
+                        group_ticket: (!self.without_tickets)
+                            .then(|| {
+                                self.data
+                                    .favorites
+                                    .group_ticket(self.data.account, self.data.session, &self.data.inventory, id)
+                            })
+                            .flatten(),
                         region: format!("Synthetic region {}", id.as_u128()),
                         rating: "",
                         global: Some(DVec3::new(1.0, 2.0, 3.0)),
@@ -114,7 +135,12 @@ impl Harness {
                 ..Default::default()
             },
             |root_ui| {
-                if self.mode == 1 {
+                if self.member_panel {
+                    egui::CentralPanel::default().show(root_ui, |ui| {
+                        let members = view.list.iter().enumerate().collect::<Vec<_>>();
+                        folder_contents(ui, &self.palette, &self.icons, &members, None, false, &mut action);
+                    });
+                } else if self.mode == 1 {
                     if let (_, Some(BarAction::Favorite(found))) = row(
                         &self.ctx,
                         &self.palette,
@@ -180,6 +206,15 @@ impl Harness {
             output = self.frame(Vec::new()).0;
         }
         assert!(visible(&output, "First landmark") && visible(&output, "Last landmark"));
+    }
+    fn open_member_context(&mut self) -> GroupEditor {
+        assert!(self.click("First landmark", PointerButton::Secondary).1.is_none());
+        for _ in 0..4 {
+            self.frame(Vec::new());
+        }
+        self.ctx
+            .data(|data| data.get_temp::<GroupEditor>(Id::unique("favorite_folder_editor")))
+            .expect("actual member context")
     }
     fn open_editor(&mut self) {
         self.open_folder();
@@ -429,4 +464,201 @@ fn favorites_real_egui_cancel_emits_no_assignment_and_leaves_published_name() {
     let (_, action) = h.click(aurora_i18n::tr!("common-cancel"), PointerButton::Primary);
     assert!(action.is_none());
     assert_eq!(h.data.name(10), Some("Trips"));
+}
+
+#[test]
+fn favorites_real_egui_native_context_without_group_ticket_keeps_original_action_table() {
+    for (label, command) in [
+        (aurora_i18n::tr!("common-teleport-3"), ContextCommand::Teleport),
+        (
+            aurora_i18n::tr!("common-show-on-map"),
+            ContextCommand::ShowOnMap(DVec3::new(1.0, 2.0, 3.0)),
+        ),
+        (aurora_i18n::tr!("favorites-view-edit"), ContextCommand::Edit),
+        (
+            aurora_i18n::tr!("common-copy-slurl"),
+            ContextCommand::CopySlurl("https://example.invalid/landmark".into()),
+        ),
+    ] {
+        let mut h = Harness::members();
+        let editor = h.open_member_context();
+        assert!(editor.ticket.is_none(), "metadata availability is not native context authority");
+        let (_, action) = h.click(label, PointerButton::Primary);
+        assert_eq!(action, context_command(&editor.favorite, command));
+        assert!(h.data.favorites.context_current(
+            editor.favorite.source.as_ref().unwrap(),
+            h.data.account,
+            h.data.session,
+            &h.data.inventory,
+            editor.favorite.item,
+            editor.favorite.asset,
+        ));
+    }
+}
+
+#[test]
+fn favorites_real_egui_held_native_context_without_ticket_cannot_follow_reorder_or_source_replacement() {
+    for change in 0..6 {
+        let mut h = Harness::members();
+        let editor = h.open_member_context();
+        assert!(editor.ticket.is_none());
+        let owner_rect = h.ctx.read_response(editor.owner).unwrap().rect;
+        let position = h.position(aurora_i18n::tr!("common-teleport-3"));
+        assert!(h.frame(pointer(position, PointerButton::Primary, true)).1.is_none());
+        match change {
+            0 => h.data.favorites.rearrange(&h.data.inventory, Uuid::from_u128(10), 3),
+            1 => h.data.replace_source(Uuid::from_u128(999)),
+            2 => {
+                let old = std::mem::take(&mut h.data.inventory);
+                h.data.inventory.owner = old.owner;
+                h.data.inventory.root = old.root;
+                h.data.inventory.folders = old.folders;
+                h.data.inventory.items = old.items;
+                h.data.inventory.generation = old.generation;
+            }
+            3 => h.data.favorites = crate::world::favorites::Favorites::default(),
+            4 => h.data.account = Uuid::from_u128(998),
+            5 => h.data.inventory.items.get_mut(&Uuid::from_u128(10)).unwrap().asset_id = Uuid::from_u128(997),
+            _ => unreachable!(),
+        }
+        let (output, action) = h.frame(pointer(position, PointerButton::Primary, false));
+        assert!(action.is_none(), "held native action followed replacement {change}");
+        assert!(
+            h.ctx
+                .data(|data| data.get_temp::<GroupEditor>(Id::unique("favorite_folder_editor")))
+                .is_none()
+        );
+        assert!(!visible(&output, aurora_i18n::tr!("common-teleport-3")));
+        if change == 0 {
+            assert_eq!(h.view().list[0].item, Uuid::from_u128(11));
+            assert_eq!(
+                h.ctx.read_response(editor.owner).unwrap().rect,
+                owner_rect,
+                "the reused response is still a visible row, so cancellation needs item authority"
+            );
+        }
+    }
+}
+
+#[test]
+fn favorites_real_egui_fully_scrolled_member_retires_context_even_while_row_is_still_visited() {
+    let mut h = Harness::members();
+    let template = h.data.inventory.items[&Uuid::from_u128(12)].clone();
+    for id in 20..44 {
+        let mut item = template.clone();
+        item.id = Uuid::from_u128(id);
+        item.name = format!("Extra landmark {id}");
+        item.created_at = 0;
+        h.data.inventory.items.insert(item.id, item);
+        h.data
+            .inventory
+            .folders
+            .get_mut(&Uuid::from_u128(2))
+            .unwrap()
+            .items
+            .push(Uuid::from_u128(id));
+    }
+    h.data.inventory.generation += 1;
+    for _ in 0..4 {
+        h.frame(Vec::new());
+    }
+    let editor = h.open_member_context();
+    let command_pos = h.position(aurora_i18n::tr!("common-teleport-3"));
+    assert!(h.frame(pointer(command_pos, PointerButton::Primary, true)).1.is_none());
+    let before = h.ctx.read_response(editor.owner).unwrap().rect;
+    let at = egui::pos2(before.left() + 2.0, before.top() + ROW_H * 5.0);
+    let mut output = h
+        .frame(vec![
+            Event::PointerMoved(at),
+            Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, -2000.0),
+                phase: egui::TouchPhase::Move,
+                source: egui::MouseWheelSource::Wheel,
+                modifiers: Default::default(),
+            },
+        ])
+        .0;
+    for _ in 0..12 {
+        output = h.frame(Vec::new()).0;
+    }
+    let after = h
+        .ctx
+        .read_response(editor.owner)
+        .expect("ScrollArea still visits the clipped owner");
+    assert!(
+        after.rect.bottom() < before.top(),
+        "real ScrollArea must fully scroll the owner away"
+    );
+    assert!(
+        h.ctx
+            .data(|data| data.get_temp::<GroupEditor>(Id::unique("favorite_folder_editor")))
+            .is_none()
+    );
+    assert!(!visible(&output, aurora_i18n::tr!("common-teleport-3")));
+    assert!(h.frame(pointer(command_pos, PointerButton::Primary, false)).1.is_none());
+}
+
+#[test]
+fn favorites_context_dispatch_rechecks_real_source_and_item_even_without_group_metadata() {
+    let mut h = Harness::members();
+    h.data.favorites = crate::world::favorites::Favorites::default();
+    let item = Uuid::from_u128(10);
+    let asset = h.data.inventory.items[&item].asset_id;
+    let source = h.data.favorites.context_source(h.data.account, h.data.session, &h.data.inventory);
+    let current = |h: &Harness| {
+        h.data
+            .favorites
+            .context_current(&source, h.data.account, h.data.session, &h.data.inventory, item, asset)
+    };
+    assert!(
+        h.data
+            .favorites
+            .group_ticket(h.data.account, h.data.session, &h.data.inventory, item)
+            .is_none()
+    );
+    assert!(current(&h));
+    h.data.favorites.rearrange(&h.data.inventory, item, 3);
+    assert!(current(&h), "reorder never changes the captured item authority at final dispatch");
+    for field in 0..6 {
+        let original = h.data.inventory.items[&item].clone();
+        let owner = h.data.inventory.owner;
+        let root = h.data.inventory.root;
+        match field {
+            0 => h.data.inventory.items.get_mut(&item).unwrap().asset_id = Uuid::from_u128(900),
+            1 => h.data.inventory.items.get_mut(&item).unwrap().asset_type = 0,
+            2 => h.data.inventory.items.get_mut(&item).unwrap().parent = root,
+            3 => h.data.inventory.items.get_mut(&item).unwrap().owner = Uuid::from_u128(901),
+            4 => h.data.inventory.owner = Uuid::from_u128(902),
+            5 => {
+                h.data.inventory.items.remove(&item);
+            }
+            _ => unreachable!(),
+        }
+        assert!(!current(&h), "final native dispatch accepted stale item field {field}");
+        h.data.inventory.items.insert(item, original);
+        h.data.inventory.owner = owner;
+        assert!(current(&h));
+    }
+    let session = h.data.session;
+    h.data.session = Uuid::from_u128(903);
+    assert!(!current(&h));
+    h.data.session = session;
+    let old_inventory_instance = h.data.inventory.favorite_context_instance.clone();
+    h.data.inventory.favorite_context_instance = std::sync::Arc::new(());
+    assert!(
+        !current(&h),
+        "identical Inventory contents in a new model cannot adopt a captured context"
+    );
+    h.data.inventory.favorite_context_instance = old_inventory_instance;
+    assert!(current(&h));
+    let old_favorites = std::mem::take(&mut h.data.favorites);
+    assert!(!current(&h), "a fresh Favorites model cannot adopt a captured context");
+    h.data.favorites = old_favorites;
+    assert!(current(&h));
+    h.data.favorites.bind_groups(None, std::path::PathBuf::new());
+    assert!(
+        !current(&h),
+        "source rebinding retires contexts even when group metadata is unavailable"
+    );
 }
