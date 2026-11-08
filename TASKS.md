@@ -18,6 +18,18 @@
   actual-World lifecycle tests are authored/unrun; existing Favorites assertions
   remain. Bounded archive projection, new closed store kind, actual consumers
   and Folder Jump visibility integration are not yet implemented or enabled.
+- 🔧 Windows existing-prefix ACL compatibility for stopped-profile copy
+  (2026-11-08; no issue): retained native directory roles distinguish creating a
+  different child from deleting/replacing the already retained next child.
+  Directory-only add-file/subdirectory grants do not prove private confinement;
+  parent DeleteChild, child Delete, DAC/owner changes and generic/unknown mutation
+  remain refused. Final settings parent/file, owner trust, Unix policy and strict
+  lock/temp validators are unchanged. Two pure role cases plus one Windows-only
+  ordinary-temp ancestry/native saver case are authored UNRUN (27 adapter
+  definitions; three Unix-only, one Windows-only). Independent source review,
+  Root execution and native owner/ACL acceptance remain required before actual
+  Manage UI/production promotion. No existing permissions are repaired.
+
 - 🔧 Ordinary-saver compatibility for the stopped-profile copy adapter
   (2026-11-08; no issue): settings-specific retained native ancestor/file handle
   identity and permission/ACL checks accept ordinary confined saved settings

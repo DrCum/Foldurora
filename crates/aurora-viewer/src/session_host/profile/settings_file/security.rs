@@ -12,21 +12,40 @@ fn windows_settings_allowed(user_owner: bool, admin_owner: bool, closed: bool, c
     closed && (user_owner || confined && admin_owner)
 }
 #[cfg(any(windows, test))]
-fn windows_allow_grant(trusted: bool, mask: u32) -> Result<bool, ()> {
+#[derive(Clone, Copy)]
+enum WindowsGrantRole {
+    RetainedPrefix,
+    SettingsObject,
+}
+#[cfg(any(windows, test))]
+fn windows_allow_grant(trusted: bool, mask: u32, role: WindowsGrantRole) -> Result<bool, ()> {
     // FILE_READ_DATA/EA/ATTRIBUTES/EXECUTE, READ_CONTROL, SYNCHRONIZE,
     // GENERIC_READ/EXECUTE. Every other untrusted grant is refused.
     const READ_ONLY: u32 = 0x0000_0001 | 0x0000_0008 | 0x0000_0080 | 0x0000_0020 | 0x0002_0000 | 0x0010_0000 | 0x8000_0000 | 0x2000_0000;
+    // These aliases mean adding a different child on a directory, but writing
+    // data/appending on a file. Only a prefix with an independently retained
+    // existing next-directory child gets the directory interpretation.
+    let additions = match role {
+        WindowsGrantRole::RetainedPrefix => 0x2 | 0x4,
+        WindowsGrantRole::SettingsObject => 0,
+    };
     if trusted {
         Ok(true)
-    } else if mask & !READ_ONLY == 0 {
+    } else if mask & !(READ_ONLY | additions) == 0 {
         Ok(false)
     } else {
         Err(())
     }
 }
+#[derive(Clone, Copy)]
+enum DirectoryRole {
+    RetainedPrefix,
+    SettingsParent,
+}
 struct Directory {
     path: PathBuf,
     handle: File,
+    role: DirectoryRole,
 }
 pub(super) struct Confinement {
     directories: Vec<Directory>,
@@ -53,12 +72,18 @@ impl Confinement {
                 return Err(invalid("settings directory ancestry exceeds its bound"));
             }
             let handle = native::open(&current, true)?;
-            if native::directory(&handle)? && private_ancestor.is_none() {
+            let role = if current == parent {
+                DirectoryRole::SettingsParent
+            } else {
+                DirectoryRole::RetainedPrefix
+            };
+            if native::directory(&handle, role)? && private_ancestor.is_none() {
                 private_ancestor = Some(directories.len());
             }
             directories.push(Directory {
                 path: current.clone(),
                 handle,
+                role,
             });
         }
         let proof = Self {
@@ -72,14 +97,14 @@ impl Confinement {
     pub(super) fn check(&self) -> io::Result<()> {
         for (index, directory) in self.directories.iter().enumerate() {
             let originally_confined = self.private_ancestor == Some(index);
-            if originally_confined && !native::directory(&directory.handle)? {
+            if originally_confined && !native::directory(&directory.handle, directory.role)? {
                 return Err(invalid("settings private ancestor lost confinement"));
             }
             // Validate every retained handle and its current native-path
             // counterpart, including safe ancestry above the private ancestor.
-            native::directory(&directory.handle)?;
+            native::directory(&directory.handle, directory.role)?;
             let current = native::open(&directory.path, true)?;
-            let private = native::directory(&current)?;
+            let private = native::directory(&current, directory.role)?;
             if !same_file(&directory.handle, &current)? || originally_confined && !private {
                 return Err(invalid("settings ancestor was replaced or lost confinement"));
             }
@@ -110,7 +135,7 @@ mod native {
         }
         Ok(file)
     }
-    pub(super) fn directory(file: &File) -> io::Result<bool> {
+    pub(super) fn directory(file: &File, _: DirectoryRole) -> io::Result<bool> {
         let metadata = file.metadata()?;
         // SAFETY: geteuid has no preconditions; it only reads this process uid.
         let user = unsafe { libc::geteuid() };
@@ -175,7 +200,7 @@ mod native {
         admin_owner: bool,
         closed: bool,
     }
-    fn access(file: &File) -> io::Result<Access> {
+    fn access(file: &File, role: WindowsGrantRole) -> io::Result<Access> {
         let wanted = OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION;
         let mut bytes = 0;
         // SAFETY: this live File handle is queried with a null/zero size buffer.
@@ -273,8 +298,8 @@ mod native {
                 let trusted = EqualSid(principal, sid) != 0
                     || EqualSid(principal, system.as_mut_ptr().cast()) != 0
                     || EqualSid(principal, admins.as_mut_ptr().cast()) != 0;
-                closed &=
-                    windows_allow_grant(trusted, ace.Mask).map_err(|_| invalid("ordinary settings ancestor grants untrusted mutation"))?;
+                closed &= windows_allow_grant(trusted, ace.Mask, role)
+                    .map_err(|_| invalid("ordinary settings ancestor grants untrusted mutation"))?;
             }
             Ok(Access {
                 user_owner,
@@ -283,11 +308,15 @@ mod native {
             })
         }
     }
-    pub(super) fn directory(file: &File) -> io::Result<bool> {
+    pub(super) fn directory(file: &File, role: DirectoryRole) -> io::Result<bool> {
         if !file.metadata()?.is_dir() {
             return Err(invalid("settings ancestor is not a directory"));
         }
-        let access = access(file)?;
+        let grant_role = match role {
+            DirectoryRole::RetainedPrefix => WindowsGrantRole::RetainedPrefix,
+            DirectoryRole::SettingsParent => WindowsGrantRole::SettingsObject,
+        };
+        let access = access(file, grant_role)?;
         Ok(access.user_owner && access.closed)
     }
     pub(super) fn settings(file: &File, confined: bool) -> io::Result<()> {
@@ -296,7 +325,7 @@ mod native {
         if !metadata.is_file() || platform::is_reparse(&metadata) {
             return Err(invalid("settings file is not plain"));
         }
-        let access = access(file)?;
+        let access = access(file, WindowsGrantRole::SettingsObject)?;
         if !windows_settings_allowed(access.user_owner, access.admin_owner, access.closed, confined) {
             return Err(invalid("ordinary settings file is not privately confined"));
         }
@@ -310,7 +339,7 @@ mod native {
     pub(super) fn open(_: &Path, _: bool) -> io::Result<File> {
         Err(invalid("ordinary settings native policy is unsupported"))
     }
-    pub(super) fn directory(_: &File) -> io::Result<bool> {
+    pub(super) fn directory(_: &File, _: DirectoryRole) -> io::Result<bool> {
         Err(invalid("ordinary settings native policy is unsupported"))
     }
     pub(super) fn settings(_: &File, _: bool) -> io::Result<()> {
@@ -446,11 +475,67 @@ mod tests {
     fn profile_copy_windows_closed_allow_principals_never_accept_untrusted_mutation_or_broad_settings_read() {
         // TokenUser/LocalSystem/BuiltinAdministrators classification is done
         // by EqualSid on the opened-handle descriptor, never group membership.
-        assert_eq!(windows_allow_grant(true, u32::MAX), Ok(true));
-        assert_eq!(windows_allow_grant(false, 0x8000_0000), Ok(false));
+        assert_eq!(windows_allow_grant(true, u32::MAX, WindowsGrantRole::SettingsObject), Ok(true));
+        assert_eq!(windows_allow_grant(false, 0x8000_0000, WindowsGrantRole::SettingsObject), Ok(false));
         for unsafe_mask in [0x2, 0x4, 0x40, 0x10000, 0x40000, 0x80000, 0x1000_0000, 0x4000_0000, 0x0200_0000] {
-            assert_eq!(windows_allow_grant(false, unsafe_mask), Err(()));
+            assert_eq!(windows_allow_grant(false, unsafe_mask, WindowsGrantRole::SettingsObject), Err(()));
         }
         assert!(!windows_settings_allowed(true, false, false, true));
+    }
+
+    #[test]
+    fn profile_copy_windows_normal_drive_prefix_can_add_other_children_without_proving_private_confinement() {
+        // Root's normal native ACL shape: applicable Users/AuthenticatedUsers
+        // read/traverse + FILE_ADD_FILE/FILE_ADD_SUBDIRECTORY on the drive prefix.
+        // Existing next child directories still have their own retained handles,
+        // owner/ACL checks and current-path identity checks before/after reads.
+        for mask in [0x2, 0x4, 0x2 | 0x4, 0x8000_0000 | 0x2 | 0x4] {
+            assert_eq!(windows_allow_grant(false, mask, WindowsGrantRole::RetainedPrefix), Ok(false));
+            // Accepted creation is explicitly NOT a closed/private ACL, even
+            // when the prefix happens to have the current user's owner SID.
+            assert!(!windows_settings_allowed(true, false, false, true));
+            assert_eq!(windows_allow_grant(false, mask, WindowsGrantRole::SettingsObject), Err(()));
+        }
+    }
+
+    #[test]
+    fn profile_copy_windows_prefix_creation_never_accepts_parent_delete_child_or_existing_child_delete() {
+        // Parent DELETE_CHILD or DELETE/WRITE_DAC/WRITE_OWNER on an existing
+        // child permits replacement; generic/unknown grants are not expanded
+        // into presumed harmless directory creation.
+        for dangerous in [0x40, 0x10000, 0x40000, 0x80000, 0x1000_0000, 0x4000_0000, 0x0200_0000] {
+            for mask in [dangerous, dangerous | 0x2, dangerous | 0x4, dangerous | 0x2 | 0x4] {
+                assert_eq!(windows_allow_grant(false, mask, WindowsGrantRole::RetainedPrefix), Err(()));
+                assert_eq!(windows_allow_grant(false, mask, WindowsGrantRole::SettingsObject), Err(()));
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn profile_copy_windows_ordinary_temp_ancestry_read_uses_real_retained_prefix_roles_and_normal_saver() {
+        // Root alone executes this native Windows fixture. No claim about the
+        // machine's actual ACL is made by the author. Unsupported prefix owner
+        // principals (including an unestablished TrustedInstaller case) still
+        // refuse; this test is a real native acceptance gate, never a skip.
+        let directory = std::env::temp_dir().join(format!("aurora-profile-copy-prefix-{}", uuid::Uuid::new_v4()));
+        crate::session_host::profile::platform::private_directory(&directory).unwrap();
+        let path = directory.join("settings.json");
+        ordinary_save(&path);
+        let file = super::super::ProfileSettingsFile::selected(path.clone(), false).unwrap();
+        assert!(
+            file.confinement
+                .directories
+                .iter()
+                .any(|node| matches!(node.role, DirectoryRole::RetainedPrefix))
+        );
+        assert!(matches!(
+            file.confinement.directories.last().unwrap().role,
+            DirectoryRole::SettingsParent
+        ));
+        assert_eq!(file.read().unwrap(), Some(std::fs::read(&path).unwrap()));
+        file.confinement.check().unwrap();
+        drop(file);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 }
