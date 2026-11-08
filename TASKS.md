@@ -1,5 +1,22 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Foldurora browser plugin backlog (human upstream request, 2026-11-08;
+  no fork issue; upstream #2882 / #2889 / PR #2941, `3413d4058a03`):
+  base `388b299c`, upstream selection snapshot `9316c40d`. Limit plugin input
+  to 256 KiB per idle and frame messages in a forward pass; preserve message
+  order, received data on close/error and heartbeat grace while backlogged.
+  Adapt only the backlog patch to the base heartbeat check and test fixture;
+  deferred native file-picker stage `ae10170e` remains absent. Retain all five
+  new upstream regressions and add close/error edge coverage. Source review
+  found no duplicate or media-process edits in visible protected heads.
+  No App, localization, settings or permission changes. TASKS needs Dev Agent
+  reconciliation; Slick is unavailable, so no delivery. Exact focused checks
+  belong to the PR; full combined validation/package belongs to the related
+  feature-group checkpoint under current policy `f78d2814`.
+  - ⬜ Native browser/video backlog responsiveness and normal playback in both
+    styles; later group checkpoint and human grid acceptance. Historical
+    upstream checks are reference evidence, not Foldurora acceptance.
+
 - 🔧 Selective upstream catch-up (human request, 2026-11-07; no issue): apply
   sixteen reviewed upstream commits individually with `-x` to frozen photo/
   branding base `f5ae21d5`, from upstream snapshot `576dd54a`. Production
