@@ -1,7 +1,7 @@
 //! Ordinary-settings compatibility, deliberately separate from strict host
 //! lock/temp policy. Retained native directories prove confinement; file modes
 //! or inherited ACL spelling alone do not establish it. No permission repair.
-use super::{File, Path, PathBuf, invalid, io, same_file};
+use super::{File, Path, PathBuf, SettingsRole, invalid, io, same_file};
 
 const MAX_ANCESTORS: usize = 128;
 const MAX_PATH_BYTES: usize = 32 * 1024;
@@ -10,6 +10,13 @@ const MAX_PATH_BYTES: usize = 32 * 1024;
 #[cfg(any(windows, test))]
 fn windows_settings_allowed(user_owner: bool, admin_owner: bool, closed: bool, confined: bool) -> bool {
     closed && (user_owner || confined && admin_owner)
+}
+#[cfg(any(windows, test))]
+fn windows_source_allowed(user_owner: bool, admin_owner: bool, closed: bool, confined: bool) -> bool {
+    // The opened ACL parser already refused untrusted mutation. Ordinary
+    // current-user SOURCE read grants need no confidentiality proof. Preserve
+    // the narrower administrator-owner exception unchanged.
+    user_owner || windows_settings_allowed(user_owner, admin_owner, closed, confined)
 }
 #[cfg(any(windows, test))]
 #[derive(Clone, Copy)]
@@ -50,9 +57,10 @@ struct Directory {
 pub(super) struct Confinement {
     directories: Vec<Directory>,
     private_ancestor: Option<usize>,
+    role: SettingsRole,
 }
 impl Confinement {
-    pub(super) fn capture(path: &Path) -> io::Result<Self> {
+    pub(super) fn capture(path: &Path, role: SettingsRole) -> io::Result<Self> {
         if !path.is_absolute() || path.as_os_str().as_encoded_bytes().len() > MAX_PATH_BYTES {
             return Err(invalid("settings path is not a bounded absolute native path"));
         }
@@ -89,6 +97,7 @@ impl Confinement {
         let proof = Self {
             directories,
             private_ancestor,
+            role,
         };
         proof.check()?;
         Ok(proof)
@@ -113,7 +122,14 @@ impl Confinement {
     }
 
     pub(super) fn validate_settings(&self, file: &File) -> io::Result<()> {
-        native::settings(file, self.private_ancestor.is_some())
+        native::settings(file, self.private_ancestor.is_some(), self.role)
+    }
+
+    pub(super) fn require_private_target(&self) -> io::Result<()> {
+        if self.role != SettingsRole::PrivateTarget || self.private_ancestor.is_none() {
+            return Err(invalid("settings target has no private host confinement capability"));
+        }
+        Ok(())
     }
 }
 pub(super) fn open_settings(path: &Path) -> io::Result<File> {
@@ -144,7 +160,7 @@ mod native {
         }
         Ok(metadata.uid() == user && metadata.mode() & 0o077 == 0 && metadata.mode() & 0o700 == 0o700)
     }
-    pub(super) fn settings(file: &File, confined: bool) -> io::Result<()> {
+    pub(super) fn settings(file: &File, confined: bool, role: SettingsRole) -> io::Result<()> {
         let metadata = file.metadata()?;
         // SAFETY: geteuid has no preconditions; it only reads this process uid.
         let user = unsafe { libc::geteuid() };
@@ -152,7 +168,7 @@ mod native {
             || metadata.nlink() != 1
             || metadata.uid() != user
             || metadata.mode() & 0o022 != 0
-            || !confined && metadata.mode() & 0o077 != 0
+            || role == SettingsRole::PrivateTarget && !confined && metadata.mode() & 0o077 != 0
         {
             return Err(invalid("ordinary settings file is not privately confined"));
         }
@@ -319,14 +335,18 @@ mod native {
         let access = access(file, grant_role)?;
         Ok(access.user_owner && access.closed)
     }
-    pub(super) fn settings(file: &File, confined: bool) -> io::Result<()> {
+    pub(super) fn settings(file: &File, confined: bool, role: SettingsRole) -> io::Result<()> {
         super::super::super::validate_opened_single_link(file)?;
         let metadata = file.metadata()?;
         if !metadata.is_file() || platform::is_reparse(&metadata) {
             return Err(invalid("settings file is not plain"));
         }
         let access = access(file, WindowsGrantRole::SettingsObject)?;
-        if !windows_settings_allowed(access.user_owner, access.admin_owner, access.closed, confined) {
+        let allowed = match role {
+            SettingsRole::ReadOnlySource => windows_source_allowed(access.user_owner, access.admin_owner, access.closed, confined),
+            SettingsRole::PrivateTarget => windows_settings_allowed(access.user_owner, access.admin_owner, access.closed, confined),
+        };
+        if !allowed {
             return Err(invalid("ordinary settings file is not privately confined"));
         }
         Ok(())
@@ -342,7 +362,7 @@ mod native {
     pub(super) fn directory(_: &File, _: DirectoryRole) -> io::Result<bool> {
         Err(invalid("ordinary settings native policy is unsupported"))
     }
-    pub(super) fn settings(_: &File, _: bool) -> io::Result<()> {
+    pub(super) fn settings(_: &File, _: bool, _: SettingsRole) -> io::Result<()> {
         Err(invalid("ordinary settings native policy is unsupported"))
     }
 }
@@ -414,7 +434,7 @@ mod tests {
         let path = directory.join("settings.json");
         ordinary_save(&path);
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
-        let proof = Confinement::capture(&path).unwrap();
+        let proof = Confinement::capture(&path, SettingsRole::PrivateTarget).unwrap();
         let file = open_settings(&path).unwrap();
         assert!(proof.private_ancestor.is_some());
         proof.validate_settings(&file).unwrap();
@@ -423,6 +443,7 @@ mod tests {
         let unconfined = Confinement {
             directories: Vec::new(),
             private_ancestor: None,
+            role: SettingsRole::PrivateTarget,
         };
         assert!(unconfined.validate_settings(&file).is_err());
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
@@ -537,5 +558,88 @@ mod tests {
         file.confinement.check().unwrap();
         drop(file);
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn profile_copy_readonly_source_ordinary_0644_needs_no_private_evidence_and_cannot_be_target_even_if_0600() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = native_directory();
+        let path = directory.join("settings.json");
+        ordinary_save(&path);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let mut source = super::super::SourceSettingsFile(
+            super::super::ProfileSettingsFile::capture(path.clone(), true, SettingsRole::ReadOnlySource).unwrap(),
+        );
+        // CI/test workspaces may themselves be private. Discard any such
+        // optional confidentiality evidence; retain all real opened ancestors
+        // and identity/integrity checks. No private authority is fabricated.
+        source.0.confinement.private_ancestor = None;
+        assert_eq!(source.read().unwrap(), Some(std::fs::read(&path).unwrap()));
+        assert!(source.0.confinement.require_private_target().is_err());
+        assert!(source.0.publish(b"source cannot publish", || Ok(())).is_err());
+        let mut target = super::super::TargetSettingsFile(
+            super::super::ProfileSettingsFile::capture(path.clone(), true, SettingsRole::PrivateTarget).unwrap(),
+        );
+        target.0.confinement.private_ancestor = None;
+        assert!(target.read().is_err());
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(
+            target.read().is_err(),
+            "a private file does not replace actual private host target confinement"
+        );
+        assert!(target.publish(b"target has no private authority", || Ok(())).is_err());
+        assert_eq!(std::fs::read(path).unwrap(), br#"{"settings_version":32,"ui_scale":1.0}"#);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn profile_copy_readonly_source_still_refuses_writable_link_ancestor_turnover_and_root_escape() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        for fault in 0..5 {
+            let directory = native_directory();
+            let path = directory.join("settings.json");
+            ordinary_save(&path);
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+            let source = super::super::SourceSettingsFile(
+                super::super::ProfileSettingsFile::capture(path.clone(), true, SettingsRole::ReadOnlySource).unwrap(),
+            );
+            match fault {
+                0 => std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o666)).unwrap(),
+                1 => std::fs::hard_link(&path, path.with_extension("hardlink")).unwrap(),
+                2 => {
+                    std::fs::rename(&path, path.with_extension("original")).unwrap();
+                    symlink(path.with_extension("original"), &path).unwrap();
+                }
+                3 => {
+                    std::fs::rename(&directory, directory.with_extension("retired")).unwrap();
+                    crate::session_host::profile::private_dir(&directory).unwrap();
+                    ordinary_save(&path);
+                }
+                4 => std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o722)).unwrap(),
+                _ => unreachable!(),
+            }
+            assert!(source.read().is_err());
+        }
+        let directory = native_directory();
+        let escaped = directory.join("../settings.json");
+        assert!(super::super::ProfileSettingsFile::capture(escaped, true, SettingsRole::ReadOnlySource).is_err());
+        assert!(
+            super::super::SourceSettingsFile::stopped_slot("../foreign", crate::session_host::slots::SlotId::try_from(0).unwrap()).is_err()
+        );
+    }
+
+    #[test]
+    fn profile_copy_windows_readonly_source_can_read_broad_read_acl_without_lending_target_or_admin_authority() {
+        assert!(windows_source_allowed(true, false, false, false));
+        assert!(!windows_settings_allowed(true, false, false, false));
+        assert!(windows_source_allowed(false, true, true, true));
+        assert!(!windows_source_allowed(false, true, true, false));
+        assert!(!windows_source_allowed(false, true, false, true));
+        assert!(!windows_source_allowed(false, false, true, true));
+        assert_eq!(windows_allow_grant(false, 0x8000_0000, WindowsGrantRole::SettingsObject), Ok(false));
+        for mutation in [0x2, 0x4, 0x40, 0x10000, 0x40000, 0x80000, 0x4000_0000] {
+            assert_eq!(windows_allow_grant(false, mutation, WindowsGrantRole::SettingsObject), Err(()));
+        }
     }
 }

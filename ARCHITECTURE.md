@@ -46,6 +46,27 @@ and World reset clears pending provenance. Consumers copy the original digest
 with the accepted account/session independently of IO readiness; no form value,
 raw URI or credential is persisted. Favorites retains its original file identity
 and behavior. Archive projection, private storage and UI are separate stages.
+Stopped-profile copy now captures distinct closed native `SourceSettingsFile`
+and `TargetSettingsFile` capabilities. Only the target wrapper exposes publish;
+the private underlying file and retained ancestry capture an immutable
+`ReadOnlySource` or `PrivateTarget` role. Preparation, every bounded reread and
+final source digest/target byte CAS use those same captured capabilities. Main
+saved and stopped-slot sources may read current-user-owned ordinary0644 files
+without private-ancestor evidence, while still requiring plain/single-link,
+no-follow, non-other-writable files and safe opened ancestry/current-path
+identity before and after the read. Windows permits broad read-only source
+grants only after the existing opened-handle parser refuses untrusted mutation
+and unsupported ACE forms; administrator-owned sources retain the narrower
+closed-ACL plus same-user private-ancestor exception. Source capabilities cannot
+publish or supply private-target evidence. A stopped target requires an actual
+retained private ancestor even when its file is0600; strict lock/temp validators,
+native path factories, reservations, source raw-drop order and original deadline
+are unchanged. Four additional cases are authored UNRUN (31 adapter definitions,
+six Unix-only and one Windows-only). The Unix no-private-evidence fixture drops
+optional confinement evidence while retaining all real opened ancestors, so it
+does not depend on the test workspace itself being public. Independent source
+review and Root execution precede actual Manage UI/production promotion.
+
 Windows ordinary-settings ACL classification distinguishes retained directory
 prefixes from the final settings parent/file. A native-derived prefix with an
 independently retained existing next-directory child may grant other principals
@@ -60,9 +81,9 @@ The owner trust set is unchanged: unestablished prefix owners, including any
 TrustedInstaller-owned layout, remain unsupported pending native evidence.
 Two additional pure role/rights cases and one Windows-only ordinary-temp/native
 saver ancestry case are authored UNRUN:27 adapter definitions, three Unix-only
-and one Windows-only. No native ACL was inspected by the author. Linux MainSaved
-without genuine private ancestry is still refused by the existing policy; any
-read-only-source exception is a separate Root decision. Actual Manage UI and
+and one Windows-only. No native ACL was inspected by the author. The following
+earlier policy was superseded for read-only source capabilities as described
+above; private-target confinement remains required. Actual Manage UI and
 production promotion remain gated on independent exact-source clearance.
 
 `profile/settings_file/security.rs` adds the ordinary-settings compatibility
@@ -71,13 +92,14 @@ It retains at most128 opened no-follow ancestor handles per native file, with
 native paths at most32KiB, through confirmation and final CAS. Current path and
 retained handle identities/confinement are rechecked; ordinary file owner/link/
 mode or opened-handle DACL evidence is checked before and after each bounded
-read. Unix0644 ordinary saver output is accepted only behind a retained existing
+read. For targets, Unix0644 ordinary saver output is accepted only behind a retained existing
 same-user0700 ancestor; group/other writes always refuse, and unconfined files
 must be private. Windows permits ordinary inherited ACL spelling with a closed
 applicable allow set of TokenUser, LocalSystem and BuiltinAdministrators. A
 TokenUser owner is required unless a BuiltinAdministrators-owned settings file
 is confined by a retained same-user private ancestor. Broad read-only grants can
-occur above confinement, never on the settings file; untrusted mutation grants,
+occur above confinement, or on a current-user-owned read-only source as described
+above; target settings retain closed applicable grants. Untrusted mutation grants,
 unsupported applicable object/callback ACEs and unsafe owners refuse. Inherit-only
 ACEs grant nothing on the current object and never supply confinement evidence;
 each descendant receives its own check. Deny ACEs never excuse a broad allow.
@@ -104,7 +126,7 @@ all unselected raw source before destination output, and retains original target
 bytes plus a source digest. A durable private temporary file precedes fresh
 source/target CAS, held-lock file-identity checks and final controller/cancel/
 original-deadline checks. Rename has no delayed retry after these checks. Main
-saved settings is strictly read-only; unsafe ownership, unconfined public access,
+saved settings is strictly read-only; unsafe ownership, unsafe writable access,
 symlinks/reparse points and hard links are refused without repair. There is no
 raw backup or global Settings load/save. Logical cancellation never releases a
 reservation before actual worker terminal; a completed rename reports Applied
