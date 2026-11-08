@@ -27,6 +27,10 @@
   real-consumer/input-history tests are authored UNRUN, with every earlier
   assertion retained. Offline ordinary browsing retains the demo's nil session;
   demo Folder Jump remains unavailable under its unchanged native source gate.
+  A separately frozen structural Frame witness correction accounts only for
+  egui's exact owned late background allocation, preserving real visual covers
+  and all103 earlier actual test bodies; three additional popup/nested/ambiguity
+  cases are authored UNRUN. Final source review and Root execution remain open.
 
 - 🔧 Local Inventory archive prerequisite, shared origin (2026-11-07; no issue):
   World now owns one pure actual-request digest/ambiguity state, captured before
