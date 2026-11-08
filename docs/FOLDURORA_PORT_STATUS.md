@@ -9,7 +9,30 @@ Monitor, Workspace and Board slices and the remaining Folderstorm behavior.
 The late initial port-order table below is historical; newer exact-build entries
 and the backlog supersede its implementation inventory.
 
-## Current integration: checks found failures
+## Current candidate: full checks running
+
+Exact source [`d9f50d0f7d567686b16e3e73601315ab9ba6f350`](https://github.com/DrCum/Foldurora/commit/d9f50d0f7d567686b16e3e73601315ab9ba6f350),
+tree `e259b00733c520e0cc4899161b3d0ccaeb209da5`, is frozen on
+`feat/monitor-runtime-integration`. Linux formatting and qualified Clippy passed.
+The full Linux workspace suite and [Windows run 42433785594](https://github.com/DrCum/Foldurora/actions/runs/42433785594),
+attempt 1, are running. No final counts, new package or native acceptance are
+established yet. The earlier negative checkpoints below remain preserved.
+
+This candidate includes the reviewed Board final-control/fixture corrections,
+Favorites menu ownership and location privacy, Poser fixture correction and
+Windows lint cleanup. It also adds the loaded-only Folder Jump chooser, shared
+actual-login metadata origin and locale-independent mouse binding identity.
+Subsequent egui API and mechanical lint corrections passed independent review.
+Archive visibility, profile copying, fixed-slot quick actions and true live
+inactive rendering remain separate unfinished work.
+
+The exact source inventory requires 761 Windows / 759 applicable Linux names.
+Conditional totals are Windows 8,549/0/55 and Linux 8,580/1/57 across 33 summaries,
+with the inherited terrain case included in the Linux expectation. These are
+**source expectations, not measured results**. Inventory SHA-256:
+`839e1a7285624f6beed632c931486555d3d48242032ed6629de407ea2bcea5d2`.
+
+## Preserved negative integration checkpoint
 
 Exact source [`4ff12e60948336bd1b16499beaa2c8beed35a213`](https://github.com/DrCum/Foldurora/commit/4ff12e60948336bd1b16499beaa2c8beed35a213),
 tree `847501d002cd7640ed9a7a666b2d55349a83c449`, remains the last Windows integration

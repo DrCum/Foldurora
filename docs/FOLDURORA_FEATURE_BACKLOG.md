@@ -9,6 +9,13 @@ source review and staged code do not establish a working product or test pass.
 
 ## Current candidate
 
+Exact `d9f50d0f` is now frozen for full Linux tests and
+[Windows run 42433785594](https://github.com/DrCum/Foldurora/actions/runs/42433785594),
+attempt 1. Formatting, qualified Linux Clippy and independent source integration
+review passed. It combines the Board/Favorites/Poser/Windows corrections with
+Folder Jump, actual-login metadata origin and mouse binding identity. Full
+counts, a new package and native acceptance are still pending.
+
 Exact `4ff12e60` joins the reviewed Monitor/Workspace/Board/Favorites consumers.
 [Windows run 42426186025](https://github.com/DrCum/Foldurora/actions/runs/42426186025)
 and full Linux workspace tests finished negative: Windows 8,480/19/55 and Linux
@@ -36,8 +43,8 @@ and human grid acceptance remain pending; see the ledger for checks and hashes.
 | Named Favorite menus | Actual menu ownership, immutable original context, visible owner validation and current location privacy are corrected through independently reviewed `7382df8c` (29 definitions, unrun). Combined execution is next. Inventory items are not moved. |
 | About report location choice | Per-open, source-qualified opt-in and copied-report filtering are joined in `4ff12e60`, preserving native restrictions. Whole-candidate checks failed; no new product acceptance. |
 | Folder Jump | Reviewed loaded-only chooser and Inventory-local entry/shortcut through `f6ddc960` are joined. All 27 definitions remain unrun; current egui API corrections are required by the measured compilation failure. Archive-policy integration remains mandatory before enabling archives. |
-| Inventory archive | Pure model `cb922cad` and bounded projection `c5f26f36` total 25 unrun definitions. Projection independent review is active; native store, actual Inventory/Folder Jump consumers and UI remain required. No archive UI or mask is enabled. |
-| Selective profile preferences | Typed projection `7ca6a42b` is source-reviewed (19 unrun cases). IO/controller atom `f8e20703` adds 17 unrun cases and is under review; ordinary settings-file compatibility needs correction. Actual Manage UI and production promotion are still required. No copy UI is enabled. |
+| Inventory archive | Model and bounded projection through independently reviewed `ad6ba521` total 26 unrun definitions. Native store and actual World/Inventory/Folder Jump integration are in progress. No archive UI or mask is enabled. |
+| Selective profile preferences | Typed projection `7ca6a42b` is source-reviewed (19 unrun cases). IO/controller compatibility through `1f271ad2` has 27 unrun adapter cases; a separate read-only-source/private-target distinction is being implemented. Actual Manage UI and production promotion remain required. No copy UI is enabled. |
 | Fixed-slot quick actions | Reviewed pure fixed-slot model has eight unrun cases. Data-only Show Viewer ledger `0ea03e4f` adds six unrun cases and is under independent review. Actual versioned native consumer, actor, private preferences and UI remain; detached/recovery Show is later work. |
 
 The intermediate monitor component source `df213a08` completed Linux workspace
