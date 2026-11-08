@@ -1,0 +1,10 @@
+{
+  "source": "899d75c4bd2e840699a95eaea3b00909499512e4",
+  "validation_workflow_commit": "236afc376df4bb929a391e399746fb6de4719a58",
+  "platform": "Linux-7.0.0-1017-azure-x86_64-with-glibc2.39",
+  "profile": "default dev/test",
+  "incremental": "disabled",
+  "rust": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "cargo": "cargo 1.99.1 (5f94df478 2026-08-27)",
+  "native_acceptance": false
+}

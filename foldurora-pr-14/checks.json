@@ -1,0 +1,168 @@
+[
+  {
+    "name": "fmt",
+    "command": [
+      "cargo",
+      "fmt",
+      "--all",
+      "--",
+      "--check"
+    ],
+    "exit_code": 0,
+    "seconds": 14.63,
+    "passed": 0,
+    "failed": 0,
+    "ignored": 0,
+    "final_exit_code": 0
+  },
+  {
+    "name": "clippy",
+    "command": [
+      "cargo",
+      "clippy",
+      "--workspace",
+      "--all-targets",
+      "--locked",
+      "--",
+      "-D",
+      "warnings",
+      "-A",
+      "dead-code"
+    ],
+    "exit_code": 0,
+    "seconds": 432.4,
+    "passed": 0,
+    "failed": 0,
+    "ignored": 0,
+    "final_exit_code": 0
+  },
+  {
+    "name": "options",
+    "command": [
+      "cargo",
+      "test",
+      "--workspace",
+      "--locked",
+      "--offline",
+      "ui::options::"
+    ],
+    "exit_code": 0,
+    "seconds": 1465.18,
+    "passed": 73,
+    "failed": 0,
+    "ignored": 0,
+    "final_exit_code": 0
+  },
+  {
+    "name": "theme",
+    "command": [
+      "cargo",
+      "test",
+      "--workspace",
+      "--locked",
+      "--offline",
+      "theme_guard"
+    ],
+    "exit_code": 0,
+    "seconds": 1.59,
+    "passed": 5,
+    "failed": 0,
+    "ignored": 0,
+    "final_exit_code": 0
+  },
+  {
+    "name": "catalog-keys",
+    "command": [
+      "cargo",
+      "test",
+      "--workspace",
+      "--locked",
+      "--offline",
+      "every_language_has_english_keys_and_variables"
+    ],
+    "exit_code": 0,
+    "seconds": 0.42,
+    "passed": 1,
+    "failed": 0,
+    "ignored": 0,
+    "final_exit_code": 0
+  },
+  {
+    "name": "catalog-format",
+    "command": [
+      "cargo",
+      "test",
+      "--workspace",
+      "--locked",
+      "--offline",
+      "every_bundled_message_formats_with_its_declared_variables"
+    ],
+    "exit_code": 0,
+    "seconds": 0.45,
+    "passed": 1,
+    "failed": 0,
+    "ignored": 0,
+    "final_exit_code": 0
+  },
+  {
+    "name": "captures",
+    "command": [
+      "cargo",
+      "test",
+      "--workspace",
+      "--locked",
+      "--offline",
+      "the_system_font_search_",
+      "--",
+      "--test-threads=1"
+    ],
+    "exit_code": 0,
+    "seconds": 16.67,
+    "passed": 2,
+    "failed": 0,
+    "ignored": 0,
+    "captures": [
+      {
+        "name": "font-search-1000-filtered.png",
+        "bytes": 110357,
+        "sha256": "2bc64703b8c157b42aea3030e16960e551bf28834d95808080684e278efb440f"
+      },
+      {
+        "name": "font-search-1000-opened.png",
+        "bytes": 114091,
+        "sha256": "84cd00792ca34aa31911fb4bbe3d14547a89a6f9a7feba78de0423f69616cb38"
+      },
+      {
+        "name": "font-search-1000-reopened.png",
+        "bytes": 114091,
+        "sha256": "84cd00792ca34aa31911fb4bbe3d14547a89a6f9a7feba78de0423f69616cb38"
+      },
+      {
+        "name": "font-search-1000-restored.png",
+        "bytes": 111960,
+        "sha256": "8927d29931b90f9199ea6ce98596767be92412605fc790b0e9758823d34c3b34"
+      },
+      {
+        "name": "font-search-420-filtered.png",
+        "bytes": 74119,
+        "sha256": "4ec695d60a19c41c6b30ec4ceb639341a5f3afa23412d6d5129c07d49617b428"
+      },
+      {
+        "name": "font-search-420-opened.png",
+        "bytes": 78642,
+        "sha256": "0bd91d05b800f14656981d3ce867b1fd63e6383f26c7c2689c268e06d7211c28"
+      },
+      {
+        "name": "font-search-420-reopened.png",
+        "bytes": 78642,
+        "sha256": "0bd91d05b800f14656981d3ce867b1fd63e6383f26c7c2689c268e06d7211c28"
+      },
+      {
+        "name": "font-search-420-restored.png",
+        "bytes": 78216,
+        "sha256": "7105ab4b317922909ed716cb67b4261593fd202dccfa46ab4771805846489983"
+      }
+    ],
+    "final_exit_code": 0
+  }
+]
