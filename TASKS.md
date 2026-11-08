@@ -940,6 +940,30 @@
     reopen, picked/already-selected font, Escape/outside dismissal and edge
     placement. CPU mock-font captures do not establish native/Vulkan acceptance.
 
+- 🔧 Independent Glow and private-call upstream ports (human request,
+  2026-11-08; no fork issue; upstream #2388 / #2281, PRs #2915 / #2918):
+  base `388b299c429d776b3fc7a9890162cd3d940b9dc3`, upstream snapshot `84d7996f`.
+  Port `0be5a699` as `b6b0b48d` and `ff50a49e` as `337f9420` with `-x`.
+  Keep the user's Glow through quality levels and old-level migration, while
+  saved graphics profiles restore their own Glow. Keep the same private-call
+  transport across teleport data gaps, retaining global voice-off, logout,
+  audio-output, new-call/hangup and spatial-land restrictions. Imported five
+  regressions; add a fork old-level migration/Glow regression without FSR.
+  Refreshed branches/PRs show no duplicate or production-file edits in current
+  monitor/wrap-up or combined integration `48042c6b`. Only the Glow test's
+  insertion context referenced deferred FSR tests; those fields/tests remain
+  absent. New login/payment-chat/mouselook changes overlap protected App,
+  settings and Shared Chat/host integration and are excluded. The public base
+  excludes the held `670c026b` payload; do not change frozen combined source.
+  No App wiring, schema or locale changes. Shared ARCHITECTURE/TASKS changes
+  need later Dev Agent coordination; Slick is unavailable, no delivery.
+  Independent-runner checks and native acceptance are pending; local Cargo is
+  unavailable and disk space is insufficient for a fresh build. Preserve old
+  outputs. Imported upstream test/human annotations are historical evidence.
+  - ⬜ Native quality-menu/Preferences Glow, saved-profile restore, safe-level
+    restore and restart checks; human private/group call teleport, hangup,
+    voice-off/logout and audio-output-loss checks. No automated grid login.
+
 - 🔧 Selective upstream catch-up (human request, 2026-11-07; no issue): apply
   sixteen reviewed upstream commits individually with `-x` to frozen photo/
   branding base `f5ae21d5`, from upstream snapshot `576dd54a`. Production

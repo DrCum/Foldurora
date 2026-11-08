@@ -1242,6 +1242,29 @@ mod tests {
         }
     }
 
+    /// The fork still migrates pre-v21 levels without the deferred FSR fields.
+    /// A user's Glow choice must neither prevent that migration nor be reset.
+    #[test]
+    fn former_level_migrations_keep_glow_and_still_upgrade_the_level() {
+        for glow in [false, true] {
+            for (former, preset) in [
+                (medium_v20(), Preset::Medium),
+                (high_v20(), Preset::High),
+                (deluxe_v20(), Preset::Deluxe),
+            ] {
+                let mut s = Settings::default();
+                former.write(&mut s);
+                s.glow = glow;
+                upgrade_levels_v21(&mut s);
+                assert_eq!(s.glow, glow, "{preset:?}");
+                assert_eq!(Preset::matching(&s), Some(preset), "{preset:?}");
+                let after = Values::read(&s);
+                upgrade_levels_v21(&mut s);
+                assert_eq!(Values::read(&s), after, "migration runs only once");
+            }
+        }
+    }
+
     #[test]
     fn demo_names() {
         assert_eq!(Preset::from_name("Potato"), Some(Preset::Potato));
