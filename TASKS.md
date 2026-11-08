@@ -1,7 +1,8 @@
 # Aurora Viewer — task tracking
 
 - 🔧 Independent Glow and private-call upstream ports (human request,
-  2026-11-08; no fork issue; upstream #2388 / #2281, PRs #2915 / #2918):
+  2026-11-08; no fork issue; [PR #15](https://github.com/DrCum/Foldurora/pull/15);
+  upstream #2388 / #2281, PRs #2915 / #2918):
   base `388b299c429d776b3fc7a9890162cd3d940b9dc3`, upstream snapshot `84d7996f`.
   Port `0be5a699` as `b6b0b48d` and `ff50a49e` as `337f9420` with `-x`.
   Keep the user's Glow through quality levels and old-level migration, while
@@ -17,7 +18,8 @@
   excludes the held `670c026b` payload; do not change frozen combined source.
   No App wiring, schema or locale changes. Shared ARCHITECTURE/TASKS changes
   need later Dev Agent coordination; Slick is unavailable, no delivery.
-  Independent-runner checks and native acceptance are pending; local Cargo is
+  Exact check outcomes are recorded in PR #15; native acceptance is pending.
+  Local Cargo is
   unavailable and disk space is insufficient for a fresh build. Preserve old
   outputs. Imported upstream test/human annotations are historical evidence.
   - ⬜ Native quality-menu/Preferences Glow, saved-profile restore, safe-level
