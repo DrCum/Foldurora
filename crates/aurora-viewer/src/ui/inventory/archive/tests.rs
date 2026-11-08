@@ -546,7 +546,7 @@ impl Frames {
                         .iter()
                         .any(|widget| widget.enabled && widget.visible && widget.interact_rect.contains(position))
                 );
-                let order = ctx.memory(|memory| memory.layer_ids().collect::<Vec<_>>());
+                let order = ctx.memory(|memory| memory.layer_ids().take(32).collect::<Vec<_>>());
                 assert!(
                     order.iter().position(|id| *id == layer).unwrap() > order.iter().position(|id| *id == proposal.control.layer).unwrap()
                 );
