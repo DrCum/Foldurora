@@ -746,8 +746,9 @@
     groups, including changing/clearing the group while confirmation is open;
     verify bought-object group and unchanged purchase guards. No changed UI
     or translations; both editor layouts retain the same interaction path.
-- 🔧 Foldurora bounded imports/music catch-up (human request, 2026-11-08;
-  no fork issue; base `388b299c`, upstream snapshot `45d6d5fc`): import local
+- 🟡 Foldurora bounded imports/music catch-up (human request, 2026-11-08;
+  no fork issue; [PR #13](https://github.com/DrCum/Foldurora/pull/13);
+  base `388b299c`, upstream snapshot `45d6d5fc`): import local
   texture watching `89d2223a`, equivalent COLLADA IDs `9fa79484`, parcel music
   buffering `24fe0e77` and folder-upload order `6e326177` separately with `-x`.
   Production patches match upstream; only TASKS conflicts were reconciled,
@@ -756,10 +757,18 @@
   host or current WIP branches. PRs #11 and #12 remain separate and unchanged.
   Fork regressions additionally cover XML formatting/conflicting attributes,
   initial music prebuffer and stable source indices through folder collapse.
-  Fork checks are pending. Imported validation notes below describe historical
-  upstream results, not new Foldurora acceptance. Shared TASKS integration needs
-  Dev Agent coordination; no shared app dispatch or localization is changed.
-  Native audio, texture reload and upload/preview acceptance remain human-only.
+  Tested source `5fe69e5c` passed formatting, workspace Clippy with the existing
+  Linux dead-code allowance and 135 focused checks, including an inspected
+  synthetic CPU capture of the actual folder panel. Final-head CI is recorded
+  in the PR. Two optional external-fixture probes remain unrun. Imported
+  validation notes below describe historical upstream results, not new Foldurora
+  acceptance. Shared TASKS conflicts with PRs #11/#12 and monitor need Dev Agent
+  reconciliation; no shared app dispatch or localization is changed. Slick was
+  unavailable; no message was delivered.
+  - ⬜ Human native/grid checks: equivalent/conflicting rigs, local texture and
+    PBR-map refresh on existing faces, music start/stall/resume/stop/mute, folder
+    upload order/collapse/selection. The CPU panel image is not native/Vulkan
+    or grid acceptance; both editor layouts retain their existing guard paths.
 
 - ✅ Folder upload queue and destination preview follow Explorer order ([PR #2160](https://github.com/Aurora-Viewer/Aurora-Viewer/pull/2160); task `bulk-folder-upload-order`, 2026-11-08): virtual destination folders use case-insensitive natural order, with child folders before direct files; real inventory ancestry retains the picker’s rank order. `preview_keeps_inventory_sort_and_naturally_sorts_virtual_folders_before_files` covers `Textures` ranked before `Objects`, nested `Set2` / `Set10` destinations and loose files. Focused test passes. Full checks pass PowerShell parsing, formatting and Clippy; workspace tests: 6,605 passed, 1 unrelated host-layout failure, 15 ignored. Human visually checked the preview in demo on 2026-11-08; folder upload order was earlier checked in-world on 2026-11-03.
 
