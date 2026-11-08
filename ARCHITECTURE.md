@@ -47,13 +47,21 @@ Unknown strings and Other buttons remain opaque unchanged, without settings
 repair or action substitution. Visible labels still use the existing catalogues.
 This prerequisite enables no profile-copy UI, IO, or automatic native action.
 
-The test-only `world/inventory_archive` prerequisite contains the closed local
-UUID-set codec and source/edit/publication model. Actual World login, Inventory
-owner/root and RLVa showinv are checked before reads/edits; source/event and UI
-owner adapters remain required. Only an explicit missing-load outcome creates
-empty defaults. Exact model/source/operation intents retain old published flags
-on failure and cannot complete another model's operation with the same number.
-There is no IO, visibility projection, new store kind or production UI yet.
+The test-only `world/inventory_archive` contains the closed local UUID-set codec,
+source/edit/publication model and one bounded incremental visibility projection.
+Actual World login, Inventory owner/root and RLVa showinv qualify borrowed reads
+once; row checks share bounded table lookups. Two physically retained projection
+bundles share process credits even across model resets and held snapshots.
+`store.rs` uses only the hardened NativeDirectory closed InventoryArchive kind
+(128 KiB, 2048 flags), original-byte/revision CAS and captured-path cancellation.
+Its independent two-worker pool refunds only after actual worker-owned resources
+drop; request/reply queues are bounded, GUI calls try-only and Drop never joins.
+`controller.rs` accepts only exact original model/source/load/save receipts;
+missing differs from unknown bytes, and failures retain last published flags.
+Binding alone starts no IO. All Archive registration remains cfg(test): actual
+World replacement/source/App CPU-turn adapters, ordinary Inventory and complete
+Folder Jump index/final-parent consumers must join before production enablement.
+Same-generation physical Inventory replacement MUST retire/recreate its model.
 
 `session_host/monitor_manager.rs` is the Shell-owned bounded binding/operation
 front for four fixed monitors and one cycling view. It depends on the separately
