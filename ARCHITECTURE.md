@@ -529,6 +529,19 @@ real-byte-buffer lifecycle regressions are authored and unrun. Existing renderer
 allocators, Active/XR/photo policy, callers and GPU submissions remain unchanged;
 no monitor authority or inactive producer is enabled.
 
+The separate `target_layout/{descriptor,inventory,ownership,world,world_tests}.rs`
+extension is also cfg(test) only. It describes the prospective nested/post/shared
+texture graph, D3/array/BC7 and buffer payloads, explicit capture CPU/image costs,
+bounded metadata and exact allocation IDs across held/retiring owners. Its
+32-family catalogue requires an explicit inventory observation for each family;
+generic factory transactions reserve all descriptors before construction and
+retain charges through opaque derived holders and partial-failure rollback.
+Synthetic last-use owners model storage retention, never real GPU completion.
+Current wgpu factories and holders are not migrated or recorder-verified. Dynamic
+scene/page/buffer inventories, actual queue adapters, numeric budgets/headroom and
+physical VRAM measurements remain required before any production admission.
+Seventeen new source tests are authored and unrun; the original nine remain exact.
+
 `render_thread::Owner::try_submit_owned` is a generic ownership prerequisite:
 its Busy and WorkerGone errors return the intact rejected job, including any
 owned journals/uploads. Only acceptance transfers the job and takes a previous

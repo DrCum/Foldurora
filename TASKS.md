@@ -153,6 +153,20 @@
   Active/XR/photo behavior and GPU producers remain unchanged; source review and
   root-owned compilation/tests are next.
 
+- 🔧 Prospective whole-view resource accounting (2026-11-08; no issue):
+  disabled planner covers nested GTAO/contact, AA/post/privacy, fixed shared
+  shadows/probes/impostors/water, retained looks and explicit capture costs.
+  Checked D3/array/BC7/buffer descriptors and a bounded 32-family inventory
+  distinguish new, borrowed, spare, old-copy and retiring physical identities.
+  Generic recorder reserves before construction; opaque leases retain storage
+  credit through rollback and independent holders. Seventeen new source tests are
+  authored and unrun; original nine core tests remain exact. No current wgpu
+  factory/holder migration, real GPU completion, numeric resource capability or
+  physical VRAM acceptance is claimed. Production rendering remains unchanged.
+  ⬜ Migrate and recorder-verify actual reachable factories/holders, review all
+  dynamic inventories and budgets/headroom, then run Root-owned device evidence
+  before considering a real inactive producer.
+
 - 🔧 Sealed Monitor native facade (2026-11-07; no issue): test-only Windows
   owner accepts localized title/logical geometry, exact native event routing,
   raw input, redraw/focus, observed pin/placement and opaque credited images.
