@@ -668,12 +668,18 @@ impl InventoryUi {
 
     fn set_browse_fetch(&mut self, pending: bool) {
         self.browse_fetch = pending;
-        self.fetch_all = self.browse_fetch || self.operation_fetch;
+        self.update_fetch_all();
     }
 
     fn set_operation_fetch(&mut self, pending: bool) {
         self.operation_fetch = pending;
-        self.fetch_all = self.browse_fetch || self.operation_fetch;
+        self.update_fetch_all();
+    }
+
+    fn update_fetch_all(&mut self) {
+        // Cleanup also discovers its selected folder and the Library. A
+        // complete personal-tree pump cannot complete that retained owner.
+        self.fetch_all = self.browse_fetch || self.operation_fetch || self.pending_cleanup.is_some();
     }
 
     pub fn filter_move_to(&mut self, filter: &str) {
