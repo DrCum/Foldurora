@@ -880,7 +880,13 @@ impl CopyUi {
                 .min_scrolled_height(height)
                 .auto_shrink([false, true])
                 .show(ui, |ui| {
-                    ui.set_max_width(width);
+                    let available = ui.available_width().min(width);
+                    let content_right = ui.cursor().min.x + available;
+                    // Respect the actual scroll viewport and retain a full
+                    // interaction strip while its allocated width animates.
+                    let scroll = ui.spacing().scroll;
+                    let strip = scroll.bar_width + scroll.bar_inner_margin + scroll.bar_outer_margin;
+                    ui.set_max_width((available - strip).max(1.0));
                     ui.label(aurora_i18n::tr!(
                         "host-profile-copy-destination",
                         destination = caption(snapshot, selection.target)
@@ -946,10 +952,12 @@ impl CopyUi {
                         ui.label(aurora_i18n::tr!("host-profile-copy-choose"));
                     }
                     self.status(ui, snapshot);
+                    ui.expand_to_include_x(content_right);
                 });
             #[cfg(test)]
             ctx.data_mut(|data| {
                 data.insert_temp(Id::unique("host_copy_scroll"), scroll.inner_rect);
+                data.insert_temp(Id::unique("host_copy_body_scroll_id"), scroll.id);
             });
             #[cfg(not(test))]
             let _ = scroll;

@@ -46,6 +46,14 @@
   all final authority checks remain; a real five-choice/wrapped-label regression
   checks the visible scrollbar, nonoverlap, committed rows and wheel movement.
   This source-only atom is UNRUN pending independent review and Root execution.
+  Root's 83304 focused normal Profile run passed 22 cases (one ignored), but
+  all three explicit EN/FR/JA compact runs failed because the main-body Picker
+  overlaps its actual scrollbar by 2.1 px at scale 1.5. The body now respects
+  the ScrollArea's available width and retains full style-sized right padding
+  through allocation animation. Every guard and original locale assertion is
+  unchanged; an additional compact/scaled real-bar regression preserves the
+  same three post-resize layouts and requires committed Picker/popup controls.
+  This final layout follow-up is source-only and author-UNRUN.
 
 - 🔧 Candidate Linux validation on standard native ancestry (no issue):
   The isolated Windows-candidate workflow now also runs the repository's existing

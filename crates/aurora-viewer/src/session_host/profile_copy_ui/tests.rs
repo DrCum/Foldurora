@@ -1220,6 +1220,56 @@ fn profile_copy_ui_actual_compact_modal_and_source_popup_layout_explicit_locale(
     }
 }
 
+#[test]
+fn profile_copy_ui_compact_scaled_main_body_reserves_real_bar_and_keeps_picker_committed() {
+    let mut frames = Frames::new();
+    frames.size = egui::vec2(760.0, 600.0) / 1.5;
+    frames.scale = 1.5;
+    crate::ui::fonts::apply(&frames.ctx, crate::ui::fonts::DEFAULT);
+    // Preserve the measured locale fixture's three empty layouts after resize;
+    // do not wait out the strip animation to conceal an interaction overlap.
+    for _ in 0..3 {
+        assert!(frames.show(vec![], Late::None).is_none());
+    }
+    let (scroll_id, body) = frames.ctx.data(|data| {
+        (
+            data.get_temp::<Id>(Id::unique("host_copy_body_scroll_id")).unwrap(),
+            data.get_temp::<Rect>(Id::unique("host_copy_scroll")).unwrap(),
+        )
+    });
+    let bar = frames
+        .ctx
+        .viewport(|viewport| viewport.prev_pass.widgets.get(scroll_id.with(1_usize)).copied())
+        .expect("actual pinned ScrollArea vertical interaction widget");
+    assert!(bar.visible && bar.enabled && bar.sense.senses_click() && bar.sense.senses_drag());
+    assert!(finite_positive(bar.interact_rect));
+    let picker = frames.control(|intent| matches!(intent, Intent::Picker(_)));
+    assert_eq!(picker.layer, bar.layer_id);
+    assert!(picker.rect.right() <= bar.interact_rect.left());
+    assert!(!picker.registered.interact_rect.intersect(bar.interact_rect).is_positive());
+    assert!(picker.committed(&frames.ctx));
+    let content = picker.frame_origin.unwrap().content;
+    assert!(
+        frames.ctx.viewport(|viewport| {
+            viewport
+                .prev_pass
+                .widgets
+                .get_layer(picker.layer)
+                .any(|widget| widget.parent_id == content && widget.rect.bottom() > body.bottom())
+        }),
+        "the genuine main body still overflows its scroll viewport"
+    );
+    assert!(frames.click(picker, Late::None).is_none());
+    assert!(frames.show(vec![], Late::None).is_none());
+    assert!(
+        frames
+            .model
+            .controls
+            .iter()
+            .any(|control| matches!(control.intent, Intent::Source(_, _)) && control.committed(&frames.ctx))
+    );
+}
+
 #[derive(Clone, Copy, Debug)]
 enum Modality {
     Pointer,
