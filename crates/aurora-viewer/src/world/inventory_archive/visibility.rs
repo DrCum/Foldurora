@@ -458,6 +458,14 @@ impl Default for Projection {
     }
 }
 impl Projection {
+    /// Cheap event/profile revocation, preserving physical pool/configuration.
+    /// Actual source/privacy qualification belongs to read and pump admission.
+    pub(crate) fn invalidate(&mut self) {
+        self.key = None;
+        self.builder = None;
+        self.snapshot = None;
+        self.stopped = false;
+    }
     /// O(1) revocation; no observer performs projection work or grants a budget.
     pub(crate) fn observe(&mut self, world: &World, model: &Model) {
         let key = Key::observe(world, model);

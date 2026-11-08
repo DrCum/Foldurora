@@ -226,6 +226,8 @@ impl App {
             if let Some(event) = self.bridge_runtime.receive(&mut self.world, event, now, now) {
                 self.on_app_event(event);
             }
+            #[cfg(test)]
+            self.observe_inventory_archive();
         }
         true
     }
