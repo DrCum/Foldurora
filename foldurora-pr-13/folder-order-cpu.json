@@ -1,0 +1,112 @@
+{
+  "native_or_vulkan_acceptance": false,
+  "painted_text": [
+    {
+      "text": "3 folders · 3 selected files",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "text": "Inventory preview",
+      "x": 25,
+      "y": 27
+    },
+    {
+      "text": "Files",
+      "x": 579,
+      "y": 27
+    },
+    {
+      "text": "My inventory",
+      "x": 54,
+      "y": 63
+    },
+    {
+      "text": "Set2",
+      "x": 70,
+      "y": 95
+    },
+    {
+      "text": "texture2",
+      "x": 68,
+      "y": 127
+    },
+    {
+      "text": "Set10",
+      "x": 70,
+      "y": 159
+    },
+    {
+      "text": "texture10",
+      "x": 68,
+      "y": 191
+    },
+    {
+      "text": "loose",
+      "x": 52,
+      "y": 223
+    },
+    {
+      "text": "texture10",
+      "x": 596,
+      "y": 63
+    },
+    {
+      "text": "Set10",
+      "x": 706,
+      "y": 62
+    },
+    {
+      "text": "Apply",
+      "x": 1008,
+      "y": 64
+    },
+    {
+      "text": "texture2",
+      "x": 598.5625,
+      "y": 95
+    },
+    {
+      "text": "Set2",
+      "x": 706,
+      "y": 94
+    },
+    {
+      "text": "Apply",
+      "x": 1008,
+      "y": 96
+    },
+    {
+      "text": "loose",
+      "x": 607.40625,
+      "y": 127
+    },
+    {
+      "text": "My inventory",
+      "x": 706,
+      "y": 126
+    },
+    {
+      "text": "",
+      "x": 706,
+      "y": 126
+    },
+    {
+      "text": "Apply",
+      "x": 1008,
+      "y": 128
+    },
+    {
+      "text": "Missing destination folders will be created after you confirm the upload.",
+      "x": 0,
+      "y": 692
+    }
+  ],
+  "panel": "imports::ui::folder_panel::show",
+  "synthetic_cpu_capture": true,
+  "tested_source": "5fe69e5c9fc9817ca2abb4a3aefc270ec6bd78ac",
+  "base": "388b299c429d776b3fc7a9890162cd3d940b9dc3",
+  "image_sha256": "dfcbc9b4c9548e47385bceed8066b408c959d761ff8914e481401daec31f8119",
+  "fixture": "import_folder_order_cpu_capture",
+  "inspected": true
+}
