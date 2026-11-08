@@ -3140,6 +3140,12 @@ pub fn show(
     actions
 }
 
+/// One predicate for both native composer styles; the worker separately
+/// checks the same World rule at its current-source send/open boundaries.
+fn direct_contact_allowed(world: &World, conversation: Option<uuid::Uuid>) -> bool {
+    conversation.is_none_or(|peer| world.is_group_session(&peer) || world.groups.is_member(&peer) || world.allows_direct_contact(peer))
+}
+
 /// The conversation shown at the right of the tabs (the Bubbles and
 /// Legacy styles), or alone in its own window (`popout.rs`): who it is
 /// with and its actions, its call, the participants, its lines and its
@@ -3158,6 +3164,10 @@ fn classic_pane(
     h: f32,
     own_name: &str,
 ) {
+    let contact_allowed = direct_contact_allowed(world, st.selected);
+    if !contact_allowed {
+        st.gif_open = false;
+    }
     let pane = ui.available_rect_before_wrap();
     let kind = st.selected.map(|id| sidebar::kind(world, &id));
     workspace::drops(ui, p, pane, st, kind, actions);
@@ -3264,9 +3274,13 @@ fn classic_pane(
     // input + emoji
     let hint = input::hint(
         ui,
-        match st.selected {
-            None => aurora_i18n::tr!("ui-chat-to-local-chat").to_owned(),
-            Some(id) => aurora_i18n::tr!("ui-chat-at", value0 = world.session_title(&id).to_string()),
+        if !contact_allowed {
+            aurora_i18n::tr!("ui-chat-support-contact-blocked").to_owned()
+        } else {
+            match st.selected {
+                None => aurora_i18n::tr!("ui-chat-to-local-chat").to_owned(),
+                Some(id) => aurora_i18n::tr!("ui-chat-at", value0 = world.session_title(&id).to_string()),
+            }
         },
     );
     let mut emoji_btn = None;
@@ -3283,7 +3297,7 @@ fn classic_pane(
                 st.gif_open = false;
             }
             // shown once a key is entered (Preferences › Chat › GIFs)
-            if st.gifs.usable() {
+            if contact_allowed && st.gifs.usable() {
                 let b = tool_resp(ui, p, icons, "gif", st.gif_open).on_hover_text(aurora_i18n::tr!("ui-chat-gif"));
                 gif_picker::button(&b, p, st);
             }
@@ -3309,12 +3323,13 @@ fn classic_pane(
                 Some(id) => suggest::Scope::Session(id, &people),
             };
             suggest::after(ui, p, &mut output, &mut draft, suggest_nav, &mut st.suggest, scope);
-            let has_text = !draft.trim().is_empty();
+            let has_text = contact_allowed && !draft.trim().is_empty();
             send_clicked = send_button(ui, p, icons, has_text).clicked() && has_text;
-            output
-                .response
-                .response
-                .on_hover_text(aurora_i18n::tr!("ui-chat-compose-shortcuts"))
+            output.response.response.on_hover_text(if contact_allowed {
+                aurora_i18n::tr!("ui-chat-compose-shortcuts")
+            } else {
+                aurora_i18n::tr!("ui-chat-support-contact-blocked")
+            })
         })
         .inner;
     // the strip between the lines and the field: egui reaches
@@ -3354,14 +3369,18 @@ fn classic_pane(
         }
     }
     let anchor = emoji_btn.unwrap_or(resp.rect).left_top();
-    gif_picker::popup(ui.ctx(), p, icons, st, anchor, 4.0, conv_input, ChatType::Normal, actions);
+    if contact_allowed {
+        gif_picker::popup(ui.ctx(), p, icons, st, anchor, 4.0, conv_input, ChatType::Normal, actions);
+    }
     if st.conv_focus_request {
         st.conv_focus_request = false;
         resp.request_focus();
         cursor_to_end(ui.ctx(), conv_input, &draft);
     }
     let mut sent = false;
-    if send_clicked || ((resp.has_focus() || resp.lost_focus()) && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.alt)) {
+    if contact_allowed
+        && (send_clicked || ((resp.has_focus() || resp.lost_focus()) && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.alt)))
+    {
         let text = st.suggest.expand(st.selected, draft.trim());
         if !text.is_empty() {
             sent = true;
@@ -3391,7 +3410,9 @@ fn classic_pane(
         resp.request_focus();
     }
     st.typing_field = Some(typing::Field {
-        to: st.selected.filter(|id| !world.is_group_session(id) && (resp.has_focus() || sent)),
+        to: st
+            .selected
+            .filter(|id| contact_allowed && !world.is_group_session(id) && (resp.has_focus() || sent)),
         typed: resp.changed(),
         empty: draft.trim().is_empty(),
         sent,

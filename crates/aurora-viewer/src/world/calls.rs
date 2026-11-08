@@ -462,6 +462,9 @@ impl World {
     /// an ordinary conversation (startIM).
     pub fn start_text_conference(&mut self, residents: Vec<Uuid>) {
         let agents = self.conference_agents(residents);
+        if agents.len() == 1 && !self.allows_direct_contact(agents[0]) {
+            return;
+        }
         if !self.rlva_start_ims(&agents) {
             return;
         }

@@ -1,5 +1,12 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Foldurora Host Friends/New IM dependencies (2026-11-08): original-login
+  name replies and grid-cache capture pass9 focused +36 neighboring cases at
+  `9caf6761`. Shared FSData Direct-contact policy is implemented next, pending
+  focused checks; chooser/Open/search are still unfinished. One combined full
+  checkpoint follows the feature group. Source publication remains held.
+
+
 - 🔧 Foldurora combined Glow/call/textbox integration (2026-11-08): joins
   reviewed open drafts [PR15](https://github.com/DrCum/Foldurora/pull/15) at
   `85191933c4ac42991f6cf841a0e1377e37f61b1d` and

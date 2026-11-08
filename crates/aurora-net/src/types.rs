@@ -18,20 +18,20 @@ pub mod beacon {
 /// Region identifier: global origin in meters packed as `(x << 32) | y`.
 pub type RegionHandle = u64;
 
-/// Local routing identity of a name answer. Retaining the original login
+/// Local routing identity of an asynchronous name/contact answer. Retaining the original login
 /// prevents both delayed replies and identifier reuse from reaching another
 /// login. This never leaves the process and grants no IM/contact permission.
 #[derive(Clone)]
-pub struct NameSource(Arc<LoginResponse>);
+pub struct LoginSource(Arc<LoginResponse>);
 
-impl std::fmt::Debug for NameSource {
+impl std::fmt::Debug for LoginSource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // A routing diagnostic must not print the login/session credentials.
-        f.write_str("NameSource(..)")
+        f.write_str("LoginSource(..)")
     }
 }
 
-impl NameSource {
+impl LoginSource {
     pub fn from_login(login: &Arc<LoginResponse>) -> Self {
         Self(login.clone())
     }
@@ -790,25 +790,32 @@ pub enum NetEvent {
     LoggedOut,
     /// Agent names resolved (id, first, last).
     Names {
-        source: NameSource,
+        source: LoginSource,
         names: Vec<(Uuid, String, String)>,
     },
     /// GetDisplayNames answer (People API): resolved names, ids it could not
     /// resolve, and the Cache-Control max-age of the reply (seconds).
     DisplayNames {
-        source: NameSource,
+        source: LoginSource,
         names: Vec<AvatarNameData>,
         bad_ids: Vec<Uuid>,
         max_age: Option<u64>,
     },
     /// GetDisplayNames request failed (HTTP error): fall back to legacy names.
     DisplayNamesFailed {
-        source: NameSource,
+        source: LoginSource,
         ids: Vec<Uuid>,
+    },
+    /// Public FSData contact flags, captured for the original native SL login.
+    /// Failure preserves already loaded policy; it is never an empty update.
+    ContactPolicy {
+        source: LoginSource,
+        feed: crate::contact_policy::Feed,
+        result: Result<crate::contact_policy::Patch, crate::contact_policy::Error>,
     },
     /// DisplayNameUpdate (event queue): an avatar changed its display name.
     DisplayNameUpdate {
-        source: NameSource,
+        source: LoginSource,
         name: AvatarNameData,
         old_display_name: String,
     },
@@ -816,7 +823,7 @@ pub enum NetEvent {
     /// queue, or the POST failing): HTTP-like status, reason, and `content`
     /// (display_name, error_tag, error_description).
     SetDisplayNameReply {
-        source: NameSource,
+        source: LoginSource,
         status: i32,
         reason: String,
         content: aurora_llsd::Llsd,

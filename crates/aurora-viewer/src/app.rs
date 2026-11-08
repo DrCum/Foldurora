@@ -456,6 +456,7 @@ pub struct App {
     /// Name-cache destination captured with the login request. Editing grid
     /// settings later must not publish this world's names into another grid.
     name_cache_file: Option<std::path::PathBuf>,
+    contact_policy_grid: Option<crate::world::account_metadata_origin::GridDigest>,
     login_form: LoginForm,
     // Bug report form (disabled, see main.rs):
     // bug_report: ui::bug_report::BugReportUi,
@@ -1534,6 +1535,7 @@ impl App {
             command: false,
             screen: Screen::Login,
             name_cache_file: None,
+            contact_policy_grid: None,
             login_form: LoginForm::default(),
             // Bug report form (disabled, see main.rs):
             // bug_report: Default::default(),
@@ -1967,6 +1969,15 @@ impl App {
     }
 
     fn send_from(&mut self, mut cmd: NetCommand, actor: uuid::Uuid) {
+        // A separate hard refusal: RLVa being disabled or replacing text must
+        // never authorize support contact. No typing or placeholder is sent.
+        if !self.world.contact_command_allowed(&cmd) {
+            self.world.system_notice(
+                aurora_i18n::tr!("ui-chat-support-contact-blocked"),
+                crate::world::notice_topics::Topic::Warning,
+            );
+            return;
+        }
         // a region that does not bake: our own bakes stand for the server's
         if let NetCommand::RequestServerAppearance { cof_version } = cmd
             && self.world.bakes_locally()
@@ -3125,6 +3136,7 @@ impl App {
         }
         self.world.reset();
         self.name_cache_file = None;
+        self.contact_policy_grid = None;
         // the next session's network starts with the neighbours allowed
         self.neighbours_refused = false;
         // the transcripts shown belong to the account that leaves
@@ -3811,6 +3823,10 @@ impl App {
                 self.name_cache_file = metadata_grid
                     .filter(|_| !self.demo)
                     .map(|grid| crate::settings::cache_dir().join(crate::world::names::cache_file(grid)));
+                self.contact_policy_grid = metadata_grid.filter(|grid| !self.demo && crate::world::contact_policy::supported_grid(*grid));
+                if let Some(grid) = self.contact_policy_grid {
+                    self.world.load_contact_policy_cache(&crate::settings::cache_dir(), grid);
+                }
                 self.bind_inventory_archive_login(metadata_grid);
                 self.world.favorites = if self.demo {
                     Default::default()
@@ -4066,6 +4082,11 @@ impl App {
             } => self.buy_land_ui.preflight_reply(billable_area, currency_buy, result),
             NetEvent::LandToolPrepared(result) => self.land_tool_prepared(result),
             NetEvent::CurrencyBought(result) => self.currency_bought(result),
+            NetEvent::ContactPolicy { feed, result: Ok(_), .. } => {
+                if let Some(grid) = self.contact_policy_grid {
+                    self.world.save_contact_policy_cache(&crate::settings::cache_dir(), grid, feed);
+                }
+            }
             // LLSetDisplayNameReply + LLFloaterDisplayName::onCacheSetName
             NetEvent::SetDisplayNameReply {
                 status, reason, content, ..
@@ -7528,6 +7549,13 @@ impl App {
     /// LLFloater::setFocus → focusFirstItem). Openings that come from calls
     /// set `focus_im` alone and leave the keyboard where it is.
     pub(super) fn open_conversation_to_type(&mut self, id: uuid::Uuid) {
+        if !self.world.is_group_session(&id) && !self.world.groups.is_member(&id) && !self.world.allows_direct_contact(id) {
+            self.world.system_notice(
+                aurora_i18n::tr!("ui-chat-support-contact-blocked"),
+                crate::world::notice_topics::Topic::Warning,
+            );
+            return;
+        }
         if !self.world.rlva_start_ims(&[id]) {
             return;
         }
@@ -13523,16 +13551,9 @@ impl App {
                 self.world.send_session_im(to, &text);
                 continue;
             }
-            if self.world.mutes.is_muted_id(&to) {
-                let name = self.world.legacy_name(&to).unwrap_or_else(|| self.world.social.name_of(&to));
-                self.world.unblock(to, &name, 0);
-                self.world.system_notice(
-                    aurora_i18n::tr!("app-was-unblocked-because-you-sent-them-an-im", name = name.to_string()),
-                    crate::world::notice_topics::Topic::People,
-                );
+            if let Some(command) = self.world.prepare_native_direct_im(to, &text) {
+                self.send(command);
             }
-            self.world.own_im(to, &text);
-            self.send(NetCommand::SendIm { to, message: text });
         }
         // menu choices made anywhere in the interface (ui::context::request)
         for act in ui::context::take_requests(&self.egui_ctx) {

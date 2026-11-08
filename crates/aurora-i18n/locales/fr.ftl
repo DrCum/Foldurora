@@ -13618,3 +13618,5 @@ host-chat-close-help = Masquer cette conversation dans le chat partagé et les m
 host-chat-close-pending = Fermeture de la conversation…
 host-chat-close-uncertain = La fermeture n’a pas pu être confirmée. La conversation reste masquée jusqu’à la récupération de la confirmation initiale ou la fin de cette session.
 host-chat-close-failed = Impossible de fermer la conversation. Réessayez lorsque le personnage sera disponible.
+
+ui-chat-support-contact-blocked = Ce compte ne peut pas envoyer de message direct à ce contact.

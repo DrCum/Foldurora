@@ -86,6 +86,10 @@ pub(super) fn show(
     actions: &mut Vec<ConvAction>,
     quote: Option<String>,
 ) {
+    let contact_allowed = super::direct_contact_allowed(world, st.selected);
+    if !contact_allowed {
+        st.gif_open = false;
+    }
     let conv_input = egui::Id::unique(("conv_input", st.selected));
     let kind = st.selected.map(|id| sidebar::kind(world, &id));
     let width = ui.available_width();
@@ -136,7 +140,7 @@ pub(super) fn show(
                             st.gif_open = false;
                         }
                         // shown once a key is entered (Preferences › Chat › GIFs)
-                        if st.gifs.usable() {
+                        if contact_allowed && st.gifs.usable() {
                             let b = box_button(ui, p, "gif", aurora_i18n::tr!("ui-chat-gif"), st.gif_open);
                             super::gif_picker::button(&b, p, st);
                         }
@@ -155,9 +159,13 @@ pub(super) fn show(
                         let field_w = (ui.available_width() - chip_w - BUTTON - 12.0).max(40.0);
                         let hint = super::input::hint(
                             ui,
-                            match st.selected {
-                                None => aurora_i18n::tr!("ui-chat-write-local").to_owned(),
-                                Some(id) => aurora_i18n::tr!("ui-chat-write-to", name = world.session_title(&id)),
+                            if !contact_allowed {
+                                aurora_i18n::tr!("ui-chat-support-contact-blocked").to_owned()
+                            } else {
+                                match st.selected {
+                                    None => aurora_i18n::tr!("ui-chat-write-local").to_owned(),
+                                    Some(id) => aurora_i18n::tr!("ui-chat-write-to", name = world.session_title(&id)),
+                                }
                             },
                         );
                         super::input::prepare(ui, conv_input, local);
@@ -183,12 +191,13 @@ pub(super) fn show(
                         if chip {
                             channel_chip(ui, p, &mut draft, channel);
                         }
-                        let has_text = !draft.trim().is_empty();
+                        let has_text = contact_allowed && !draft.trim().is_empty();
                         send_clicked = send_button(ui, p, has_text).clicked() && has_text;
-                        output
-                            .response
-                            .response
-                            .on_hover_text(aurora_i18n::tr!("ui-chat-compose-shortcuts"))
+                        output.response.response.on_hover_text(if contact_allowed {
+                            aurora_i18n::tr!("ui-chat-compose-shortcuts")
+                        } else {
+                            aurora_i18n::tr!("ui-chat-support-contact-blocked")
+                        })
                     })
                     .inner
                 });
@@ -220,15 +229,18 @@ pub(super) fn show(
             }
             let anchor = emoji_btn.unwrap_or(resp.rect).left_top();
             let chat_type = st.volume.chat_type();
-            super::gif_picker::popup(ui.ctx(), p, icons, st, anchor, 8.0, conv_input, chat_type, actions);
+            if contact_allowed {
+                super::gif_picker::popup(ui.ctx(), p, icons, st, anchor, 8.0, conv_input, chat_type, actions);
+            }
             if st.conv_focus_request {
                 st.conv_focus_request = false;
                 resp.request_focus();
                 super::cursor_to_end(ui.ctx(), conv_input, &draft);
             }
             let mut sent = false;
-            if send_clicked
-                || ((resp.has_focus() || resp.lost_focus()) && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.alt))
+            if contact_allowed
+                && (send_clicked
+                    || ((resp.has_focus() || resp.lost_focus()) && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.alt)))
             {
                 let text = st.suggest.expand(st.selected, draft.trim());
                 if !text.is_empty() {
@@ -261,7 +273,7 @@ pub(super) fn show(
             st.typing_field = Some(typing::Field {
                 to: st
                     .selected
-                    .filter(|_| kind == Some(sidebar::Kind::Private) && (resp.has_focus() || sent)),
+                    .filter(|_| contact_allowed && kind == Some(sidebar::Kind::Private) && (resp.has_focus() || sent)),
                 typed: resp.changed(),
                 empty: draft.trim().is_empty(),
                 sent,

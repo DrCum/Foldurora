@@ -328,7 +328,7 @@ pub(super) fn snapshot(world: &World, conversation: Conversation, ui_ready: bool
                 aurora_i18n::tr!("rlva-blocked").to_owned()
             };
             (
-                !muted && world.rlva_can_start_im(peer) && world.rlva_allows_im("sendim", peer),
+                !muted && world.allows_direct_contact(peer) && world.rlva_can_start_im(peer) && world.rlva_allows_im("sendim", peer),
                 can_read,
                 title,
             )
@@ -367,10 +367,10 @@ pub(super) fn snapshot(world: &World, conversation: Conversation, ui_ready: bool
     } else {
         end.saturating_sub(SCAN_LINES as u64).max(clock.first)
     };
-    let (incarnation, roster_revision) = if let Conversation::Conference(id) = conversation {
-        world.shared_conference_stamp(uuid(id))?
-    } else {
-        (0, 0)
+    let (incarnation, roster_revision) = match conversation {
+        Conversation::Conference(id) => world.shared_conference_stamp(uuid(id))?,
+        Conversation::Direct(_) => (world.contact_policy_revision(), 0),
+        _ => (0, 0),
     };
     Some(NativeSnapshot {
         title: label(&title),
@@ -531,6 +531,45 @@ mod tests {
     const PEER: Uuid = Uuid::from_u128(55);
     const OWNER: Uuid = Uuid::from_u128(99);
     const CONTROLLER: Uuid = Uuid::from_u128(77);
+
+    #[test]
+    fn contact_policy_host_send_authority_tracks_policy_aba_without_changing_read_access() {
+        use aurora_net::contact_policy::{Feed, NO_SUPPORT, Patch, SUPPORT};
+        let mut w = world();
+        w.bind_session_test_login(OWNER);
+        let conversation = Conversation::Direct(conversation_id(PEER).unwrap());
+        let before = snapshot(&w, conversation, true).unwrap();
+        assert!(before.can_send && before.can_read);
+        let source = aurora_net::LoginSource::from_login(w.login.as_ref().unwrap());
+        w.apply(aurora_net::NetEvent::ContactPolicy {
+            source: source.clone(),
+            feed: Feed::Agents,
+            result: Ok(Patch {
+                agents: [(OWNER, NO_SUPPORT), (PEER, SUPPORT)].into(),
+                legacy: false,
+            }),
+        });
+        let denied = snapshot(&w, conversation, true).unwrap();
+        assert!(!denied.can_send && denied.can_read);
+        assert_ne!(before.stamp, denied.stamp);
+        assert!(literal_command(&w, conversation, "No text").is_none());
+        w.apply(aurora_net::NetEvent::ContactPolicy {
+            source,
+            feed: Feed::Agents,
+            result: Ok(Patch {
+                agents: [(OWNER, 0)].into(),
+                legacy: false,
+            }),
+        });
+        let restored = snapshot(&w, conversation, true).unwrap();
+        assert!(restored.can_send && restored.can_read);
+        assert_ne!(restored.stamp, before.stamp);
+        assert_ne!(restored.stamp, denied.stamp);
+        assert!(matches!(
+            literal_command(&w, conversation, "Now allowed"),
+            Some(NetCommand::SendIm { to: PEER, .. })
+        ));
+    }
 
     fn source(generation: u64) -> ChatSource {
         ChatSource {

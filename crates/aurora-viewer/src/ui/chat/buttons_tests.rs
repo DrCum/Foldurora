@@ -20,6 +20,53 @@ const MEETING: Uuid = Uuid::from_u128(0xC0);
 const ALL: [ChatStyle; 4] = [ChatStyle::Aurora, ChatStyle::Compact, ChatStyle::Bubbles, ChatStyle::Legacy];
 
 #[test]
+fn contact_policy_composers_preserve_denied_drafts_and_restore_explicitly_in_every_style() {
+    use aurora_net::contact_policy::{Feed, NO_SUPPORT, Patch, SUPPORT};
+    for style in ALL {
+        let mut h = H::new(style);
+        let owner = Uuid::from_u128(0xc011_1001);
+        h.world.bind_session_test_login(owner);
+        h.open(Some(JANE));
+        h.type_text("Keep this unsent draft");
+        let source = aurora_net::LoginSource::from_login(h.world.login.as_ref().unwrap());
+        h.world.apply(aurora_net::NetEvent::ContactPolicy {
+            source: source.clone(),
+            feed: Feed::Agents,
+            result: Ok(Patch {
+                agents: [(owner, NO_SUPPORT), (JANE, SUPPORT)].into(),
+                legacy: false,
+            }),
+        });
+        h.actions.clear();
+        h.enter(egui::Modifiers::NONE);
+        assert_eq!(h.st.draft_mut(Some(JANE)), "Keep this unsent draft", "{style:?}");
+        assert!(
+            !h.actions
+                .iter()
+                .any(|a| matches!(a, ConvAction::Im { .. } | ConvAction::Typing { typing: true, .. })),
+            "{style:?}"
+        );
+        h.world.apply(aurora_net::NetEvent::ContactPolicy {
+            source,
+            feed: Feed::Agents,
+            result: Ok(Patch {
+                agents: [(owner, 0)].into(),
+                legacy: false,
+            }),
+        });
+        h.actions.clear();
+        h.enter(egui::Modifiers::NONE);
+        assert!(
+            h.actions
+                .iter()
+                .any(|a| matches!(a, ConvAction::Im { to: JANE, text } if text == "Keep this unsent draft")),
+            "{style:?}"
+        );
+        assert!(h.st.draft_mut(Some(JANE)).is_empty());
+    }
+}
+
+#[test]
 fn teleport_invitation_paints_one_destination_in_every_style() {
     use crate::world::teleport_invites::{Answer, Invite, InviteKind, Place, Rating};
     for style in ALL {

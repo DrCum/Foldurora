@@ -458,6 +458,7 @@ pub(crate) async fn run_session(sh: &Shared, req: LoginRequest, cmd_rx: &mut mps
         }
     };
     emit(sh, NetEvent::LoggedIn(login.clone()));
+    crate::contact_policy::load_for_login(&req.login_uri, &login, sh.events.clone());
     emit(
         sh,
         NetEvent::LoginProgress {
@@ -3067,7 +3068,7 @@ impl Session<'_> {
     /// handed back as failed, for the legacy UUIDNameRequest.
     fn request_display_names(&mut self, ids: Vec<uuid::Uuid>) {
         const NAME_URL_SEND_THRESHOLD: usize = 3500;
-        let source = NameSource::from_login(&self.login);
+        let source = LoginSource::from_login(&self.login);
         let cap = self
             .main
             .and_then(|a| self.sims.get(&a))
@@ -3147,7 +3148,7 @@ impl Session<'_> {
     /// SetDisplayName. The answer comes later as SetDisplayNameReply on the
     /// event queue; only a failed POST is reported here.
     fn set_display_name(&mut self, old: String, new: String) {
-        let source = NameSource::from_login(&self.login);
+        let source = LoginSource::from_login(&self.login);
         let cap = self
             .main
             .and_then(|a| self.sims.get(&a))
@@ -3915,7 +3916,7 @@ impl Session<'_> {
                 emit(
                     self.sh,
                     NetEvent::SetDisplayNameReply {
-                        source: NameSource::from_login(&self.login),
+                        source: LoginSource::from_login(&self.login),
                         status,
                         reason,
                         content: b["content"].clone(),
@@ -3934,7 +3935,7 @@ impl Session<'_> {
                     emit(
                         self.sh,
                         NetEvent::DisplayNameUpdate {
-                            source: NameSource::from_login(&self.login),
+                            source: LoginSource::from_login(&self.login),
                             name,
                             old_display_name,
                         },
@@ -4967,7 +4968,7 @@ impl Session<'_> {
             emit(
                 self.sh,
                 NetEvent::Names {
-                    source: NameSource::from_login(&self.login),
+                    source: LoginSource::from_login(&self.login),
                     names,
                 },
             );

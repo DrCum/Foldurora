@@ -13583,3 +13583,5 @@ host-chat-close-help = 下書きを保持したまま、共有チャットとモ
 host-chat-close-pending = 会話を閉じています…
 host-chat-close-uncertain = 会話を閉じたことを確認できませんでした。元の確認結果を取得するか、このセッションが終了するまで非表示のままです。
 host-chat-close-failed = 会話を閉じることができませんでした。キャラクターが利用可能になってから、もう一度お試しください。
+
+ui-chat-support-contact-blocked = このアカウントではこの相手にダイレクトメッセージを送信できません。

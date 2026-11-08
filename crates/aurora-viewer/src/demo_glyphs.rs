@@ -169,10 +169,10 @@ pub fn events(mode: Mode) -> Vec<NetEvent> {
 }
 
 pub fn events_for_login(mode: Mode, login: &std::sync::Arc<aurora_net::LoginResponse>) -> Vec<NetEvent> {
-    events_with_source(mode, aurora_net::NameSource::from_login(login))
+    events_with_source(mode, aurora_net::LoginSource::from_login(login))
 }
 
-fn events_with_source(mode: Mode, source: aurora_net::NameSource) -> Vec<NetEvent> {
+fn events_with_source(mode: Mode, source: aurora_net::LoginSource) -> Vec<NetEvent> {
     let boxp = shape(LL_PCODE_PATH_LINE, LL_PCODE_PROFILE_SQUARE, 100, 0, 0);
     // start position and view direction of the demo (see `events`)
     let (start, ahead) = (Vec3::new(132.0, 126.0, 0.0), Vec3::new(0.8, 0.4, 0.0).normalize());

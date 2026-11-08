@@ -847,8 +847,8 @@ fn demo_raw() -> Llsd {
 /// Fake replies for name / inventory requests in demo mode.
 /// Demo residents and groups (block list and group chat).
 /// Same local routing identity as this offline fixture's LoggedIn event.
-pub fn name_source() -> aurora_net::NameSource {
-    aurora_net::NameSource::from_login(&name_login())
+pub fn name_source() -> aurora_net::LoginSource {
+    aurora_net::LoginSource::from_login(&name_login())
 }
 
 pub const DEMO_AGENT: Uuid = Uuid::from_u128(0xA0E0_A6E1_0000_0000_0000_0000_0000_0001);
@@ -2769,10 +2769,10 @@ pub fn demo_reply(cmd: &aurora_net::NetCommand) -> Vec<NetEvent> {
 /// network session does. Alternate synthetic accounts must not borrow baseline
 /// fixture identity or relabel a completed reply.
 pub fn demo_reply_for_login(cmd: &aurora_net::NetCommand, login: &Arc<LoginResponse>) -> Vec<NetEvent> {
-    demo_reply_with_source(cmd, aurora_net::NameSource::from_login(login))
+    demo_reply_with_source(cmd, aurora_net::LoginSource::from_login(login))
 }
 
-fn demo_reply_with_source(cmd: &aurora_net::NetCommand, source: aurora_net::NameSource) -> Vec<NetEvent> {
+fn demo_reply_with_source(cmd: &aurora_net::NetCommand, source: aurora_net::LoginSource) -> Vec<NetEvent> {
     if let aurora_net::NetCommand::FetchInventoryOrphans { request } = cmd {
         let contents = if std::env::var("AURORA_DEMO_INVENTORY").is_ok_and(|mode| mode == "lost") {
             crate::world::inventory::demo::lost_reply(DEMO_AGENT)

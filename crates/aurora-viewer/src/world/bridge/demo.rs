@@ -6,7 +6,7 @@ pub const SKY_VISITOR: Uuid = Uuid::from_u128(0xd0d0_b120_0000_0000_0000_0000_00
 
 pub fn seed_queries(world: &mut World) {
     if let (Some(region), Some(login)) = (world.main_region, world.login.as_ref()) {
-        let source = aurora_net::NameSource::from_login(login);
+        let source = aurora_net::LoginSource::from_login(login);
         world.coarse.entry(region).or_default().push((
             SKY_VISITOR,
             world.agent.position + glam::Vec3::new(16.0, 0.0, 1020.0 - world.agent.position.z),

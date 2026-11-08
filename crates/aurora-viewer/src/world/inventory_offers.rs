@@ -1190,7 +1190,7 @@ mod tests {
         assert!(w.notifications.list[0].body.contains(&JANE.to_string()));
         w.bind_session_test_login(ME);
         w.apply(aurora_net::NetEvent::Names {
-            source: aurora_net::NameSource::from_login(w.login.as_ref().unwrap()),
+            source: aurora_net::LoginSource::from_login(w.login.as_ref().unwrap()),
             names: vec![(JANE, "Jane".into(), "Doe".into())],
         });
         let n = &w.notifications.list[0];

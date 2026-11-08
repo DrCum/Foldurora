@@ -17,6 +17,7 @@ pub mod bridge;
 pub mod calls;
 pub mod chat_log;
 pub mod collisions;
+pub(crate) mod contact_policy;
 pub mod contact_sets;
 pub mod derender;
 pub mod dialog_names;
@@ -522,6 +523,7 @@ pub struct World {
     aliases_synced: u64,
     /// Block list (LLMuteList).
     pub mutes: mutes::MuteList,
+    pub(crate) contact_policy: contact_policy::State,
     pub poser_consent: poser_consent::State,
     pub portals: portals::State,
     /// Firestorm LSL bridge messages kept out of nearby chat.
@@ -844,6 +846,7 @@ impl World {
             recent: Default::default(),
             aliases_synced: 0,
             mutes: mutes::MuteList::default(),
+            contact_policy: Default::default(),
             poser_consent: poser_consent::State::default(),
             portals: portals::State::default(),
             lsl_bridge: lslbridge::LslBridge::default(),
@@ -2509,7 +2512,8 @@ impl World {
             | NetEvent::DisplayNames { source, .. }
             | NetEvent::DisplayNamesFailed { source, .. }
             | NetEvent::DisplayNameUpdate { source, .. }
-            | NetEvent::SetDisplayNameReply { source, .. } => Some(source),
+            | NetEvent::SetDisplayNameReply { source, .. }
+            | NetEvent::ContactPolicy { source, .. } => Some(source),
             _ => None,
         };
         if name_source.is_some_and(|source| !self.login.as_ref().is_some_and(|login| source.matches_login(login, self.agent_id))) {
@@ -2521,6 +2525,7 @@ impl World {
         }
         match ev {
             NetEvent::LoggedIn(l) => {
+                self.contact_policy = contact_policy::State::for_login(&l);
                 self.bind_shared_chat_activity(l.agent_id, l.session_id);
                 self.agent_id = l.agent_id;
                 self.anti_spam.reset();
@@ -3482,6 +3487,27 @@ impl World {
                 }
                 None
             }
+            NetEvent::ContactPolicy { source, feed, result } => match result {
+                Ok(patch) => {
+                    if self.contact_policy.apply(self.login.as_ref()?, feed, &patch).is_ok() {
+                        Some(NetEvent::ContactPolicy {
+                            source,
+                            feed,
+                            result: Ok(patch),
+                        })
+                    } else {
+                        log::warn!("contact policy update refused; retaining flags and restriction state");
+                        None
+                    }
+                }
+                Err(error) => {
+                    if error == aurora_net::contact_policy::Error::TooLarge {
+                        self.contact_policy.lose();
+                    }
+                    log::warn!("{error}; retaining cached contact flags");
+                    None
+                }
+            },
             NetEvent::FriendsOnline { ids, online } => {
                 self.social.set_online(&ids, online);
                 self.flush_online_notices();
@@ -5403,8 +5429,29 @@ impl World {
             .unwrap_or_default()
     }
 
+    /// Native composer preparation, before either automatic unblock or own
+    /// echo. The App still applies its independent final command restriction.
+    pub(crate) fn prepare_native_direct_im(&mut self, to: Uuid, text: &str) -> Option<NetCommand> {
+        if !self.allows_direct_contact(to) {
+            return None;
+        }
+        if self.mutes.is_muted_id(&to) {
+            let name = self.legacy_name(&to).unwrap_or_else(|| self.social.name_of(&to));
+            self.unblock(to, &name, 0);
+            self.system_notice(
+                aurora_i18n::tr!("app-was-unblocked-because-you-sent-them-an-im", name = name.to_string()),
+                notice_topics::Topic::People,
+            );
+        }
+        self.own_im(to, text);
+        Some(NetCommand::SendIm { to, message: text.into() })
+    }
+
     /// Record an IM we sent.
     pub fn own_im(&mut self, to: Uuid, text: &str) {
+        if !self.allows_direct_contact(to) {
+            return;
+        }
         let text = self.rlva_outgoing_im_text(to, false, text).into_owned();
         let me = self
             .login

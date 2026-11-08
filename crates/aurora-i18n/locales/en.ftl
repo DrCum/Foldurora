@@ -13622,3 +13622,5 @@ host-chat-close-help = Hide this conversation in Shared Chat and monitors, keepi
 host-chat-close-pending = Closing conversation…
 host-chat-close-uncertain = Close could not be confirmed. The conversation stays hidden until its original confirmation is recovered or this session ends.
 host-chat-close-failed = The conversation could not be closed. Try again when the character is available.
+
+ui-chat-support-contact-blocked = Direct messaging with this contact is unavailable for this account.

@@ -2,7 +2,7 @@
 use super::*;
 use crate::world::World;
 use crate::world::account_metadata_origin::{GridDigest, Pending, request};
-use aurora_net::{NameSource, NetEvent};
+use aurora_net::{LoginSource, NetEvent};
 use std::sync::Arc;
 
 const ME: Uuid = Uuid::from_u128(0xc011_0001);
@@ -14,7 +14,7 @@ fn world() -> World {
     world
 }
 
-fn display(source: NameSource, text: &str) -> NetEvent {
+fn display(source: LoginSource, text: &str) -> NetEvent {
     NetEvent::DisplayNames {
         source,
         names: vec![AvatarNameData {
@@ -32,10 +32,10 @@ fn display(source: NameSource, text: &str) -> NetEvent {
 fn name_source_reused_wire_identifiers_do_not_accept_an_old_login_object() {
     let mut w = world();
     let old_login = w.login.as_ref().unwrap().clone();
-    let old = NameSource::from_login(&old_login);
+    let old = LoginSource::from_login(&old_login);
     // An actual new login object, deliberately reusing every server field.
     w.login = Some(Arc::new((*old_login).clone()));
-    let current = NameSource::from_login(w.login.as_ref().unwrap());
+    let current = LoginSource::from_login(w.login.as_ref().unwrap());
     w.apply(display(current, "Current name"));
     w.social.session_mut(PEER).input = "Unsent draft".into();
     w.social.ims[0].unread = 7;
@@ -64,7 +64,7 @@ fn name_source_reused_wire_identifiers_do_not_accept_an_old_login_object() {
 #[test]
 fn name_source_stale_failure_and_display_dialog_reply_have_no_replacement_side_effect() {
     let mut w = world();
-    let old = NameSource::from_login(w.login.as_ref().unwrap());
+    let old = LoginSource::from_login(w.login.as_ref().unwrap());
     w.bind_session_test_login(ME);
     w.social.avatar_names.want(&PEER);
     assert_eq!(w.social.avatar_names.take_asks(), vec![PEER]);
@@ -84,7 +84,7 @@ fn name_source_stale_failure_and_display_dialog_reply_have_no_replacement_side_e
         .is_none()
     );
 
-    let source = NameSource::from_login(w.login.as_ref().unwrap());
+    let source = LoginSource::from_login(w.login.as_ref().unwrap());
     w.apply(NetEvent::DisplayNamesFailed {
         source: source.clone(),
         ids: vec![PEER],
@@ -104,14 +104,14 @@ fn name_source_stale_failure_and_display_dialog_reply_have_no_replacement_side_e
 #[test]
 fn name_source_after_reset_cannot_repopulate_cache_and_current_legacy_still_resolves() {
     let mut w = world();
-    let old = NameSource::from_login(w.login.as_ref().unwrap());
+    let old = LoginSource::from_login(w.login.as_ref().unwrap());
     w.reset();
     w.apply(display(old, "Old cached name"));
     assert!(w.social.avatar_names.raw(&PEER).is_none());
     w.bind_session_test_login(ME);
     w.social.avatar_names.legacy_protocol = true;
     w.apply(NetEvent::Names {
-        source: NameSource::from_login(w.login.as_ref().unwrap()),
+        source: LoginSource::from_login(w.login.as_ref().unwrap()),
         names: vec![(PEER, "Peer".into(), "Resident".into())],
     });
     assert_eq!(w.social.names[&PEER], "Peer");
@@ -148,8 +148,8 @@ fn name_source_cache_custom_grid_punctuation_and_uri_components_do_not_collide()
 #[test]
 fn name_source_diagnostics_never_print_the_retained_login() {
     let w = world();
-    let source = NameSource::from_login(w.login.as_ref().unwrap());
-    assert_eq!(format!("{source:?}"), "NameSource(..)");
+    let source = LoginSource::from_login(w.login.as_ref().unwrap());
+    assert_eq!(format!("{source:?}"), "LoginSource(..)");
 }
 
 #[test]

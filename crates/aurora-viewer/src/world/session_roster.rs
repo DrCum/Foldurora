@@ -585,6 +585,7 @@ impl World {
             raw: aurora_llsd::llsd_map! {},
         }));
         self.bind_shared_chat_activity(owner, session);
+        self.contact_policy = super::contact_policy::State::for_login(self.login.as_ref().unwrap());
     }
 }
 

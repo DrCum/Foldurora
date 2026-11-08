@@ -1,5 +1,28 @@
 # Aurora Viewer architecture
 
+`LoginSource` retains the actual native `Arc<LoginResponse>` for asynchronous
+name and contact-policy answers. `World` rejects old-login successes/failures,
+including reused wire identifiers, before applying or forwarding them. Public
+avatar-name caches use the consumed submitted-grid receipt; custom grids use
+its digest instead of ambiguous punctuation folding. Missing/ambiguous receipts
+have no mutable-Preferences fallback. Generic IM sender-name fallbacks are not
+source-qualified contact-picker labels.
+
+`aurora-net/contact_policy` and `world/contact_policy` port the narrow FSData
+SUPPORT/NO_SUPPORT Direct-contact rule (Folderstorm abbe3cb0, fsdata.cpp and
+fsimcontactpolicy.h, LGPL-2.1-or-later). Actual SL login requests enable fixed
+HTTPS public feeds, ordinary public TLS, no redirects and bounded requests.
+Grid/feed/schema-bound public caches retain known flags on ordinary failures.
+Dedicated agents entries override data entries deterministically; legacy flags
+are additive and cannot clear modern refusals. These are deliberate refinements
+to reference arrival-order merging. Missing flags allow contact; unrepresentable
+size/revision loss disables Direct contact until a fresh login. Native Open,
+pre-unblock/echo preparation, final Send/typing and host Send share the rule;
+Direct host policy stamps include its revision. Both composers preserve denied
+drafts. Receive, Read, Close and Group/Conference rules remain independent.
+No SL flags or invented vendor URL are applied to custom grids.
+
+
 `ui/inventory/folder_jump` implements the separate loaded-folder chooser from
 pinned Legacy FSFloaterFolderJump (abbe3cb0). Its bounded model indexes actual
 personal Inventory metadata incrementally and keeps the best 60 name/path
