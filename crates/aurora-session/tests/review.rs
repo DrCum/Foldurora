@@ -71,7 +71,8 @@ fn group_attention_review_codec_keeps_source_grant_and_receipt_identity_and_reje
     assert_eq!(ledger.reserve(wrong), Err(ChatError::RequestChanged));
     wrong = request;
     wrong.target.key.conversation = Conversation::Conference(ConversationId::from_bytes([7; 16]).unwrap());
-    assert_eq!(wrong.validate(), Err(ChatError::Invalid));
+    wrong.validate().unwrap(); // Valid DTO; it cannot reuse a Group operation's receipt.
+    assert_eq!(ledger.reserve(wrong), Err(ChatError::RequestChanged));
 }
 
 fn query(request: ReviewConversationRequest) -> ReviewReceiptQuery {
@@ -149,12 +150,12 @@ fn review_dtos_validate_full_source_positive_sequences_and_nearby_or_direct_only
     }
 
     {
-        let mut invalid = valid;
-        invalid.target.key.conversation = Conversation::Conference(ConversationId::from_bytes([7; 16]).unwrap());
-        assert_eq!(invalid.target.validate(), Err(ChatError::Invalid));
-        assert_eq!(invalid.validate(), Err(ChatError::Invalid));
-        assert_eq!(query(invalid).validate(), Err(ChatError::Invalid));
-        assert_eq!(receipt(invalid, ReviewOutcome::OpenedLocally).validate(), Err(ChatError::Invalid));
+        let mut conference = valid;
+        conference.target.key.conversation = Conversation::Conference(ConversationId::from_bytes([7; 16]).unwrap());
+        conference.target.validate().unwrap();
+        conference.validate().unwrap();
+        query(conference).validate().unwrap();
+        receipt(conference, ReviewOutcome::OpenedLocally).validate().unwrap();
     }
 
     let mut invalid = valid;
@@ -270,8 +271,8 @@ fn review_dtos_are_closed_body_free_and_maximum_full_id_serialization_is_bounded
 
 #[test]
 fn review_v3_codec_roundtrips_closed_variants_and_rejects_old_versions() {
-    // Review retains its V3 payload inside the Group-Review-capable V7 envelope.
-    assert_eq!(VERSION, 7);
+    // Review retains its V3 payload inside the Conference-capable V8 envelope.
+    assert_eq!(VERSION, 8);
     assert_eq!(PROTOCOL_VERSION, 1);
     let operation = request(1);
     for message in [
@@ -432,7 +433,17 @@ fn review_v3_packet_validation_binds_source_query_receipt_and_command_direction(
     invalid.target.key.conversation = Conversation::Conference(ConversationId::from_bytes([7; 16]).unwrap());
     packet.reply_to = 0;
     packet.message = ChatMessage::Command(ChatCommand::ReviewConversation(invalid));
-    assert_eq!(packet.validate(), Err(ChatError::Invalid));
+    packet.validate().unwrap(); // DTO validity grants no native activation authority.
+    packet.reply_to = 1;
+    packet.message = ChatMessage::Event(ChatEvent::ReviewReceipt(ReviewReceiptReply {
+        query: query(original),
+        receipt: Some(receipt(invalid, ReviewOutcome::OpenedLocally)),
+    }));
+    assert_eq!(
+        packet.validate(),
+        Err(ChatError::Binding),
+        "the same UUID cannot alias Direct and Conference"
+    );
 }
 
 #[test]
