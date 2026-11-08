@@ -3,11 +3,14 @@
 //! graph with mandatory external allocation inventories. Actual current wgpu
 //! factories/holders have not been migrated or recorder-verified. Texture block
 //! payload and deterministic wgpu buffer backing exclude driver tiling, heaps
-//! and allocator metadata. No production allocator, render permission or numeric
+//! and allocator metadata. Mapped initialization has a distinct staged allocation
+//! and independent synthetic pending/submission owners. No production allocator,
+//! render permission or numeric
 //! budget is changed.
 
 mod descriptor;
 mod generations;
+mod index;
 mod inventory;
 mod layout;
 mod ownership;

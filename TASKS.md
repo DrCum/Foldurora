@@ -163,8 +163,13 @@
   pinned wgpu 30.0.1 D1/transient/mip/usage restrictions and checked VERTEX end-byte
   plus four-byte buffer backing costs. Valid same-sample MSAA blend-depth copies
   retain full samples and cost, replacing the earlier incorrect refusal.
-  Twenty-four extension source tests (seven correction regressions) are authored
-  and unrun; original nine core tests remain exact. No current wgpu
+  Mapped initialization now reserves distinct primary/staging components and
+  private companion metadata before factories. Opaque Init/pending/submitted
+  owners retain both allocations independently of application/generation drops;
+  no modeled transition grants actual GPU completion. Checked util padding/zero
+  backing and a preflighted insert-only AVL ID index complete this amendment.
+  Thirty-two extension source tests (eight mapped-init/index regressions) are
+  authored and unrun; original nine core tests remain exact. No current wgpu
   factory/holder migration, real GPU completion, numeric resource capability or
   physical VRAM acceptance is claimed. Production rendering remains unchanged.
   ⬜ Migrate and recorder-verify actual reachable factories/holders, review all

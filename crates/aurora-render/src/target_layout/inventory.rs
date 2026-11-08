@@ -3,7 +3,8 @@
 //! An empty family needs an explicit observation; absence is never zero cost.
 
 use super::Error;
-use super::descriptor::{Bounded, DeviceCaps, Resource};
+use super::descriptor::{Bounded, ComponentRole, DeviceCaps, Resource};
+use super::index::IdIndex;
 use super::ownership::AllocationId;
 
 pub(super) const MAX_PLAN_RECORDS: usize = 128;
@@ -173,6 +174,54 @@ impl Entry {
     }
 }
 
+/// One deterministic physical component of a logical factory request. Private
+/// fields prevent supplying a cheaper unrelated descriptor or staging size.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct ComponentSpec {
+    origin: Entry,
+    role: ComponentRole,
+}
+impl ComponentSpec {
+    pub fn origin(self) -> Entry {
+        self.origin
+    }
+    pub fn role(self) -> ComponentRole {
+        self.role
+    }
+    pub fn payload(self, caps: DeviceCaps<'_>) -> Result<u64, Error> {
+        match (self.origin.resource, self.role) {
+            (Resource::Texture(t), ComponentRole::Primary) => Ok(t.payload(caps)?.0),
+            (Resource::Buffer(b), role) => {
+                let plan = b.creation_plan(caps)?;
+                match role {
+                    ComponentRole::Primary => Ok(plan.primary()),
+                    ComponentRole::InitStaging => plan.init_staging().ok_or(Error::Invalid),
+                }
+            }
+            _ => Err(Error::Invalid),
+        }
+    }
+}
+impl Entry {
+    pub fn components(self, caps: DeviceCaps<'_>) -> Result<[Option<ComponentSpec>; 2], Error> {
+        self.validate(caps)?;
+        let staging = match self.resource {
+            Resource::Buffer(b) => b.creation_plan(caps)?.init_staging().is_some(),
+            _ => false,
+        };
+        Ok([
+            Some(ComponentSpec {
+                origin: self,
+                role: ComponentRole::Primary,
+            }),
+            staging.then_some(ComponentSpec {
+                origin: self,
+                role: ComponentRole::InitStaging,
+            }),
+        ])
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Holding {
     Resident,
@@ -187,41 +236,72 @@ pub(super) enum Holding {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Record {
     id: AllocationId,
-    entry: Entry,
+    component: ComponentSpec,
+    required: [Option<AllocationId>; 2],
     holding: Holding,
 }
 impl Record {
-    /// Descriptors and identity come from the same opaque allocation owner;
-    /// copied metadata cannot associate a cheaper descriptor with another ID.
+    /// Snapshot may conservatively retain a subsequently dropped companion;
+    /// no terminal Gone component can later return to Live under the same ID.
     pub fn held<T>(lease: &super::ownership::Lease<T>, holding: Holding) -> Self {
         Self {
             id: lease.id(),
-            entry: lease.entry(),
+            component: lease.component(),
+            required: lease.required_ids(),
             holding,
         }
     }
     pub fn holding(self) -> Holding {
         self.holding
     }
+    pub fn id(self) -> AllocationId {
+        self.id
+    }
 }
 
 pub(super) struct Inventory {
     records: Bounded<Record>,
+    index: IdIndex,
+    storage: u64,
     observed: [bool; FACTORY_SITES.len()],
     payloads: Payloads,
     failed: bool,
 }
 impl Inventory {
     pub fn new(capacity: usize, preparation_bytes: u64) -> Result<Self, Error> {
+        if capacity == 0 || capacity > MAX_DEVICE_RECORDS {
+            return Err(Error::Capacity);
+        }
+        let header = u64::try_from(std::mem::size_of::<Self>()).map_err(|_| Error::Overflow)?;
+        let minimum = std::mem::size_of::<Record>()
+            .checked_add(IdIndex::element_size())
+            .and_then(|n| n.checked_mul(capacity))
+            .and_then(|n| u64::try_from(n).ok())
+            .and_then(|n| n.checked_add(header))
+            .ok_or(Error::Overflow)?;
+        if minimum > preparation_bytes {
+            return Err(Error::Capacity);
+        }
+        let budget = preparation_bytes.checked_sub(header).ok_or(Error::Capacity)?;
+        let records = Bounded::new(capacity, MAX_DEVICE_RECORDS, budget)?;
+        let remaining = budget.checked_sub(records.storage()).ok_or(Error::Capacity)?;
+        let index = IdIndex::new(capacity, remaining)?;
+        let storage = header
+            .checked_add(records.storage())
+            .and_then(|n| n.checked_add(index.storage()))
+            .ok_or(Error::Overflow)?;
+        if storage > preparation_bytes {
+            return Err(Error::Capacity);
+        }
         Ok(Self {
-            records: Bounded::new(capacity, MAX_DEVICE_RECORDS, preparation_bytes)?,
+            records,
+            index,
+            storage,
             observed: [false; FACTORY_SITES.len()],
             payloads: Payloads::default(),
             failed: false,
         })
     }
-    /// Exact owner observation, including an actually empty family. Merely
-    /// setting this bit is not proof of actual factory coverage in production.
     pub fn observe(&mut self, factory: Factory) {
         self.observed[factory as usize] = true;
     }
@@ -229,23 +309,29 @@ impl Inventory {
         if self.failed {
             return Err(Error::Invalid);
         }
-        // Ignoring a failed observation cannot later yield a closed inventory.
         self.failed = true;
-        if self.records.slice().iter().any(|old| old.id == record.id) {
+        if self.index.position(record.id).is_some() {
             return Err(Error::Invalid);
         }
-        let bytes = record.entry.validate(caps)?;
         let mut payloads = self.payloads;
-        payloads.add(record.entry.class, bytes)?;
+        payloads.add(record.component.origin.class, record.component.payload(caps)?)?;
+        self.index.insert(record.id, self.records.slice().len())?;
         self.records.push(record)?;
         self.payloads = payloads;
-        self.observe(record.entry.factory);
+        self.observe(record.component.origin.factory);
         self.failed = false;
         Ok(())
     }
     pub fn checked_records(&self) -> Result<&[Record], Error> {
         if self.failed || self.observed.contains(&false) {
             return Err(Error::MissingDependencies);
+        }
+        for record in self.records.slice() {
+            for id in record.required.into_iter().flatten() {
+                if self.index.position(id).is_none() {
+                    return Err(Error::MissingDependencies);
+                }
+            }
         }
         Ok(self.records.slice())
     }
@@ -254,6 +340,6 @@ impl Inventory {
         Ok(self.payloads)
     }
     pub fn storage(&self) -> u64 {
-        self.records.storage()
+        self.storage
     }
 }

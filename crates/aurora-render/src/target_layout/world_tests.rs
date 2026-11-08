@@ -4,7 +4,7 @@
 use super::descriptor::{Bounded, Buffer, DeviceCaps, Resource, Texture};
 use super::inventory::{Class, Entry, FACTORY_SITES, Factory, Holding, Inventory, Payloads, Record};
 use super::layout::FormatSupport;
-use super::ownership::{DeviceIds, Ledger, Limits, Transaction};
+use super::ownership::{BufferParts, DeviceIds, Ledger, Limits, Transaction};
 use super::world::{Aa, CaptureLayout, Gtao, View, WorldViewPlan};
 use super::{Error, PayloadCost};
 use std::cell::Cell;
@@ -240,14 +240,14 @@ fn prospective_buffer_mapping_limits_and_separate_pool_class_are_checked() {
         usage: B::MAP_READ | B::COPY_DST,
         mapped: true,
     };
-    assert_eq!(buffer.payload(caps(&l, &f)), Ok(PayloadCost(256)));
+    assert_eq!(buffer.payload(caps(&l, &f)), Ok(PayloadCost(512)));
     buffer.usage |= B::STORAGE;
     assert_eq!(buffer.payload(caps(&l, &f)), Err(Error::Limits));
     let c = DeviceCaps {
         mappable_primary_buffers: true,
         ..caps(&l, &f)
     };
-    assert_eq!(buffer.payload(c), Ok(PayloadCost(256)));
+    assert_eq!(buffer.payload(c), Ok(PayloadCost(512)));
     buffer.size = 255;
     assert_eq!(buffer.payload(caps(&l, &f)), Err(Error::Invalid));
     buffer.mapped = false;
@@ -465,8 +465,8 @@ fn prospective_buffer_backing_charges_vertex_end_byte_and_alignment_with_checked
             mapped: false,
         }
         .payload(c),
-        Err(Error::Invalid),
-        "zero-size descriptors remain outside this prospective graph"
+        Ok(PayloadCost(4)),
+        "pinned core gives zero-size descriptors four backing bytes"
     );
 }
 
@@ -1030,4 +1030,406 @@ fn inventory_charges_every_old_spare_page_copy_and_retiring_physical_id_once() {
     // A copied inventory is metadata only: it never substitutes for actual
     // resource leases or proves those allocations are still live.
     assert_eq!(inventory.payloads().unwrap().0[1], 20);
+}
+
+fn initialized_entry(index: u16) -> Entry {
+    Entry {
+        factory: Factory::Uniforms,
+        index,
+        class: Class::Buffer,
+        resource: Resource::Buffer(Buffer {
+            size: 4,
+            usage: B::UNIFORM,
+            mapped: true,
+        }),
+    }
+}
+
+#[test]
+fn initialized_buffer_plan_counts_zero_util_padding_mapping_and_total_overflow() {
+    let (l, f) = (limits(), formats());
+    let c = caps(&l, &f);
+    for (size, usage, mapped, primary, stage) in [
+        (0, B::UNIFORM, false, 4, None),
+        (0, B::UNIFORM, true, 4, Some(4)),
+        (4, B::UNIFORM, true, 4, Some(4)),
+        (4, B::VERTEX, true, 8, Some(8)),
+        (4, B::MAP_WRITE | B::COPY_SRC, true, 4, None),
+        (256, B::MAP_READ | B::COPY_DST, true, 256, Some(256)),
+    ] {
+        let b = Buffer { size, usage, mapped };
+        let p = b.creation_plan(c).unwrap();
+        assert_eq!(p.source(), b);
+        assert_eq!(p.primary(), primary);
+        assert_eq!(p.init_staging(), stage);
+        assert_eq!(b.payload(c), Ok(PayloadCost(primary + stage.unwrap_or(0))));
+    }
+    for (length, usage, effective, total) in [
+        (0, B::UNIFORM, 0, 4),
+        (1, B::UNIFORM, 4, 8),
+        (5, B::UNIFORM, 8, 16),
+        (1, B::VERTEX, 4, 16),
+    ] {
+        let b = Buffer::from_init_len(length, usage).unwrap();
+        assert_eq!(b.size, effective);
+        assert_eq!(b.mapped, length != 0);
+        assert_eq!(b.payload(c), Ok(PayloadCost(total)));
+    }
+    for b in [
+        Buffer::from_init_len(0, B::UNIFORM).unwrap(),
+        Buffer {
+            size: 4,
+            usage: B::MAP_WRITE | B::COPY_SRC,
+            mapped: true,
+        },
+    ] {
+        let e = Entry {
+            resource: Resource::Buffer(b),
+            ..initialized_entry(0)
+        };
+        let ledger = test_ledger(4);
+        let mut t = Transaction::begin(DeviceIds::new().unwrap(), &ledger, &[e], c).unwrap();
+        let made = t.create_buffer(0, e, || Ok(BufferParts::new([0u8; 4], None))).unwrap();
+        assert!(made.records()[1].is_none());
+        let (primary, pending) = made.synthetic_unmap();
+        assert!(pending.is_none());
+        drop(t.finish().unwrap());
+        assert_eq!(ledger.used().0[2], 4);
+        drop(primary);
+        assert_eq!(ledger.preparation(), 0);
+    }
+    assert_eq!(Buffer::from_init_len(u64::MAX, B::UNIFORM), Err(Error::Overflow));
+    assert_eq!(
+        Buffer::from_init_len(u64::MAX - 3, B::UNIFORM).unwrap().payload(c),
+        Err(Error::Overflow)
+    );
+}
+
+#[test]
+fn initialized_components_reserve_both_ids_credits_and_capacity_before_factories() {
+    let (l, f) = (limits(), formats());
+    let c = caps(&l, &f);
+    let entries: Vec<_> = (0..64).map(initialized_entry).collect();
+    let ledger = test_ledger(10_000);
+    let mut transaction = Transaction::begin(DeviceIds::new().unwrap(), &ledger, &entries, c).unwrap();
+    assert_eq!(ledger.used().0, [0, 0, 512, 0]);
+    let calls = Cell::new(0);
+    assert!(matches!(
+        transaction.create(0, entries[0], || {
+            calls.set(1);
+            Ok([0u8; 4])
+        }),
+        Err(Error::MissingDependencies)
+    ));
+    assert_eq!(calls.get(), 0);
+    for (i, e) in entries.iter().copied().enumerate() {
+        let made = transaction
+            .create_buffer(i, e, || Ok(BufferParts::new([0u8; 4], Some([0u8; 4]))))
+            .unwrap();
+        let records = made.records();
+        assert_ne!(records[0].unwrap().id(), records[1].unwrap().id());
+        drop(made);
+    }
+    let bundle = transaction.finish().unwrap();
+    assert_eq!(bundle.ids().count(), 128);
+    drop(bundle);
+    assert_eq!(ledger.used(), Payloads::default());
+    assert_eq!(ledger.preparation(), 0);
+    let mut oversized = entries;
+    oversized.push(Entry {
+        resource: Resource::Buffer(Buffer {
+            mapped: false,
+            ..Buffer {
+                size: 4,
+                usage: B::UNIFORM,
+                mapped: true,
+            }
+        }),
+        ..initialized_entry(64)
+    });
+    assert!(matches!(
+        Transaction::<[u8; 4]>::begin(DeviceIds::new().unwrap(), &ledger, &oversized, c),
+        Err(Error::Capacity)
+    ));
+    assert_eq!(calls.get(), 0);
+    let mut small_plan = WorldViewPlan::new(1, 100_000).unwrap();
+    assert_eq!(small_plan.add(initialized_entry(0), c), Err(Error::Capacity));
+    assert_eq!(small_plan.entries(), Err(Error::Invalid));
+    assert_eq!(ledger.preparation(), 0);
+}
+
+struct InitStorage {
+    ledger: Ledger,
+    drops: Rc<Cell<usize>>,
+    _bytes: [u8; 4],
+}
+impl Drop for InitStorage {
+    fn drop(&mut self) {
+        assert!(
+            self.ledger.used().0[Class::Buffer as usize] >= 4,
+            "each component storage drops before its last refund"
+        );
+        self.drops.set(self.drops.get() + 1);
+    }
+}
+
+#[test]
+fn initialized_upload_owners_outlive_primary_and_logical_retirement_with_independent_last_holder() {
+    let (l, f) = (limits(), formats());
+    let c = caps(&l, &f);
+    let ledger = test_ledger(8);
+    let drops = Rc::new(Cell::new(0));
+    let e = initialized_entry(0);
+    let make = || InitStorage {
+        ledger: ledger.clone(),
+        drops: drops.clone(),
+        _bytes: [0; 4],
+    };
+    let mut t = Transaction::begin(DeviceIds::new().unwrap(), &ledger, &[e], c).unwrap();
+    let created = t.create_buffer(0, e, || Ok(BufferParts::new(make(), Some(make())))).unwrap();
+    assert_eq!(ledger.used().0[2], 8);
+    let logical = t.finish().unwrap().synthetic_retirement();
+    assert_eq!(logical.allocation_count(), 2);
+    let (primary, pending) = created.synthetic_unmap();
+    let pending = pending.unwrap();
+    let pending_records = pending.records();
+    assert_ne!(pending_records[0].id(), pending_records[1].id());
+    let submitted = pending.synthetic_submit();
+    assert_eq!(submitted.records()[1].id(), pending_records[1].id());
+    let derived = submitted.hold_staging([0u8; 3]);
+    drop(primary);
+    drop(logical);
+    assert_eq!(ledger.used().0[2], 8);
+    assert_eq!(drops.get(), 0);
+    drop(submitted); // MODEL storage retirement, not actual queue completion
+    assert_eq!(ledger.used().0[2], 4);
+    assert_eq!(drops.get(), 1);
+    let mut stage_only = Inventory::new(1, 100_000).unwrap();
+    stage_only.record(derived.record(Holding::Retiring), c).unwrap();
+    observe_all(&mut stage_only);
+    assert_eq!(stage_only.payloads().unwrap().0, [0, 0, 4, 0]);
+    drop(derived);
+    assert_eq!(drops.get(), 2);
+    assert_eq!(ledger.used(), Payloads::default());
+    assert_eq!(ledger.preparation(), 0);
+}
+
+#[test]
+fn initialized_companion_inventory_refuses_missing_live_stage_and_stale_snapshots_remain_conservative() {
+    let (l, f) = (limits(), formats());
+    let c = caps(&l, &f);
+    let ledger = test_ledger(8);
+    let e = initialized_entry(0);
+    let mut t = Transaction::begin(DeviceIds::new().unwrap(), &ledger, &[e], c).unwrap();
+    let made = t.create_buffer(0, e, || Ok(BufferParts::new([0u8; 4], Some([0u8; 4])))).unwrap();
+    drop(t.finish().unwrap());
+    let (primary, pending) = made.synthetic_unmap();
+    let pending = pending.unwrap();
+    let stale = Record::held(&primary, Holding::Resident);
+    let mut incomplete = Inventory::new(2, 100_000).unwrap();
+    incomplete.record(stale, c).unwrap();
+    observe_all(&mut incomplete);
+    assert_eq!(incomplete.payloads(), Err(Error::MissingDependencies));
+    incomplete.record(pending.records()[1], c).unwrap();
+    assert_eq!(incomplete.payloads().unwrap().0, [0, 0, 8, 0]);
+    let retained_stage = pending.hold_staging([0u8; 1]);
+    drop(retained_stage);
+    drop(pending.synthetic_submit());
+    assert_eq!(ledger.used().0[2], 4);
+    let mut old = Inventory::new(1, 100_000).unwrap();
+    old.record(stale, c).unwrap();
+    observe_all(&mut old);
+    assert_eq!(old.checked_records(), Err(Error::MissingDependencies));
+    let mut fresh = Inventory::new(1, 100_000).unwrap();
+    fresh.record(Record::held(&primary, Holding::Resident), c).unwrap();
+    observe_all(&mut fresh);
+    assert_eq!(fresh.payloads().unwrap().0, [0, 0, 4, 0]);
+    drop(primary);
+    assert_eq!(ledger.used(), Payloads::default());
+    assert_eq!(ledger.preparation(), 0);
+}
+
+#[test]
+fn initialized_factory_mismatch_missing_stage_error_and_unwind_drop_storage_before_credit() {
+    let (l, f) = (limits(), formats());
+    let c = caps(&l, &f);
+    let e = initialized_entry(0);
+    for mode in 0..3 {
+        let ledger = test_ledger(8);
+        let drops = Rc::new(Cell::new(0));
+        let make = || InitStorage {
+            ledger: ledger.clone(),
+            drops: drops.clone(),
+            _bytes: [0; 4],
+        };
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut t = Transaction::begin(DeviceIds::new().unwrap(), &ledger, &[e], c).unwrap();
+            let calls = Cell::new(0);
+            assert!(matches!(
+                t.create_buffer(0, initialized_entry(1), || {
+                    calls.set(1);
+                    Ok(BufferParts::new(make(), Some(make())))
+                }),
+                Err(Error::Invalid)
+            ));
+            assert_eq!(calls.get(), 0);
+            let made = t.create_buffer(0, e, || {
+                assert_eq!(ledger.used().0[2], 8);
+                let primary = make();
+                if mode == 0 {
+                    return Ok(BufferParts::new(primary, None));
+                }
+                if mode == 1 {
+                    return Err(Error::Allocation);
+                }
+                let _stage = make();
+                panic!("synthetic mapped-init stage unwind");
+            });
+            assert!(made.is_err());
+            assert!(matches!(t.finish(), Err(Error::MissingDependencies)));
+        }));
+        assert_eq!(outcome.is_err(), mode == 2);
+        assert_eq!(drops.get(), if mode == 2 { 2 } else { 1 });
+        assert_eq!(ledger.used(), Payloads::default());
+        assert_eq!(ledger.preparation(), 0);
+    }
+    let ledger = test_ledger(8);
+    let drops = Rc::new(Cell::new(0));
+    let single = Entry {
+        resource: Resource::Buffer(Buffer {
+            size: 4,
+            usage: B::UNIFORM,
+            mapped: false,
+        }),
+        ..e
+    };
+    let make = || InitStorage {
+        ledger: ledger.clone(),
+        drops: drops.clone(),
+        _bytes: [0; 4],
+    };
+    let mut t = Transaction::begin(DeviceIds::new().unwrap(), &ledger, &[single], c).unwrap();
+    assert!(matches!(
+        t.create_buffer(0, single, || Ok(BufferParts::new(make(), Some(make())))),
+        Err(Error::MissingDependencies)
+    ));
+    assert_eq!(drops.get(), 2, "unexpected factory-owned storage drops before refund");
+    assert!(matches!(t.finish(), Err(Error::MissingDependencies)));
+    assert_eq!(ledger.used(), Payloads::default());
+    assert_eq!(ledger.preparation(), 0);
+}
+
+#[test]
+fn physical_id_index_keeps_ordered_reverse_interleaved_membership_bounded_and_source_record_order() {
+    let (l, f) = (limits(), formats());
+    let c = caps(&l, &f);
+    let ledger = test_ledger(64);
+    let allocator = DeviceIds::new().unwrap();
+    let mut ids = Vec::with_capacity(4097);
+    for _ in 0..4097 {
+        let e = entry(0, Class::ViewTexture);
+        let mut t = Transaction::begin(allocator.clone(), &ledger, &[e], c).unwrap();
+        let lease = t.create(0, e, || Ok([0u8; 4])).unwrap();
+        ids.push(lease.id());
+        drop(t.finish().unwrap());
+        drop(lease);
+    }
+    let absent = ids.pop().unwrap();
+    assert!(matches!(super::index::IdIndex::new(4097, u64::MAX), Err(Error::Capacity)));
+    assert!(matches!(super::index::IdIndex::new(4, 1), Err(Error::Capacity)));
+    assert!(matches!(Inventory::new(8, 1), Err(Error::Capacity)));
+
+    for order in 0..3 {
+        let mut index = super::index::IdIndex::new(4096, 1_000_000).unwrap();
+        let source = |position: usize| match order {
+            0 => position,
+            1 => 4095 - position,
+            _ if position % 2 == 0 => position / 2,
+            _ => 4095 - position / 2,
+        };
+        for position in 0..4096 {
+            index.insert(ids[source(position)], position).unwrap();
+        }
+        for position in 0..4096 {
+            let (found, steps) = index.probe(ids[source(position)]);
+            assert_eq!(found, Some(position));
+            assert!(steps <= 24, "fixed-stack bound at full capacity");
+        }
+        assert_eq!(index.position(absent), None);
+        assert_eq!(index.insert(ids[100], 0), Err(Error::Invalid));
+        assert_eq!(index.insert(absent, 4096), Err(Error::Capacity));
+        assert_eq!(index.position(ids[source(17)]), Some(17));
+        assert_eq!(index.position(absent), None);
+    }
+    let mut inventory = Inventory::new(8, 100_000).unwrap();
+    let mut leases = Vec::new();
+    let mut expected = Vec::new();
+    for n in 0..8 {
+        let e = entry(n, Class::ViewTexture);
+        let mut t = Transaction::begin(allocator.clone(), &ledger, &[e], c).unwrap();
+        let lease = t.create(0, e, || Ok([0u8; 4])).unwrap();
+        drop(t.finish().unwrap());
+        leases.push(lease);
+    }
+    for lease in leases.iter().rev() {
+        let record = Record::held(lease, Holding::Resident);
+        expected.push(record.id());
+        inventory.record(record, c).unwrap();
+    }
+    observe_all(&mut inventory);
+    assert_eq!(
+        inventory.checked_records().unwrap().iter().map(|r| r.id()).collect::<Vec<_>>(),
+        expected
+    );
+    drop(leases);
+    assert_eq!(ledger.preparation(), 0);
+}
+
+#[test]
+fn initialized_later_factory_failure_or_omission_preserves_independent_upload_components() {
+    let (l, f) = (limits(), formats());
+    let c = caps(&l, &f);
+    for omit in [false, true] {
+        let ledger = test_ledger(16);
+        let drops = Rc::new(Cell::new(0));
+        let make = || InitStorage {
+            ledger: ledger.clone(),
+            drops: drops.clone(),
+            _bytes: [0; 4],
+        };
+        let entries = [initialized_entry(0), initialized_entry(1)];
+        let mut t = Transaction::begin(DeviceIds::new().unwrap(), &ledger, &entries, c).unwrap();
+        let first = t
+            .create_buffer(0, entries[0], || Ok(BufferParts::new(make(), Some(make()))))
+            .unwrap();
+        let calls = Cell::new(0);
+        assert!(matches!(
+            t.create_buffer(0, entries[0], || {
+                calls.set(1);
+                Ok(BufferParts::new(make(), Some(make())))
+            }),
+            Err(Error::Invalid)
+        ));
+        assert_eq!(calls.get(), 0);
+        let (primary, pending) = first.synthetic_unmap();
+        let pending = pending.unwrap();
+        if !omit {
+            assert!(matches!(
+                t.create_buffer(1, entries[1], || {
+                    let _primary = make();
+                    Err(Error::Allocation)
+                }),
+                Err(Error::Allocation)
+            ));
+        }
+        assert!(matches!(t.finish(), Err(Error::MissingDependencies)));
+        assert_eq!(ledger.used().0[2], 8);
+        assert_eq!(drops.get(), usize::from(!omit));
+        drop(primary);
+        assert_eq!(ledger.used().0[2], 8);
+        drop(pending);
+        assert_eq!(drops.get(), 2 + usize::from(!omit));
+        assert_eq!(ledger.used(), Payloads::default());
+        assert_eq!(ledger.preparation(), 0);
+    }
 }

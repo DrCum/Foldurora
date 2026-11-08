@@ -143,13 +143,55 @@ pub(super) struct Buffer {
     pub usage: BufferUsages,
     pub mapped: bool,
 }
+/// Known core allocations for one effective create_buffer descriptor. Init
+/// staging uses a separate HAL MAP_WRITE|COPY_SRC / TRANSIENT allocation of
+/// exactly primary bytes, not another public mapped-buffer constructor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct BufferCreationPlan {
+    source: Buffer,
+    primary: u64,
+    init_staging: Option<u64>,
+}
+impl BufferCreationPlan {
+    pub fn source(self) -> Buffer {
+        self.source
+    }
+    pub fn primary(self) -> u64 {
+        self.primary
+    }
+    pub fn init_staging(self) -> Option<u64> {
+        self.init_staging
+    }
+    pub fn total(self) -> Result<PayloadCost, Error> {
+        self.primary
+            .checked_add(self.init_staging.unwrap_or(0))
+            .map(PayloadCost)
+            .ok_or(Error::Overflow)
+    }
+}
 impl Buffer {
-    /// Deterministic HAL backing from pinned wgpu-core 30.0.1::create_buffer:
-    /// nonzero VERTEX size gains one byte, then every backing rounds to four.
-    /// This known expansion is mandatory credit, not driver-heap headroom.
+    /// Effective descriptor used by pinned util::create_buffer_init, without
+    /// reading/copying input data. Empty input uses an unmapped zero descriptor.
+    pub fn from_init_len(length: u64, usage: BufferUsages) -> Result<Self, Error> {
+        let remainder = length % wgpu::COPY_BUFFER_ALIGNMENT;
+        let size = if remainder == 0 {
+            length
+        } else {
+            length.checked_add(wgpu::COPY_BUFFER_ALIGNMENT - remainder).ok_or(Error::Overflow)?
+        };
+        Ok(Self {
+            size,
+            usage,
+            mapped: length != 0,
+        })
+    }
+    /// Complete deterministic creation bill, including core's separate Init
+    /// staging. Driver heaps/tiling remain a different, unproven cost.
     pub fn payload(self, caps: DeviceCaps<'_>) -> Result<PayloadCost, Error> {
-        if self.size == 0
-            || self.usage.is_empty()
+        self.creation_plan(caps)?.total()
+    }
+    pub fn creation_plan(self, caps: DeviceCaps<'_>) -> Result<BufferCreationPlan, Error> {
+        if self.usage.is_empty()
             || self.usage.contains_unknown_bits()
             || self.mapped && !self.size.is_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT)
         {
@@ -164,21 +206,35 @@ impl Buffer {
         {
             return Err(Error::Limits);
         }
-        let backing = if self.usage.contains(BufferUsages::VERTEX) {
+        let backing = if self.size == 0 {
+            wgpu::COPY_BUFFER_ALIGNMENT
+        } else if self.usage.contains(BufferUsages::VERTEX) {
             self.size.checked_add(1).ok_or(Error::Overflow)?
         } else {
             self.size
         };
         let remainder = backing % wgpu::COPY_BUFFER_ALIGNMENT;
-        let aligned = if remainder == 0 {
+        let primary = if remainder == 0 {
             backing
         } else {
             backing
                 .checked_add(wgpu::COPY_BUFFER_ALIGNMENT - remainder)
                 .ok_or(Error::Overflow)?
         };
-        Ok(PayloadCost(aligned))
+        let plan = BufferCreationPlan {
+            source: self,
+            primary,
+            init_staging: (self.mapped && !self.usage.contains(BufferUsages::MAP_WRITE)).then_some(primary),
+        };
+        plan.total()?;
+        Ok(plan)
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ComponentRole {
+    Primary,
+    InitStaging,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

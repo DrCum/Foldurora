@@ -104,13 +104,26 @@ pub(super) struct WorldViewPlan {
     entries: Bounded<Entry>,
     payloads: Payloads,
     failed: bool,
+    components: usize,
+    component_limit: usize,
+    metadata_storage: u64,
 }
 impl WorldViewPlan {
     pub fn new(capacity: usize, preparation_bytes: u64) -> Result<Self, Error> {
+        let header = u64::try_from(std::mem::size_of::<Self>()).map_err(|_| Error::Overflow)?;
+        let entries = Bounded::new(
+            capacity,
+            MAX_PLAN_RECORDS,
+            preparation_bytes.checked_sub(header).ok_or(Error::Capacity)?,
+        )?;
+        let metadata_storage = entries.storage().checked_add(header).ok_or(Error::Overflow)?;
         Ok(Self {
-            entries: Bounded::new(capacity, MAX_PLAN_RECORDS, preparation_bytes)?,
+            entries,
+            metadata_storage,
             payloads: Payloads::default(),
             failed: false,
+            components: 0,
+            component_limit: capacity,
         })
     }
     pub fn entries(&self) -> Result<&[Entry], Error> {
@@ -125,7 +138,7 @@ impl WorldViewPlan {
         Ok(self.payloads)
     }
     pub fn storage(&self) -> u64 {
-        self.entries.storage()
+        self.metadata_storage
     }
     pub fn add(&mut self, entry: Entry, caps: DeviceCaps<'_>) -> Result<(), Error> {
         self.construct(|plan| {
@@ -137,10 +150,16 @@ impl WorldViewPlan {
             {
                 return Err(Error::Invalid);
             }
+            let count = entry.components(caps)?.into_iter().flatten().count();
+            let components = plan.components.checked_add(count).ok_or(Error::Overflow)?;
+            if components > plan.component_limit {
+                return Err(Error::Capacity);
+            }
             let mut payloads = plan.payloads;
             payloads.add(entry.class, entry.validate(caps)?)?;
             plan.entries.push(entry)?;
             plan.payloads = payloads;
+            plan.components = components;
             Ok(())
         })
     }

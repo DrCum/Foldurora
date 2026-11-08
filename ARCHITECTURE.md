@@ -548,9 +548,20 @@ and four-byte backing alignment. Same-sample texture-to-texture MSAA blend-depth
 copies retain their full descriptor/sample cost; they are valid in pinned wgpu,
 unlike the earlier prospective refusal. Copied capability metadata and descriptor
 costs prove neither enabled device support nor permission to execute a copy.
-Twenty-four extension source tests are authored and unrun, including seven new
-correction regressions; the original nine core tests remain exact. Independent
-review and Root-owned compiler/device evidence remain pending.
+Mapped initialization now has a BufferCreationPlan with distinct primary and
+optional internal staging identities/credits; zero-sized primary backing is four
+bytes, and util initialization padding is checked before that plan. Component
+capacity and all transaction/group metadata are preflighted before factories.
+Opaque Init owners transfer both resources to independent synthetic pending and
+submitted upload owners. Storage drops before credit and private companion state
+publishes terminal Gone; snapshots cannot waive a live companion. An insert-only,
+preflighted physical-ID AVL index preserves record order/Copy snapshots and
+provides bounded logarithmic duplicate/companion lookup, with 24-frame/probe caps.
+These tokens model owned storage; actual wgpu hidden-owner/queue migration and
+GPU completion authority remain unproven. Thirty-two extension source tests are
+authored and unrun, including eight mapped-init/index regressions; the original
+nine core tests remain exact. Independent review and Root-owned compiler/device
+evidence remain pending.
 
 `render_thread::Owner::try_submit_owned` is a generic ownership prerequisite:
 its Busy and WorkerGone errors return the intact rejected job, including any
