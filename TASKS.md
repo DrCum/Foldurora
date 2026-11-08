@@ -1,20 +1,27 @@
 # Aurora Viewer — task tracking
 
 - 🔧 Foldurora System fonts search (human request, 2026-11-08; no fork issue;
-  upstream `bd9509fedc20`, Aurora-Viewer/Aurora-Viewer#2177 / #2136): preserve
-  search focus, filtering, growth after erasing, outside/Escape dismissal and
-  reset on reopen, including a list above its button. Base `388b299c`;
-  upstream snapshot `b87ef7d7`. Production and regression changes import with
-  `-x`; unrelated deferred probe_range/gpu_recovery test rows stay absent.
-  Refreshed refs/PRs show no duplicate or font-file edits in protected monitor,
-  Shared Chat, Attention, host or latest WIP work (monitor `9c095650`, ledger
-  `e1121f7d`). Other new property-batching/surface-protection changes overlap
-  protected app/settings/scene work and are not included. Fork checks and
-  synthetic CPU captures are pending. Use an independent hosted runner because
-  local build space is insufficient; do not clean old outputs. A validation-only
-  branch owns its runner workflow, outside the integration diff. Shared TASKS
-  reconciliation needs Dev Agent coordination; Slick is unavailable. Imported
-  upstream test/human annotations below are historical, not Foldurora acceptance.
+  [PR #14](https://github.com/DrCum/Foldurora/pull/14); upstream `bd9509fedc20`,
+  Aurora-Viewer/Aurora-Viewer#2177 / #2136): preserve search focus, filtering,
+  growth after erasing, outside/Escape dismissal and reset on reopen, including
+  a list above its button. Base `388b299c`; upstream snapshot `b87ef7d7`;
+  port `0f6b9e60`, runtime-test source `899d75c4`. Production matches upstream;
+  unrelated deferred probe_range/gpu_recovery test rows stay absent. Refreshed
+  refs/PRs show no duplicate or font-file edits in monitor, Shared Chat,
+  Attention, host or wrap-up `6ac6fbe1` (monitor `9c095650`, ledger `e1121f7d`).
+  Other new property-batching/surface-protection changes overlap protected
+  app/settings/scene work and are excluded. Exact hosted check results and
+  synthetic CPU evidence are recorded in the PR. The capture fixture uses the
+  existing opaque skin; ordinary regressions retain the default skin. No paint
+  callback is skipped and no renderer code changes. Local compilation/cleanup
+  are avoided because build space is insufficient; a validation-only branch
+  owns the independent runner workflow, outside this integration diff. Shared
+  TASKS reconciliation needs later Dev Agent coordination; Slick is unavailable.
+  Imported upstream test/human annotations below are historical, not Foldurora
+  acceptance. Keep draft; no merge or release.
+  - ⬜ Human native Windows/macOS/Linux/default-glass checks: focus/type/clear/
+    reopen, picked/already-selected font, Escape/outside dismissal and edge
+    placement. CPU mock-font captures do not establish native/Vulkan acceptance.
 
 - 🔧 Selective upstream catch-up (human request, 2026-11-07; no issue): apply
   sixteen reviewed upstream commits individually with `-x` to frozen photo/
