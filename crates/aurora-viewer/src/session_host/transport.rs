@@ -8,7 +8,7 @@
 pub(crate) use super::chat_broker::HostChatSnapshot;
 use super::review::{self, Grant as ReviewGrant, Status as ReviewStatus};
 use super::slots::{Registry, SlotId, SlotLabel, SlotSummary};
-use aurora_session::chat::{ChatKey, ChatSource, ChatText, MarkReadRequest, ReviewCapture};
+use aurora_session::chat::{ChatKey, ChatSource, ChatText, CloseRequest, MarkReadRequest, ReviewCapture};
 use aurora_session::{
     AccountKey, Binding, Command, Coordinator, Effect, Envelope, Event, GridKey, HostId, HostNotice, HostedViewport, InstallationId,
     MAX_WORKERS, Message, PROTOCOL_VERSION, Phase, SessionId, SessionIdentity, WorkerId, WorkerIdentity, WorkerStatus,
@@ -111,6 +111,7 @@ enum HostIntent {
     Park,
     Detach(WorkerId),
     ChatRead(MarkReadRequest),
+    ChatClose(CloseRequest),
     ReviewConversation(ReviewCapture, HostedViewport),
     CancelReview(u64),
     ChatSend {
@@ -130,6 +131,7 @@ impl HostIntent {
             // cannot cover an acknowledged world or clear a control error.
             Self::ChatSend { .. }
             | Self::ChatRead(_)
+            | Self::ChatClose(_)
             | Self::ReviewConversation(_, _)
             | Self::CancelReview(_)
             | Self::RenameSlot(_, _)
@@ -274,6 +276,10 @@ pub(super) mod native_fixture {
             ticket: u64,
             request: MarkReadRequest,
         },
+        Close {
+            ticket: u64,
+            request: CloseRequest,
+        },
     }
 
     pub(crate) struct Inbox {
@@ -320,6 +326,13 @@ pub(super) mod native_fixture {
                             request: read,
                         }
                     }
+                    HostIntent::ChatClose(mut close) => {
+                        close.request = request.ticket;
+                        Intent::Close {
+                            ticket: request.ticket,
+                            request: close,
+                        }
+                    }
                     _ => panic!("native chat fixture must never activate, open, detach or manage a worker"),
                 })
                 .collect()
@@ -333,6 +346,7 @@ pub(super) mod native_fixture {
                 let (key, ticket) = match intent {
                     Intent::Send { key, ticket, .. } => (*key, *ticket),
                     Intent::Read { request, ticket } => (request.key, *ticket),
+                    Intent::Close { request, ticket } => (request.key, *ticket),
                 };
                 let Some(chat) = snapshot.chat.iter_mut().find(|chat| chat.source == key.source) else {
                     continue;
@@ -352,6 +366,12 @@ pub(super) mod native_fixture {
                             status: ReadStatus::Completed(ReadOutcome::RejectedNative),
                         });
                     }
+                    Intent::Close { request, .. } => {
+                        chat.closes.operations.push(super::super::chat_broker::CloseOperation {
+                            request: *request,
+                            status: super::super::chat_broker::CloseStatus::Unavailable,
+                        });
+                    }
                     _ => {}
                 }
             }
@@ -369,6 +389,7 @@ pub(super) mod native_fixture {
             }
             chat.receipts.clear();
             chat.read_operations.clear();
+            chat.closes = Default::default();
             for read in chat.reads.values_mut() {
                 read.observed.epoch = read.observed.epoch.checked_add(1).unwrap();
             }
@@ -493,6 +514,7 @@ impl HostController {
         let snapshot = self.snapshot();
         let allowed = snapshot.chat.iter().any(|chat| {
             chat.source == key.source
+                && !chat.closes.hidden.contains(&key.conversation)
                 && chat.authenticated
                 && chat.live
                 && chat.conversations.iter().any(|info| {
@@ -513,10 +535,33 @@ impl HostController {
         })
     }
 
+    pub fn close_chat(&self, request: CloseRequest) -> Result<u64, HostError> {
+        let snapshot = self.snapshot();
+        let allowed = snapshot.chat.iter().any(|chat| {
+            chat.source == request.key.source
+                && chat.authenticated
+                && chat.live
+                && !chat.closes.hidden.contains(&request.key.conversation)
+                && chat.closes.targets.get(&request.key.conversation) == Some(&request.stream)
+                && chat.conversations.iter().any(|info| {
+                    info.policy.key == request.key
+                        && info.policy.revision == request.policy_revision
+                        && info.policy.lease_current
+                        && info.policy.ready
+                        && info.policy.can_read
+                })
+        });
+        if !allowed || (CloseRequest { request: 1, ..request }).validate().is_err() {
+            return Err(HostError::Unavailable);
+        }
+        self.send(HostIntent::ChatClose(request))
+    }
+
     pub fn mark_chat_read(&self, request: MarkReadRequest) -> Result<u64, HostError> {
         let snapshot = self.snapshot();
         let allowed = snapshot.chat.iter().any(|chat| {
             chat.source == request.key.source
+                && !chat.closes.hidden.contains(&request.key.conversation)
                 && chat.authenticated
                 && chat.live
                 && chat.conversations.iter().any(|info| {
@@ -1561,6 +1606,26 @@ impl Broker {
             HostIntent::Detach(worker) => {
                 let effects = self.coordinator.detach(worker)?;
                 self.effects(effects)?;
+            }
+            HostIntent::ChatClose(mut request) => {
+                request.request = ticket;
+                let key = request.key;
+                let live = self
+                    .coordinator
+                    .workers()
+                    .any(|entry| entry.live && entry.binding == key.source.binding() && entry.status.phase == Phase::Online);
+                let child = self
+                    .children
+                    .iter_mut()
+                    .find(|child| child.config.identity == key.source.worker && child.config.lease_epoch == key.source.lease_epoch)
+                    .ok_or(HostError::Unavailable)?;
+                if !live || child.detached || child.exited || child.last_seen.is_none_or(|seen| seen.elapsed() > REACHABLE) {
+                    child.chat.set_control(None, false);
+                    anyhow::bail!(HostError::Unavailable);
+                }
+                // The UI already owns this FIFO ticket. The peer publishes a
+                // terminal local rejection if native enqueue is no longer valid.
+                child.chat.admit_close(request, Instant::now())?;
             }
             HostIntent::ChatRead(mut request) => {
                 request.request = ticket;

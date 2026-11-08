@@ -13610,3 +13610,9 @@ inventory-archive-show-original = Consultez Visibilité → Inclure les dossiers
 inventory-archive-offline-readonly = Visibilité hors ligne — lecture seule
 inventory-archive-load-failed = Impossible de charger les paramètres d’archive. Les données enregistrées sont conservées. Utilisez Inclure les dossiers archivés pour afficher le contenu.
 inventory-archive-readonly = Les paramètres d’archive sont en lecture seule
+
+host-chat-close = Fermer la conversation
+host-chat-close-help = Masquer cette conversation dans le chat partagé et les moniteurs en conservant son brouillon. Un nouveau message entrant peut la rouvrir. Le chat natif et les messages non lus restent inchangés.
+host-chat-close-pending = Fermeture de la conversation…
+host-chat-close-uncertain = La fermeture n’a pas pu être confirmée. La conversation reste masquée jusqu’à la récupération de la confirmation initiale ou la fin de cette session.
+host-chat-close-failed = Impossible de fermer la conversation. Réessayez lorsque le personnage sera disponible.

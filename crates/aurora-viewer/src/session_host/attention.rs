@@ -164,7 +164,8 @@ impl Attention {
                 for info in catalogue {
                     let policy = info.policy;
                     let key = policy.key;
-                    if key.source != chat.source
+                    if chat.closes.hidden.contains(&key.conversation)
+                        || key.source != chat.source
                         || policy.validate().is_err()
                         || !policy.lease_current
                         || !policy.ready

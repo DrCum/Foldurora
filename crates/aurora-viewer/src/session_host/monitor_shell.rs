@@ -373,6 +373,15 @@ impl Shell {
                     Err(error) => self.shared_chat.queue_failed(&draft, error),
                 }
             }
+            MonitorAction::Close(draft) => {
+                if draft.capture.key.source != binding.source.chat() || (view == View::Cycling && self.monitors.model().playing()) {
+                    return;
+                }
+                match self.controller.close_chat(draft.request(0)) {
+                    Ok(ticket) => self.shared_chat.queued_close(draft, ticket),
+                    Err(error) => self.shared_chat.close_queue_failed(draft, error),
+                }
+            }
             MonitorAction::Read(draft) => {
                 if draft.key.source != binding.source.chat() || (view == View::Cycling && self.monitors.model().playing()) {
                     return;

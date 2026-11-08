@@ -3,7 +3,7 @@
 //! The Legacy host selects a character/conversation without acknowledging read
 //! (tools/session-host/main.cpp); Aurora retains its own native policy fences.
 
-use super::chat_ui::{self, ChatSurface, ChatUi, InputMode, ReadDraft, SendDraft};
+use super::chat_ui::{self, ChatSurface, ChatUi, CloseDraft, InputMode, ReadDraft, SendDraft};
 use super::slots::SlotId;
 use super::transport::{HostChatSnapshot, HostError, HostSnapshot};
 use crate::theme::Palette;
@@ -125,6 +125,7 @@ impl SharedChat {
             for state in &mut model.states {
                 state.ui.with_surface(surface, |ui| {
                     let _ = ui.take_read_action();
+                    let _ = ui.take_close_action();
                 });
             }
             if model.selected != Some(expected) || !model.states.iter().any(|state| state.ui.source() == expected) {
@@ -338,6 +339,27 @@ impl SharedChat {
     pub(super) fn native_fixture_status(&self, ctx: Option<&egui::Context>) -> serde_json::Value {
         serde_json::json!({"selected": self.selected, "sources": self.states.iter()
             .map(|state| state.ui.native_fixture_status(ctx)).collect::<Vec<_>>()})
+    }
+
+    pub fn take_close_action_for(&mut self, surface: ChatSurface) -> Option<CloseDraft> {
+        self.with_surface(surface, |model| model.take_close_action())
+    }
+    pub fn take_close_action(&mut self) -> Option<CloseDraft> {
+        self.states
+            .iter_mut()
+            .find(|state| Some(state.ui.source()) == self.selected)?
+            .ui
+            .with_surface(self.surface, ChatUi::take_close_action)
+    }
+    pub fn queued_close(&mut self, draft: CloseDraft, ticket: u64) {
+        if let Some(state) = self.states.iter_mut().find(|state| state.ui.source() == draft.capture.key.source) {
+            state.ui.queued_close(draft, ticket);
+        }
+    }
+    pub fn close_queue_failed(&mut self, draft: CloseDraft, error: HostError) {
+        if let Some(state) = self.states.iter_mut().find(|state| state.ui.source() == draft.capture.key.source) {
+            state.ui.close_queue_failed(draft, error);
+        }
     }
 
     pub fn take_read_action(&mut self) -> Option<ReadDraft> {

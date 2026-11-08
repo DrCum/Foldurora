@@ -5,7 +5,7 @@
 //! applies a source transition. Parent flushes old delivered edits before it
 //! changes bindings; every canonical chat pass names its exact ChatSurface.
 
-use super::chat_ui::{self, InputMode, ReadDraft, SendDraft};
+use super::chat_ui::{self, CloseDraft, InputMode, ReadDraft, SendDraft};
 use super::monitor_model::{Binding, Direction, MonitorSet, Navigation, Options, Ticket, View};
 use super::private_image::PrivateTextureView;
 use super::shared_chat::SharedChat;
@@ -105,6 +105,7 @@ pub(super) enum Action {
     },
     Send(SendDraft),
     Read(ReadDraft),
+    Close(CloseDraft),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -609,6 +610,7 @@ impl MonitorUi {
                 .frame(widgets::overlay_frame(ui.ctx(), p))
                 .show(ui, |_| {});
         }
+        let close = chat.take_close_action_for(view.surface());
         let read = chat.take_read_action_for(view.surface()); // Never leave a latent UI Read behind a disabled body.
         if self.options_open {
             self.options(ui, p, view, binding, state, model, live, &mut command);
@@ -643,6 +645,9 @@ impl MonitorUi {
             self.gesture = None;
         }
         if !passive && mode == InputMode::Live {
+            if let Some(close) = close {
+                return Some(Action::Close(close));
+            }
             if let Some(send) = send {
                 return Some(Action::Send(send));
             }

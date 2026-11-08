@@ -99,6 +99,7 @@ pub(super) fn host() -> HostSnapshot {
             lines: Vec::new(),
             receipts: Vec::new(),
             read_operations: Vec::new(),
+            closes: Default::default(),
             gap: false,
         }));
     }
@@ -207,8 +208,12 @@ impl Frames {
         let mut output = context.run_ui(raw, |ui| {
             let result = if index == 0 {
                 let send = self.chat.show_for(Self::surface(index), ui, &palette, mode);
+                let close = self.chat.take_close_action_for(Self::surface(index));
                 let read = self.chat.take_read_action_for(Self::surface(index));
-                send.map(Action::Send).or_else(|| read.map(Action::Read))
+                close
+                    .map(Action::Close)
+                    .or_else(|| send.map(Action::Send))
+                    .or_else(|| read.map(Action::Read))
             } else {
                 let view = Self::view(index);
                 self.bodies[index - 1].show(
@@ -1363,4 +1368,46 @@ fn monitor_body_ime_terminal_retires_only_owned_command_focus_before_later_confi
             fresh_exchange(&mut f);
         }
     }
+}
+
+#[test]
+fn monitor_body_close_uses_canonical_source_and_keeps_shared_draft_until_newer_incoming() {
+    let mut f = Frames::new([680.0, 680.0], 1.0);
+    Arc::make_mut(&mut f.host.chat[0]).closes.targets.insert(direct(), 22);
+    f.chat.sync(&f.host, false);
+    let key = ChatKey {
+        source: source(1),
+        conversation: direct(),
+    };
+    for surface in [chat_ui::ChatSurface::Shared, View::Fixed1.surface(), View::Cycling.surface()] {
+        assert!(f.chat.select_key_for(surface, key));
+    }
+    f.settle(1);
+    f.type_text(1, "Monitor close retains this draft");
+    let Some(Action::Close(close)) = f.click(1, Id::unique("host_chat_close_rect")) else {
+        panic!("real monitor Close button must dispatch its exact capture");
+    };
+    assert_eq!(close.capture.key, key);
+    assert_eq!(close.capture.stream, 22);
+    f.chat.queued_close(close, 70);
+    let chat = Arc::make_mut(&mut f.host.chat[0]);
+    chat.closes.hidden.insert(direct());
+    chat.closes.operations.push(crate::session_host::chat_broker::CloseOperation {
+        request: close.request(70),
+        status: crate::session_host::chat_broker::CloseStatus::Pending,
+    });
+    for index in 0..3 {
+        f.settle(index);
+        assert!(!f.chat.select_key_for(Frames::surface(index), key));
+        assert!(f.chat.take_close_action_for(Frames::surface(index)).is_none());
+    }
+    let chat = Arc::make_mut(&mut f.host.chat[0]);
+    chat.closes.hidden.clear(); // broker supplied a genuinely newer incoming row
+    chat.closes.operations[0].status = crate::session_host::chat_broker::CloseStatus::Completed(
+        aurora_session::chat::CloseOutcome::Closed(aurora_session::chat::NativeIncoming { stream: 22, serial: 2 }),
+    );
+    f.chat.sync(&f.host, false);
+    assert!(f.chat.select_key_for(chat_ui::ChatSurface::Shared, key));
+    f.focus(0);
+    assert_eq!(f.send(0).text.as_str(), "Monitor close retains this draft");
 }

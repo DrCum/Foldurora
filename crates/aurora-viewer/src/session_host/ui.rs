@@ -1568,6 +1568,7 @@ mod tests {
             receipts: Vec::new(),
             reads: Default::default(),
             read_operations: Vec::new(),
+            closes: Default::default(),
             gap: false,
         };
         snapshot.chat.push(Arc::new(chat.clone()));

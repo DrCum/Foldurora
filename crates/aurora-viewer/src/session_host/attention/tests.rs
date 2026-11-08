@@ -86,6 +86,7 @@ fn fixture(workers: usize, conversations: usize) -> HostSnapshot {
             receipts: Vec::new(),
             reads,
             read_operations: Vec::new(),
+            closes: Default::default(),
             gap: false,
         }));
     }
@@ -604,4 +605,24 @@ fn attention_stop_and_explicit_clear_purge_without_reusing_old_tickets() {
     model.sync(&host, &Preferences::default());
     assert!(model.open_chat(ticket).is_none());
     assert!(model.selected().is_none());
+}
+
+#[test]
+fn attention_closed_conversation_is_hidden_without_changing_unread_or_other_accounts() {
+    let mut host = fixture(2, 2);
+    let mut model = Attention::default();
+    model.sync(&host, &Preferences::default());
+    assert_eq!(model.rows().len(), 4);
+    let old = model.capture(key(1, 1)).unwrap();
+    let original_unread = chat(&mut host, 0).reads.clone();
+    chat(&mut host, 0).closes.hidden.insert(direct(1));
+    model.sync(&host, &Preferences::default());
+    assert_eq!(model.rows().len(), 3);
+    assert!(model.capture(key(1, 1)).is_none());
+    assert!(model.open_chat(old).is_none(), "old Attention proof cannot reopen a closed row");
+    assert!(model.capture(key(2, 1)).is_some(), "another account's same peer is unaffected");
+    assert_eq!(chat(&mut host, 0).reads, original_unread);
+    chat(&mut host, 0).closes.hidden.clear();
+    model.sync(&host, &Preferences::default());
+    assert_eq!(model.rows().len(), 4);
 }

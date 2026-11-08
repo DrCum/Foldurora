@@ -556,9 +556,24 @@ optional session activity; neither absent value implies zero. WorkerChat owns a
 bounded exact-request Close ledger: original ingress age gates capture, while
 read-only lookup returns the immutable result without recapture. The App fence
 rechecks current native stream, source and ordinary privacy. It never leaves a
-native session or resets unread. The canonical host hide/draft/query-once owner,
-source/stream retirement and Uncertain presentation remain a later atom; current
-Peer rejects Close receipts and no UI intent/button exposes the staged action.
+native session or resets unread. `session_host/chat_broker/close.rs` owns bounded
+source-qualified hide state and immutable operation history. The Shared Chat and
+monitor Close buttons capture the exact native policy/stream; queued admission
+hides the row across their canonical source-owned views and Attention without
+removing its draft, Undo or native unread. A confirmed fence reopens only for a
+strictly newer eligible incoming serial in that same stream, including arrivals
+observed before its delayed acknowledgment. Catalogues, export/read cursors,
+own echoes, unknown activity and a replacement stream cannot supply that proof.
+
+Lost confirmation permits one read-authorized lookup of the original request;
+Close is never retried or recaptured. Changed policy can authorize immutable
+lookup without replacing its original policy/stream. Recovery has a bounded
+pending gate; an unresolved result stays visibly Uncertain and hidden without
+blocking every other conversation. Explicit rejection restores visibility.
+Source replacement retires all state, and ordinary authority loss still purges
+private drafts, Undo and metadata. Nearby cannot be closed. Group/conference,
+Friends/New IM and their explicit native-open acknowledgments remain separate
+features. Chat packet V4 is required on both ends; the control protocol stays V1.
 
 `app/host_chat_bridge.rs` drives `session_host/chat.rs` and `app/host_chat.rs` on
 the owning App thread, including standby CPU ticks. The literal Nearby/existing

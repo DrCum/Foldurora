@@ -13,6 +13,10 @@ use aurora_session::chat::{MAX_READ_RECEIPTS, MarkReadRequest, ReadMetadata, Rea
 use aurora_session::chat::{MAX_REVIEW_RECEIPTS, ReviewCapture, ReviewConversationRequest, ReviewReceiptQuery};
 use std::collections::{BTreeMap, VecDeque};
 
+mod close;
+use close::CloseBook;
+pub(crate) use close::{CloseOperation, CloseSnapshot, CloseStatus};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ReadStatus {
     Pending,
@@ -60,22 +64,24 @@ pub(crate) struct HostChatSnapshot {
     pub receipts: Vec<SendReceipt>,
     pub reads: BTreeMap<Conversation, ReadMetadata>,
     pub read_operations: Vec<ReadOperation>,
+    pub closes: CloseSnapshot,
     pub gap: bool,
 }
 
 impl HostChatSnapshot {
     pub fn permits_review(&self, target: ReviewCapture) -> bool {
-        review::current_target(
-            target,
-            Some(self.source),
-            self.live,
-            self.authenticated,
-            self.conversations
-                .iter()
-                .find(|info| info.policy.key == target.key)
-                .map(|info| info.policy),
-            self.reads.get(&target.key.conversation).copied(),
-        )
+        !self.closes.hidden.contains(&target.key.conversation)
+            && review::current_target(
+                target,
+                Some(self.source),
+                self.live,
+                self.authenticated,
+                self.conversations
+                    .iter()
+                    .find(|info| info.policy.key == target.key)
+                    .map(|info| info.policy),
+                self.reads.get(&target.key.conversation).copied(),
+            )
     }
 }
 
@@ -97,6 +103,7 @@ pub(crate) struct Peer {
     reads: BTreeMap<Conversation, ReadMetadata>,
     read_operations: VecDeque<ReadOperation>,
     read_pending: Option<PendingRead>,
+    closes: CloseBook,
     review_operations: VecDeque<ReviewRecord>,
     review_pending: Option<PendingReview>,
     review_high_water: u64,
@@ -124,6 +131,7 @@ impl Peer {
             reads: BTreeMap::new(),
             read_operations: VecDeque::new(),
             read_pending: None,
+            closes: CloseBook::default(),
             review_operations: VecDeque::new(),
             review_pending: None,
             review_high_water: 0,
@@ -185,6 +193,7 @@ impl Peer {
             self.source = source;
             self.history = source.and_then(|source| ChatHistory::new(source).ok());
             self.conversations.clear();
+            self.closes = CloseBook::default();
             self.receipts.clear();
             self.read_operations.clear();
             self.read_pending = None;
@@ -239,6 +248,7 @@ impl Peer {
             *valid = false;
         }
         self.uncertain();
+        self.closes.revoke();
         self.reads.clear();
         if let Some(pending) = &self.read_pending {
             let request = pending.request;
@@ -268,7 +278,8 @@ impl Peer {
             self.publish();
             return Err(HostError::Busy);
         }
-        let allowed = self.live
+        let allowed = !self.closes.hidden(key.conversation)
+            && self.live
             && self.io.is_some()
             && self.source == Some(key.source)
             && self.conversations.get(&key.conversation).is_some_and(|info| {
@@ -369,7 +380,8 @@ impl Peer {
         if self.read_pending.is_some() {
             return Err(HostError::Busy);
         }
-        let allowed = self.live
+        let allowed = !self.closes.hidden(request.key.conversation)
+            && self.live
             && self.io.is_some()
             && self.source == Some(request.key.source)
             && self.conversations.get(&request.key.conversation).is_some_and(|info| {
@@ -444,14 +456,15 @@ impl Peer {
     }
 
     pub fn review_allowed(&self, target: ReviewCapture) -> bool {
-        review::current_target(
-            target,
-            self.source,
-            self.live,
-            self.io.is_some(),
-            self.conversations.get(&target.key.conversation).map(|info| info.policy),
-            self.reads.get(&target.key.conversation).copied(),
-        )
+        !self.closes.hidden(target.key.conversation)
+            && review::current_target(
+                target,
+                self.source,
+                self.live,
+                self.io.is_some(),
+                self.conversations.get(&target.key.conversation).map(|info| info.policy),
+                self.reads.get(&target.key.conversation).copied(),
+            )
     }
 
     pub fn watch_review(&mut self, target: Option<ReviewCapture>) {
@@ -613,6 +626,7 @@ impl Peer {
         }
         changed |= self.poll_read_receipt(now);
         self.poll_review_receipt(now);
+        self.poll_close_receipt(now);
         if changed {
             self.publish();
         }
@@ -632,6 +646,7 @@ impl Peer {
             .is_none_or(|old| old.policy != info.policy);
         if changed || !info.policy.lease_current || !info.policy.ready || !info.policy.can_read {
             self.reads.remove(&info.policy.key.conversation);
+            self.closes.policy_changed(info.policy.key.conversation);
         }
         self.conversations.insert(info.policy.key.conversation, info.clone());
         Ok(())
@@ -656,6 +671,7 @@ impl Peer {
                 for row in rows {
                     let info = row.info(packet.source);
                     self.conversation(&info)?;
+                    self.closes.row(row);
                     if let Some(read) = row.read {
                         self.reads.insert(row.conversation, read);
                     } else {
@@ -723,10 +739,7 @@ impl Peer {
                     self.review_pending = None;
                 }
             }
-            // The canonical hide/query-once owner is the next reviewed atom.
-            // No current host intent can submit a Close or adopt an unsolicited
-            // receipt as permission to hide, reopen or clear another operation.
-            ChatEvent::CloseReceipt(_) => return Err(ChatError::UnknownReceipt),
+            ChatEvent::CloseReceipt(reply) => self.closes.receipt(*reply)?,
             ChatEvent::Line(line) => {
                 let policy = self.conversations.get(&line.key.conversation).ok_or(ChatError::Unavailable)?.policy;
                 self.history.as_mut().ok_or(ChatError::Unavailable)?.push(line.clone(), policy)?;
@@ -761,11 +774,13 @@ impl Peer {
                     self.history = Some(history);
                     self.conversations.clear();
                     self.reads.clear();
+                    self.closes.revoke();
                     self.after_event = *through_event;
                     self.gap = true;
                 }
             }
             ChatEvent::Unsupported => {
+                self.closes.revoke();
                 self.conversations.clear();
                 self.reads.clear();
                 self.history = ChatHistory::new(packet.source).ok();
@@ -818,6 +833,11 @@ impl Peer {
                 BTreeMap::new()
             },
             read_operations: self.read_operations.iter().copied().collect(),
+            closes: if self.live && authenticated {
+                self.closes.snapshot()
+            } else {
+                CloseSnapshot::default()
+            },
             gap: self.gap || self.history.as_ref().is_some_and(ChatHistory::has_gap),
         };
         if self.snapshot.as_ref().is_none_or(|previous| **previous != next) {

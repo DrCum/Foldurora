@@ -237,7 +237,8 @@ fn review_dtos_are_closed_body_free_and_maximum_full_id_serialization_is_bounded
 
 #[test]
 fn review_v3_codec_roundtrips_closed_variants_and_rejects_old_versions() {
-    assert_eq!(VERSION, 3);
+    // Review retains its V3 payload; the enclosing chat lane now carries Close V4.
+    assert_eq!(VERSION, 4);
     assert_eq!(PROTOCOL_VERSION, 1);
     let operation = request(1);
     for message in [
@@ -261,7 +262,7 @@ fn review_v3_codec_roundtrips_closed_variants_and_rejects_old_versions() {
         };
         let encoded = encode(&packet).unwrap();
         assert_eq!(decode(&encoded), Ok(packet.clone()));
-        for version in [1, 2, 4] {
+        for version in [1, 2, 3, 5] {
             let unsupported = ChatPacket { version, ..packet.clone() };
             assert_eq!(encode(&unsupported), Err(ChatError::Version));
             assert_eq!(decode(&serde_json::to_vec(&unsupported).unwrap()), Err(ChatError::Version));

@@ -2,10 +2,11 @@
 //! borrow selection, reading and input state without cloning composer authority.
 //! The active world is absent; changing a view never retargets captured actions.
 
-use super::chat_broker::{ReadOperation, ReadStatus};
+use super::chat_broker::{CloseStatus, ReadOperation, ReadStatus};
 use super::transport::{HostChatSnapshot, HostError};
 use crate::theme::Palette;
 use crate::ui::widgets::{self, ActionKind};
+use aurora_session::chat::CloseRequest;
 use aurora_session::chat::{
     ChatKey, ChatSource, ChatText, Conversation, ConversationInfo, MAX_CONVERSATIONS, MAX_RECEIPTS, MAX_RETAINED_LINES, MAX_TEXT_BYTES,
     NativeChatPolicy, SendOutcome, SendReceipt,
@@ -36,7 +37,18 @@ impl ReadDraft {
     }
 }
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct CloseDraft {
+    pub capture: CloseRequest,
+    instance: u64,
+}
+impl CloseDraft {
+    pub fn request(self, request: u64) -> CloseRequest {
+        CloseRequest { request, ..self.capture }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct SendDraft {
@@ -157,6 +169,8 @@ pub(super) struct ChatUi {
     catalogue: Vec<ConversationInfo>,
     read_operation: Option<ReadOperation>,
     read_busy: bool,
+    hidden: BTreeSet<Conversation>,
+    pending_close: Option<CloseRequest>,
 }
 
 pub(super) fn eligible(snapshot: &HostChatSnapshot) -> bool {
@@ -206,6 +220,8 @@ impl ChatUi {
             catalogue: Vec::new(),
             read_operation: None,
             read_busy: false,
+            hidden: BTreeSet::new(),
+            pending_close: None,
         }
     }
 
@@ -263,6 +279,7 @@ impl ChatUi {
         if self.view.exhausted
             || snapshot.source != self.source
             || !eligible(snapshot)
+            || self.hidden.contains(&conversation)
             || !supported(conversation)
             || !native_policy(snapshot, key).is_some_and(|policy| policy.can_read)
         {
@@ -298,6 +315,14 @@ impl ChatUi {
     /// authority purges text immediately, rather than waiting for a repaint.
     pub fn sync(&mut self, snapshot: Option<&HostChatSnapshot>) {
         let current = snapshot.filter(|snapshot| snapshot.source == self.source && eligible(snapshot));
+        self.hidden = current.map_or_else(BTreeSet::new, |snapshot| snapshot.closes.hidden.clone());
+        if let Some(request) = self.pending_close {
+            if current.is_none_or(|snapshot| snapshot.closes.operations.iter().any(|operation| operation.request == request)) {
+                self.pending_close = None;
+            } else {
+                self.hidden.insert(request.key.conversation);
+            }
+        }
         let catalogue = current.map_or_else(Vec::new, |snapshot| {
             snapshot
                 .conversations
@@ -326,8 +351,11 @@ impl ChatUi {
         self.sync_operations(current);
         for surface in ChatSurface::ALL {
             self.with_surface(surface, |model| {
-                if catalogue_changed {
+                if catalogue_changed || model.hidden.contains(&model.view.conversation) {
                     model.cancel_gesture();
+                }
+                if model.hidden.contains(&model.view.conversation) {
+                    model.select(Conversation::Nearby);
                 }
                 model.sync_view(current);
             });
@@ -448,6 +476,7 @@ impl ChatUi {
         self.cancel_compositions(self.surface);
         self.retire_view();
         self.view.read_action = None;
+        self.view.close_action = None;
         self.view.interaction = self.view.interaction.saturating_add(1);
         self.view.changed = true;
         self.view.ime_composing = false;
@@ -556,7 +585,7 @@ impl ChatUi {
     }
 
     fn select(&mut self, conversation: Conversation) {
-        if self.view.conversation == conversation || !supported(conversation) {
+        if self.view.conversation == conversation || self.hidden.contains(&conversation) || !supported(conversation) {
             return;
         }
         self.view.policy = None;
@@ -623,6 +652,34 @@ impl ChatUi {
         self.view.read_metadata.is_some()
     }
 
+    pub fn take_close_action(&mut self) -> Option<CloseDraft> {
+        self.view.close_action.take()
+    }
+
+    pub fn queued_close(&mut self, draft: CloseDraft, ticket: u64) {
+        if draft.capture.key.source != self.source || draft.instance != self.instance || ticket == 0 {
+            return;
+        }
+        let request = draft.request(ticket);
+        self.pending_close = Some(request);
+        self.hidden.insert(request.key.conversation);
+        for surface in ChatSurface::ALL {
+            self.with_surface(surface, |model| {
+                if model.view.conversation == request.key.conversation {
+                    model.cancel_gesture();
+                    model.select(Conversation::Nearby);
+                    model.view.policy = None;
+                }
+            });
+        }
+    }
+
+    pub fn close_queue_failed(&mut self, draft: CloseDraft, error: HostError) {
+        if draft.capture.key.source == self.source && draft.instance == self.instance {
+            self.warning = Some(Warning::Queue(error));
+        }
+    }
+
     pub fn take_read_action(&mut self) -> Option<ReadDraft> {
         self.view.read_action.take()
     }
@@ -687,6 +744,7 @@ impl ChatUi {
         selector: impl FnOnce(&mut egui::Ui) -> bool,
     ) -> Option<SendDraft> {
         self.view.read_action = None;
+        self.view.close_action = None;
         self.sync(snapshot);
         let stale_owner = self.view.owner_generation != 0
             && (self.view.owner_generation != self.edit_generation || self.edit_owner != Some(self.surface));
@@ -989,6 +1047,7 @@ impl ChatUi {
                     if let Some(snapshot) = current {
                         for info in snapshot.conversations.iter().take(MAX_CONVERSATIONS).filter(|info| {
                             info.policy.key.source == self.source
+                                && !self.hidden.contains(&info.policy.key.conversation)
                                 && supported(info.policy.key.conversation)
                                 && info.policy.validate().is_ok()
                                 && info.policy.lease_current
@@ -1018,6 +1077,62 @@ impl ChatUi {
             let _ = combo;
             if mode == InputMode::Live {
                 self.select(picked);
+            }
+            if let (Some(snapshot), Some(policy)) = (current, self.view.policy)
+                && let Some(stream) = snapshot.closes.targets.get(&policy.key.conversation).copied()
+            {
+                let enabled = !stale_owner
+                    && self.pending_close.is_none()
+                    && !self.read_busy
+                    && !self.receipt.is_some_and(|receipt| receipt.outcome == SendOutcome::Pending)
+                    && policy.can_read
+                    && matches!(policy.key.conversation, Conversation::Direct(_))
+                    && matches!(mode, InputMode::Live | InputMode::Editing)
+                    && focused
+                    && !focus_changed
+                    && !navigating
+                    && !source_changed
+                    && !popup_open
+                    && !self.view.ime_composing;
+                let close = ui
+                    .push_id((self.editor_id(), self.view.interaction, "close", stream), |ui| {
+                        widgets::action_button_if(
+                            ui,
+                            p,
+                            "",
+                            aurora_i18n::tr!("host-chat-close"),
+                            ActionKind::Flat,
+                            vec2(0.0, 30.0),
+                            enabled,
+                        )
+                    })
+                    .inner
+                    .on_hover_text(aurora_i18n::tr!("host-chat-close-help"));
+                #[cfg(test)]
+                ui.ctx()
+                    .data_mut(|data| data.insert_temp(Id::unique("host_chat_close_rect"), close.rect));
+                if close.clicked() && mode == InputMode::Live && action.is_none() {
+                    self.view.close_action = Some(CloseDraft {
+                        capture: CloseRequest {
+                            key: policy.key,
+                            request: 0,
+                            policy_revision: policy.revision,
+                            stream,
+                        },
+                        instance: self.instance,
+                    });
+                }
+            }
+            if let Some(operation) = current.and_then(|snapshot| snapshot.closes.operations.last()) {
+                let message = match operation.status {
+                    CloseStatus::Pending => Some(aurora_i18n::tr!("host-chat-close-pending")),
+                    CloseStatus::Uncertain => Some(aurora_i18n::tr!("host-chat-close-uncertain")),
+                    CloseStatus::Completed(aurora_session::chat::CloseOutcome::Closed(_)) => None,
+                    CloseStatus::Completed(_) | CloseStatus::Unavailable => Some(aurora_i18n::tr!("host-chat-close-failed")),
+                };
+                if let Some(message) = message {
+                    ui.label(RichText::new(message).small().color(p.muted));
+                }
             }
             if let (Some(metadata), Some(policy)) = (self.view.read_metadata, self.view.policy) {
                 ui.horizontal_wrapped(|ui| {
@@ -1238,6 +1353,7 @@ mod tests {
             receipts: Vec::new(),
             reads: Default::default(),
             read_operations: Vec::new(),
+            closes: Default::default(),
             gap: false,
         }
     }
@@ -2105,4 +2221,5 @@ mod tests {
         frames.ui.sync(None);
         assert!(frames.ui.view.read_metadata.is_none() && frames.ui.read_operation.is_none());
     }
+    mod close_tests;
 }

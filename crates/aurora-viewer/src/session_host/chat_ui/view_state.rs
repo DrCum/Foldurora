@@ -2,7 +2,7 @@
 //! pinned Legacy monitor model (abbe3cb0ca66): selection and reading belong to
 //! a surface; text, Undo and operation receipts belong to the exact source.
 
-use super::{Conversation, NativeChatPolicy, ReadDraft, ReadMetadata};
+use super::{CloseDraft, Conversation, NativeChatPolicy, ReadDraft, ReadMetadata};
 use std::collections::BTreeMap;
 
 /// The complete bounded set: Shared Chat, four fixed monitors and one cycler.
@@ -56,6 +56,7 @@ pub(super) struct ChatViewState {
     pub ime_composing: bool,
     pub read_metadata: Option<ReadMetadata>,
     pub read_action: Option<ReadDraft>,
+    pub close_action: Option<CloseDraft>,
     pub reading: BTreeMap<Conversation, ReadingState>,
     pub incarnation: u64,
     pub owner_generation: u64,
@@ -72,6 +73,7 @@ impl Default for ChatViewState {
             ime_composing: false,
             read_metadata: None,
             read_action: None,
+            close_action: None,
             reading: BTreeMap::new(),
             incarnation: 0,
             owner_generation: 0,

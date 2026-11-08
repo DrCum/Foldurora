@@ -13575,3 +13575,9 @@ inventory-archive-show-original = 非表示の場所を表示するには、表�
 inventory-archive-offline-readonly = オフラインの表示設定（読み取り専用）
 inventory-archive-load-failed = アーカイブ設定を読み込めませんでした。保存済みデータは保持されています。内容を表示するには「アーカイブしたフォルダを含める」を使用してください。
 inventory-archive-readonly = アーカイブ設定は読み取り専用です
+
+host-chat-close = 会話を閉じる
+host-chat-close-help = 下書きを保持したまま、共有チャットとモニターでこの会話を非表示にします。新しい受信メッセージで再表示されます。ビューアー側の会話と未読数は変更しません。
+host-chat-close-pending = 会話を閉じています…
+host-chat-close-uncertain = 会話を閉じたことを確認できませんでした。元の確認結果を取得するか、このセッションが終了するまで非表示のままです。
+host-chat-close-failed = 会話を閉じることができませんでした。キャラクターが利用可能になってから、もう一度お試しください。

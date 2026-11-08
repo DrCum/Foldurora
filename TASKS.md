@@ -652,6 +652,22 @@
   separately above. Windows/native/human acceptance remains pending for the
   new candidate; frozen `0e40e48f` predates the guard.
 
+- 🔧 Shared conversation Close host integration (2026-11-08; no issue):
+  resumed preserved `da57c357` on a separate branch from frozen `48042c6b`.
+  Actual Shared Chat and monitor controls capture exact source/policy/stream;
+  canonical host hiding retains drafts/Undo and suppresses Attention without
+  native IM leave, send or unread mutation. Only newer eligible native incoming
+  beyond the original acknowledgment reopens a row. Exact bounded receipts,
+  one immutable recovery query, Uncertain presentation and bounded pending
+  recovery preserve source/privacy retirement and reject stale gestures.
+  EN/FR/JA text is aligned. Source review found and cleared the changed-policy
+  recovery blocker. Focused workspace `close` regressions: **206 passed / 0
+  failed / 0 ignored**, including all 29 newly joined/authored Close cases.
+  The Review V3 payload test now checks its V4 chat envelope and rejects old
+  envelopes; the Undo regression creates a stable pre-close checkpoint.
+  Full frozen suite, qualified Linux lint and Windows/native/human acceptance
+  remain pending. No new public source upload is approved.
+
 - 🔧 Shared conversation Close producer/fence slice (2026-11-08; no issue):
   source-only from frozen `072bef3a`, following Folderstorm `abbe3cb0` native
   CloseChat fence and host newer-incoming rules. Chat V4 adds a bounded exact

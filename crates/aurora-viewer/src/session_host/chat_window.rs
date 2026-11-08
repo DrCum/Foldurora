@@ -209,6 +209,14 @@ impl ChatWindow {
         let delay = self.surface.present(event_loop, &context, output, palette.panel)?;
         self.last_frame = Some(Instant::now());
         self.repaint = Instant::now().checked_add(delay);
+        if let Some(draft) = model.take_close_action() {
+            match controller.close_chat(draft.request(0)) {
+                Ok(ticket) => model.queued_close(draft, ticket),
+                Err(error) => model.close_queue_failed(draft, error),
+            }
+            self.repaint = Some(Instant::now());
+            return Ok(());
+        }
         if let Some(draft) = model.take_read_action() {
             match controller.mark_chat_read(draft.request(0)) {
                 Ok(request) => model.queued_read(draft, request),

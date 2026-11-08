@@ -100,6 +100,7 @@ pub(super) fn host() -> HostSnapshot {
             lines: Vec::new(),
             receipts: Vec::new(),
             read_operations: Vec::new(),
+            closes: Default::default(),
             gap: false,
         }));
     }

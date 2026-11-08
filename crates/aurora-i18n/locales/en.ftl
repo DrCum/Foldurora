@@ -13614,3 +13614,9 @@ inventory-archive-show-original = Review Visibility → Include archived folders
 inventory-archive-offline-readonly = Offline visibility — read-only
 inventory-archive-load-failed = Archive settings could not be loaded. Saved data was preserved. Use Include archived folders to view contents.
 inventory-archive-readonly = Archive settings are read-only
+
+host-chat-close = Close conversation
+host-chat-close-help = Hide this conversation in Shared Chat and monitors, keeping its draft. A newer incoming message can reopen it. Native chat and unread stay unchanged.
+host-chat-close-pending = Closing conversation…
+host-chat-close-uncertain = Close could not be confirmed. The conversation stays hidden until its original confirmation is recovered or this session ends.
+host-chat-close-failed = The conversation could not be closed. Try again when the character is available.

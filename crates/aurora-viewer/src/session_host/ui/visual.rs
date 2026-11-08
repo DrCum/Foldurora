@@ -94,6 +94,7 @@ fn fixture_snapshot() -> HostSnapshot {
             receipts: Vec::new(),
             reads: Default::default(),
             read_operations: Vec::new(),
+            closes: Default::default(),
             gap: false,
         }));
     }
