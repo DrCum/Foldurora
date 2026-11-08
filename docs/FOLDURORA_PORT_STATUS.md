@@ -11,10 +11,10 @@ and the backlog supersede its implementation inventory.
 
 ## Current candidate: full checks running
 
-Exact source [`d9f50d0f7d567686b16e3e73601315ab9ba6f350`](https://github.com/DrCum/Foldurora/commit/d9f50d0f7d567686b16e3e73601315ab9ba6f350),
-tree `e259b00733c520e0cc4899161b3d0ccaeb209da5`, is frozen on
+Exact source [`6e51ba4c7cd1959fa4e29a8fa50691e54ce1a563`](https://github.com/DrCum/Foldurora/commit/6e51ba4c7cd1959fa4e29a8fa50691e54ce1a563),
+tree `633116df671c2d5689e853348a8c3812e1d3bdf5`, is frozen on
 `feat/monitor-runtime-integration`. Linux formatting and qualified Clippy passed.
-The full Linux workspace suite and [Windows run 42433785594](https://github.com/DrCum/Foldurora/actions/runs/42433785594),
+The full Linux workspace suite and [Windows run 42436902578](https://github.com/DrCum/Foldurora/actions/runs/42436902578),
 attempt 1, are running. No final counts, new package or native acceptance are
 established yet. The earlier negative checkpoints below remain preserved.
 
@@ -26,11 +26,29 @@ Subsequent egui API and mechanical lint corrections passed independent review.
 Archive visibility, profile copying, fixed-slot quick actions and true live
 inactive rendering remain separate unfinished work.
 
-The exact source inventory requires 761 Windows / 759 applicable Linux names.
-Conditional totals are Windows 8,549/0/55 and Linux 8,580/1/57 across 33 summaries,
+The exact source inventory requires 763 Windows / 761 applicable Linux names.
+Conditional totals are Windows 8,551/0/55 and Linux 8,582/1/57 across 33 summaries,
 with the inherited terrain case included in the Linux expectation. These are
 **source expectations, not measured results**. Inventory SHA-256:
-`839e1a7285624f6beed632c931486555d3d48242032ed6629de407ea2bcea5d2`.
+`807ac42f9d62521608b997671bd0430b0d87469d778ffa4d4514c3c257988d6e`.
+
+The preceding exact `d9f50d0f` completed Linux with **8,572 passed, nine failed,
+57 ignored**, and Windows with **8,541 passed, eight failed, 55 ignored**, each
+across 33 summaries. The same five Board, one Favorites and two Folder Jump
+failures occurred on both platforms; all eight also failed individually on the
+frozen Linux executable. Linux additionally retained the inherited terrain
+failure. Windows parsing, formatting, strict Clippy, build and packaging passed;
+tests and the final gate failed. Raw and packaged logs match, with all 761
+required Windows names appearing once (753 passing).
+
+[Artifact 13599970893](https://github.com/DrCum/Foldurora/actions/runs/42433785594/artifacts/13599970893)
+is a verified **negative-checkpoint package**, not the next acceptance
+recommendation. Receipt SHA-256:
+`7877e35468c17d87d0bc9696c82c76e2768c6a757cd756af0d3c7764ce62fbf8`.
+The current candidate changes only three test files and documentation relative
+to d9: actual focus/modal setup, visible Favorite ordering and two new Board
+regressions. All production bytes and prior assertions are preserved. These
+fixture corrections are source-reviewed; their execution is still pending.
 
 ## Preserved negative integration checkpoint
 
@@ -58,8 +76,8 @@ Source corrections for Board setup and final-control validation, Favorites menu
 ownership and location privacy, the Poser fixture and Windows lint issues have
 independent reviews. They are being combined with Folder Jump, actual-login
 metadata origin and locale-independent mouse binding identity. A subsequent
-Linux compilation exposed Folder Jump calls against older egui APIs; that
-correction is in progress. These source reviews are not passing execution results
+Linux compilation exposed Folder Jump calls against older egui APIs; those
+corrections passed current compilation. These source reviews are not passing execution results
 or a new Windows package. The all-green Attention Review package below remains
 the latest package with passing automated checks.
 
