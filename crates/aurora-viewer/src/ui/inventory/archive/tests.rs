@@ -538,18 +538,16 @@ impl Frames {
                 ctx.memory(|memory| memory.areas().is_visible(&layer)),
                 ctx.layer_id_at(position)
             );
-            if let Some(proposal) = proposals.last() {
+            if let Some(original) = before {
                 let rect = egui::AreaState::load(ctx, layer.id).unwrap().rect();
-                assert!(rect.contains(position) && rect.intersect(proposal.control.rect).is_positive());
+                assert!(rect.contains(position) && rect.intersect(original.rect).is_positive());
                 assert!(
                     widgets
                         .iter()
                         .any(|widget| widget.enabled && widget.visible && widget.interact_rect.contains(position))
                 );
                 let order = ctx.memory(|memory| memory.layer_ids().take(32).collect::<Vec<_>>());
-                assert!(
-                    order.iter().position(|id| *id == layer).unwrap() > order.iter().position(|id| *id == proposal.control.layer).unwrap()
-                );
+                assert!(order.iter().position(|id| *id == layer).unwrap() > order.iter().position(|id| *id == original.layer).unwrap());
                 assert_eq!(
                     ctx.layer_id_at(position),
                     Some(layer),
