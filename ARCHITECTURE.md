@@ -37,6 +37,18 @@ transform translations, positive scale/inverse and global finite geometry are
 checked; this modal supports identity transforms only. Later overlapping visible
 widgets in the same layer or visible Areas above it revoke every modality,
 including visual covers that do not themselves take input.
+Pinned egui Frame::begin reserves the background paint slot before contents,
+while Frame::end registers its enclosing hover allocation afterwards. Each
+control captures the actual enclosing Frame UiStack marker/configuration and
+at most16 checked parent WidgetRects up to its actual Modal or source Menu Area.
+After the container completes, the unique sibling allocation must exactly match
+the finalized content rect plus Frame margins/stroke, pinned round_ui geometry,
+parent clipping, layer and hover-only metadata. Its exact ID and parent-chain
+witness remain immutable through press, release and whole-run final redemption.
+Only this verified structural allocation is excluded from the later-cover scan;
+missing/ambiguous/changed structure and all other real visual covers still fail
+closed. This correction preserves the original69 Profile cases and adds two
+authored UNRUN cases; Root's earlier executed failures remain recorded.
 Native modifier/AltGraph transitions revoke copy input across raw batches even
 after Alt-down/up ABA; actual release/final modifiers must remain plain. This
 does not reset the unchanged native EnterRelease helper or another editor's state.

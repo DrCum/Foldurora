@@ -54,6 +54,10 @@ enum Late {
     VisualLayerCover,
     FocusWidget,
     Transform(egui::emath::TSTransform),
+    StructuralFrameMove,
+    StructuralFrameSense,
+    AmbiguousFrame,
+    SameSizeVisualCover,
 }
 struct Frames {
     ctx: egui::Context,
@@ -118,7 +122,11 @@ impl Frames {
                 | Late::VisualWidgetCover
                 | Late::VisualLayerCover
                 | Late::FocusWidget
-                | Late::Transform(_) => {
+                | Late::Transform(_)
+                | Late::StructuralFrameMove
+                | Late::StructuralFrameSense
+                | Late::AmbiguousFrame
+                | Late::SameSizeVisualCover => {
                     if let Some(completed) = &self.model.completed {
                         late_widget(ui, completed.control, late);
                     }
@@ -184,6 +192,34 @@ impl Frames {
 }
 
 fn late_widget(ui: &mut egui::Ui, control: Control, change: Late) {
+    if matches!(change, Late::AmbiguousFrame) {
+        let frame = control.frame.unwrap();
+        let original = frame
+            .parents
+            .iter()
+            .flatten()
+            .find(|parent| parent.id == frame.allocation.parent_id)
+            .unwrap();
+        ui.ctx().options_mut(|options| options.warn_on_id_clash = false);
+        // Use a real Ui with the checked parent ID and preserve its exact
+        // geometry. The second matching allocation makes structure ambiguous.
+        let mut parent = egui::Ui::new(
+            ui.ctx().clone(),
+            original.id,
+            egui::UiBuilder::new()
+                .layer_id(original.layer_id)
+                .max_rect(original.rect)
+                .sense(original.sense),
+        );
+        parent.set_clip_rect(original.interact_rect);
+        parent.set_min_size(original.rect.size());
+        parent.interact(
+            frame.allocation.rect,
+            Id::unique("copy_guard_ambiguous_frame"),
+            egui::Sense::hover(),
+        );
+        return;
+    }
     if let Late::Transform(transform) = change {
         ui.ctx().set_transform_layer(control.layer, transform);
         return;
@@ -209,6 +245,28 @@ fn late_widget(ui: &mut egui::Ui, control: Control, change: Late) {
     );
     child.set_clip_rect(control.paint_clip);
     match change {
+        Late::StructuralFrameMove => {
+            let frame = control.frame.unwrap();
+            child.interact(
+                frame.allocation.rect.translate(egui::vec2(7.0, 0.0)),
+                frame.allocation.id,
+                frame.allocation.sense,
+            );
+        }
+        Late::StructuralFrameSense => {
+            let frame = control.frame.unwrap();
+            child.interact(frame.allocation.rect, frame.allocation.id, egui::Sense::click());
+        }
+        Late::SameSizeVisualCover => {
+            let frame = control.frame.unwrap();
+            child.set_clip_rect(frame.allocation.interact_rect);
+            child.interact(
+                frame.allocation.rect,
+                Id::unique("copy_guard_same_size_frame_cover"),
+                egui::Sense::hover(),
+            );
+            child.painter().rect_filled(frame.allocation.rect, 0.0, egui::Color32::BLACK);
+        }
         Late::MoveWidget => {
             child.interact(
                 control.registered.rect.translate(egui::vec2(11.0, 0.0)),
@@ -725,6 +783,138 @@ fn key_event(key: Key, pressed: bool, modifiers: Modifiers) -> Event {
         repeat: false,
         modifiers,
     }
+}
+
+#[test]
+fn profile_copy_ui_actual_modal_and_popup_retain_unique_structural_frame_and_real_parent_chain() {
+    let mut frames = Frames::new();
+    assert!(!frames.model.controls.is_empty());
+    for control in &frames.model.controls {
+        let origin = control.frame_origin.unwrap();
+        let frame = control.frame.unwrap();
+        assert!(control.committed(&frames.ctx));
+        assert_eq!(frame.allocation.parent_id, origin.parent);
+        assert_ne!(
+            frame.allocation.id, origin.content,
+            "the allocation is a sibling, not the Frame content Ui"
+        );
+        assert!(frame.parents.iter().flatten().any(|parent| parent.id == origin.content));
+        assert!(frame.parents.iter().flatten().any(|parent| parent.id == origin.root));
+        assert_eq!(frame.allocation.sense, egui::Sense::hover());
+        assert_eq!(origin.root, control.layer.id);
+        assert_eq!(
+            frames
+                .ctx
+                .viewport(|viewport| FrameWitness::capture(&viewport.prev_pass.widgets, control)),
+            Some(frame)
+        );
+    }
+    let picker = frames.control(|intent| matches!(intent, Intent::Picker(_)));
+    assert!(frames.click(picker, Late::None).is_none());
+    frames.show(vec![], Late::None);
+    let sources = frames
+        .model
+        .controls
+        .iter()
+        .filter(|control| matches!(control.intent, Intent::Source(_, _)))
+        .collect::<Vec<_>>();
+    assert!(!sources.is_empty());
+    assert!(sources.len() <= MAX_SOURCES);
+    for control in sources {
+        assert!(control.committed(&frames.ctx));
+        assert_ne!(control.layer, picker.layer, "the source popup has its own actual Frame and Area");
+        assert_eq!(control.frame_origin.unwrap().root, control.layer.id);
+        assert_ne!(control.frame.unwrap().allocation.id, picker.frame.unwrap().allocation.id);
+    }
+}
+
+#[test]
+fn profile_copy_ui_structural_frame_turnover_ambiguity_and_same_size_visual_cover_revoke_every_modality() {
+    for modality in [Modality::Pointer, Modality::Enter, Modality::Space, Modality::Accessibility] {
+        for late in [
+            Late::StructuralFrameMove,
+            Late::StructuralFrameSense,
+            Late::AmbiguousFrame,
+            Late::SameSizeVisualCover,
+        ] {
+            let mut frames = Frames::new();
+            frames.prepare();
+            let original = frames.control(|intent| matches!(intent, Intent::Apply(_)));
+            assert!(original.committed(&frames.ctx));
+            assert!(release_with(&mut frames, original, modality, late).is_none());
+            assert_eq!(
+                frames
+                    .ctx
+                    .viewport(|viewport| viewport.prev_pass.widgets.get(original.widget).copied()),
+                Some(original.registered),
+                "the original button is unchanged; only its structural witness or a real visual cover invalidates it"
+            );
+            let witness = frames
+                .ctx
+                .viewport(|viewport| FrameWitness::capture(&viewport.prev_pass.widgets, &original));
+            if matches!(late, Late::SameSizeVisualCover) {
+                assert_eq!(
+                    witness, original.frame,
+                    "a different real hover cover cannot borrow the verified Frame exemption"
+                );
+            } else {
+                assert_ne!(
+                    witness, original.frame,
+                    "a missing, changed or ambiguous structural witness must fail closed"
+                );
+            }
+            assert!(!original.committed(&frames.ctx));
+            assert!(
+                frames.show(vec![], Late::None).is_none(),
+                "a rejected proposal has no retry or reminted authority"
+            );
+            assert!(!frames.model.operation.as_ref().unwrap().apply_submitted);
+        }
+    }
+    // A genuine Frame configuration change before release must also revoke
+    // the original AccessKit gesture, even when the button geometry is intact.
+    let mut frames = Frames::new();
+    let capture = frames.prepare();
+    let original = frames.control(|intent| matches!(intent, Intent::Apply(_)));
+    frames.ctx.memory_mut(|memory| memory.request_focus(original.widget));
+    frames.show(vec![], Late::None);
+    let fill = frames.ctx.global_style().visuals.window_fill;
+    frames.ctx.global_style_mut(|style| {
+        style.visuals.window_fill = if fill == egui::Color32::BLACK {
+            egui::Color32::WHITE
+        } else {
+            egui::Color32::BLACK
+        };
+    });
+    let click = || {
+        Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+            action: egui::accesskit::Action::Click,
+            target_tree: egui::accesskit::TreeId::ROOT,
+            target_node: original.widget.accesskit_id(),
+            data: None,
+        })
+    };
+    assert!(frames.show(vec![click()], Late::None).is_none());
+    assert!(
+        frames.model.gesture.is_none(),
+        "a witness mismatch consumes the old gesture for accessibility too"
+    );
+    assert_eq!(
+        frames
+            .ctx
+            .viewport(|viewport| viewport.prev_pass.widgets.get(original.widget).copied()),
+        Some(original.registered)
+    );
+    frames.ctx.global_style_mut(|style| style.visuals.window_fill = fill);
+    assert!(
+        frames.show(vec![], Late::None).is_none(),
+        "restoring the Frame cannot replay the old gesture"
+    );
+    assert_eq!(
+        frames.show(vec![click()], Late::None),
+        Some(Command::Apply(capture)),
+        "a fresh accessible intent can proceed"
+    );
 }
 
 #[test]
