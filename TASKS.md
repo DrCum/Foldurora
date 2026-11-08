@@ -1,7 +1,8 @@
 # Aurora Viewer — task tracking
 
 - 🔧 Foldurora multiline script text boxes (human upstream request, 2026-11-08;
-  no fork issue; upstream #2832 / PR #2909, `a92c0e2e33d0`): base `388b299c`,
+  no fork issue; [PR #16](https://github.com/DrCum/Foldurora/pull/16);
+  upstream #2832 / PR #2909, `a92c0e2e33d0`): base `388b299c`,
   upstream snapshot `b01979c2`; complete port `b372453d7886` with `-x`.
   Enter inserts a line; Send alone submits. Shared card code shows three lines
   then scrolls in Aurora and Legacy styles; paste normalization and a 250-byte
