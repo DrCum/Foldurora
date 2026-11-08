@@ -6,6 +6,7 @@ use super::transport::{HostError, HostSnapshot};
 use crate::settings::profile_seed::{Families, Family};
 use crate::theme::Palette;
 use crate::ui::widgets;
+use egui::emath::GuiRounding as _;
 use egui::{Id, Key, Rect, RichText};
 
 #[cfg(test)]
@@ -13,6 +14,7 @@ mod tests;
 
 const MAX_CONTROLS: usize = 24;
 const MAX_SOURCES: usize = 5;
+const MAX_CONTROL_PARENTS: usize = 16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Command {
@@ -41,6 +43,109 @@ struct Control {
     registered: egui::WidgetRect,
     paint_clip: Rect,
     transform: Option<egui::emath::TSTransform>,
+    frame_origin: Option<FrameOrigin>,
+    frame: Option<FrameWitness>,
+}
+
+/// Pinned egui Frame reserves its background shape before the contents, but
+/// registers the enclosing hover allocation afterwards (Frame::begin/end).
+/// Capture the actual Frame stack marker, never infer structure from hover Sense.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct FrameOrigin {
+    content: Id,
+    parent: Id,
+    root: Id,
+    frame: egui::Frame,
+}
+impl FrameOrigin {
+    fn capture(ui: &egui::Ui, layer: egui::LayerId, popup_source: bool) -> Option<Self> {
+        let mut frame = None;
+        for node in ui.stack().iter().take(MAX_CONTROL_PARENTS) {
+            if frame.is_none() && node.kind() == Some(egui::UiKind::Frame) {
+                frame = Some((node.unique_id, node.parent.as_ref()?.unique_id, *node.frame()));
+            }
+            if node.unique_id == layer.id {
+                let expected = if popup_source { egui::UiKind::Menu } else { egui::UiKind::Modal };
+                if node.kind() != Some(expected) {
+                    return None;
+                }
+                let (content, parent, frame) = frame?;
+                return Some(Self {
+                    content,
+                    parent,
+                    root: node.unique_id,
+                    frame,
+                });
+            }
+        }
+        None
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct FrameWitness {
+    allocation: egui::WidgetRect,
+    parents: [Option<egui::WidgetRect>; MAX_CONTROL_PARENTS],
+}
+impl FrameWitness {
+    fn capture(widgets: &egui::WidgetRects, control: &Control) -> Option<Self> {
+        let origin = control.frame_origin?;
+        let mut parents = [None; MAX_CONTROL_PARENTS];
+        let mut id = control.registered.parent_id;
+        let mut reached_root = false;
+        let mut reached_content = false;
+        for index in 0..MAX_CONTROL_PARENTS {
+            if parents_seen(control.registered.id, &parents[..index], id) {
+                return None;
+            }
+            let parent = *widgets.get(id)?;
+            if parent.layer_id != control.layer || !parent.enabled || !parent.visible || !finite_positive(parent.rect) {
+                return None;
+            }
+            if id == origin.content {
+                if parent.parent_id != origin.parent {
+                    return None;
+                }
+                reached_content = true;
+            }
+            parents[index] = Some(parent);
+            if id == origin.root {
+                reached_root = true;
+                break;
+            }
+            id = parent.parent_id;
+        }
+        if !reached_root || !reached_content {
+            return None;
+        }
+        let content = widgets.get(origin.content)?;
+        let parent = widgets.get(origin.parent)?;
+        // Ui::remember_min_rect registers exactly the finalized min_rect used
+        // by Frame::Prepared::outer_rect; Ui::allocate_rect applies round_ui.
+        let outer = origin.frame.outer_rect(content.rect).round_ui();
+        let interact = outer.intersect(parent.interact_rect);
+        if !finite_positive(outer) || !finite_positive(interact) || !parent.rect.contains_rect(outer) || !outer.contains_rect(control.rect)
+        {
+            return None;
+        }
+        let mut matching = widgets.get_layer(control.layer).filter(|widget| {
+            widget.parent_id == origin.parent
+                && widget.layer_id == control.layer
+                && widget.id != origin.content
+                && widget.enabled
+                && widget.visible
+                && widget.sense == egui::Sense::hover()
+                && widget.rect == outer
+                && widget.interact_rect == interact
+        });
+        let allocation = *matching.next()?;
+        if matching.next().is_some() || widgets.order(allocation.id)?.1 <= widgets.order(control.widget)?.1 {
+            return None;
+        }
+        Some(Self { allocation, parents })
+    }
+}
+fn parents_seen(control: Id, parents: &[Option<egui::WidgetRect>], id: Id) -> bool {
+    id == control || parents.iter().flatten().any(|parent| parent.id == id)
 }
 
 fn finite_positive(rect: Rect) -> bool {
@@ -108,14 +213,19 @@ impl Control {
         // original even when focus and layer_id_at still name the old layer.
         let unoccluded = ctx.viewport(|viewport| {
             let widgets = &viewport.prev_pass.widgets;
+            let Some(frame) = self.frame else {
+                return false;
+            };
+            if FrameWitness::capture(widgets, self) != Some(frame) {
+                return false;
+            }
             let Some((layer, index)) = widgets.order(self.widget) else {
                 return false;
             };
             layer == self.layer
-                && !widgets
-                    .get_layer(layer)
-                    .skip(index + 1)
-                    .any(|widget| widget.visible && widget.interact_rect.intersect(self.rect).is_positive())
+                && !widgets.get_layer(layer).skip(index + 1).any(|widget| {
+                    widget.id != frame.allocation.id && widget.visible && widget.interact_rect.intersect(self.rect).is_positive()
+                })
         });
         if !unoccluded {
             return false;
@@ -777,7 +887,29 @@ impl CopyUi {
             self.gesture = None;
             return None;
         }
+        // Frame::end and all enclosing Ui drops have now finalized the actual
+        // structural allocation and parent registry. Do not guess it in paint.
+        ctx.viewport(|viewport| {
+            for control in &mut self.painting {
+                control.frame = FrameWitness::capture(&viewport.this_pass.widgets, control);
+            }
+            if let Some((control, _)) = &mut candidate {
+                control.frame = FrameWitness::capture(&viewport.this_pass.widgets, control);
+            }
+        });
         self.painted = Some((ctx.cumulative_frame_nr(), ctx.cumulative_pass_nr(), shown.response.layer_id));
+        let candidate = candidate.and_then(|(control, release)| {
+            if control.frame.is_some()
+                && self
+                    .gesture
+                    .is_some_and(|gesture| gesture.control.frame_origin == control.frame_origin && gesture.control.frame == control.frame)
+            {
+                Some((control, release))
+            } else {
+                self.gesture = None;
+                None
+            }
+        });
         if let Some((control, release)) = candidate {
             self.gesture = None;
             let nonce = self.nonce.checked_add(1)?;
@@ -905,6 +1037,8 @@ impl CopyUi {
             registered,
             paint_clip,
             transform,
+            frame_origin: FrameOrigin::capture(ui, response.layer_id, matches!(intent, Intent::Source(_, _))),
+            frame: None,
         };
         if !live
             || !response.enabled()

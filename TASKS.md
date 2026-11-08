@@ -28,6 +28,18 @@
   actual-World lifecycle tests are authored/unrun; existing Favorites assertions
   remain. Bounded archive projection, new closed store kind, actual consumers
   and Folder Jump visibility integration are not yet implemented or enabled.
+- 🔧 Selective-copy structural Frame correction (2026-11-08; no issue): Root's
+  Linux execution exposed pinned egui's enclosing Frame hover allocation as a
+  false later cover. Capture the actual Frame UiStack marker/configuration and
+  bounded parent chain, resolve its unique exact allocation after Modal/Menu
+  completion, and retain the immutable witness through release and final dispatch.
+  Only that allocation is excluded; ambiguous/changed structure and every other
+  sibling/visual/higher-Area cover still revoke authority. Two additional real
+  egui cases are authored UNRUN, preserving all69 prior Profile tests/assertions.
+  No filesystem ownership policy change is included: ST_RDONLY alone cannot
+  replace trusted prefix ownership. Independent review and Root execution remain
+  required; the earlier full-workspace negative evidence is preserved.
+
 - 🔧 Windows profile-copy build follow-up (2026-11-08; no issue): explicitly
   type the opened ACE principal as pinned windows-sys PSID to resolve E0282.
   Pointer value, SID extent checks, ownership/ACL policy and all tests are
