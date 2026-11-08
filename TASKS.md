@@ -1,5 +1,22 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Foldurora decoded sound edge fade (human upstream request, 2026-11-08;
+  no fork issue; upstream #1653 / PR #2960, `479f15c2dda6`): base `388b299c`,
+  upstream snapshot `08b2de24`. Fade decoded clip edges once after resampling,
+  about 2.9 ms capped at a quarter of short clips, with one gain per stereo
+  frame. Preserve raw/generated PCM, radio and voice stream envelopes.
+  The decoder has no edits in the visible protected heads; the mixer change
+  is an additive playback test beside the earlier PR #13 music-buffer work.
+  Retain four upstream signal/playback regressions and the synthetic Vorbis
+  fixture; add stereo edge-balance coverage. Shared mixer tests, ARCHITECTURE
+  and TASKS need Dev Agent reconciliation; no App, FTL, settings or permission
+  changes. Slick is unavailable; no delivery. Exact focused results belong
+  to the PR; full combined validation/package stays at the related feature-
+  group checkpoint under current policy `f78d2814`. Upstream validation is
+  historical evidence, not Foldurora native/human acceptance.
+  - ⬜ Native Windows listening for clip starts/stops/loops and ordinary
+    generated PCM/music/voice in both styles; human grid confirmation.
+
 - 🔧 Selective upstream catch-up (human request, 2026-11-07; no issue): apply
   sixteen reviewed upstream commits individually with `-x` to frozen photo/
   branding base `f5ae21d5`, from upstream snapshot `576dd54a`. Production
