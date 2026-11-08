@@ -534,7 +534,7 @@ impl Projection {
         }
         VisibilityRead {
             world,
-            model,
+            _model: model,
             key,
             snapshot,
             bypass,
@@ -550,7 +550,9 @@ impl Projection {
 /// alone cannot authorize anything; every consumer obtains a fresh read.
 pub(crate) struct VisibilityRead<'a> {
     world: &'a World,
-    model: &'a Model,
+    // The read acquisition qualified actual source/privacy once. These model
+    // and policy borrows keep that proof current until this read is dropped.
+    _model: &'a Model,
     key: Option<Key>,
     snapshot: Option<&'a Snapshot>,
     bypass: bool,
@@ -568,7 +570,7 @@ impl VisibilityRead<'_> {
         self.revision
     }
     pub(crate) fn passes(&self, id: Uuid) -> bool {
-        if self.revision.is_none() || self.key.is_none() || Key::observe(self.world, self.model) != self.key || id.is_nil() {
+        if self.revision.is_none() || self.key.is_none() || id.is_nil() {
             return false;
         }
         let inv = &self.world.inventory;
