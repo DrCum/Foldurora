@@ -579,6 +579,14 @@ entry budgets invalidate, never truncate, the whole witness. No arbitrary Vec
 or parser validity alone proves a live session or complete current membership.
 Native event/lifecycle and correlated-reply integration remain required; this
 prerequisite does not enable Conference host actions.
+`social/roster_authority.rs` owns bounded pre-base deltas and a sealed local
+initialization capture tied to the native owner/login, incarnation and request.
+An original full base is followed by retained ordered updates. Invalid, missing,
+overflowed or lost data never becomes a complete roster; same-incarnation retries
+retain loss and final-session binding, including incomplete completions and
+initialization-kind changes. Only a genuine new native incarnation clears it.
+Live effective membership/mute changes advance a checked revision. The model
+has no network/UI effects; World lifecycle/callback integration is still required.
 
 The Close-in-host producer retains its V4 closed data in `chat/close.rs`.
 `world/shared_chat_activity.rs` mints a checked native stream at actual LoggedIn,

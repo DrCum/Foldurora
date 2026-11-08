@@ -1,5 +1,15 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Foldurora Conference roster authority prerequisite (2026-11-08): sealed
+  owner/login/incarnation/original-request captures, bounded retained deltas,
+  base-then-pending initialization, temporary/final merge and effective revision.
+  Same-incarnation retry, missing completion and acceptance/start-kind changes
+  retain final-session binding; only a new native incarnation clears it. Two
+  attack regressions reproduced before correction; all20 parser/model cases now
+  pass in workspace-filtered ci lib tests. Source review closed both binding
+  findings. No native consumer, complete Conference host action, Windows build
+  or human acceptance is claimed. Full checks belong to the combined group.
+
 - 🔧 Windows selective-copy servicing-prefix owner compatibility (2026-11-08;
   no issue): Root's read-only runner diagnostic42454510345 on image20261103.298.1
   established exact TrustedInstaller root-prefix ownership for LocalAppData and
