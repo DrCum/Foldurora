@@ -127,7 +127,13 @@ fn shared_group_unread_export_does_not_grant_attention_or_native_review() {
     chat.conversations[1].policy.key.conversation = group;
     chat.reads.insert(group, unread());
     let mut attention = Attention::default();
-    attention.sync(&host, &Preferences::default());
+    attention.sync(
+        &host,
+        &Preferences {
+            groups: false,
+            ..Preferences::default()
+        },
+    );
     assert_eq!(attention.rows().len(), 1);
     assert!(attention.rows().iter().all(|row| row.key.conversation != group));
     assert!(
@@ -138,6 +144,104 @@ fn shared_group_unread_export_does_not_grant_attention_or_native_review() {
             })
             .is_none()
     );
+}
+
+fn group_fixture() -> (HostSnapshot, ChatKey) {
+    let mut host = fixture(1, 1);
+    let key = ChatKey {
+        source: source(1),
+        conversation: Conversation::Group(ConversationId::from_bytes([1; 16]).unwrap()),
+    };
+    let peer = chat(&mut host, 0);
+    let mut info = peer.conversations[0].clone();
+    info.policy.key = key;
+    info.policy.can_send = false;
+    peer.conversations.push(info);
+    peer.reads.insert(
+        key.conversation,
+        ReadMetadata {
+            can_mark_read: false,
+            ..unread()
+        },
+    );
+    (host, key)
+}
+
+#[test]
+fn group_attention_default_filters_and_typed_identity_preserve_native_reads_during_navigation_and_review_capture() {
+    let (host, group) = group_fixture();
+    let before = host.chat.clone();
+    let mut model = Attention::default();
+    let mut prefs = Preferences::default();
+    model.sync(&host, &prefs);
+    assert_eq!(model.rows().len(), 2, "Direct and Group sharing an ID remain distinct");
+    let ticket = model.capture(group).unwrap();
+    let target = model.review_capture(ticket).unwrap();
+    assert_eq!(target.key, group);
+    assert_eq!(model.open_chat(ticket), Some(group));
+    assert!(host.chat == before, "passive navigation/capture cannot read, send or activate");
+    prefs.direct = false;
+    model.sync(&host, &prefs);
+    assert_eq!(model.rows().len(), 1);
+    assert_eq!(model.rows()[0].key, group);
+    prefs.groups = false;
+    model.sync(&host, &prefs);
+    assert!(model.rows().is_empty());
+    assert!(model.review_capture(ticket).is_none());
+}
+
+#[test]
+fn group_attention_current_authority_and_close_hiding_reject_stale_review_captures() {
+    for fault in 0..10 {
+        let (mut host, group) = group_fixture();
+        let mut model = Attention::default();
+        model.sync(&host, &Preferences::default());
+        let ticket = model.capture(group).unwrap();
+        match fault {
+            0 => chat(&mut host, 0).live = false,
+            1 => chat(&mut host, 0).authenticated = false,
+            2 => host.workers[0].reachable = false,
+            3 => host.workers[0].slot = None,
+            4 => chat(&mut host, 0).conversations[1].policy.ready = false,
+            5 => chat(&mut host, 0).conversations[1].policy.can_read = false,
+            6 => chat(&mut host, 0).conversations[1].policy.lease_current = false,
+            7 => {
+                chat(&mut host, 0).reads.remove(&group.conversation);
+            }
+            8 => {
+                chat(&mut host, 0).closes.hidden.insert(group.conversation);
+            }
+            9 => chat(&mut host, 0).conversations[1].policy.key.source.lease_epoch += 1,
+            _ => unreachable!(),
+        }
+        model.sync(&host, &Preferences::default());
+        assert!(model.capture(group).is_none(), "fault {fault}");
+        assert!(model.review_capture(ticket).is_none());
+    }
+}
+
+#[test]
+fn group_attention_dismissal_retains_original_fence_and_does_not_alias_direct_or_resurrect_old_review() {
+    let (mut host, group) = group_fixture();
+    let mut model = Attention::default();
+    let prefs = Preferences::default();
+    model.sync(&host, &prefs);
+    let ticket = model.capture(group).unwrap();
+    assert!(model.dismiss(ticket));
+    model.sync(&host, &prefs);
+    assert!(model.capture(group).is_none());
+    assert!(model.capture(key(1, 1)).is_some());
+    chat(&mut host, 0).reads.get_mut(&group.conversation).unwrap().observed.through += 1;
+    model.sync(&host, &prefs);
+    assert!(model.capture(group).is_some());
+    assert!(
+        model.review_capture(ticket).is_none(),
+        "new arrivals require a new explicit gesture"
+    );
+    let fresh = model.capture(group).unwrap();
+    chat(&mut host, 0).conversations[1].policy.revision += 1;
+    model.sync(&host, &prefs);
+    assert!(model.review_capture(fresh).is_none());
 }
 
 #[test]
@@ -169,7 +273,7 @@ fn attention_nearby_off_direct_on_and_unsupported_classes_never_adapt() {
     let peer = chat(&mut host, 0);
     for conversation in [
         Conversation::Nearby,
-        Conversation::Group(ConversationId::from_bytes([9; 16]).unwrap()),
+        Conversation::Conference(ConversationId::from_bytes([9; 16]).unwrap()),
     ] {
         let mut info = peer.conversations[0].clone();
         info.policy.key.conversation = conversation;

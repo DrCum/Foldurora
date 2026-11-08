@@ -142,9 +142,12 @@ impl ReviewReceiptReply {
 
 fn validate_key(key: ChatKey) -> Result<(), ChatError> {
     key.validate()?;
-    // A typed Direct key is not proof that the native session exists. That
+    // A typed Direct/Group key is not proof that the native session exists. That
     // lookup remains mandatory at the owning App's eventual review boundary.
-    if !matches!(key.conversation, Conversation::Nearby | Conversation::Direct(_)) {
+    if !matches!(
+        key.conversation,
+        Conversation::Nearby | Conversation::Direct(_) | Conversation::Group(_)
+    ) {
         return Err(ChatError::Invalid);
     }
     Ok(())

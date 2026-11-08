@@ -708,6 +708,21 @@
   pending. The earlier first-click observation remains unexplained by native
   frame evidence; no earlier candidate's validation transfers to this change.
 
+- 🔧 Group Attention and explicit native Review (Folderstorm port, 2026-11-08;
+  no issue): existing initialized Group rows join body-free Attention with an
+  independent category filter. Fresh defaults include Groups per Folderstorm
+  legacy mask29; closed preferences V2 reads V1 without rewriting and derives
+  the new Group choice from saved Direct silence. Only explicit save upgrades;
+  unknown, duplicate and mismatched schemas stay disabled/nonwritable. ChatV7
+  admits source-qualified Group Review via existing native read/membership,
+  original grant/foreground/input and receipt gates. Navigation/dismissal/read
+  capacity remain separate; no Review join/leave/read/send or Conference support.
+  Source review found and corrected category-grid wrapping and obsolete negative
+  Group DTO fixtures. Qualified Linux Clippy passes. First two test link attempts hit
+  disk-full linker SIGBUS before tests; both logs retained and frozen binaries
+  preserved losslessly.
+  Corrected focused checks/full/native acceptance remain pending.
+
 - 🔧 Group Close in host (Folderstorm port, 2026-11-08; no issue): separate
   successor to frozen initialized-Group source `4cfad9363`. Uses actual eligible
   native Group insertion, original login stream, immutable Close receipts and
@@ -716,7 +731,9 @@
   reopens; Conference, history, own/system, metadata and other chats cannot.
   Chat V6 rejects old V5 peers; control/native protocols unchanged. Source
   review, qualified Linux Clippy and all seven focused regressions pass.
-  Combined full-candidate checks follow; no Windows/native acceptance claimed.
+  Frozen26b full Linux8,796/18/59 retains only the known17 deferred Profile Copy
+  failures plus terrain; all22 Group core/Close cases pass. No Windows/native
+  acceptance claimed.
 
 - 🔧 Initialized Group Shared Chat (Folderstorm port, 2026-11-08; no issue):
   source work extends the canonical Shared Chat/monitor surfaces with live

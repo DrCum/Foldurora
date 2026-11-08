@@ -559,11 +559,17 @@ and native incoming stamps to the same immutable receipt/fence machinery;
 V5 peers also fail closed. Real eligible Group insertion advances the login-
 owned stream and only that conversation's stamp. Membership-only previews,
 conferences and blocked/nonincoming lines cannot mint or backfill activity.
-Conference, Group Attention and native Review remain subsequent slices.
+V7 extends body-free Attention and the existing explicit native Review path to
+initialized Groups. A separate category filter defaults on for fresh installs;
+closed preference schemaV2 reads V1 without eager rewriting and retains prior
+non-Nearby silence via its Direct choice. Old binaries refuse V2 rather than
+misread it. Review still requires the original source/policy/read incarnation
+and exact acknowledged foreground input grant; it never joins/leaves/reads or
+sends. Conference remains excluded pending participant-authority work.
 
 The Close-in-host producer retains its V4 closed data in `chat/close.rs`.
 `world/shared_chat_activity.rs` mints a checked native stream at actual LoggedIn,
-then advances it only at eligible live nonself Direct conversation insertion.
+then advances it only at eligible live nonself Direct/Group conversation insertion.
 Existing fair ReadBatch rows export the optional current stream separately from
 optional session activity; neither absent value implies zero. WorkerChat owns a
 bounded exact-request Close ledger: original ingress age gates capture, while
@@ -584,9 +590,10 @@ lookup without replacing its original policy/stream. Recovery has a bounded
 pending gate; an unresolved result stays visibly Uncertain and hidden without
 blocking every other conversation. Explicit rejection restores visibility.
 Source replacement retires all state, and ordinary authority loss still purges
-private drafts, Undo and metadata. Nearby cannot be closed. Group/conference,
+private drafts, Undo and metadata. Nearby cannot be closed. Conference and
 Friends/New IM and their explicit native-open acknowledgments remain separate
-features. Chat packet V4 is required on both ends; the control protocol stays V1.
+features. Close retains its V4 payload in the current V7 Chat envelope; the
+control protocol stays V1.
 
 `app/host_chat_bridge.rs` drives `session_host/chat.rs` and `app/host_chat.rs` on
 the owning App thread, including standby CPU ticks. The literal Nearby/existing

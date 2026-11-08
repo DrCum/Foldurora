@@ -887,6 +887,13 @@ fn attention_filter_cells_keep_bounded_geometry_and_all_settings_reachable() {
                     ..Preferences::default()
                 },
             ));
+            controls.push((
+                Id::unique(("attention_kind", "groups")),
+                Preferences {
+                    groups: false,
+                    ..Preferences::default()
+                },
+            ));
             for (id, expected) in controls {
                 let rect = f.rect(id);
                 assert!(rect.min.is_finite() && rect.max.is_finite() && rect.width() > 0.0 && rect.height() > 0.0);
@@ -927,6 +934,53 @@ fn review_fixture() -> Frames {
     chat.reads.get_mut(&direct()).unwrap().can_mark_read = false;
     f.choose(key);
     f
+}
+
+#[test]
+fn group_attention_actual_ui_explicit_review_and_filter_intents_keep_reads_and_typed_target_unchanged() {
+    let mut f = Frames::new();
+    f.host.can_activate = true;
+    let conversation = Conversation::Group(ConversationId::from_bytes([11; 16]).unwrap());
+    let key = ChatKey {
+        source: source(1),
+        conversation,
+    };
+    let chat = Arc::make_mut(&mut f.host.chat[0]);
+    let mut info = chat
+        .conversations
+        .iter()
+        .find(|info| info.policy.key.conversation == direct())
+        .unwrap()
+        .clone();
+    info.policy.key = key;
+    info.policy.can_send = false;
+    chat.conversations.push(info);
+    chat.reads.insert(
+        conversation,
+        ReadMetadata {
+            can_mark_read: false,
+            ..chat.reads[&direct()]
+        },
+    );
+    f.settle();
+    f.choose(key);
+    let reads = f.host.chat[0].reads.clone();
+    let Some(Action::Review(ticket)) = f.click(Id::unique("attention_review")) else {
+        panic!("explicit Group review gesture");
+    };
+    assert_eq!(f.model.review_capture(ticket).unwrap().key, key);
+    assert_eq!(f.host.chat[0].reads, reads);
+    assert!(f.host.review_operations.is_empty());
+    assert!(f.click(Id::unique("attention_filter_toggle")).is_none());
+    f.scroll_filter_into_view(Id::unique(("attention_kind", "groups")));
+    let Some(Action::Preferences(desired)) = f.click(Id::unique(("attention_kind", "groups"))) else {
+        panic!("explicit independent Group category filter");
+    };
+    assert!(!desired.groups && desired.direct && !desired.nearby);
+    assert!(
+        f.host.attention_preferences.preferences.groups,
+        "a queued save is not a successful publication"
+    );
 }
 
 fn queued_review(f: &mut Frames, request: u64) -> ReviewCapture {

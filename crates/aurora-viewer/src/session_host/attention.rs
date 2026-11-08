@@ -73,7 +73,7 @@ pub(super) enum Direction {
 }
 
 /// Only conversation items exist in this increment. ChatKey includes the full
-/// source and typed conversation class, so Nearby and Direct never alias.
+/// source and typed conversation class, so Nearby, Direct and Group never alias.
 struct Dismissal {
     key: ChatKey,
     policy: NativeChatPolicy,
@@ -170,7 +170,10 @@ impl Attention {
                         || !policy.lease_current
                         || !policy.ready
                         || !policy.can_read
-                        || !matches!(key.conversation, Conversation::Nearby | Conversation::Direct(_))
+                        || !matches!(
+                            key.conversation,
+                            Conversation::Nearby | Conversation::Direct(_) | Conversation::Group(_)
+                        )
                     {
                         continue;
                     }
@@ -221,6 +224,7 @@ impl Attention {
                 && match row.key.conversation {
                     Conversation::Nearby => preferences.nearby,
                     Conversation::Direct(_) => preferences.direct,
+                    Conversation::Group(_) => preferences.groups,
                     _ => false,
                 }
                 && !self.dismissed.iter().any(|dismissal| dismissal.hides(row))

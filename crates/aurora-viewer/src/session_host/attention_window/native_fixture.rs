@@ -626,6 +626,7 @@ fn attention_native_trace_budget_covers_512_fully_annotated_key_events() {
             include_slots: [false; 5],
             nearby: false,
             direct: false,
+            groups: false,
             oldest_first: false,
         };
         fixture

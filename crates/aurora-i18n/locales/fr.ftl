@@ -13445,6 +13445,7 @@ host-attention-help = Conversations non lues de vos profils enregistrés.
 host-attention-profiles = Profils inclus
 host-attention-nearby = Chat à proximité
 host-attention-direct = Messages directs
+host-attention-groups = Discussions de groupe
 host-attention-previous = Précédent
 host-attention-next = Suivant
 host-attention-open = Ouvrir le chat partagé

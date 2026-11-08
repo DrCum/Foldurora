@@ -60,7 +60,7 @@ fn shared_group_codec_bounds_real_read_rows_and_rejects_v4_consumers() {
     let bytes = encode(&packet).unwrap();
     assert!(bytes.len() <= MAX_PACKET_BYTES);
     assert_eq!(decode(&bytes).unwrap(), packet);
-    for old in [4, 5] {
+    for old in 0..VERSION {
         packet.version = old;
         assert_eq!(packet.validate(), Err(ChatError::Version));
     }
@@ -81,10 +81,14 @@ fn shared_group_read_does_not_grant_close_review_or_conference_authority() {
     };
     request.validate().unwrap();
     assert!(
-        ReviewCapture {
-            key,
-            policy_revision: 1,
-            observed: request.observed
+        ReviewConversationRequest {
+            target: ReviewCapture {
+                key,
+                policy_revision: 1,
+                observed: request.observed
+            },
+            request: 1,
+            activation: 0 // Read authority alone supplies no foreground input grant.
         }
         .validate()
         .is_err()

@@ -13449,6 +13449,7 @@ host-attention-help = Unread conversations from your saved profiles.
 host-attention-profiles = Include profiles
 host-attention-nearby = Nearby chat
 host-attention-direct = Direct messages
+host-attention-groups = Group chats
 host-attention-previous = Previous
 host-attention-next = Next
 host-attention-open = Open shared chat

@@ -38,6 +38,42 @@ fn request(number: u64) -> ReviewConversationRequest {
     }
 }
 
+#[test]
+fn group_attention_review_codec_keeps_source_grant_and_receipt_identity_and_rejects_conferences() {
+    let mut request = request(1);
+    request.target.key.conversation = Conversation::Group(ConversationId::from_bytes([7; 16]).unwrap());
+    request.validate().unwrap();
+    let mut ledger = ReviewReceiptLedger::new(source()).unwrap();
+    assert_eq!(ledger.reserve(request).unwrap(), None);
+    let receipt = ledger.finish(request, ReviewOutcome::OpenedLocally).unwrap();
+    assert_eq!(ledger.reserve(request).unwrap(), Some(receipt));
+    for message in [
+        ChatMessage::Command(ChatCommand::ReviewConversation(request)),
+        ChatMessage::Event(ChatEvent::ReviewReceipt(ReviewReceiptReply {
+            query: query(request),
+            receipt: Some(receipt),
+        })),
+    ] {
+        let packet = ChatPacket {
+            version: VERSION,
+            source: source(),
+            sequence: 1,
+            reply_to: if matches!(message, ChatMessage::Command(_)) { 0 } else { 1 },
+            message,
+        };
+        assert_eq!(decode(&encode(&packet).unwrap()), Ok(packet));
+    }
+    let mut wrong = request;
+    wrong.activation += 1;
+    assert_eq!(ledger.reserve(wrong), Err(ChatError::RequestChanged));
+    wrong = request;
+    wrong.target.key.conversation = Conversation::Direct(ConversationId::from_bytes([7; 16]).unwrap());
+    assert_eq!(ledger.reserve(wrong), Err(ChatError::RequestChanged));
+    wrong = request;
+    wrong.target.key.conversation = Conversation::Conference(ConversationId::from_bytes([7; 16]).unwrap());
+    assert_eq!(wrong.validate(), Err(ChatError::Invalid));
+}
+
 fn query(request: ReviewConversationRequest) -> ReviewReceiptQuery {
     ReviewReceiptQuery {
         key: request.target.key,
@@ -112,12 +148,9 @@ fn review_dtos_validate_full_source_positive_sequences_and_nearby_or_direct_only
         assert_eq!(receipt(changed, ReviewOutcome::RejectedNative).validate(), Err(ChatError::Sequence));
     }
 
-    for conversation in [
-        Conversation::Group(ConversationId::from_bytes([7; 16]).unwrap()),
-        Conversation::Conference(ConversationId::from_bytes([7; 16]).unwrap()),
-    ] {
+    {
         let mut invalid = valid;
-        invalid.target.key.conversation = conversation;
+        invalid.target.key.conversation = Conversation::Conference(ConversationId::from_bytes([7; 16]).unwrap());
         assert_eq!(invalid.target.validate(), Err(ChatError::Invalid));
         assert_eq!(invalid.validate(), Err(ChatError::Invalid));
         assert_eq!(query(invalid).validate(), Err(ChatError::Invalid));
@@ -237,8 +270,8 @@ fn review_dtos_are_closed_body_free_and_maximum_full_id_serialization_is_bounded
 
 #[test]
 fn review_v3_codec_roundtrips_closed_variants_and_rejects_old_versions() {
-    // Review retains its V3 payload inside the Group-Close-capable V6 envelope.
-    assert_eq!(VERSION, 6);
+    // Review retains its V3 payload inside the Group-Review-capable V7 envelope.
+    assert_eq!(VERSION, 7);
     assert_eq!(PROTOCOL_VERSION, 1);
     let operation = request(1);
     for message in [
@@ -396,7 +429,7 @@ fn review_v3_packet_validation_binds_source_query_receipt_and_command_direction(
     }));
     assert_eq!(packet.validate(), Err(ChatError::Sequence));
     invalid = original;
-    invalid.target.key.conversation = Conversation::Group(ConversationId::from_bytes([7; 16]).unwrap());
+    invalid.target.key.conversation = Conversation::Conference(ConversationId::from_bytes([7; 16]).unwrap());
     packet.reply_to = 0;
     packet.message = ChatMessage::Command(ChatCommand::ReviewConversation(invalid));
     assert_eq!(packet.validate(), Err(ChatError::Invalid));

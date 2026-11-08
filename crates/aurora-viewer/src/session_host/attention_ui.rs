@@ -461,10 +461,14 @@ impl AttentionUi {
                                             }
                                         }
                                         ui.end_row();
-                                        for (kind, label, value) in [
+                                        for (index, (kind, label, value)) in [
                                             ("nearby", aurora_i18n::tr!("host-attention-nearby"), state.preferences.nearby),
                                             ("direct", aurora_i18n::tr!("host-attention-direct"), state.preferences.direct),
-                                        ] {
+                                            ("groups", aurora_i18n::tr!("host-attention-groups"), state.preferences.groups),
+                                        ]
+                                        .into_iter()
+                                        .enumerate()
+                                        {
                                             let response = ui
                                                 .allocate_ui_with_layout(
                                                     vec2(cell_width, 0.0),
@@ -478,8 +482,10 @@ impl AttentionUi {
                                             let mut desired = state.preferences;
                                             if kind == "nearby" {
                                                 desired.nearby = !value;
-                                            } else {
+                                            } else if kind == "direct" {
                                                 desired.direct = !value;
+                                            } else {
+                                                desired.groups = !value;
                                             }
                                             self.control(
                                                 ui,
@@ -492,6 +498,9 @@ impl AttentionUi {
                                                 live,
                                                 &mut activated,
                                             );
+                                            if index % 2 == 1 {
+                                                ui.end_row();
+                                            }
                                         }
                                         ui.end_row();
                                     });

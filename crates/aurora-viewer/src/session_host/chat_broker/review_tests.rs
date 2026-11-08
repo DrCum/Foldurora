@@ -53,6 +53,75 @@ fn setup() -> (Peer, WorkerIo, ReviewConversationRequest) {
     (peer, worker, request)
 }
 
+#[test]
+fn group_attention_review_broker_preserves_native_reads_and_latches_group_replacement_before_dispatch() {
+    for change in 0..4 {
+        let (mut peer, _worker) = connected();
+        let mut row = row();
+        row.conversation = Conversation::Group(aurora_session::ConversationId::from_bytes([8; 16]).unwrap());
+        peer.observe(&event(&peer, 1, ChatEvent::ReadBatch(vec![row.clone()]))).unwrap();
+        let request = ReviewConversationRequest {
+            target: ReviewCapture {
+                key: ChatKey {
+                    source: source(),
+                    conversation: row.conversation,
+                },
+                policy_revision: row.policy_revision,
+                observed: row.read.unwrap().observed,
+            },
+            request: 40,
+            activation: 8,
+        };
+        peer.watch_review(Some(request.target));
+        assert!(peer.watched_review_current(request.target));
+        match change {
+            0 => {
+                row.read.as_mut().unwrap().observed.through += 1;
+                row.read.as_mut().unwrap().unread = 0;
+                row.read.as_mut().unwrap().unread_revision += 1;
+            }
+            1 => row.read.as_mut().unwrap().observed.epoch += 1,
+            2 => row.policy_revision += 1,
+            3 => {}
+            _ => unreachable!(),
+        }
+        // CloseBook owns hidden entries; use its real Close admission/receipt
+        // tests for mutation. This case exercises the snapshot gate below.
+        if change == 3 {
+            let snapshot = HostChatSnapshot {
+                source: source(),
+                authenticated: true,
+                live: true,
+                conversations: peer.conversations.values().cloned().collect(),
+                reads: peer.reads.clone(),
+                closes: super::close::CloseSnapshot {
+                    hidden: [row.conversation].into_iter().collect(),
+                    ..Default::default()
+                },
+                lines: Vec::new(),
+                receipts: Vec::new(),
+                read_operations: Vec::new(),
+                gap: false,
+            };
+            assert!(!snapshot.permits_review(request.target));
+            continue;
+        }
+        peer.observe(&event(&peer, 2, ChatEvent::ReadBatch(vec![row]))).unwrap();
+        if change == 0 {
+            let reads = peer.reads.clone();
+            peer.admit_review(request, Instant::now()).unwrap();
+            peer.observe(&event(&peer, 3, reply(request, ReviewOutcome::OpenedLocally)))
+                .unwrap();
+            assert_eq!(peer.reads, reads);
+            assert!(peer.pending.is_none() && peer.read_pending.is_none());
+        } else {
+            assert!(!peer.watched_review_current(request.target));
+            assert_eq!(peer.admit_review(request, Instant::now()), Err(HostError::Unavailable));
+            assert_eq!(peer.sent, 0);
+        }
+    }
+}
+
 fn reply(request: ReviewConversationRequest, outcome: ReviewOutcome) -> ChatEvent {
     ChatEvent::ReviewReceipt(ReviewReceiptReply {
         query: ReviewReceiptQuery {

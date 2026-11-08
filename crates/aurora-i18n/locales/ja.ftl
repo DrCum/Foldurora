@@ -13422,6 +13422,7 @@ host-attention-help = 保存済みプロフィールの未読の会話です。
 host-attention-profiles = 対象のプロフィール
 host-attention-nearby = 近くのチャット
 host-attention-direct = ダイレクトメッセージ
+host-attention-groups = グループチャット
 host-attention-previous = 前へ
 host-attention-next = 次へ
 host-attention-open = 共有チャットを開く

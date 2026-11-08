@@ -358,6 +358,55 @@ mod tests {
     }
 
     #[test]
+    fn group_attention_native_review_requires_existing_initialized_group_and_fresh_permissions_without_mutation() {
+        use aurora_session::{ConversationId, chat::Conversation};
+        let group = uuid::Uuid::from_u128(55);
+        let conversation = Conversation::Group(ConversationId::from_bytes(*group.as_bytes()).unwrap());
+        for fault in 0..8 {
+            let mut world = native_world();
+            world.groups.groups.push(aurora_net::GroupMembership {
+                id: group,
+                name: "Synthetic group".into(),
+                insignia: uuid::Uuid::nil(),
+                powers: 0,
+                accept_notices: true,
+                list_in_profile: false,
+                contribution: 0,
+            });
+            let mut info = crate::world::groups::SessionInfo::default();
+            info.group = true;
+            info.active = true;
+            info.text_muted = true; // A moderator send restriction does not prohibit show-only review.
+            world.groups.sessions.insert(group, info);
+            world.social.session_mut(group).unread = 3;
+            let request = capture(&world, conversation);
+            request.validate().unwrap();
+            let before = world.read_counters(Some(group));
+            let sessions = world.social.ims.len();
+            assert_eq!(existing_target(&world, request, true), Ok(Some(group)));
+            assert_eq!(world.read_counters(Some(group)), before);
+            match fault {
+                0 => world.groups.groups.clear(),
+                1 => world.groups.sessions.get_mut(&group).unwrap().closed = true,
+                2 => world.groups.sessions.get_mut(&group).unwrap().active = false,
+                3 => world.groups.sessions.get_mut(&group).unwrap().group = false,
+                4 => world.mutes.state = crate::world::mutes::LoadState::Initial,
+                5 => world.social.ims.retain(|im| im.other != group),
+                6 => world.groups.mute_all_groups = true,
+                7 => world.agent_id = uuid::Uuid::nil(),
+                _ => unreachable!(),
+            }
+            assert!(existing_target(&world, request, true).is_err(), "fault {fault}");
+            assert!(world.social.ims.len() <= sessions, "review never creates a missing native session");
+            assert!(world.groups.out.is_empty());
+            assert!(world.social.focus_im.is_none());
+            if fault != 5 {
+                assert_eq!(world.read_counters(Some(group)), before, "review never marks read or leaves");
+            }
+        }
+    }
+
+    #[test]
     fn native_review_target_reuses_read_policy_without_send_permission_or_explicit_read_mutation() {
         use aurora_session::chat::Conversation;
         let mut world = native_world();
