@@ -34,6 +34,7 @@ struct Harness {
     time: f64,
     without_tickets: bool,
     member_panel: bool,
+    rlva: crate::world::rlva::Rlva,
 }
 impl Harness {
     fn new(mode: usize, zoom: f32) -> Self {
@@ -55,6 +56,7 @@ impl Harness {
             time: 0.0,
             without_tickets: false,
             member_panel: false,
+            rlva: Default::default(),
         };
         for _ in 0..4 {
             h.frame(Vec::new());
@@ -113,7 +115,7 @@ impl Harness {
                         region: format!("Synthetic region {}", id.as_u128()),
                         rating: "",
                         global: Some(DVec3::new(1.0, 2.0, 3.0)),
-                        slurl: Some("https://example.invalid/landmark".into()),
+                        slurl: (!self.rlva.has("showloc")).then(|| "https://example.invalid/landmark".into()),
                         thumbnail: None,
                     }
                 })
@@ -727,6 +729,59 @@ fn favorites_real_egui_cached_context_slurl_respects_actual_showloc_added_before
                     .commands
                     .iter()
                     .any(|command| matches!(command, egui::OutputCommand::CopyText(_)))
+            );
+        }
+        let mut live = Harness::members();
+        live.rlva.configure(true);
+        let captured = live.open_member_context();
+        assert!(captured.favorite.slurl.is_some());
+        let position = live.position(aurora_i18n::tr!("common-copy-slurl"));
+        let copy_row = |h: &Harness| {
+            let layer = h.ctx.layer_id_at(position).expect("actual member context layer");
+            h.ctx.viewport(|viewport| {
+                viewport
+                    .prev_pass
+                    .widgets
+                    .get_layer(layer)
+                    .find(|widget| widget.rect.contains(position) && widget.rect.height() < 40.0 && widget.rect.width() > 150.0)
+                    .copied()
+                    .expect("actual Copy SLURL menu row")
+            })
+        };
+        assert!(copy_row(&live).sense.click, "the original available URL has an enabled row");
+        if restrict_after_capture {
+            assert!(live.rlva.receive(&ChatMessage {
+                from_name: "Synthetic restriction issuer".into(),
+                source_id: Uuid::from_u128(700),
+                owner_id: live.data.account,
+                source_type: ChatSourceType::Object,
+                chat_type: ChatType::OwnerSay,
+                position: glam::Vec3::ZERO,
+                message: "@showloc=n".into(),
+            }));
+        }
+        live.frame(Vec::new());
+        assert_eq!(live.view().list[0].slurl.is_none(), restrict_after_capture);
+        assert_eq!(
+            copy_row(&live).sense.click,
+            !restrict_after_capture,
+            "the open context follows current availability"
+        );
+        let retained = live
+            .ctx
+            .data(|data| data.get_temp::<GroupEditor>(Id::unique("favorite_folder_editor")))
+            .unwrap();
+        assert_eq!(
+            retained.favorite, captured.favorite,
+            "availability never substitutes the captured source or payload"
+        );
+        let (_, action) = live.click(aurora_i18n::tr!("common-copy-slurl"), PointerButton::Primary);
+        if restrict_after_capture {
+            assert!(action.is_none(), "a currently hidden location cannot activate cached Copy SLURL");
+        } else {
+            assert_eq!(
+                action,
+                context_command(&captured.favorite, ContextCommand::CopySlurl(original_slurl))
             );
         }
     }
