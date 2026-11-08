@@ -1,4 +1,4 @@
-name: Isolated Glow and call continuity validation
+name: Baseline control for existing UI fixture failures
 on:
   push:
     branches: [checks/upstream-glow-calls-20261108]
@@ -14,89 +14,72 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: '0'
   CARGO_BUILD_JOBS: '2'
-  SOURCE_SHA: 85191933c4ac42991f6cf841a0e1377e37f61b1d
+  SOURCE_SHA: 388b299c429d776b3fc7a9890162cd3d940b9dc3
 jobs:
-  validate:
+  baseline:
     runs-on: ubuntu-24.04
-    timeout-minutes: 70
+    timeout-minutes: 45
     steps:
-      - name: Checkout pinned public port source
+      - name: Checkout the unchanged public base
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: 85191933c4ac42991f6cf841a0e1377e37f61b1d
+          ref: 388b299c429d776b3fc7a9890162cd3d940b9dc3
           fetch-depth: 0
           filter: blob:none
-      - name: Source and runner
-        shell: bash
+      - name: Source and compiler identity
         run: |
-          mkdir -p .scratch/validation
+          mkdir -p .scratch/baseline
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-          git rev-parse HEAD | tee .scratch/validation/source.txt
-          echo "$GITHUB_SHA" > .scratch/validation/workflow.txt
-          rustc --version | tee .scratch/validation/rust.txt
-          cargo --version | tee .scratch/validation/cargo.txt
-          df -h .
-      - name: Existing CI system libraries
+          git rev-parse HEAD | tee .scratch/baseline/source.txt
+          echo "$GITHUB_SHA" > .scratch/baseline/workflow.txt
+          rustc --version | tee .scratch/baseline/rust.txt
+          cargo --version | tee .scratch/baseline/cargo.txt
+      - name: Existing CI libraries and cache
         run: |
           sudo apt-get update
           sudo apt-get install -y libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev
-          rustup component add rustfmt clippy
-      - name: Restore repository Linux CI cache
-        uses: ./.github/actions/rust-cache
+      - uses: ./.github/actions/rust-cache
         with:
           name: linux-tests
-      - name: Formatting
+      - name: Reproduce only the four unchanged failures
         run: |
-          cargo fmt --all -- --check 2>&1 | tee .scratch/validation/fmt.log
-      - name: Qualified workspace Clippy
-        run: |
-          cargo clippy --profile ci --workspace --all-targets --locked -- -D warnings -A dead-code 2>&1 | tee .scratch/validation/clippy.log
-      - name: Graphics presets and saved profiles
-        run: |
-          cargo test --profile ci --workspace --locked --offline graphics_presets:: 2>&1 | tee .scratch/validation/graphics.log
-      - name: Voice continuity and channel restrictions
-        run: |
-          cargo test --profile ci --workspace --locked --offline voice::tests:: 2>&1 | tee .scratch/validation/voice.log
-      - name: Safe graphics backup and restore
-        run: |
-          cargo test --profile ci --workspace --locked --offline safe_graphics:: 2>&1 | tee .scratch/validation/safe-graphics.log
-      - name: Theme guards
-        run: |
-          cargo test --profile ci --workspace --locked --offline theme_guard 2>&1 | tee .scratch/validation/theme.log
-      - name: Translation catalogs
-        run: |
-          cargo test --profile ci --workspace --locked --offline every_language_has_english_keys_and_variables 2>&1 | tee .scratch/validation/catalog-keys.log
-          cargo test --profile ci --workspace --locked --offline every_bundled_message_formats_with_its_declared_variables 2>&1 | tee .scratch/validation/catalog-format.log
-      - name: Confirm the six new regressions executed
-        run: |
-          python3 - <<'PY'
-          import pathlib
-          root=pathlib.Path('.scratch/validation')
-          expected={
-            'graphics.log':['levels_keep_the_glow_switch_of_the_user','graphics_saved_restores_the_glow_it_was_saved_with','former_level_migrations_keep_glow_and_still_upgrade_the_level'],
-            'voice.log':['the_current_call_survives_teleport_region_data_gaps','call_hangup_and_channel_changes_still_require_the_destination','keeping_a_call_never_bypasses_voice_disabled_logout_or_missing_audio'],
-          }
-          for filename,names in expected.items():
-            log=(root/filename).read_text()
-            for name in names:
-              assert '::'+name+' ... ok' in log,name
-          print('All six new regressions executed and passed.')
+          names=(
+            crash::window::tests::a_device_loss_without_a_trace_displays_and_copies_the_saved_summary
+            crash::window::tests::a_recovered_trace_keeps_precedence_in_details_and_clipboard
+            session_host::native::tests::host_overlay_collection_covers_live_tooltips_and_bounds_excess_area_count
+            session_host::native::tests::host_popup_islands_follow_real_combo_paint_and_disappear_when_it_closes
+          )
+          index=0
+          for name in "${names[@]}"; do
+            index=$((index+1))
+            log=".scratch/baseline/case-$index.log"
+            set +e
+            cargo test --profile ci --workspace --locked "$name" -- --exact > "$log" 2>&1
+            result=$?
+            set -e
+            cat "$log"
+            python3 - "$name" "$log" "$result" <<'PY'
+          import pathlib,sys
+          name,path,result=sys.argv[1:]
+          log=pathlib.Path(path).read_text()
+          assert result=='101',(name,'unexpected Cargo exit',result)
+          assert 'test '+name+' ... FAILED' in log,(name,'case did not execute')
+          assert 'Dropped TexturesDelta with 1 unapplied deltas.' in log,(name,'different failure')
+          with pathlib.Path('.scratch/baseline/expected-failures.txt').open('a') as out:
+            out.write(name+' : expected unchanged TexturesDelta failure'+chr(10))
           PY
-      - name: Full workspace suite on the frozen port candidate
-        timeout-minutes: 25
-        run: |
-          timeout 1200 cargo test --profile ci --workspace --locked --offline --no-fail-fast 2>&1 | tee .scratch/validation/full-suite.log
-      - name: Verify source remained frozen
+          done
+      - name: Verify unchanged source
         if: always()
         run: |
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           git diff --exit-code
-      - name: Upload raw commands and results
+      - name: Upload raw baseline evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: glow-calls-85191933c4ac
-          path: .scratch/validation/
+          name: glow-calls-base-388b299c
+          path: .scratch/baseline/
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
