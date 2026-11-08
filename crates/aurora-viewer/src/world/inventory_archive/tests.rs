@@ -108,6 +108,9 @@ fn restriction(world: &mut World, text: &str) {
     }));
 }
 
+#[path = "projection_tests.rs"]
+mod projection_tests;
+
 #[test]
 fn inventory_archive_eligibility_uses_actual_ordinary_outfit_own_ancestry_without_fetches() {
     let mut world = world();
