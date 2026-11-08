@@ -726,16 +726,26 @@
   Windows, visual and human grid acceptance remain pending; no grid was used.
   Shared app wiring, EN/FR/JA text, documentation and the Windows build allowlist
   need Dev Agent coordination during integration. Slick was unavailable.
-- 🔧 Foldurora bought-object active group (human request, 2026-11-08;
-  no fork issue; upstream `b498b8fd6e09`, Aurora-Viewer/Aurora-Viewer#2824):
+- 🟡 Foldurora bought-object active group (human request, 2026-11-08;
+  no fork issue; [PR #12](https://github.com/DrCum/Foldurora/pull/12);
+  upstream `b498b8fd6e09`, Aurora-Viewer/Aurora-Viewer#2824):
   pass the originating world's current active group at purchase confirmation
   into ObjectBuy, or nil with no active group, following LLSelectMgr::sendBuy /
   packAgentGroupAndCatID. Keep the selected root, quoted sale, destination,
   eligibility checks and reliable wire format. The intact upstream regressions
   decode local UDP purchases and change/clear the group while confirmation is
   open. Source screening found no shared production edits with current monitor,
-  Shared Chat, Attention or relevant WIP tips. Fork checks are pending; upstream
-  grid validation below is historical. Native grid acceptance remains human-only.
+  Shared Chat, Attention or relevant WIP tips, rechecked through monitor
+  `d9f50d0f` and ledger `9cd07e43`. Tested code `2d0e0928` passed Linux formatting,
+  workspace Clippy with the existing dead-code allowance, one UDP regression
+  and 18 interaction tests. Final PR CI is recorded in the PR. The shared
+  NetCommand field and TASKS-only conflicts with PR #11 / monitor require Dev
+  Agent coordination; Slick was unavailable and no message was delivered.
+  Upstream grid validation below is historical, not new Foldurora acceptance.
+  - ⬜ Human native/grid acceptance: Original/Copy/Contents with active/nil
+    groups, including changing/clearing the group while confirmation is open;
+    verify bought-object group and unchanged purchase guards. No changed UI
+    or translations; both editor layouts retain the same interaction path.
 
 - 🔧 Selective upstream catch-up (human request, 2026-11-07; no issue): apply
   sixteen reviewed upstream commits individually with `-x` to frozen photo/
