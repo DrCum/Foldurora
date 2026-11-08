@@ -17,6 +17,12 @@ quarantined through empty Preedit until an actual terminal batch completes;
 composition epochs prevent an old terminal from erasing newer ownership.
 Other editors' IME input never grants that quarantine. Index work remains
 bounded once per egui frame.
+The focus-dependent clip/native fixtures enter their target through real bounded
+Tab traversal: egui 0.37 buttons register keyboard focus interest but do not
+request focus from pointer clicks or aborted presses. This test setup preserves
+all 29 existing test names, attributes and assertions and changes no production
+focus/admission policy. Root's two d9 focus failures remain negative evidence;
+the corrected setup is source-only and awaits independent review and rerun.
 The ordinary `app/folder_jump.rs` adapter observes actual login/profile/owner/
 Inventory and RLVa state after delivered events, before input and callback.
 Main/additional full personal Inventory gets a classic control or Aurora menu

@@ -85,6 +85,14 @@
   Archive/custom-view/other future folder policy must join the shared admission,
   revision and final-parent checks before chooser support; no full parity claim.
 
+- 🔧 Folder Jump focus-dependent fixture correction (2026-11-08; no issue):
+  Root's d9 workspace/isolated runs exposed two setups assuming pointer clicks
+  focus egui buttons. They now traverse the actual Tab focus chain before the
+  unchanged clipping/accessibility and native denied-press assertions. All 29
+  existing test names, attributes and assertions remain; production body/native
+  focus, IME quarantine and final-pass admission are unchanged. Source-only
+  correction is authored and unrun; independent review and Root rerun are next.
+
 - 🔧 Actual native LastActive producer front, phase 1 (2026-11-07; no issue):
   WorkerBridge privately mints accepted Online control tokens with original
   receipt/expiry and stable revocable witness; optional image startup and source

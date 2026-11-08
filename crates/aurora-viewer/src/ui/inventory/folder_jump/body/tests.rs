@@ -214,6 +214,21 @@ impl Frames {
         assert!(self.pointer(at, true).is_none());
         self.pointer(at, false)
     }
+    fn focus_with_tab(&mut self, control: Control) {
+        assert!(control.visible(), "keyboard fixture starts from a real visible command");
+        // egui 0.37 buttons are focusable, but pointer clicks do not request
+        // keyboard focus. Traverse the actual query/results/footer focus chain;
+        // do not manufacture focus or bypass the body/native command guards.
+        // There are at most MAX_RESULTS rows plus query/Open/Cancel.
+        for _ in 0..super::super::model::MAX_RESULTS + 3 {
+            if self.ctx.memory(|memory| memory.focused()) == Some(control.widget) {
+                return;
+            }
+            assert!(self.show(vec![key(Key::Tab, true)]).is_none());
+            assert!(self.show(vec![key(Key::Tab, false)]).is_none());
+        }
+        assert_eq!(self.ctx.memory(|memory| memory.focused()), Some(control.widget));
+    }
     fn replace_query(&mut self, value: &str) {
         assert!(self.click(self.query()).is_none());
         let command = Modifiers {
@@ -494,6 +509,7 @@ fn folder_jump_clipped_focused_row_rejects_held_keyboard_and_accessibility_until
     let alpha = frames.row(id(2));
     assert!(frames.click(alpha).is_none());
     frames.settle();
+    frames.focus_with_tab(alpha);
     assert_eq!(frames.ctx.memory(|memory| memory.focused()), Some(alpha.widget));
     assert!(frames.show(vec![key(Key::Enter, true)]).is_none());
     let point = frames.row(id(2)).rect.center();
@@ -611,6 +627,7 @@ fn folder_jump_native_rejected_press_and_up_in_one_batch_cannot_open_then_fresh_
         assert!(frames.pointer(open.rect.center(), true).is_none());
         assert!(frames.pointer(Pos2::ZERO, false).is_none());
         frames.settle();
+        frames.focus_with_tab(open);
         assert_eq!(frames.ctx.memory(|memory| memory.focused()), Some(open.widget));
         let mut owner = frames.attach_owner();
         // The first physical press belonged to an external modal guard; its
