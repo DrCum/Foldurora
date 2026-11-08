@@ -28,6 +28,12 @@
   actual-World lifecycle tests are authored/unrun; existing Favorites assertions
   remain. Bounded archive projection, new closed store kind, actual consumers
   and Folder Jump visibility integration are not yet implemented or enabled.
+- 🔧 Windows profile-copy build follow-up (2026-11-08; no issue): explicitly
+  type the opened ACE principal as pinned windows-sys PSID to resolve E0282.
+  Pointer value, SID extent checks, ownership/ACL policy and all tests are
+  unchanged. Source-only correction; independent review and Root Windows
+  compiler/tests/build rerun remain required.
+
 - 🔧 Selective-copy committed-widget and modifier guard correction
   (2026-11-08; no issue): exact final egui prev_pass widget enabled/visible/ID/
   parent/Sense/rect/interact/layer proof, finite forward/inverse geometry and

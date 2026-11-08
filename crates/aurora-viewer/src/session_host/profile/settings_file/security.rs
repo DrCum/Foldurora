@@ -299,7 +299,7 @@ mod native {
                     continue;
                 }
                 let ace = &*raw.cast::<ACCESS_ALLOWED_ACE>();
-                let principal = (&ace.SidStart as *const u32).cast_mut().cast();
+                let principal: PSID = (&ace.SidStart as *const u32).cast_mut().cast();
                 let available = usize::from(header.AceSize) - (size_of::<ACCESS_ALLOWED_ACE>() - size_of::<u32>());
                 // Validate the SID header/count's complete extent before any
                 // SID API can inspect its variable SubAuthority array.
