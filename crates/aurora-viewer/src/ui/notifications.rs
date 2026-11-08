@@ -1216,9 +1216,7 @@ mod tests {
                     .shapes
                     .iter()
                     .find_map(|s| match &s.shape {
-                        egui::Shape::Text(t) if t.galley.text() == aurora_i18n::tr!("common-send") => {
-                            Some(t.pos + t.galley.size() * 0.5)
-                        }
+                        egui::Shape::Text(t) if t.galley.text() == aurora_i18n::tr!("common-send") => Some(t.pos + t.galley.size() * 0.5),
                         _ => None,
                     })
                     .expect("Send is visible");
@@ -1226,7 +1224,14 @@ mod tests {
                     assert!((output.pixels_per_point - 1.0).abs() < 0.001);
                     let primitives = ctx.tessellate(output.shapes.clone(), output.pixels_per_point);
                     assert!(primitives.iter().all(|p| matches!(p.primitive, egui::epaint::Primitive::Mesh(_))));
-                    painter.paint(pixels, [640, 480], &primitives, &output.textures_delta, output.pixels_per_point, p.panel);
+                    painter.paint(
+                        pixels,
+                        [640, 480],
+                        &primitives,
+                        &output.textures_delta,
+                        output.pixels_per_point,
+                        p.panel,
+                    );
                 }
                 output.textures_delta.clear();
                 (answer, send)
@@ -1268,7 +1273,10 @@ mod tests {
             };
             assert!(draw(vec![egui::Event::PointerMoved(send)], &mut list, &mut capture).0.is_none());
             assert!(draw(vec![click(true)], &mut list, &mut capture).0.is_none());
-            assert!(matches!(draw(vec![click(false)], &mut list, &mut capture).0, Some(Response::SendText)));
+            assert!(matches!(
+                draw(vec![click(false)], &mut list, &mut capture).0,
+                Some(Response::SendText)
+            ));
             let text = list.list[0].text.clone();
             let (commands, _) = list.respond(id, Response::SendText, |_| Uuid::nil(), Uuid::nil());
             assert!(matches!(commands.as_slice(), [aurora_net::NetCommand::ScriptDialogReply {
