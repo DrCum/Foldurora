@@ -13532,3 +13532,18 @@ inventory-jump-limited = ここで索引に登録した読み込み済みフォ�
 inventory-jump-first = 索引内の検索結果を先頭から{ $count }件表示しています。
 inventory-jump-empty = 一致する読み込み済みフォルダはありません。
 inventory-jump-count = 読み込み済みフォルダ{ $count }件が一致
+
+## Local Inventory visibility
+inventory-archive-archive = フォルダをアーカイブ
+inventory-archive-unarchive = フォルダのアーカイブを解除
+inventory-archive-visibility = 表示設定
+inventory-archive-include = アーカイブしたフォルダを含める
+inventory-archive-loading = アーカイブの表示設定を読み込み中…
+inventory-archive-limited = 確認済みの読み込まれたフォルダのみ表示しています。残りを表示するには「アーカイブしたフォルダを含める」を使用してください。
+inventory-archive-unavailable = アーカイブ設定を利用できません
+inventory-archive-saving = アーカイブ設定を保存中…
+inventory-archive-save-failed = 保存できませんでした。メニューを開き直して再試行してください。
+inventory-archive-show-original = 非表示の場所を表示するには、表示設定の「アーカイブしたフォルダを含める」を確認してください。
+inventory-archive-offline-readonly = オフラインの表示設定（読み取り専用）
+inventory-archive-load-failed = アーカイブ設定を読み込めませんでした。保存済みデータは保持されています。内容を表示するには「アーカイブしたフォルダを含める」を使用してください。
+inventory-archive-readonly = アーカイブ設定は読み取り専用です

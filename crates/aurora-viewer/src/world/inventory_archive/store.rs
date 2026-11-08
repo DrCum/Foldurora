@@ -201,6 +201,12 @@ impl Resources {
         }
     }
     fn perform(&self, request: &Request) -> Result<Outcome, Error> {
+        if match request {
+            Request::Load(ticket) => ticket.instance == 0,
+            Request::Save { intent, .. } => intent.operation() == 0,
+        } {
+            return Err(Error::Invalid);
+        }
         if request.source() != self.source
             || NativeStoreKind::InventoryArchive.max_bytes() != MAX_BYTES
             || !self.directory.matches(

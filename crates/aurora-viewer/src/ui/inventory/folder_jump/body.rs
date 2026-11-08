@@ -5,6 +5,7 @@ use super::model::{Model, Phase, Policy, Source, Ticket};
 use crate::theme::Palette;
 use crate::ui::widgets;
 use crate::world::inventory::Inventory;
+use crate::world::inventory_archive::visibility::MaskRead;
 use egui::{Id, Key, LayerId, Pos2, Rect, RichText};
 
 #[derive(Clone, Copy)]
@@ -152,17 +153,18 @@ impl Body {
         self.model.source()
     }
 
-    pub(super) fn take_open(
+    pub(super) fn take_open_visible(
         &mut self,
         ticket: Ticket,
         ctx: &egui::Context,
         inventory: &Inventory,
         source: Option<Source>,
         policy: Policy,
+        mask: Option<MaskRead<'_>>,
     ) -> bool {
         let Some(open) = self.completed_open.take() else { return false };
         open.ticket == ticket
-            && self.model.validate(ticket, inventory, source, policy)
+            && self.model.validate_visible(ticket, inventory, source, policy, mask)
             && open.frame.checked_add(1) == Some(ctx.cumulative_frame_nr())
             && open.pass.checked_add(1) == Some(ctx.cumulative_pass_nr())
             && open.control.visible()
@@ -175,8 +177,16 @@ impl Body {
             }
     }
 
-    pub(super) fn observe(&mut self, inventory: &Inventory, source: Option<Source>, policy: Policy) {
-        self.model.sync(inventory, source, policy);
+    pub(super) fn observe_visible(&mut self, inventory: &Inventory, source: Option<Source>, policy: Policy, mask: Option<MaskRead<'_>>) {
+        let before = self.model.epoch();
+        self.model.sync_visible(inventory, source, policy, mask);
+        if before != self.model.epoch() {
+            self.controls.clear();
+            self.painted = None;
+            self.gesture = None;
+            self.pending_release = None;
+            self.completed_open = None;
+        }
         let source = self.model.source();
         if source != self.source {
             self.query.clear();
@@ -200,12 +210,13 @@ impl Body {
             ]
             .into_iter()
             .flatten()
-            .any(|intent| self.model.validate(intent.ticket(), inventory, source, policy))
+            .any(|intent| self.model.validate_visible(intent.ticket(), inventory, source, policy, mask))
         });
-        if self
-            .gesture
-            .is_some_and(|gesture| !self.model.validate(gesture.intent.ticket(), inventory, source, policy))
-        {
+        if self.gesture.is_some_and(|gesture| {
+            !self
+                .model
+                .validate_visible(gesture.intent.ticket(), inventory, source, policy, mask)
+        }) {
             self.gesture = None;
         }
     }
@@ -275,7 +286,14 @@ impl Body {
         }
     }
 
-    fn capture(&mut self, ui: &egui::Ui, inventory: &Inventory, source: Option<Source>, policy: Policy) -> Option<(Gesture, Release)> {
+    fn capture(
+        &mut self,
+        ui: &egui::Ui,
+        inventory: &Inventory,
+        source: Option<Source>,
+        policy: Policy,
+        mask: Option<MaskRead<'_>>,
+    ) -> Option<(Gesture, Release)> {
         let frame = ui.ctx().cumulative_frame_nr();
         if self.input_frame == Some(frame) {
             return self.pending_release;
@@ -379,7 +397,7 @@ impl Body {
             }
             return None;
         }
-        let valid = |intent: Intent| self.model.validate(intent.ticket(), inventory, source, policy);
+        let valid = |intent: Intent| self.model.validate_visible(intent.ticket(), inventory, source, policy, mask);
         let mut released = None;
         let mut consumed = Vec::new();
         for (index, edge) in edges {
@@ -477,16 +495,17 @@ impl Body {
         released
     }
 
-    pub(super) fn show(
+    pub(super) fn show_visible(
         &mut self,
         ui: &mut egui::Ui,
         palette: &Palette,
         inventory: &Inventory,
         source: Option<Source>,
         policy: Policy,
+        mask: Option<MaskRead<'_>>,
     ) -> Option<Action> {
         ui.push_id(self.model.widget_namespace(), |ui| {
-            self.show_inner(ui, palette, inventory, source, policy)
+            self.show_inner(ui, palette, inventory, source, policy, mask)
         })
         .inner
     }
@@ -498,6 +517,7 @@ impl Body {
         inventory: &Inventory,
         source: Option<Source>,
         policy: Policy,
+        mask: Option<MaskRead<'_>>,
     ) -> Option<Action> {
         // Keep ownership before pruning: terminal IME must retire its focus
         // even if an Inventory revision just invalidated that control ticket.
@@ -520,18 +540,18 @@ impl Body {
         if terminal_ime && let Some(focus) = owned_focus.filter(|focus| Some(*focus) != self.query_widget) {
             ui.ctx().memory_mut(|memory| memory.surrender_focus(focus));
         }
-        self.observe(inventory, source, policy);
+        self.observe_visible(inventory, source, policy, mask);
         let frame = ui.ctx().cumulative_frame_nr();
         if self.work_frame != Some(frame) {
             self.work_frame = Some(frame);
-            self.model.advance(inventory);
+            self.model.advance_visible(inventory, mask);
         }
         let live =
             ui.is_enabled() && ui.ctx().memory(|memory| memory.is_above_modal_layer(ui.layer_id())) && !egui::Popup::is_any_open(ui.ctx());
         if !live {
             self.cancel_input();
         }
-        let released = self.capture(ui, inventory, source, policy);
+        let released = self.capture(ui, inventory, source, policy, mask);
         let mut painting = Vec::with_capacity(64);
         let field = ui
             .push_id("folder_jump_query", |ui| {
@@ -658,7 +678,11 @@ impl Body {
             return Some(Action::Close);
         }
         let activated = released.and_then(|(gesture, release)| {
-            if !self.model.validate(gesture.intent.ticket(), inventory, source, policy) || !gesture.control.visible() {
+            if !self
+                .model
+                .validate_visible(gesture.intent.ticket(), inventory, source, policy, mask)
+                || !gesture.control.visible()
+            {
                 return None;
             }
             let control = painting.iter().find(|control| {
@@ -690,7 +714,7 @@ impl Body {
                 Some(Action::Open(ticket))
             }
             Some((Intent::Select(ticket), trigger, _, _)) => {
-                if self.model.select(ticket, inventory, source, policy) {
+                if self.model.select_visible(ticket, inventory, source, policy, mask) {
                     if matches!(trigger, Trigger::Key(Key::ArrowUp | Key::ArrowDown)) {
                         self.reveal = Some(ticket.folder());
                         if let Some(control) = self.painted.as_ref().and_then(|painted| {
@@ -709,5 +733,29 @@ impl Body {
             }
             None => None,
         }
+    }
+}
+
+#[cfg(test)]
+impl Body {
+    pub(super) fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        palette: &Palette,
+        fixture: &super::fixtures::InventoryFixture,
+        source: Option<Source>,
+        policy: Policy,
+    ) -> Option<Action> {
+        fixture.with(|inventory, mask, _| self.show_visible(ui, palette, inventory, source, policy, Some(mask)))
+    }
+    pub(super) fn take_open(
+        &mut self,
+        ticket: Ticket,
+        ctx: &egui::Context,
+        fixture: &super::fixtures::InventoryFixture,
+        source: Option<Source>,
+        policy: Policy,
+    ) -> bool {
+        fixture.with(|inventory, mask, _| self.take_open_visible(ticket, ctx, inventory, source, policy, Some(mask)))
     }
 }

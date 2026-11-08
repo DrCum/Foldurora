@@ -47,7 +47,6 @@ pub mod hud_lock;
 pub mod hud_scale;
 mod im_announce;
 pub mod inventory;
-#[cfg(test)]
 pub(crate) mod inventory_archive;
 pub mod inventory_offers;
 pub mod land;
@@ -540,8 +539,8 @@ pub struct World {
     /// Online status (away, do not disturb...) and automatic responses.
     pub status: status::Status,
     pub inventory: inventory::Inventory,
-    #[cfg(test)]
     pub(crate) inventory_archive: Option<inventory_archive::controller::Controller>,
+    pub(crate) inventory_archive_instance: Option<u64>,
     pub active_gestures: std::collections::BTreeSet<Uuid>,
     /// The inventory cache being read by its thread since the login reply
     /// (`poll_inventory_cache`), and when the read started.
@@ -855,8 +854,8 @@ impl World {
             calls: calls::Calls::default(),
             status: status::Status::default(),
             inventory: inventory::Inventory::default(),
-            #[cfg(test)]
             inventory_archive: None,
+            inventory_archive_instance: inventory_archive::fresh_inventory_instance(),
             active_gestures: Default::default(),
             inventory_cache: None,
             inventory_background: Default::default(),
@@ -933,8 +932,8 @@ impl World {
     /// Every physical personal Inventory replacement must pass this boundary,
     /// even equal source IDs/generation. Cache application is an in-place merge.
     fn replace_inventory(&mut self, inventory: inventory::Inventory) {
-        #[cfg(test)]
         self.retire_inventory_archive();
+        self.inventory_archive_instance = inventory_archive::fresh_inventory_instance();
         self.inventory = inventory;
     }
 
@@ -942,7 +941,6 @@ impl World {
     /// stays for the next one: the conversations and the nearby chat go, and
     /// the transcripts close (only their writer and settings are kept).
     pub fn reset(&mut self) {
-        #[cfg(test)]
         self.retire_inventory_archive();
         self.save_open_ims();
         let lib = self.avatar_lib.clone();

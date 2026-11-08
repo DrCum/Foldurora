@@ -13571,3 +13571,18 @@ inventory-jump-count = { $count ->
     [one] { $count } matching loaded folder
    *[other] { $count } matching loaded folders
     }
+
+## Local Inventory visibility
+inventory-archive-archive = Archive folder
+inventory-archive-unarchive = Unarchive folder
+inventory-archive-visibility = Visibility
+inventory-archive-include = Include archived folders
+inventory-archive-loading = Loading archive visibility…
+inventory-archive-limited = Limited to checked loaded folders. Use Include archived folders to view the rest.
+inventory-archive-unavailable = Archive settings unavailable
+inventory-archive-saving = Saving archive settings…
+inventory-archive-save-failed = Could not save. Open a fresh menu to retry.
+inventory-archive-show-original = Review Visibility → Include archived folders to show hidden locations.
+inventory-archive-offline-readonly = Offline visibility — read-only
+inventory-archive-load-failed = Archive settings could not be loaded. Saved data was preserved. Use Include archived folders to view contents.
+inventory-archive-readonly = Archive settings are read-only

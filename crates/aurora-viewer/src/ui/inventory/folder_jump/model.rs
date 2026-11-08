@@ -3,6 +3,7 @@
 //! these local correlation values confer no network or Inventory authority.
 
 use crate::world::inventory::{Folder, Inventory};
+use crate::world::inventory_archive::visibility::MaskRead;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
@@ -21,12 +22,29 @@ const MAX_TOKENS: usize = 64;
 const STEPS_PER_TURN: usize = 256;
 const TURN: Duration = Duration::from_millis(2);
 
-/// Shared by the initial index and final current-parent walk. Future archive
-/// or custom-folder policy must enter this gate AND the policy revision.
-fn visible_folder(inventory: &Inventory, id: Uuid) -> Option<&Folder> {
+/// Shared by the initial index and final current-parent walk. The borrowed
+/// Archive mask and checked owning policy qualify both entry points.
+fn visible_folder<'a>(inventory: &'a Inventory, id: Uuid, mask: Option<MaskRead<'_>>) -> Option<&'a Folder> {
+    if !mask.is_some_and(|mask| mask.for_inventory(inventory) && mask.passes(id)) {
+        return None;
+    }
     let folder = inventory.folders.get(&id)?;
     (!id.is_nil() && id != inventory.lib_root && folder.info.id == id && !folder.library && folder.info.type_default != 14)
         .then_some(folder)
+}
+
+pub(super) fn current_path(inventory: &Inventory, id: Uuid, mask: Option<MaskRead<'_>>) -> bool {
+    let mut at = id;
+    for _ in 0..=MAX_DEPTH {
+        let Some(folder) = visible_folder(inventory, at, mask) else {
+            return false;
+        };
+        if at == inventory.root {
+            return true;
+        }
+        at = folder.info.parent;
+    }
+    false
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,7 +60,7 @@ pub(super) struct Source {
 }
 
 impl Source {
-    fn matches(self, inventory: &Inventory) -> bool {
+    fn matches(self, inventory: &Inventory, mask: Option<MaskRead<'_>>) -> bool {
         !self.agent.is_nil()
             && !self.session.is_nil()
             && self.profile != 0
@@ -50,7 +68,7 @@ impl Source {
             && self.owner == inventory.owner
             && !self.root.is_nil()
             && self.root == inventory.root
-            && visible_folder(inventory, self.root).is_some()
+            && visible_folder(inventory, self.root, mask).is_some()
     }
 }
 
@@ -269,11 +287,11 @@ impl Model {
 
     /// Called after actual source/model events, before input and dispatch.
     /// A false/unknown source purges private folder text immediately.
-    pub(super) fn sync(&mut self, inventory: &Inventory, source: Option<Source>, policy: Policy) {
+    pub(super) fn sync_visible(&mut self, inventory: &Inventory, source: Option<Source>, policy: Policy, mask: Option<MaskRead<'_>>) {
         if self.phase == Phase::Exhausted {
             return;
         }
-        let source = source.filter(|source| policy.allowed && source.matches(inventory));
+        let source = source.filter(|source| policy.allowed && source.matches(inventory, mask));
         if source.is_none() {
             if self.source.is_some() || self.phase != Phase::Unavailable {
                 self.invalidate();
@@ -292,6 +310,7 @@ impl Model {
             return;
         }
         let changed_source = self.source != source;
+        let changed_policy = self.policy != policy;
         if !self.invalidate() {
             return;
         }
@@ -302,6 +321,8 @@ impl Model {
         self.limited = false;
         if changed_source {
             self.query = Query::parse("");
+        }
+        if changed_source || changed_policy {
             self.selected = None;
             self.select_first = true;
         }
@@ -344,6 +365,10 @@ impl Model {
                 Phase::InvalidQuery
             };
         }
+    }
+
+    pub(super) fn epoch(&self) -> u64 {
+        self.epoch
     }
 
     pub(super) fn phase(&self) -> Phase {
@@ -406,7 +431,7 @@ impl Model {
         };
     }
 
-    fn index_step(&mut self, inventory: &Inventory) {
+    fn index_step(&mut self, inventory: &Inventory, mask: Option<MaskRead<'_>>) {
         let Some(parent) = self.nodes.get(self.parent) else {
             self.finish_index();
             return;
@@ -425,7 +450,9 @@ impl Model {
         if id.is_nil() || id == inventory.lib_root || self.seen.contains_key(&id) {
             return;
         }
-        let Some(folder) = visible_folder(inventory, id) else { return };
+        let Some(folder) = visible_folder(inventory, id, mask) else {
+            return;
+        };
         if folder.info.parent != parent.id {
             return;
         }
@@ -504,8 +531,14 @@ impl Model {
         }
     }
 
-    fn advance_with(&mut self, inventory: &Inventory, steps: usize, mut expired: impl FnMut() -> bool) -> usize {
-        if inventory.generation != self.revision || !self.source.is_some_and(|source| source.matches(inventory)) {
+    fn advance_with_visible(
+        &mut self,
+        inventory: &Inventory,
+        steps: usize,
+        mut expired: impl FnMut() -> bool,
+        mask: Option<MaskRead<'_>>,
+    ) -> usize {
+        if inventory.generation != self.revision || !self.source.is_some_and(|source| source.matches(inventory, mask)) {
             return 0;
         }
         let mut used = 0;
@@ -514,7 +547,7 @@ impl Model {
                 break;
             }
             match self.phase {
-                Phase::Indexing => self.index_step(inventory),
+                Phase::Indexing => self.index_step(inventory, mask),
                 Phase::Matching => self.match_step(),
                 _ => break,
             }
@@ -524,9 +557,9 @@ impl Model {
     }
 
     /// At most 256 bounded edge/parent/match steps and a 2 ms soft deadline.
-    pub(super) fn advance(&mut self, inventory: &Inventory) {
+    pub(super) fn advance_visible(&mut self, inventory: &Inventory, mask: Option<MaskRead<'_>>) {
         let started = Instant::now();
-        self.advance_with(inventory, STEPS_PER_TURN, || started.elapsed() >= TURN);
+        self.advance_with_visible(inventory, STEPS_PER_TURN, || started.elapsed() >= TURN, mask);
     }
 
     pub(super) fn capture(&self, folder: Uuid) -> Option<Ticket> {
@@ -548,13 +581,20 @@ impl Model {
     }
 
     /// Current original parent chain, not a new search or a replacement row.
-    pub(super) fn validate(&self, ticket: Ticket, inventory: &Inventory, source: Option<Source>, policy: Policy) -> bool {
+    pub(super) fn validate_visible(
+        &self,
+        ticket: Ticket,
+        inventory: &Inventory,
+        source: Option<Source>,
+        policy: Policy,
+        mask: Option<MaskRead<'_>>,
+    ) -> bool {
         if self.capture(ticket.folder) != Some(ticket)
             || source != Some(ticket.source)
             || !policy.allowed
             || policy != ticket.policy
             || inventory.generation != ticket.revision
-            || !ticket.source.matches(inventory)
+            || !ticket.source.matches(inventory, mask)
         {
             return false;
         }
@@ -566,7 +606,7 @@ impl Model {
         }
         for _ in 0..=MAX_DEPTH {
             let node = &self.nodes[index];
-            let Some(folder) = visible_folder(inventory, node.id) else {
+            let Some(folder) = visible_folder(inventory, node.id, mask) else {
                 return false;
             };
             if index == 0 {
@@ -580,8 +620,15 @@ impl Model {
         false
     }
 
-    pub(super) fn select(&mut self, ticket: Ticket, inventory: &Inventory, source: Option<Source>, policy: Policy) -> bool {
-        if !self.validate(ticket, inventory, source, policy) {
+    pub(super) fn select_visible(
+        &mut self,
+        ticket: Ticket,
+        inventory: &Inventory,
+        source: Option<Source>,
+        policy: Policy,
+        mask: Option<MaskRead<'_>>,
+    ) -> bool {
+        if !self.validate_visible(ticket, inventory, source, policy, mask) {
             return false;
         }
         if self.selected != Some(ticket.folder) {
@@ -622,6 +669,34 @@ impl Model {
             return;
         };
         self.input = input;
+    }
+}
+
+#[cfg(test)]
+impl Model {
+    pub(super) fn sync(&mut self, fixture: &super::fixtures::InventoryFixture, source: Option<Source>, policy: Policy) {
+        fixture.with(|inventory, mask, _| self.sync_visible(inventory, source, policy, Some(mask)));
+    }
+    fn advance_with(&mut self, fixture: &super::fixtures::InventoryFixture, steps: usize, mut expired: impl FnMut() -> bool) -> usize {
+        fixture.with(|inventory, mask, _| self.advance_with_visible(inventory, steps, &mut expired, Some(mask)))
+    }
+    pub(super) fn validate(
+        &self,
+        ticket: Ticket,
+        fixture: &super::fixtures::InventoryFixture,
+        source: Option<Source>,
+        policy: Policy,
+    ) -> bool {
+        fixture.with(|inventory, mask, _| self.validate_visible(ticket, inventory, source, policy, Some(mask)))
+    }
+    pub(super) fn select(
+        &mut self,
+        ticket: Ticket,
+        fixture: &super::fixtures::InventoryFixture,
+        source: Option<Source>,
+        policy: Policy,
+    ) -> bool {
+        fixture.with(|inventory, mask, _| self.select_visible(ticket, inventory, source, policy, Some(mask)))
     }
 }
 

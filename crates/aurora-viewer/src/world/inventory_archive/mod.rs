@@ -1,15 +1,17 @@
 //! Local Inventory visibility, not Inventory mutation or access permission.
 //! Behavior: fsinventoryarchive.h / LLInventoryFilter::passesArchive
 //! (Folderstorm abbe3cb0, indra/newview, LGPL-2.1-or-later).
-//! Registration remains test-only until the complete actual consumer join.
+//! Actual ordinary consumers share one borrowed projection and local metadata owner.
 
 mod codec;
 pub(crate) mod controller;
+pub(crate) mod offline;
 mod owner;
 mod store;
 pub(crate) mod visibility;
 use super::{World, account_metadata_origin::GridDigest, inventory::Inventory};
 pub(crate) use codec::Document;
+pub(crate) use owner::fresh_inventory_instance;
 use std::collections::BTreeSet;
 use std::sync::{
     Arc,
@@ -369,4 +371,4 @@ impl Model {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

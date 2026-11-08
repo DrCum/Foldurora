@@ -187,6 +187,7 @@ fn more(ui: &mut egui::Ui, p: &Palette, st: &mut InventoryUi, id: Uuid) {
         .on_hover_text(aurora_i18n::tr!("inventory-more-actions"));
     if response.clicked() {
         st.row_menu = Some((id, response.rect.left_bottom()));
+        st.row_menu_opened_frame = Some(ui.ctx().cumulative_frame_nr());
     }
 }
 
@@ -311,7 +312,7 @@ pub(super) fn strip(
     };
     body.add(egui::Label::new(sheet::semibold(&body, &name, 13.0, p.ink)).truncate());
     if let Some(folder) = inv.folders.get(&id) {
-        body.label(egui::RichText::new(rows::kind_name(inv, id)).size(12.0).color(p.muted));
+        body.label(egui::RichText::new(rows::kind_name(inv, id, &st.view)).size(12.0).color(p.muted));
         body.add_space(8.0);
         body.horizontal(|ui| {
             if widgets::action_button(
@@ -339,7 +340,7 @@ pub(super) fn strip(
     let original = rules::original(inv, id).and_then(|id| inv.items.get(&id)).unwrap_or(it);
     body.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
-        ui.label(egui::RichText::new(rows::kind_name(inv, id)).size(12.0).color(p.muted));
+        ui.label(egui::RichText::new(rows::kind_name(inv, id, &st.view)).size(12.0).color(p.muted));
         ui.label(egui::RichText::new("·").size(12.0).color(p.muted_dim));
         resident_link(ui, p, facts, original.creator, 12.0, actions);
     });
@@ -540,7 +541,7 @@ pub(super) fn pane(
         }
     });
     let place = rules::parent(inv, id).map(|parent| folder_name(inv, parent));
-    let mut line = rows::kind_name(inv, id);
+    let mut line = rows::kind_name(inv, id, &st.view);
     if let Some(place) = place {
         line = aurora_i18n::tr!("inventory-details-in", kind = line, folder = place);
     }

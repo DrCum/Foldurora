@@ -1,21 +1,26 @@
 # Aurora Viewer — task tracking
 
-- 🔧 Local Inventory archive prerequisites (2026-11-08; no issue): test-only
-  closed codec (2048 UUIDs/128KiB), actual source/eligibility/RLVa checks, exact
-  original edit/publication intents and bounded shared incremental projection.
-  Stage 1 adds the closed hardened NativeDirectory InventoryArchive kind,
-  original-byte/revision CAS and an independent TWO physical-worker pool through
-  canceled/blocked exit; GUI polls/replies are try-only and binding starts no IO.
-  Missing differs from corrupt metadata; failed saves keep published flags.
-  Stage 2 adds actual World retirement-before-replacement/reset, original-login
-  digest fanout independent of Favorites, selected-profile retire/rebind, cheap
-  event revocation and one App-owned CPU-turn pump outside the whole UI run.
-  All40 prior tests are preserved plus6 World/controller adapter cases authored
-  UNRUN (46 total). Stage1 has independent source clearance; stage2 review and
-  all Root execution remain required. These hooks are test-gated until every
-  ordinary Inventory consumer and Folder Jump index/final-parent gating joins.
-  ANY Archive production enablement and final painted-context write dispatch
-  remain blocked on that complete consumer graph.
+- 🔧 Local Inventory archive (2026-11-08; no issue): closed 2048 UUID/128KiB
+  codec, exact native source/edit/publication tickets, two physically retained
+  bounded shared projection bundles, hardened NativeDirectory CAS and separate
+  TWO physical Archive workers. Stage1/2 have independent source clearance.
+  Complete source join now covers actual physical-Inventory retirement/reset,
+  original digest fanout, selected profile and one App-owned CPU-turn budget;
+  canonical borrowed Classic/Aurora rows/search/cache/ancestor/sidebar/count/
+  existing bounded browse requests and Folder Jump index/final-parent gates.
+  Explicit Worn/Favorites/partial/picker/Marketplace exemptions retain existing
+  rights. Hidden rename cancels, reveal never auto-includes. EN/FR/JA Visibility
+  and Archive/Unarchive controls post original proposals; only after the ENTIRE
+  ctx.run_ui does App validate original control/owner/source/privacy/pass/focus/
+  modal/layer relevance and apply local Include or dispatch the original edit
+  ticket. Offline demo has a sealed distinct read-only Scope retaining nil
+  native login facts and existing masks; it cannot start IO, edit or save.
+  All46 prior Archive and29 Folder Jump cases/assertions are preserved plus
+  meaningful new scope, Rayon-mask, actual-cache/count/fetch and real egui
+  context/Include/discard/covered-control tests authored UNRUN. Source promotion
+  joins the complete consumer graph together; independent final source review
+  and all Root compiler/runtime/native/private-FS checks are still pending.
+  No grid/visual/full parity acceptance or release is claimed.
 
 - 🔧 Local Inventory archive prerequisite, shared origin (2026-11-07; no issue):
   World now owns one pure actual-request digest/ambiguity state, captured before

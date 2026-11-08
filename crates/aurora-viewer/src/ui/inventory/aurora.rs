@@ -153,8 +153,7 @@ pub fn demo_place(ctx: &egui::Context, frame: u64) {
 }
 
 /// The count after the title: the number alone at the narrow width.
-pub fn item_count(inv: &Inventory, layout: Layout) -> String {
-    let count = inv.item_count();
+pub fn item_count(count: usize, layout: Layout) -> String {
     let number = aurora_i18n::integer(count as i64);
     if layout == Layout::Compact {
         number
@@ -165,8 +164,8 @@ pub fn item_count(inv: &Inventory, layout: Layout) -> String {
 
 /// The state of the title bar's right end: synchronised, or folders still
 /// being fetched.
-pub fn sync_state(p: &Palette, inv: &Inventory, st: &InventoryUi) -> (egui::Color32, String) {
-    let fetching = !inv.queue.is_empty() || st.fetch_all || inv.folders.values().any(|f| f.state == FetchState::Fetching);
+pub fn sync_state(p: &Palette, st: &InventoryUi) -> (egui::Color32, String) {
+    let fetching = st.archive_summary.is_some_and(|summary| summary.fetching);
     if fetching {
         (p.muted_dim, aurora_i18n::tr!("inventory-syncing").to_owned())
     } else {
@@ -178,6 +177,7 @@ pub fn sync_state(p: &Palette, inv: &Inventory, st: &InventoryUi) -> (egui::Colo
 /// or what is worn changes, and rebuilt at most twice a second.
 #[derive(Default)]
 pub struct Counts {
+    archive: Option<archive::Key>,
     key: Option<(u64, i64, usize, bool, bool, bool)>,
     at: Option<std::time::Instant>,
     pub recent: usize,
@@ -187,7 +187,16 @@ pub struct Counts {
 }
 
 impl Counts {
+    #[cfg(test)]
     fn update(&mut self, inv: &Inventory, prefs: &InventoryPreferences, worn: usize) {
+        self.update_gated(inv, prefs, worn, archive::Gate::Exempt(archive::Exemption::Picker));
+    }
+    pub(super) fn update_gated(&mut self, inv: &Inventory, prefs: &InventoryPreferences, worn: usize, gate: archive::Gate<'_>) {
+        if self.archive != Some(gate.key()) {
+            self.archive = Some(gate.key());
+            self.key = None;
+            self.at = None;
+        }
         use rayon::prelude::*;
         let cutoff = view::recent_cutoff(prefs, view::now());
         let key = (
@@ -213,7 +222,8 @@ impl Counts {
             .items
             .par_iter()
             .filter(|(_, it)| {
-                it.created_at > 0
+                gate.passes(it.id)
+                    && it.created_at > 0
                     && it.created_at >= cutoff
                     && (prefs.search_trash || !trash.contains(&it.parent))
                     && (prefs.search_outfits || !outfits.contains(&it.parent))
@@ -226,20 +236,20 @@ impl Counts {
         let held = |kind: i32| {
             rules::system(inv, kind)
                 .and_then(|id| inv.folders.get(&id))
-                .map_or(0, |f| f.items.len() + f.children.len())
+                .map_or(0, |f| f.items.iter().chain(&f.children).filter(|id| gate.passes(**id)).count())
         };
-        self.received = crate::world::received_items::deliveries(inv).count();
+        self.received = crate::world::received_items::deliveries(inv).filter(|id| gate.passes(*id)).count();
         self.trash = held(14);
     }
 }
 
 /// Aurora's window: the layout of its width.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn contents(
+pub(super) fn contents_visible(
     ui: &mut egui::Ui,
     p: &Palette,
     icons: &Icons,
-    inv: &mut Inventory,
+    inv: &mut archive::Browse<'_, '_>,
     st: &mut InventoryUi,
     prefs: &mut InventoryPreferences,
     facts: &Facts,
@@ -256,7 +266,7 @@ pub(super) fn contents(
     });
     controls::init_filters(st, prefs);
     if st.scope.is_nil() {
-        st.counts.update(inv, prefs, facts.worn.len());
+        st.counts.update_gated(inv, prefs, facts.worn.len(), inv.ordinary);
     }
     // A folder window's explorer stays under its folder.
     let base = base(inv, st);
@@ -337,7 +347,7 @@ fn compact(
     ui: &mut egui::Ui,
     p: &Palette,
     icons: &Icons,
-    inv: &mut Inventory,
+    inv: &mut archive::Browse<'_, '_>,
     st: &mut InventoryUi,
     prefs: &mut InventoryPreferences,
     facts: &Facts,
@@ -351,6 +361,7 @@ fn compact(
     }
     toolbar::search_row(ui, p, inv, st, prefs, Layout::Compact, actions);
     ui.add_space(4.0);
+    archive::tab(ui.ctx(), st, inv);
     let (root, filtered) = list_scope(inv, st, prefs, facts);
     let message = toolbar::message(p, st);
     let foot_h = card_height(prefs) + if message.is_some() { toolbar::MESSAGE } else { 0.0 };
@@ -394,7 +405,7 @@ fn explorer(
     ui: &mut egui::Ui,
     p: &Palette,
     icons: &Icons,
-    inv: &mut Inventory,
+    inv: &mut archive::Browse<'_, '_>,
     st: &mut InventoryUi,
     prefs: &mut InventoryPreferences,
     facts: &Facts,
@@ -445,7 +456,7 @@ fn explorer_list(
     ui: &mut egui::Ui,
     p: &Palette,
     icons: &Icons,
-    inv: &mut Inventory,
+    inv: &mut archive::Browse<'_, '_>,
     st: &mut InventoryUi,
     prefs: &mut InventoryPreferences,
     facts: &Facts,
@@ -465,6 +476,7 @@ fn explorer_list(
     frame.columns = prefs.explorer;
     st.aurora = Some(frame);
     ui.add_space(2.0);
+    archive::tab(ui.ctx(), st, inv);
     let (root, filtered) = list_scope(inv, st, prefs, facts);
     let message = toolbar::message(p, st);
     let foot_h = match layout {
@@ -475,6 +487,7 @@ fn explorer_list(
     let list_h = list_rect.height();
     let explore = !filtered && !root.is_nil();
     let target = if explore { st.browse } else { list_destination(st, root) };
+    let target = if inv.gate.passes(target) { target } else { Uuid::nil() };
     let out = if explore {
         // A revealed entry (Find original, a new item) shows in its folder;
         // a folder to show opened is gone into.
@@ -525,6 +538,22 @@ fn explorer_list(
     });
     ui.advance_cursor_after_rect(room);
     clipboard::shortcuts(ui, inv, target, st, prefs, facts, actions);
+}
+
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+pub(super) fn contents(
+    ui: &mut egui::Ui,
+    p: &Palette,
+    icons: &Icons,
+    inv: &mut crate::ui::inventory::folder_jump::fixtures::InventoryFixture,
+    st: &mut InventoryUi,
+    prefs: &mut InventoryPreferences,
+    facts: &Facts,
+    images: &std::collections::HashMap<Uuid, egui::TextureHandle>,
+    actions: &mut Vec<InvAction>,
+) {
+    inv.browse(|inv| contents_visible(ui, p, icons, inv, st, prefs, facts, images, actions))
 }
 
 #[cfg(test)]
@@ -615,7 +644,7 @@ mod tests {
     /// Aurora's window `width` wide in a headless context.
     struct Harness {
         ctx: egui::Context,
-        inv: Inventory,
+        inv: crate::ui::inventory::folder_jump::fixtures::InventoryFixture,
         st: InventoryUi,
         prefs: InventoryPreferences,
         facts: Facts,

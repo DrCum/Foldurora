@@ -3,7 +3,7 @@
 //! The App adapter must advance ONE CpuTurn before its CPU event/draw turn and
 //! lend that same turn to every caller. Observers only call `observe`.
 
-use super::{MAX_DEPTH, Model, Revision, Source};
+use super::{MAX_DEPTH, Model, Read, Revision, Source, offline};
 use crate::world::{World, inventory::Inventory};
 use std::{
     collections::hash_map::RandomState,
@@ -72,16 +72,22 @@ impl Key {
     fn observe(world: &World, model: &Model) -> Option<Self> {
         #[cfg(test)]
         QUALIFICATIONS.with(|count| count.set(count.get().saturating_add(1)));
-        model.include_allowed(world).then(|| Self {
-            source: model.source,
-            revision: Revision {
-                instance: model.instance,
-                publication: model.published.publication,
-            },
-            generation: world.inventory.generation,
-            privacy: world.rlva.revision,
-            privacy_enabled: world.rlva.enabled(),
-            known: model.read(world).is_some(),
+        model.include_allowed(world).then(|| {
+            let metadata = model.read(world);
+            Self {
+                source: metadata.as_ref().map_or(model.source, Read::source),
+                revision: metadata.as_ref().map_or(
+                    Revision {
+                        instance: model.instance,
+                        publication: model.published.publication,
+                    },
+                    Read::revision,
+                ),
+                generation: world.inventory.generation,
+                privacy: world.rlva.revision,
+                privacy_enabled: world.rlva.enabled(),
+                known: metadata.is_some(),
+            }
         })
     }
 }
@@ -89,6 +95,7 @@ impl Key {
 /// Owner-local visibility choice. Its checked revision also fences Folder Jump.
 #[derive(Default)]
 pub(crate) struct OwnerPolicy {
+    offline: Option<OfflinePolicy>,
     key: Option<Key>,
     binding: Option<(Source, u64)>,
     include: bool,
@@ -96,18 +103,59 @@ pub(crate) struct OwnerPolicy {
     exhausted: bool,
     presentation: Option<(VisibilityStatus, Option<u64>)>,
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct OfflinePolicy {
+    scope: offline::Key,
+    privacy: u64,
+    enabled: bool,
+    available: bool,
+}
 impl OwnerPolicy {
+    pub(crate) fn unavailable(&mut self) {
+        if self.offline.is_some()
+            || self.key.is_some()
+            || self.binding.is_some()
+            || self.include
+            || self.presentation != Some((VisibilityStatus::Unavailable, None))
+        {
+            self.offline = None;
+            self.key = None;
+            self.binding = None;
+            self.include = false;
+            self.presentation = Some((VisibilityStatus::Unavailable, None));
+            self.bump();
+        }
+    }
+    pub(crate) fn included(&self) -> bool {
+        self.include
+    }
     fn update(&mut self, world: &World, model: &Model, key: Option<Key>) {
+        let switched = self.offline.take().is_some();
         let binding = model.matches(world).then_some((model.source, model.instance));
-        if self.key == key && self.binding == binding {
+        if self.key == key && self.binding == binding && !switched {
             return;
         }
-        if self.binding != binding {
+        if self.binding != binding || switched {
             self.include = false;
         }
         self.binding = binding;
         self.key = key;
         self.bump();
+    }
+    fn update_offline(&mut self, world: &World, scope: &offline::Scope, available: bool) {
+        let key = OfflinePolicy {
+            scope: scope.key(),
+            privacy: world.rlva.revision,
+            enabled: world.rlva.enabled(),
+            available,
+        };
+        if self.offline != Some(key) || self.key.is_some() || self.binding.is_some() {
+            self.offline = Some(key);
+            self.key = None;
+            self.binding = None;
+            self.include = false;
+            self.bump();
+        }
     }
     fn bump(&mut self) {
         match self.revision.checked_add(1) {
@@ -322,7 +370,7 @@ struct Builder {
     root: u8,
 }
 impl Builder {
-    fn candidate(&self, inv: &Inventory, model: &Model, id: Uuid, parent: Option<Frame>, config: Config) -> Option<Candidate> {
+    fn candidate(&self, inv: &Inventory, metadata: &Read<'_>, id: Uuid, parent: Option<Frame>, config: Config) -> Option<Candidate> {
         let folder = inv.folders.get(&id)?;
         let depth = parent.map_or(0, |_| self.bundle.stack_len);
         let library = parent.map_or(id == inv.lib_root, |p| p.bits & LIBRARY != 0);
@@ -340,7 +388,7 @@ impl Builder {
         if folder.info.type_default == 14 {
             bits |= TRASH;
         }
-        if model.published.folders.contains(&id) {
+        if metadata.marked(id) {
             bits |= MARKED;
         }
         Some(Candidate {
@@ -352,7 +400,7 @@ impl Builder {
         })
     }
     /// One resumable initialization slot, hash probe, root or child edge.
-    fn step(&mut self, world: &World, model: &Model, turn: &mut CpuTurn, config: Config) -> Step {
+    fn step(&mut self, world: &World, metadata: &Read<'_>, turn: &mut CpuTurn, config: Config) -> Step {
         if self.bundle.slots.len() < config.slots {
             self.bundle.slots.push(Slot::default());
             turn.used.probes += 1;
@@ -398,7 +446,7 @@ impl Builder {
                 _ => return Step::Complete,
             };
             self.root += 1;
-            self.pending = self.candidate(&world.inventory, model, id, None, config);
+            self.pending = self.candidate(&world.inventory, metadata, id, None, config);
             return if self.pending.is_some() { Step::More } else { Step::Limited };
         }
         let last = self.bundle.stack_len - 1;
@@ -412,7 +460,7 @@ impl Builder {
         };
         self.bundle.stack[last].next += 1;
         turn.used.edges += 1;
-        self.pending = self.candidate(&world.inventory, model, child, Some(frame), config);
+        self.pending = self.candidate(&world.inventory, metadata, child, Some(frame), config);
         if self.pending.is_some() { Step::More } else { Step::Limited }
     }
 }
@@ -424,6 +472,7 @@ enum Step {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum VisibilityStatus {
+    OfflineReadOnly,
     Unavailable,
     Loading,
     Ready,
@@ -458,6 +507,37 @@ impl Default for Projection {
     }
 }
 impl Projection {
+    pub(super) fn offline_read<'a>(
+        &'a self,
+        world: &'a World,
+        scope: &'a offline::Scope,
+        policy: &'a mut OwnerPolicy,
+    ) -> VisibilityRead<'a> {
+        #[cfg(test)]
+        QUALIFICATIONS.with(|count| count.set(count.get().saturating_add(1)));
+        let current = scope.available(world);
+        policy.update_offline(world, scope, current);
+        let mut status = if current && !policy.exhausted {
+            VisibilityStatus::OfflineReadOnly
+        } else {
+            VisibilityStatus::Unavailable
+        };
+        policy.present(status, None);
+        if policy.exhausted {
+            status = VisibilityStatus::Unavailable;
+        }
+        VisibilityRead {
+            world,
+            owner: QualifiedOwner::Offline { _scope: scope },
+            key: None,
+            snapshot: None,
+            bypass: current,
+            status,
+            config: self.config,
+            revision: policy.revision(),
+            _policy: policy,
+        }
+    }
     /// Cheap event/profile revocation, preserving physical pool/configuration.
     /// Actual source/privacy qualification belongs to read and pump admission.
     pub(crate) fn invalidate(&mut self) {
@@ -481,7 +561,17 @@ impl Projection {
         let Some(key) = self.key else {
             return;
         };
-        if !key.known || model.published.folders.is_empty() || self.snapshot.is_some() || self.stopped || !turn.available() {
+        if !key.known {
+            return;
+        }
+        // observe qualified this exact immutable World/Model once. Lend its
+        // published metadata without another rule scan or copying the set.
+        let metadata = Read {
+            source: key.source,
+            revision: key.revision,
+            folders: &model.published.folders,
+        };
+        if metadata.folders().len() == 0 || self.snapshot.is_some() || self.stopped || !turn.available() {
             return;
         }
         if self.builder.is_none() {
@@ -504,7 +594,7 @@ impl Projection {
                 .builder
                 .as_mut()
                 .expect("admitted builder")
-                .step(world, model, turn, self.config);
+                .step(world, &metadata, turn, self.config);
             let status = match step {
                 Step::More => continue,
                 Step::Complete => VisibilityStatus::Ready,
@@ -549,7 +639,7 @@ impl Projection {
         }
         VisibilityRead {
             world,
-            _model: model,
+            owner: QualifiedOwner::Native(model),
             key,
             snapshot,
             bypass,
@@ -567,7 +657,7 @@ pub(crate) struct VisibilityRead<'a> {
     world: &'a World,
     // The read acquisition qualified actual source/privacy once. These model
     // and policy borrows keep that proof current until this read is dropped.
-    _model: &'a Model,
+    owner: QualifiedOwner<'a>,
     key: Option<Key>,
     snapshot: Option<&'a Snapshot>,
     bypass: bool,
@@ -577,7 +667,58 @@ pub(crate) struct VisibilityRead<'a> {
     // A held read also prevents Include/policy mutation until its paint ends.
     _policy: &'a OwnerPolicy,
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct VisibilityBinding {
+    scope: BindingScope,
+    policy: u64,
+    projection: Option<u64>,
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BindingScope {
+    Native(Key),
+    Offline(OfflinePolicy),
+}
+#[derive(Clone, Copy)]
+enum QualifiedOwner<'a> {
+    Native(&'a Model),
+    Offline { _scope: &'a offline::Scope },
+}
 impl VisibilityRead<'_> {
+    pub(crate) fn binding(&self) -> Option<VisibilityBinding> {
+        let scope = match self.owner {
+            QualifiedOwner::Native(_) => BindingScope::Native(self.key?),
+            QualifiedOwner::Offline { .. } if self.status == VisibilityStatus::OfflineReadOnly => {
+                BindingScope::Offline(self._policy.offline?)
+            }
+            _ => return None,
+        };
+        Some(VisibilityBinding {
+            scope,
+            policy: self.revision?,
+            projection: self.snapshot.map(|snapshot| snapshot.publication),
+        })
+    }
+    /// Allocation-free lending: the returned mask cannot outlive this actual
+    /// qualified read. Only Inventory/Model/policy/table references enter Rayon;
+    /// no whole World Send/Sync assumption or snapshot ownership escapes.
+    pub(crate) fn mask(&self) -> MaskRead<'_> {
+        MaskRead {
+            inventory: &self.world.inventory,
+            _owner: self.owner,
+            _policy: self._policy,
+            current: self.revision.is_some() && (self.key.is_some() || self.status == VisibilityStatus::OfflineReadOnly),
+            snapshot: self.snapshot,
+            bypass: self.bypass,
+            config: self.config,
+            revision: self.revision,
+        }
+    }
+    pub(crate) fn prepare_edit(&self, id: Uuid) -> Option<super::EditTicket> {
+        match self.owner {
+            QualifiedOwner::Native(model) => model.prepare_edit(self.world, id),
+            QualifiedOwner::Offline { .. } => None,
+        }
+    }
     pub(crate) fn status(&self) -> VisibilityStatus {
         self.status
     }
@@ -585,10 +726,33 @@ impl VisibilityRead<'_> {
         self.revision
     }
     pub(crate) fn passes(&self, id: Uuid) -> bool {
-        if self.revision.is_none() || self.key.is_none() || id.is_nil() {
+        self.mask().passes(id)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct MaskRead<'a> {
+    inventory: &'a Inventory,
+    _owner: QualifiedOwner<'a>,
+    _policy: &'a OwnerPolicy,
+    current: bool,
+    snapshot: Option<&'a Snapshot>,
+    bypass: bool,
+    config: Config,
+    revision: Option<u64>,
+}
+impl MaskRead<'_> {
+    pub(crate) fn for_inventory(self, inventory: &Inventory) -> bool {
+        std::ptr::eq(self.inventory, inventory)
+    }
+    pub(crate) fn revision(self) -> Option<u64> {
+        self.revision
+    }
+    pub(crate) fn passes(self, id: Uuid) -> bool {
+        if !self.current || id.is_nil() {
             return false;
         }
-        let inv = &self.world.inventory;
+        let inv = self.inventory;
         let folder = if let Some(folder) = inv.folders.get(&id) {
             if folder.info.id != id {
                 return false;

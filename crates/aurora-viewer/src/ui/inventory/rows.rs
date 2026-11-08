@@ -137,7 +137,7 @@ impl PlainTree {
 
     #[allow(clippy::too_many_arguments)]
     fn folder(&mut self, view: &ViewCache, inv: &Inventory, show_library: bool, id: Uuid, depth: usize, level: usize, parent: usize) {
-        if depth > MAX_DEPTH || !inv.folders.contains_key(&id) {
+        if depth > MAX_DEPTH || !inv.folders.contains_key(&id) || !view.visible_folder(id) {
             return;
         }
         let open = self.open.contains(&id);
@@ -228,11 +228,11 @@ impl PlainTree {
 /// The plain tree in its scroll area, `root` shown as the first row or not
 /// (folder windows list its contents only).
 #[allow(clippy::too_many_arguments)]
-pub(super) fn scroll(
+pub(super) fn scroll_visible(
     ui: &mut egui::Ui,
     p: &Palette,
     icons: &Icons,
-    inv: &mut Inventory,
+    inv: &mut archive::Browse<'_, '_>,
     st: &mut InventoryUi,
     prefs: &mut InventoryPreferences,
     facts: &Facts,
@@ -246,7 +246,7 @@ pub(super) fn scroll(
     if st.ui_id.is_nil() && !st.aurora.is_some_and(|frame| frame.explorer) {
         st.plain.persist(ui.ctx(), egui::Id::unique("inventory_open_folders"));
     }
-    st.view.prepare(inv, prefs.sort_for(st.tab));
+    st.view.prepare_gated(inv, prefs.sort_for(st.tab), inv.gate);
     if let Some(open) = st.expand_all.take() {
         st.plain.expand(&st.view, inv, root, show_root, prefs.show_library, open);
     }
@@ -328,7 +328,7 @@ fn rows(
     ui: &mut egui::Ui,
     p: &Palette,
     icons: &Icons,
-    inv: &mut Inventory,
+    inv: &mut archive::Browse<'_, '_>,
     st: &mut InventoryUi,
     prefs: &mut InventoryPreferences,
     facts: &Facts,
@@ -398,6 +398,24 @@ fn guides(ui: &egui::Ui, tree: &PlainTree, range: std::ops::Range<usize>, origin
         let bottom = origin.y + row.end as f32 * pitch + row_height - 2.0;
         ui.painter().line_segment([egui::pos2(x, top), egui::pos2(x, bottom)], stroke);
     }
+}
+
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+pub(super) fn scroll(
+    ui: &mut egui::Ui,
+    p: &Palette,
+    icons: &Icons,
+    inv: &mut crate::ui::inventory::folder_jump::fixtures::InventoryFixture,
+    st: &mut InventoryUi,
+    prefs: &mut InventoryPreferences,
+    facts: &Facts,
+    actions: &mut Vec<InvAction>,
+    height: f32,
+    root: Uuid,
+    show_root: bool,
+) -> egui::scroll_area::ScrollAreaOutput<()> {
+    inv.browse(|inv| scroll_visible(ui, p, icons, inv, st, prefs, facts, actions, height, root, show_root))
 }
 
 #[cfg(test)]

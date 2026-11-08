@@ -43,6 +43,8 @@ pub(super) fn source(ui: &egui::Ui, r: &egui::Response, id: Uuid, folder: bool, 
     if !r.drag_started() {
         return;
     }
+    ui.ctx()
+        .data_mut(|data| data.insert_temp(egui::Id::unique("inventory_archive_drag_owner"), (st.ui_id, st.archive_key)));
     // Pressing a selected row must keep a Ctrl/Shift selection until the drag
     // threshold. Starting from another row selects that row alone.
     if !st.selection.contains(&id) {
@@ -59,6 +61,16 @@ pub(super) fn source(ui: &egui::Ui, r: &egui::Response, id: Uuid, folder: bool, 
         r.dnd_set_drag_payload(FolderDrag(id));
     } else {
         r.dnd_set_drag_payload(InvDrag(id));
+    }
+}
+
+pub(super) fn prune_archive(ctx: &egui::Context, owner: Uuid, gate: archive::Gate<'_>) {
+    let original = ctx.data(|data| data.get_temp::<(Uuid, Option<archive::Key>)>(egui::Id::unique("inventory_archive_drag_owner")));
+    if original.is_some_and(|(original, key)| original == owner && key != Some(gate.key()))
+        || original.is_some_and(|(original, _)| original == owner)
+            && Cargo::carried(ctx).is_some_and(|cargo| cargo.ids().iter().any(|id| !gate.passes(*id)))
+    {
+        egui::DragAndDrop::clear_payload(ctx);
     }
 }
 

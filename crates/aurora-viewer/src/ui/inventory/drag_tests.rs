@@ -4,7 +4,7 @@ use aurora_net::inventory::operations::Operation;
 
 struct Fixture {
     ctx: egui::Context,
-    inv: Inventory,
+    inv: folder_jump::fixtures::InventoryFixture,
     state: InventoryUi,
     other: InventoryUi,
     prefs: InventoryPreferences,
@@ -63,7 +63,7 @@ impl Fixture {
         state.reveal = Some(id(100));
         let mut f = Self {
             ctx,
-            inv,
+            inv: folder_jump::fixtures::InventoryFixture::new(inv),
             state,
             other: InventoryUi {
                 ui_id: id(801),
@@ -204,7 +204,7 @@ impl Fixture {
 fn draw_tree(
     ui: &mut egui::Ui,
     p: &Palette,
-    inv: &mut Inventory,
+    inv: &mut folder_jump::fixtures::InventoryFixture,
     st: &mut InventoryUi,
     prefs: &mut InventoryPreferences,
     facts: &Facts,

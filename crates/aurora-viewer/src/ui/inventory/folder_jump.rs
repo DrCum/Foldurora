@@ -2,13 +2,17 @@
 //! indra/newview/fsfloaterfolderjump.cpp, pinned abbe3cb0, originally LGPL 2.1).
 //! This module is not an Inventory mutation or a folder-content fetcher.
 
+#[cfg(test)]
+mod archive_tests;
 mod body;
+#[cfg(test)]
+pub(super) mod fixtures;
 mod model;
 mod shortcut;
 #[cfg(test)]
 mod tests;
 
-use super::InventoryUi;
+use super::{InventoryUi, archive};
 use crate::theme::Palette;
 use crate::ui::widgets;
 use crate::world::World;
@@ -23,6 +27,13 @@ fn fresh_profile() -> u64 {
     static NEXT: AtomicU64 = AtomicU64::new(1);
     NEXT.try_update(Ordering::Relaxed, Ordering::Relaxed, |value| value.checked_add(1))
         .unwrap_or(0)
+}
+pub(crate) fn current_folder(
+    inventory: &crate::world::inventory::Inventory,
+    id: Uuid,
+    mask: Option<crate::world::inventory_archive::visibility::MaskRead<'_>>,
+) -> bool {
+    model::current_path(inventory, id, mask)
 }
 
 pub(crate) struct Chooser {
@@ -50,6 +61,9 @@ pub(crate) struct Chooser {
     ime_frame_quarantined: bool,
     ime_terminal_consumed: bool,
     pending_open: Option<Ticket>,
+    archive_key: Option<(archive::Key, u64)>,
+    archive_revision: u64,
+    archive_exhausted: bool,
 }
 
 impl Default for Chooser {
@@ -77,6 +91,9 @@ impl Default for Chooser {
             ime_frame_quarantined: false,
             ime_terminal_consumed: false,
             pending_open: None,
+            archive_key: None,
+            archive_revision: 0,
+            archive_exhausted: false,
         }
     }
 }
@@ -94,15 +111,30 @@ impl Chooser {
         !self.jump_blocked
     }
 
-    fn context(&mut self, world: &World, live: bool, visible: bool) -> (Option<Source>, Policy) {
+    fn context(&mut self, world: &World, live: bool, visible: bool, gate: archive::Gate<'_>) -> (Option<Source>, Policy) {
         let root = crate::session_host::profile::root();
         if root != self.profile_root {
             self.profile_root = root;
             self.profile = fresh_profile();
         }
+        let key = Some((gate.key(), world.rlva.revision));
+        if self.archive_key != key {
+            self.archive_key = key;
+            self.pending_open = None;
+            if let Some(next) = self.archive_revision.checked_add(1) {
+                self.archive_revision = next;
+            } else {
+                self.archive_exhausted = true;
+            }
+        }
         let policy = Policy {
-            revision: world.rlva.revision,
-            allowed: live && visible && !world.rlva.has("showinv"),
+            revision: self.archive_revision,
+            allowed: !self.archive_exhausted
+                && gate.mask().is_some()
+                && gate.passes(world.inventory.root)
+                && live
+                && visible
+                && !world.rlva.has("showinv"),
         };
         let source = self.owner.and_then(|window| {
             let login = world.login.as_ref()?;
@@ -119,9 +151,9 @@ impl Chooser {
         (source, policy)
     }
 
-    pub(crate) fn observe(&mut self, world: &World, live: bool, visible: bool) {
-        let (source, policy) = self.context(world, live, visible);
-        self.body.observe(&world.inventory, source, policy);
+    pub(crate) fn observe(&mut self, world: &World, live: bool, visible: bool, gate: archive::Gate<'_>) {
+        let (source, policy) = self.context(world, live, visible, gate);
+        self.body.observe_visible(&world.inventory, source, policy, gate.mask());
         let source = self.body.source();
         if self.source.is_some() && self.source != source {
             self.close();
@@ -130,13 +162,13 @@ impl Chooser {
         }
     }
 
-    pub(crate) fn open(&mut self, world: &World, live: bool, owner: Uuid, visible: bool) -> bool {
+    pub(crate) fn open(&mut self, world: &World, live: bool, owner: Uuid, visible: bool, gate: archive::Gate<'_>) -> bool {
         if self.ime_exhausted || self.composing && !self.owned_composition {
             return false;
         }
         self.close();
         self.owner = Some(owner);
-        self.observe(world, live, visible);
+        self.observe(world, live, visible, gate);
         if self.body.source().is_none() {
             self.close();
             return false;
@@ -274,23 +306,31 @@ impl Chooser {
         self.ime_frame_quarantined = false;
     }
 
-    fn take_open(
+    fn take_open_visible(
         &mut self,
         ctx: &egui::Context,
         inventory: &crate::world::inventory::Inventory,
         source: Option<Source>,
         policy: Policy,
+        gate: archive::Gate<'_>,
     ) -> Option<Uuid> {
         self.pending_open
             .take()
-            .filter(|ticket| self.body.take_open(*ticket, ctx, inventory, source, policy))
+            .filter(|ticket| self.body.take_open_visible(*ticket, ctx, inventory, source, policy, gate.mask()))
             .map(Ticket::folder)
     }
 
-    pub(crate) fn finish_input(&mut self, ctx: &egui::Context, world: &World, live: bool, visible: bool) -> Option<Uuid> {
-        self.observe(world, live, visible);
-        let (source, policy) = self.context(world, live, visible);
-        let folder = self.take_open(ctx, &world.inventory, source, policy);
+    pub(crate) fn finish_input(
+        &mut self,
+        ctx: &egui::Context,
+        world: &World,
+        live: bool,
+        visible: bool,
+        gate: archive::Gate<'_>,
+    ) -> Option<Uuid> {
+        self.observe(world, live, visible, gate);
+        let (source, policy) = self.context(world, live, visible, gate);
+        let folder = self.take_open_visible(ctx, &world.inventory, source, policy, gate);
         self.finish_consumed_batch(ctx);
         if folder.is_some() {
             self.close();
@@ -298,15 +338,16 @@ impl Chooser {
         folder
     }
 
-    fn draw_body(
+    fn draw_body_visible(
         &mut self,
         ui: &mut egui::Ui,
         palette: &Palette,
         inventory: &crate::world::inventory::Inventory,
         source: Option<Source>,
         policy: Policy,
+        gate: archive::Gate<'_>,
     ) -> bool {
-        match self.body.show(ui, palette, inventory, source, policy) {
+        match self.body.show_visible(ui, palette, inventory, source, policy, gate.mask()) {
             Some(body::Action::Open(ticket)) => {
                 self.pending_open.get_or_insert(ticket);
                 false
@@ -343,13 +384,22 @@ impl Chooser {
         self.blocked[index]
     }
 
-    pub(crate) fn show(&mut self, ctx: &egui::Context, palette: &Palette, world: &World, live: bool, visible: bool, blocked: bool) {
-        self.observe(world, live, visible);
+    pub(crate) fn show(
+        &mut self,
+        ctx: &egui::Context,
+        palette: &Palette,
+        world: &World,
+        live: bool,
+        visible: bool,
+        blocked: bool,
+        gate: archive::Gate<'_>,
+    ) {
+        self.observe(world, live, visible, gate);
         self.prepare_input(ctx);
         if self.owner.is_none() {
             return;
         }
-        let (source, policy) = self.context(world, live, visible);
+        let (source, policy) = self.context(world, live, visible, gate);
         if blocked || widgets::floater_minimized(ctx, "inventory_folder_jump") {
             self.body.cancel_input();
         }
@@ -363,8 +413,10 @@ impl Chooser {
         .steady_size();
         floater.min_size = egui::vec2(300.0, 260.0);
         let result = floater.show(ctx, palette, &mut open, |ui| {
-            ui.add_enabled_ui(!blocked, |ui| self.draw_body(ui, palette, &world.inventory, source, policy))
-                .inner
+            ui.add_enabled_ui(!blocked, |ui| {
+                self.draw_body_visible(ui, palette, &world.inventory, source, policy, gate)
+            })
+            .inner
         });
         if !open || result == Some(true) {
             self.close();
@@ -422,5 +474,28 @@ impl InventoryUi {
             }
         }
         None
+    }
+}
+
+#[cfg(test)]
+impl Chooser {
+    fn draw_body(
+        &mut self,
+        ui: &mut egui::Ui,
+        palette: &Palette,
+        fixture: &fixtures::InventoryFixture,
+        source: Option<Source>,
+        policy: Policy,
+    ) -> bool {
+        fixture.with(|inventory, _, gate| self.draw_body_visible(ui, palette, inventory, source, policy, gate))
+    }
+    fn take_open(
+        &mut self,
+        ctx: &egui::Context,
+        fixture: &fixtures::InventoryFixture,
+        source: Option<Source>,
+        policy: Policy,
+    ) -> Option<Uuid> {
+        fixture.with(|inventory, _, gate| self.take_open_visible(ctx, inventory, source, policy, gate))
     }
 }

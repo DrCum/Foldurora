@@ -329,6 +329,9 @@ pub(super) fn show(
     st.menu_editor
         .prepare(ui.ctx(), id, ui.layer_id().id, &scope, &mut prefs.context_menus);
     let profile = prefs.context_menus.profiles.entry(scope.clone()).or_default();
+    if profile.locked {
+        super::archive::context(ui, p, id, &scope, st, actions);
+    }
     if profile.locked
         && let Some(folder) = catalog.prepare_outfit
     {

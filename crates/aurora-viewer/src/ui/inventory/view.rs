@@ -547,6 +547,7 @@ struct Query {
 
 #[derive(Default)]
 pub struct ViewCache {
+    archive: Option<super::archive::Key>,
     version: Option<(Uuid, Uuid, u64, Sort)>,
     entries: Vec<Entry>,
     children: IdMap<Vec<Uuid>>,
@@ -563,6 +564,26 @@ pub struct ViewCache {
 
 impl ViewCache {
     pub fn prepare(&mut self, inv: &Inventory, sort: Sort) {
+        self.prepare_gated(inv, sort, super::archive::Gate::Exempt(super::archive::Exemption::Picker));
+    }
+    pub(super) fn prepare_gated(&mut self, inv: &Inventory, sort: Sort, gate: super::archive::Gate<'_>) {
+        if !gate.for_inventory(inv) {
+            self.entries.clear();
+            self.children.clear();
+            self.result_children.clear();
+            self.folders.clear();
+            self.folder_dates.clear();
+            self.results.clear();
+            self.version = None;
+            self.query = None;
+            self.built = self.built.wrapping_add(1);
+            return;
+        }
+        if self.archive != Some(gate.key()) {
+            self.archive = Some(gate.key());
+            self.version = None;
+            self.query = None;
+        }
         let version = (inv.root, inv.lib_root, inv.generation, sort);
         if self.version == Some(version) {
             return;
@@ -589,6 +610,7 @@ impl ViewCache {
         self.entries = inv
             .folders
             .par_iter()
+            .filter(|(id, _)| gate.passes(**id))
             .map(|(id, f)| {
                 let kind = f.info.type_default;
                 // FT_OUTFIT, merchant folders, obsolete outbox and ensembles are
@@ -617,7 +639,7 @@ impl ViewCache {
                     true,
                 )
             })
-            .chain(inv.items.par_iter().map(|(id, it)| {
+            .chain(inv.items.par_iter().filter(|(id, _)| gate.passes(**id)).map(|(id, it)| {
                 metadata(
                     *id,
                     it.parent,
@@ -644,6 +666,9 @@ impl ViewCache {
         for (folder, date) in newest {
             let mut id = folder;
             for _ in 0..=inv.folders.len() {
+                if !gate.passes(id) {
+                    break;
+                }
                 let Some(f) = inv.folders.get(&id) else { break };
                 match dates.get_mut(&id) {
                     Some(d) if *d >= date => break,
@@ -660,7 +685,7 @@ impl ViewCache {
         }
         self.folder_dates = dates;
         self.entries.par_sort_unstable_by(|a, b| compare(a, b, sort));
-        self.folders = inv.folders.keys().copied().collect();
+        self.folders = inv.folders.keys().copied().filter(|id| gate.passes(*id)).collect();
         // Keep the lists' memory: a folder gone keeps an empty list.
         self.children.values_mut().for_each(Vec::clear);
         for entry in &self.entries {
@@ -668,7 +693,7 @@ impl ViewCache {
         }
         // The library stays last, without modifying its server parent or
         // re-sorting the system folders alphabetically with ordinary folders.
-        if !inv.lib_root.is_nil() && inv.lib_root != inv.root && inv.folders.contains_key(&inv.lib_root) {
+        if !inv.lib_root.is_nil() && inv.lib_root != inv.root && inv.folders.contains_key(&inv.lib_root) && gate.passes(inv.lib_root) {
             let root = self.children.entry(inv.root).or_default();
             root.retain(|id| *id != inv.lib_root);
             root.push(inv.lib_root);
@@ -681,6 +706,9 @@ impl ViewCache {
     /// Changes whenever the sorted children change (see `prepare`).
     pub fn built(&self) -> u64 {
         self.built
+    }
+    pub(super) fn visible_folder(&self, id: Uuid) -> bool {
+        self.folders.contains(&id)
     }
 
     /// The date a folder sorts by: its newest descendant's, 0 when it holds
@@ -717,7 +745,36 @@ impl ViewCache {
         agent: Uuid,
         time: i64,
     ) {
-        self.prepare(inv, prefs.sort_for(tab));
+        self.search_gated(
+            inv,
+            root,
+            text,
+            prefs,
+            filters,
+            tab,
+            target,
+            facts,
+            agent,
+            time,
+            super::archive::Gate::Exempt(super::archive::Exemption::Picker),
+        );
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn search_gated(
+        &mut self,
+        inv: &Inventory,
+        root: Uuid,
+        text: &str,
+        prefs: &InventoryPreferences,
+        filters: &Filters,
+        tab: usize,
+        target: Option<Uuid>,
+        facts: &Facts,
+        agent: Uuid,
+        time: i64,
+        gate: super::archive::Gate<'_>,
+    ) {
+        self.prepare_gated(inv, prefs.sort_for(tab), gate);
         let age = if tab == 2 && filters.age == Age::Any {
             Age::SinceLogout
         } else {
@@ -811,6 +868,9 @@ impl ViewCache {
             .entries
             .par_iter()
             .filter(|e| {
+                if !gate.passes(e.id) {
+                    return false;
+                }
                 if !scope.contains(if e.folder { &e.id } else { &e.parent }) {
                     return false;
                 }
@@ -946,7 +1006,7 @@ impl ViewCache {
         let mut included = IdSet::default();
         for id in &self.results {
             let mut parent = *id;
-            while parent != root && included.insert(parent) {
+            while parent != root && gate.passes(parent) && included.insert(parent) {
                 if received && received_roots.contains(&parent) {
                     break;
                 }
@@ -965,7 +1025,7 @@ impl ViewCache {
             }
         }
         if received {
-            let mut top: Vec<Uuid> = inbox.into_iter().collect();
+            let mut top: Vec<Uuid> = inbox.into_iter().filter(|id| gate.passes(*id)).collect();
             if let Some(received_root) = received_root {
                 top.extend(
                     self.children
@@ -979,6 +1039,7 @@ impl ViewCache {
             if !top.is_empty() {
                 self.result_children.insert(root, top);
                 if let Some(inbox) = inbox
+                    && gate.passes(inbox)
                     && !self.results.contains(&inbox)
                 {
                     self.results.push(inbox);
@@ -1037,6 +1098,9 @@ impl TreeState {
         let mut todo = vec![(root, 0)];
         let mut seen = HashSet::new();
         while let Some((id, depth)) = todo.pop() {
+            if id == root && show_root && !view.visible_folder(id) {
+                continue;
+            }
             if !seen.insert(id) {
                 continue;
             }

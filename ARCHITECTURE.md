@@ -25,10 +25,10 @@ Ctrl/Cmd+J uses the actual painted owner, with configured/held/derived Pass Wall
 precedence and no new default key binding. Native Enter/Space snapshots use the
 existing opaque release fence without changing forwarded text events. Exact
 Open only calls the existing rooted-window constructor. No chooser fetch,
-Inventory mutation, archive/custom-tab policy, asset contents or normal search
-change is introduced. Future archive/other folder policies must enter both the
-shared folder admission and revision/final-parent checks before support.
-Twenty-seven portable/actual-egui tests are authored and unrun, including both
+Inventory mutation, asset contents or network fetch is introduced. The Archive
+join now lends the same actual qualified mask to index and final current-parent
+checks; owner/policy/publication changes retire old chooser input and selection.
+Thirty-three portable/actual-egui tests are authored and unrun, including both
 style entries, narrow/short/150% bounds, real scrolling, whole-context reruns,
 composed native/body batches and native-key metadata traces. This is
 source implementation, not compiled, native, grid or full parity acceptance.
@@ -47,28 +47,50 @@ Unknown strings and Other buttons remain opaque unchanged, without settings
 repair or action substitution. Visible labels still use the existing catalogues.
 This prerequisite enables no profile-copy UI, IO, or automatic native action.
 
-The test-only `world/inventory_archive` contains the closed local UUID-set codec,
+`world/inventory_archive` owns the closed local UUID-set codec, strict native
 source/edit/publication model and one bounded incremental visibility projection.
 Actual World login, Inventory owner/root and RLVa showinv qualify borrowed reads
-once; row checks share bounded table lookups. Two physically retained projection
-bundles share process credits even across model resets and held snapshots.
-`store.rs` uses only the hardened NativeDirectory closed InventoryArchive kind
-(128 KiB, 2048 flags), original-byte/revision CAS and captured-path cancellation.
-Its independent two-worker pool refunds only after actual worker-owned resources
-drop; request/reply queues are bounded, GUI calls try-only and Drop never joins.
-`controller.rs` accepts only exact original model/source/load/save receipts;
-missing differs from unknown bytes, and failures retain last published flags.
-Binding alone starts no IO. All Archive registration remains cfg(test): actual
-World replacement/reset helpers now retire before replacing Inventory, even
-equal source IDs/generation. The App copies the one original accepted-login
-digest independently from Favorites, with None for offline/demo. Profile changes
-retire/rebind from the retained original digest before any controller take scope;
-fresh reads/edits/Include reject a mismatched captured selection independently.
-Event/native/paint observers only compare cheap stamps and revoke; the sole
-App-owned CpuTurn advances/pumps immediately before the whole ctx.run_ui run,
-outside retryable closures. World reset cannot refill it. These hooks remain
-test-gated with the component. Ordinary Inventory and complete Folder Jump
-index/final-parent consumers must still join before production enablement.
+once; serial rows and Rayon scans lend the same allocation-free `MaskRead`, tied
+to the actual Inventory/Model/owner-policy borrow. Two physically retained
+projection bundles share process credits across resets and held snapshots.
+`store.rs` uses only the hardened NativeDirectory InventoryArchive kind (128KiB,
+2048 flags), original-byte/revision CAS and captured-path cancellation. Its
+independent two-worker pool refunds only after worker-owned resources drop;
+queues are bounded, GUI calls try-only and Drop never joins. Binding starts no
+IO. Missing differs from corrupt metadata, and failed saves retain published
+flags. Native Source/Model qualification and original request-digest fanout are
+unchanged; no settings/form origin fallback exists.
+World retires before every physical Inventory replacement/reset, including equal
+IDs/generation, and renews a checked ownership instance. Ordinary Rust moves keep
+that identity. Profile changes retire/rebind before concrete controller take
+scopes; cheap observers only revoke. One App-owned CpuTurn pumps before the
+entire ctx.run_ui, outside retries and independently of World resets.
+Ordinary Classic/Aurora owners split mutable pre/post work from the immutable
+read scope. Rows, search/type/always-folders caches, ancestor closure, sidebar,
+counts and existing bounded sixteen-request browse demand share the canonical
+gate. Worn/Favorites/partial/pickers/Marketplace exemptions are explicit. Hidden
+selection, rename, hover, drag and reveal are canceled before use; rename is not
+committed and reveal never silently enables Include. Folder Jump uses the same
+mask for its index, exact tickets and final original-parent callback, always
+rejecting Trash.
+The existing Classic controls and Aurora Sort menu expose one shared Visibility
+submenu. Both local Include and metadata Archive/Unarchive paint only original
+proposals. After the entire ctx.run_ui, App rechecks the original owner, actual
+source/privacy/binding, clipped control, final pass/layer/focus/modal and context
+before applying Include or dispatching the original EditTicket. Discarded/covered
+controls cannot apply either action. Include is transient per owner and never
+writes metadata; Archive never moves/deletes/fetches Inventory.
+Offline App.demo initialization alone can consume a sealed read-only witness.
+It retains the existing nil demo session/root, actual ownership/rights and
+physical Inventory identity; native Source remains strict. The separate Scope
+has explicit OfflineReadOnly status and no grid digest, Document, worker, native
+file or edit/save authority. An explicitly named cfg(test) binder captures actual
+fixture facts as-is. Missing/corrupt live provenance cannot enter this branch.
+The complete consumer graph is promoted together in source. All prior46 Archive
+and29 Folder Jump cases are preserved, with additional scope/mask/UI/chooser
+cases authored UNRUN. Independent source review, Root compiler/tests/private
+native/platform checks and human visual validation remain required; this source
+checkpoint is not runtime or full Legacy Viewer parity acceptance.
 
 `session_host/monitor_manager.rs` is the Shell-owned bounded binding/operation
 front for four fixed monitors and one cycling view. It depends on the separately

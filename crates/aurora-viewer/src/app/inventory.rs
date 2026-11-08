@@ -497,6 +497,7 @@ impl App {
                 self.inventory_ui.show_original(&self.world.inventory, item);
                 ui::widgets::open_floater(&self.egui_ctx, "inventory", &mut self.panels.inventory);
             }
+            InvAction::Archive(proposal) => self.inventory_archive_ui.record(*proposal),
             InvAction::FindLinks(item) => {
                 self.inventory_ui.find_links(item);
                 ui::widgets::open_floater(&self.egui_ctx, "inventory", &mut self.panels.inventory);

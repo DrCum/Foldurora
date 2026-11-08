@@ -5,9 +5,18 @@
 use super::{App, Screen};
 use crate::keybinds::Input;
 use crate::theme::Palette;
-use crate::ui::inventory::folder_jump;
+use crate::ui::inventory::{InventoryUi, archive::State, folder_jump};
+use crate::world::{World, inventory_archive::visibility::VisibilityRead};
 use winit::event::{ElementState, WindowEvent};
 use winit::keyboard::{Key, PhysicalKey};
+
+fn archive_read<'a>(ui: &'a mut InventoryUi, world: &'a World, owner: uuid::Uuid) -> (Option<u64>, Option<VisibilityRead<'a>>) {
+    let Some(state) = ui.archive_owner_mut(owner) else {
+        return (None, None);
+    };
+    let instance = state.instance();
+    (instance, state.read(world))
+}
 
 impl App {
     pub(super) fn observe_folder_jump(&mut self) {
@@ -16,7 +25,10 @@ impl App {
             .owner()
             .is_some_and(|owner| self.inventory_ui.jump_owner_visible(&self.egui_ctx, self.panels.inventory, owner));
         let live = matches!(self.screen, Screen::World) && !self.login_form.busy && self.host_input_allowed();
-        self.folder_jump.observe(&self.world, live, visible);
+        let owner = self.folder_jump.owner().unwrap_or(uuid::Uuid::nil());
+        let (instance, read) = archive_read(&mut self.inventory_ui, &self.world, owner);
+        let gate = State::ordinary(instance, read.as_ref(), self.world.inventory_archive_instance);
+        self.folder_jump.observe(&self.world, live, visible, gate);
     }
 
     /// Called before egui and viewer shortcuts/movement. Both owner selection
@@ -55,14 +67,21 @@ impl App {
         // Recheck actual UI ownership at consumption, never a recent hidden
         // window or a current-selection fallback after the press.
         let visible = self.inventory_ui.jump_owner_visible(&self.egui_ctx, self.panels.inventory, owner);
-        visible && self.folder_jump.open(&self.world, true, owner, visible)
+        if !visible {
+            return false;
+        }
+        let (instance, read) = archive_read(&mut self.inventory_ui, &self.world, owner);
+        let gate = State::ordinary(instance, read.as_ref(), self.world.inventory_archive_instance);
+        self.folder_jump.open(&self.world, true, owner, visible, gate)
     }
 
     pub(super) fn show_folder_jump(&mut self, ctx: &egui::Context, palette: &Palette) {
         if let Some(owner) = self.inventory_ui.take_jump_request() {
             let visible = self.inventory_ui.jump_owner_visible(ctx, self.panels.inventory, owner);
             let live = matches!(self.screen, Screen::World) && !self.login_form.busy && self.host_input_allowed();
-            self.folder_jump.open(&self.world, live, owner, visible);
+            let (instance, read) = archive_read(&mut self.inventory_ui, &self.world, owner);
+            let gate = State::ordinary(instance, read.as_ref(), self.world.inventory_archive_instance);
+            self.folder_jump.open(&self.world, live, owner, visible, gate);
         }
         let visible = self
             .folder_jump
@@ -75,7 +94,10 @@ impl App {
             || self.options_ui.joystick_capturing()
             || self.web_has_focus()
             || self.media.focus.is_some();
-        self.folder_jump.show(ctx, palette, &self.world, live, visible, blocked);
+        let owner = self.folder_jump.owner().unwrap_or(uuid::Uuid::nil());
+        let (instance, read) = archive_read(&mut self.inventory_ui, &self.world, owner);
+        let gate = State::ordinary(instance, read.as_ref(), self.world.inventory_archive_instance);
+        self.folder_jump.show(ctx, palette, &self.world, live, visible, blocked, gate);
     }
 
     /// The actual whole-context run has completed, including any later widget
@@ -87,8 +109,26 @@ impl App {
             .owner()
             .is_some_and(|owner| self.inventory_ui.jump_owner_visible(ctx, self.panels.inventory, owner));
         let live = matches!(self.screen, Screen::World) && !self.login_form.busy && self.host_input_allowed();
-        if let Some(folder) = self.folder_jump.finish_input(ctx, &self.world, live, visible) {
-            self.inventory_ui.open_folder_window(folder);
+        let owner = self.folder_jump.owner().unwrap_or(uuid::Uuid::nil());
+        let (instance, read) = archive_read(&mut self.inventory_ui, &self.world, owner);
+        let gate = State::ordinary(instance, read.as_ref(), self.world.inventory_archive_instance);
+        let folder = self.folder_jump.finish_input(ctx, &self.world, live, visible, gate);
+        drop(read);
+        if let Some(folder) = folder {
+            // The whole-context proposal was consumed. Reacquire the SAME
+            // original owner's actual gate immediately before the callback;
+            // never reuse an earlier layout pass or infer Include.
+            let visible = self.inventory_ui.jump_owner_visible(ctx, self.panels.inventory, owner);
+            let (instance, read) = archive_read(&mut self.inventory_ui, &self.world, owner);
+            let gate = State::ordinary(instance, read.as_ref(), self.world.inventory_archive_instance);
+            let current = live
+                && visible
+                && read.as_ref().is_some_and(|read| read.passes(folder))
+                && folder_jump::current_folder(&self.world.inventory, folder, gate.mask());
+            drop(read);
+            if current {
+                self.inventory_ui.open_folder_window(folder);
+            }
         }
     }
 }
