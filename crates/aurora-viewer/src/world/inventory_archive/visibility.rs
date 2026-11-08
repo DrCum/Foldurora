@@ -28,6 +28,11 @@ const TRASH: u8 = 2;
 const LIBRARY: u8 = 4;
 static POOL: Pool = Pool::new();
 static NEXT_PUBLICATION: AtomicU64 = AtomicU64::new(1);
+#[cfg(test)]
+std::thread_local! {
+    // Observe actual qualification work without cross-test/thread interference.
+    static QUALIFICATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 struct Pool {
     bytes: AtomicUsize,
@@ -65,6 +70,8 @@ struct Key {
 }
 impl Key {
     fn observe(world: &World, model: &Model) -> Option<Self> {
+        #[cfg(test)]
+        QUALIFICATIONS.with(|count| count.set(count.get().saturating_add(1)));
         model.include_allowed(world).then(|| Self {
             source: model.source,
             revision: Revision {
@@ -651,5 +658,11 @@ pub(super) mod testing {
     }
     pub(in crate::world::inventory_archive) fn owner_exhaust(policy: &mut OwnerPolicy) {
         policy.revision = u64::MAX;
+    }
+    pub(in crate::world::inventory_archive) fn reset_qualifications() {
+        QUALIFICATIONS.with(|count| count.set(0));
+    }
+    pub(in crate::world::inventory_archive) fn qualifications() -> usize {
+        QUALIFICATIONS.with(std::cell::Cell::get)
     }
 }
