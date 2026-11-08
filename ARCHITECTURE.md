@@ -691,6 +691,15 @@ worker work must keep the existing shared renderer pool within 7 MiB and all
 framing/auth/commands within the remaining 1 MiB of its 8 MiB total. Already-
 admitted history uses retention fences, never current Active/capture fences.
 
+The preview receive roles keep their fixed 4096-byte metadata scratch in
+fallibly allocated, capacity-checked heap storage. Frame completion and close
+zero and reset that same storage in place. This keeps the buffers out of
+by-value Pair/Connected moves in unoptimized builds; the worker thread still
+has a 256 KiB stack. Framing checks include actual scratch capacities and the
+two-role ceiling, preserving the worker's 8 MiB partition. The CI-profile stack
+overflow correction requires Root-owned execution; source checks alone do not
+establish a sufficient compiled stack bound.
+
 The combined monitor foundation remains disabled at its production boundaries:
 new_config leaves optional preview bootstrap absent, native remembered demand
 is false, and preview_transport plus monitor_model are cfg(test)-only. No image

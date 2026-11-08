@@ -480,6 +480,12 @@
   enablement or inactive rendering is shipped. Future service integration must implement
   exact stop/ACK/single-worker-close ordering, source/view/intent fences and the
   host 32/24/8 MiB plus worker 7/1 MiB partitions; auth loss purges history.
+  - 🔧 Preview worker CI-profile stack correction (2026-11-08): move receive
+    metadata scratch from by-value Pair/Connected storage to fallible bounded
+    heap storage, reused and zeroed on frame reset/close. The 256 KiB thread
+    stack and 8 MiB service budget stay fixed; framing checks include the heap
+    capacities. One direct storage/reset regression is authored UNRUN. Root's
+    CI-profile stack comparison and existing service/ownership tests are pending.
   - 🔧 Disabled IO core increment: actual bounded loopback host/worker owners,
     strict full-source/lease authentication, metadata-first independent roles,
     zero-copy moved capture sender, synchronous capture/retention barriers,
