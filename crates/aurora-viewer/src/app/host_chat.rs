@@ -324,7 +324,7 @@ pub(super) fn snapshot(world: &World, conversation: Conversation, ui_ready: bool
         }
         Conversation::Group(session) => {
             let session = uuid(session);
-            let can_read = world.shared_group_readable(session);
+            let can_read = ready && world.shared_group_readable(session);
             let title = if can_read {
                 world.session_title(&session)
             } else {

@@ -168,6 +168,25 @@ fn shared_group_native_send_rechecks_moderator_mute_group_mute_and_rlva() {
 }
 
 #[test]
+fn shared_group_unready_native_policy_does_not_export_raw_title_or_text() {
+    let mut world = group_world();
+    incoming(&mut world, "Retained body");
+    for ui_ready in [false, true] {
+        world.mutes.state = if ui_ready {
+            crate::world::mutes::LoadState::Initial
+        } else {
+            crate::world::mutes::LoadState::Loaded
+        };
+        let snapshot = snapshot(&world, group(), ui_ready).unwrap();
+        assert!(!snapshot.ready && !snapshot.can_read && !snapshot.can_send);
+        assert_ne!(snapshot.title.as_str(), "Synthetic group");
+        if ui_ready {
+            assert!(page(&world).lines.is_empty());
+        }
+    }
+}
+
+#[test]
 fn shared_group_worker_exports_codec_valid_rows_and_preserves_native_read_cas() {
     let mut native = native();
     incoming(&mut native.world, "A");

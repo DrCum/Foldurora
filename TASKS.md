@@ -718,8 +718,10 @@
   protocol behavior stay unchanged. Conference, Group Attention/Close/Review
   remain later slices. Source reference: Folderstorm abbe3cb0 worker chatCommand/
   imAllowed and filterChatEvent. Source review, formatting, qualified Linux
-  Clippy and all 14 focused regressions pass. Full frozen-candidate validation
-  follows; Windows/package/native and human acceptance remain pending.
+  Clippy and the initial 14 focused regressions pass; a follow-up additionally
+  hides Group titles until native readiness and adds its regression. Full
+  frozen-candidate validation follows; Windows/package/native and human
+  acceptance remain pending.
 
 - 🔧 Shared Chat first stage (Folderstorm port, 2026-11-07; no issue): one owned
   CPU window explicitly selects a character and its Nearby/existing resident IM,
