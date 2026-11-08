@@ -4,6 +4,12 @@ on:
     branches: [checks/upstream-glow-calls-20261108]
 permissions:
   contents: read
+defaults:
+  run:
+    shell: bash
+concurrency:
+  group: isolated-glow-calls-validation
+  cancel-in-progress: true
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
@@ -26,6 +32,7 @@ jobs:
           mkdir -p .scratch/validation
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           git rev-parse HEAD | tee .scratch/validation/source.txt
+          printf '%s\\n' "$GITHUB_SHA" > .scratch/validation/workflow.txt
           rustc --version | tee .scratch/validation/rust.txt
           cargo --version | tee .scratch/validation/cargo.txt
           df -h .
@@ -54,6 +61,21 @@ jobs:
         run: |
           cargo test --profile ci --workspace --locked --offline every_language_has_english_keys_and_variables 2>&1 | tee .scratch/validation/catalog-keys.log
           cargo test --profile ci --workspace --locked --offline every_bundled_message_formats_with_its_declared_variables 2>&1 | tee .scratch/validation/catalog-format.log
+      - name: Confirm the six new regressions executed
+        run: |
+          python3 - <<'PY'
+          import pathlib,re
+          root=pathlib.Path('.scratch/validation')
+          expected={
+            'graphics.log':['levels_keep_the_glow_switch_of_the_user','graphics_saved_restores_the_glow_it_was_saved_with','former_level_migrations_keep_glow_and_still_upgrade_the_level'],
+            'voice.log':['the_current_call_survives_teleport_region_data_gaps','call_hangup_and_channel_changes_still_require_the_destination','keeping_a_call_never_bypasses_voice_disabled_logout_or_missing_audio'],
+          }
+          for filename,names in expected.items():
+            log=(root/filename).read_text()
+            for name in names:
+              assert re.search(r'test [^\\n]*'+re.escape(name)+r' \\.\\.\\. ok',log),name
+          print('All six new regressions executed and passed.')
+          PY
       - name: Full workspace suite on the frozen port candidate
         timeout-minutes: 25
         run: timeout 1200 cargo test --profile ci --workspace --locked --offline --no-fail-fast 2>&1 | tee .scratch/validation/full-suite.log
