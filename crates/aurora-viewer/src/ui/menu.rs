@@ -368,7 +368,13 @@ fn show_scoped(mut popup: Popup<'_>, bounds: Option<egui::Rect>, body: impl FnOn
             .align_alternatives(&[])
             .gap(0.0);
     }
-    popup.show(|ui| scoped_body(ui, bounds, body)).is_some()
+    let owner = popup.get_id();
+    popup
+        .show(|ui| {
+            crate::session_host::worker::ordinary::ui_owner(ui.ctx(), owner);
+            scoped_body(ui, bounds, body)
+        })
+        .is_some()
 }
 
 /// Keep egui's submenu keyboard/hover hierarchy. Only its popup anchor moves;

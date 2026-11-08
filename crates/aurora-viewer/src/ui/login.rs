@@ -363,6 +363,7 @@ pub(super) fn demo_open_start_menu(ui: &egui::Ui, salt: &str, favorites: &StartF
         && ui.ctx().cumulative_frame_nr() >= 30
         && !OPENED.swap(true, std::sync::atomic::Ordering::Relaxed)
     {
+        crate::session_host::worker::ordinary::invalidate();
         egui::Popup::open_id(ui.ctx(), ui.make_persistent_id(egui::IdSalt::new(salt)).with("popup"));
     }
 }

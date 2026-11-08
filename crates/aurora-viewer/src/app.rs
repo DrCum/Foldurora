@@ -91,6 +91,7 @@ mod host_chat_bridge;
 mod host_preview;
 mod host_review;
 mod host_session;
+pub(crate) mod host_show_viewer;
 pub(crate) use host_session::grid_label as host_grid_label;
 mod hover_height;
 mod hover_tips;
@@ -187,6 +188,9 @@ struct Gfx {
     /// then, `Renderer::new`).
     renderer: Renderer,
     egui_state: egui_winit::State,
+    // Revokes before the final owned Window Arc drops. Temporary Gfx moves
+    // carry this physical lease rather than creating a replacement.
+    show_window_owner: Option<host_show_viewer::PhysicalWindowOwner>,
     window: Arc<Window>,
     /// Revealed only once the renderer has presented its first image.
     shown: bool,
@@ -884,6 +888,7 @@ pub struct App {
     busy_pause: busy_pause::BusyPause,
     /// Optional exact-process host bridge; standalone viewers have none.
     host_session: Option<crate::session_host::worker::WorkerBridge>,
+    show_window: host_show_viewer::WindowOwner,
     host_chat: Option<Box<host_chat_bridge::Driver>>,
     board_state: Option<Box<gesture_board::State>>,
     board_store: Option<crate::gesture_board::store::Lane>,
@@ -1786,6 +1791,7 @@ impl App {
             gpu_stall: Default::default(),
             busy_pause: Default::default(),
             host_session,
+            show_window: host_show_viewer::WindowOwner::new(),
             board_managed,
             board_epoch: 1,
             board_actions: 1,
@@ -2847,6 +2853,7 @@ impl App {
     // ------------------------------------------------------------------ login
 
     fn start_login(&mut self) {
+        crate::session_host::worker::ordinary::invalidate();
         self.workspace_cancel_preview(true);
         // a previous session of this account may still be on the grid
         if self.hold_login() {
@@ -2883,7 +2890,7 @@ impl App {
                 );
             }
             if matches!(mode.as_str(), "derez" | "derez1" | "connecting") {
-                self.login_form.busy = true;
+                self.set_login_busy(true);
                 self.login_progress = Some((aurora_i18n::tr!("session-connecting-to-login-server").into(), 0.35));
             } else if mode == "mfa-refused"
                 || (mode == "add-mfa" && self.login_form.mfa_token.trim().is_empty())
@@ -2896,7 +2903,7 @@ impl App {
                         self.login_form.read_critical
                     );
                 }
-                self.login_form.busy = true;
+                self.set_login_busy(true);
                 self.login_progress = Some((aurora_i18n::tr!("session-connecting-to-login-server").into(), 0.35));
                 self.demo_mfa_challenge = Some(std::time::Instant::now() + std::time::Duration::from_millis(1200));
             } else {
@@ -2982,7 +2989,7 @@ impl App {
             last_exec: self.last_exec(),
             platform: crate::system_info::login_platform(),
         };
-        self.login_form.busy = true;
+        self.set_login_busy(true);
         self.login_form.error = None;
         self.login_progress = Some((aurora_i18n::tr!("app-connecting").into(), 0.05));
         self.settings.save();
@@ -2991,6 +2998,7 @@ impl App {
     }
 
     fn back_to_login(&mut self, error: Option<String>) {
+        crate::session_host::worker::ordinary::invalidate();
         self.workspace_cancel_preview(true);
         // the login screen and Preferences say "L$" again, not the last grid's money
         aurora_i18n::set_currency("");
@@ -3123,8 +3131,8 @@ impl App {
         self.local_bakes.end_session(&mut self.scene);
         self.reset_avatar_health();
         self.interactions = Default::default();
-        self.screen = Screen::Login;
-        self.login_form.busy = false;
+        self.set_screen(Screen::Login);
+        self.set_login_busy(false);
         self.login_form.transition = None;
         self.login_form.pending_connect = None;
         self.login_form.focused = false;
@@ -3710,7 +3718,7 @@ impl App {
                 if previous_session && self.retry_after_refusal(&error) {
                     return;
                 }
-                self.login_form.busy = false;
+                self.set_login_busy(false);
                 self.login_form.transition = None;
                 self.login_form.focused = false;
                 self.login_progress = None;
@@ -3815,7 +3823,7 @@ impl App {
                 self.restore_gestures(&l.raw);
                 self.net_profile.reset();
                 self.login_form.transition = None;
-                self.login_form.busy = false;
+                self.set_login_busy(false);
                 self.login_form.adding = false;
                 self.login_form.add_return = None;
                 self.login_form.editing = false;
@@ -3893,7 +3901,7 @@ impl App {
                 if let Some(path) = self.name_cache_path() {
                     self.world.social.avatar_names.load(&path);
                 }
-                self.screen = Screen::Loading { since: Instant::now() };
+                self.set_screen(Screen::Loading { since: Instant::now() });
                 self.world.notifications.started = false;
                 self.loading_frac = 0.0;
                 self.loading_target = 0.0;
@@ -4078,7 +4086,7 @@ impl App {
             && !self.shift
             && !self.color_pipette()
             && !self.texture_pipette()
-            && !self.exit_prompt.open
+            && !self.exit_prompt.is_open()
             && !self.cursor_hold.held()
             && self.mouse_mode == MouseMode::None
             && self
@@ -5932,6 +5940,7 @@ impl App {
     }
 
     fn request_exit(&mut self) {
+        crate::session_host::worker::ordinary::invalidate();
         if self
             .gfx
             .as_ref()
@@ -5962,7 +5971,7 @@ impl App {
         if action != ui::exit::Action::Cancel
             && (!self.close_wearable_editor() || !self.script_editors.prepare_exit() || !self.texture_library.prepare_exit(&self.egui_ctx))
         {
-            self.exit_prompt.open = false;
+            self.exit_prompt.close();
             return;
         }
         if !self.exit_prompt.confirm(action, Instant::now()) {
@@ -5981,6 +5990,7 @@ impl App {
 
     /// Log out, save the window, layout, inventory cache and settings, exit.
     fn shutdown(&mut self, event_loop: &ActiveEventLoop) {
+        self.retire_show_window();
         self.workspace_cancel_preview(true);
         self.host_preview.retire();
         self.instances.leave();
@@ -8854,7 +8864,7 @@ impl App {
         self.mouselook_alt_cursor();
         // (not under a first-person VR entry, mouselook only underneath:
         // the cursor would stay hidden after VR ends)
-        if !self.exit_prompt.open
+        if !self.exit_prompt.is_open()
             && self.camera.mouselook()
             && self.vr_camera.is_none()
             && self.focused
@@ -10094,7 +10104,7 @@ impl App {
             let preview = if (self.focused || self.demo && self.capture.is_some())
                 && !covered
                 && !self.camera.mouselook()
-                && !self.exit_prompt.open
+                && !self.exit_prompt.is_open()
                 && self.cursor_pos.0 >= 0.0
                 && self.cursor_pos.1 >= 0.0
                 && self.cursor_pos.0 < w as f32
@@ -11013,7 +11023,7 @@ impl App {
         if let Some(anchor) = self.numeric_drag.after(
             &ctx,
             &full.platform_output.events,
-            self.focused && !self.cursor_hold.held() && !self.exit_prompt.open,
+            self.focused && !self.cursor_hold.held() && !self.exit_prompt.is_open(),
         ) {
             let position = winit::dpi::PhysicalPosition::new(anchor.x * ctx.pixels_per_point(), anchor.y * ctx.pixels_per_point());
             if (self.cursor_pos.0 - position.x).abs() > 0.5 || (self.cursor_pos.1 - position.y).abs() > 0.5 {
@@ -12018,7 +12028,7 @@ impl App {
             && let Some((w, h, px)) = gfx.renderer.captured.take()
         {
             self.scene_capture_pending = false;
-            let wait = self.quit_at.is_some() || self.exit_prompt.open;
+            let wait = self.quit_at.is_some() || self.exit_prompt.is_open();
             let pixels = std::sync::Arc::new(px);
             if let Some((account, region)) = self.scene_capture_place.take() {
                 self.login_form.places.capture(account, region, w, h, pixels.clone(), wait);
@@ -13457,6 +13467,9 @@ impl App {
         if a.update_quit {
             self.shutdown(event_loop);
             return;
+        }
+        if !matches!(&a.login, LoginAction::None) {
+            crate::session_host::worker::ordinary::invalidate();
         }
         match a.login {
             LoginAction::Login if !self.updater.blocks_login() && aurora_updater::test_environment().is_none() => self.start_login(),
@@ -15141,11 +15154,11 @@ impl App {
         let beacon_hovered = !ctx.is_pointer_over_egui() && !ctx.egui_wants_pointer_input() && self.beacon_hover();
         self.beacon_hit = None;
         let mut t = Instant::now();
-        if self.exit_prompt.open {
+        if self.exit_prompt.is_open() {
             ui.disable();
             ctx.memory_mut(|m| m.set_modal_layer(egui::Modal::default_area(egui::Id::unique("viewer_exit")).layer()));
         }
-        a.update_quit = !self.exit_prompt.open
+        a.update_quit = !self.exit_prompt.is_open()
             && ui::update::show_real(
                 &ctx,
                 &p,
@@ -17975,7 +17988,7 @@ impl ApplicationHandler for App {
                 .then(|| winit::window::Fullscreen::Borderless(monitor.clone())),
         };
         self.fullscreen_applied = plan.fullscreen.is_some();
-        let window = match self.open_window(event_loop, &plan) {
+        let (window, show_window_owner) = match self.open_window(event_loop, &plan) {
             Ok(w) => w,
             Err(e) => {
                 log::error!("cannot create window: {e}");
@@ -18039,6 +18052,7 @@ impl ApplicationHandler for App {
         let egui_state = self.egui_state_for(&window, &renderer);
         self.gfx = Some(Gfx {
             window,
+            show_window_owner,
             shown: false,
             maximize_on_show: self.settings.window_maximized && !self.settings.window_fullscreen && !capture,
             renderer,
@@ -18240,7 +18254,7 @@ impl ApplicationHandler for App {
                     if mode.ends_with("-connecting") {
                         self.settings.username = "Example new account".into();
                         self.settings.remember_password = false;
-                        self.login_form.busy = true;
+                        self.set_login_busy(true);
                         self.login_form.adding = mode == "add-connecting";
                         self.login_form.editing = true;
                         self.login_progress = Some((aurora_i18n::tr!("session-connecting-to-login-server").into(), 0.35));
@@ -20529,6 +20543,7 @@ impl ApplicationHandler for App {
     /// closed connection and every exit ended in a segmentation fault (before
     /// the browsers' private profiles were cleaned up).
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        self.retire_show_window();
         self.host_preview.retire();
         self.gfx = None;
     }
@@ -20536,6 +20551,7 @@ impl ApplicationHandler for App {
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
         let folder_jump_window = self.gfx.as_ref().is_some_and(|gfx| gfx.window.id() == id);
         if folder_jump_window {
+            crate::session_host::worker::ordinary::native_event(&event);
             self.observe_folder_jump();
             self.folder_jump.native_event(&self.egui_ctx, &event);
         }
@@ -20544,7 +20560,10 @@ impl ApplicationHandler for App {
         if self.retired_window.as_ref().is_some_and(|w| w.id() == id) && !matches!(event, WindowEvent::CloseRequested) {
             return;
         }
-        if self.review_input.observe(&event) {
+        if folder_jump_window && matches!(event, WindowEvent::Destroyed) {
+            self.retire_show_window();
+        }
+        if folder_jump_window && self.review_input.observe(&event) {
             return;
         }
         if folder_jump_window && self.folder_jump_event(&event) {
@@ -20640,16 +20659,16 @@ impl ApplicationHandler for App {
             && self.web_has_focus()
             && !self.egui_ctx.egui_wants_keyboard_input()
             && !egui::Popup::is_any_open(&self.egui_ctx)
-            && self.options_ui.capture.is_none()
-            && !self.exit_prompt.open;
+            && self.options_ui.capture().is_none()
+            && !self.exit_prompt.is_open();
         let lens_shortcut = matches!(bound_key, Some(code)
             if matches!(self.settings.keybinds.triggered(&Input::key(code), key_mods),
                 Some(Action::LensZoomIn | Action::LensZoomOut | Action::LensZoomDefault))
                 && (!(self.egui_ctx.egui_wants_keyboard_input() || egui::Popup::is_any_open(&self.egui_ctx))
                     || shortcut_while_typing(true, key_mods, code, None, true)))
             && self.in_world()
-            && self.options_ui.capture.is_none()
-            && !self.exit_prompt.open
+            && self.options_ui.capture().is_none()
+            && !self.exit_prompt.is_open()
             && !self.web_has_focus()
             && self.media.focus.is_none();
         // the hidden cursor the camera holds is the tool's (cursor_hold.rs):
@@ -20667,8 +20686,8 @@ impl ApplicationHandler for App {
             WindowEvent::KeyboardInput { event: ke, .. }
                 if ke.state == ElementState::Pressed
                     && !ke.repeat
-                    && !self.exit_prompt.open
-                    && self.options_ui.capture.is_none()
+                    && !self.exit_prompt.is_open()
+                    && self.options_ui.capture().is_none()
                     && matches!(bound_key, Some(code)
                         if shortcut_claims_focus(
                             &self.egui_ctx,
@@ -20693,9 +20712,9 @@ impl ApplicationHandler for App {
                             || egui::Popup::is_any_open(&self.egui_ctx)
                             || self.web_has_focus()
                             || self.media.focus.is_some(),
-                        self.options_ui.capture.is_some()
+                        self.options_ui.capture().is_some()
                             || self.options_ui.joystick_capturing()
-                            || self.exit_prompt.open,
+                            || self.exit_prompt.is_open(),
                         self.altgr_text_input(ke),
                     ))
         );
@@ -20807,7 +20826,7 @@ impl ApplicationHandler for App {
                         self.on_input(Input::key(bound), false);
                     }
                 }
-                if self.exit_prompt.open {
+                if self.exit_prompt.is_open() {
                     return;
                 }
                 if let PhysicalKey::Code(code) = ke.physical_key {
@@ -20853,7 +20872,7 @@ impl ApplicationHandler for App {
                         }
                         return;
                     }
-                    if self.options_ui.capture.is_some() {
+                    if self.options_ui.capture().is_some() {
                         if let Some(input) = self.options_ui.capture_key(code, pressed, ke.repeat) {
                             self.finish_capture(input);
                         }
@@ -21058,13 +21077,13 @@ impl ApplicationHandler for App {
                 if *button == MouseButton::Left {
                     self.alt_cursor.left_button(*state == ElementState::Pressed);
                 }
-                if self.exit_prompt.open {
+                if self.exit_prompt.is_open() {
                     return;
                 }
                 let pressed = *state == ElementState::Pressed;
                 let over_ui = self.ui_takes_pointer();
                 // shortcut being captured: middle / side buttons bind, left / right cancel
-                if self.options_ui.capture.is_some() {
+                if self.options_ui.capture().is_some() {
                     if pressed {
                         self.finish_capture(Input::mouse(*button));
                     }
@@ -21083,7 +21102,7 @@ impl ApplicationHandler for App {
                 // (in its turn behind a click that waits for its depth)
                 self.mouse_input(*button, pressed, over_ui);
             }
-            WindowEvent::MouseWheel { delta, .. } if !self.exit_prompt.open && !self.ui_takes_pointer() && self.in_world() => {
+            WindowEvent::MouseWheel { delta, .. } if !self.exit_prompt.is_open() && !self.ui_takes_pointer() && self.in_world() => {
                 let steps = match delta {
                     MouseScrollDelta::LineDelta(_, y) => *y,
                     MouseScrollDelta::PixelDelta(p) => p.y as f32 / 60.0,
@@ -21140,7 +21159,7 @@ impl ApplicationHandler for App {
                 }
                 return;
             }
-            if !self.in_world() || self.exit_prompt.open {
+            if !self.in_world() || self.exit_prompt.is_open() {
                 return;
             }
             let dy = if self.settings.invert_mouse { -delta.1 } else { delta.1 };

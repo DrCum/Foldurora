@@ -183,7 +183,7 @@ impl App {
     pub(super) fn mouselook_alt_cursor(&mut self) {
         // (AURORA_DEMO_CAMERA scripts the keys: the window needs no focus)
         let focused = self.focused || self.demo && std::env::var_os("AURORA_DEMO_CAMERA").is_some();
-        let mouselook = self.camera.mouselook() && focused && !self.exit_prompt.open;
+        let mouselook = self.camera.mouselook() && focused && !self.exit_prompt.is_open();
         match self.alt_cursor.update(mouselook, self.alt && !self.alt_gr_alone()) {
             Some(AltSwitch::Free) => self.release_cursor(false),
             Some(AltSwitch::Take) => self.set_mouselook_grab(true),
@@ -253,7 +253,7 @@ impl App {
     /// motion, which the move back does not produce.
     pub(super) fn recenter_mouselook_cursor(&mut self) {
         if !self.focused
-            || self.exit_prompt.open
+            || self.exit_prompt.is_open()
             || !self.camera.mouselook()
             || !self.cursor_hold.held()
             || self.alt_cursor.free()

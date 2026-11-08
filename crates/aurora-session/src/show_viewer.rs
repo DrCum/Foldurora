@@ -214,6 +214,15 @@ impl ShowViewerLedger {
     pub fn retained_count(&self) -> usize {
         self.entries.len()
     }
+    /// The actual boot owner uses this bounded read-only view to terminalize
+    /// abandoned in-flight work on permanent service retirement. It is not
+    /// authorization for lookup, native work or a fresh request reservation.
+    pub fn pending_requests(&self) -> impl Iterator<Item = ShowViewerRequest> + '_ {
+        self.entries
+            .iter()
+            .filter(|entry| entry.receipt.is_none())
+            .map(|entry| entry.request)
+    }
 }
 
 #[cfg(test)]

@@ -16,12 +16,20 @@ pub enum Action {
 
 #[derive(Default)]
 pub struct ExitPrompt {
-    pub open: bool,
+    open: bool,
     pending: Option<(Action, Instant)>,
 }
 
 impl ExitPrompt {
+    pub fn is_open(&self) -> bool {
+        self.open
+    }
+    pub fn close(&mut self) {
+        crate::session_host::worker::ordinary::invalidate();
+        self.open = false;
+    }
     pub fn request(&mut self) {
+        crate::session_host::worker::ordinary::invalidate();
         self.open = true;
     }
     pub fn confirm(&mut self, action: Action, now: Instant) -> bool {
@@ -29,9 +37,10 @@ impl ExitPrompt {
             return false;
         }
         if action == Action::Cancel {
-            self.open = false;
+            self.close();
             return false;
         }
+        crate::session_host::worker::ordinary::invalidate();
         self.pending = Some((action, now));
         true
     }
@@ -41,7 +50,7 @@ impl ExitPrompt {
             return None;
         }
         self.pending = None;
-        self.open = false;
+        self.close();
         Some(action)
     }
     pub fn show(&self, ctx: &egui::Context, p: &Palette, can_logout: bool) -> Option<Action> {

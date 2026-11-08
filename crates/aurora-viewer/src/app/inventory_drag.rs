@@ -225,7 +225,7 @@ impl App {
         }
         let give = self.avatar_give_input(ctx, renderer);
         self.scene.mark_give_target(&self.world, give);
-        if give.is_some() || !matches!(self.screen, Screen::World) || self.world.teleporting || self.exit_prompt.open {
+        if give.is_some() || !matches!(self.screen, Screen::World) || self.world.teleporting || self.exit_prompt.is_open() {
             return Vec::new();
         }
         if egui::DragAndDrop::payload::<ui::places::drag::PlaceDrag>(ctx).is_some_and(|cargo| cargo.target.item().is_none()) {
@@ -506,7 +506,7 @@ impl App {
     /// avatar is left to the rez rules.
     fn avatar_give_input(&mut self, ctx: &egui::Context, renderer: &Renderer) -> Option<usize> {
         let ids = ui::inventory::drag::carried_ids(ctx)?;
-        if !matches!(self.screen, Screen::World) || self.world.teleporting || self.exit_prompt.open || ctx.is_pointer_over_egui() {
+        if !matches!(self.screen, Screen::World) || self.world.teleporting || self.exit_prompt.is_open() || ctx.is_pointer_over_egui() {
             return None;
         }
         // the texture library's cards are not inventory to give

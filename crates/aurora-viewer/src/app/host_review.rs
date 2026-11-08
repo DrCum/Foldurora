@@ -9,9 +9,10 @@ impl App {
     pub(super) fn review_existing_conversation(&mut self, bridge: &WorkerBridge, request: ReviewConversationRequest) -> ReviewOutcome {
         if request.validate().is_err()
             || host_chat::source(self, bridge) != Some(request.target.key.source)
-            || self.exit_prompt.open
+            || self.exit_prompt.is_open()
             || self.login_form.busy
-            || self.options_ui.capture.is_some()
+            || self.options_ui.capture().is_some()
+            || !self.review_input.can_quarantine()
         {
             return ReviewOutcome::RejectedNative;
         }
@@ -68,86 +69,50 @@ fn existing_target(
 /// Native Enter is observed before egui-winit ignores focus snapshots. A
 /// review cannot turn a key held during activation into a new composer Send.
 #[derive(Default)]
-pub(super) struct ReviewInput {
+struct ActivationFence {
     held: bool,
     blocked: bool,
-    first_pass: bool,
     armed: bool,
     focused: bool,
     before_focus: bool,
-    ime_composing: bool,
-    ime_quarantined: bool,
-    ime_enter_quarantined: bool,
 }
-
-impl ReviewInput {
-    fn begin(&mut self) {
-        self.ime_enter_quarantined |= self.ime_composing || self.ime_quarantined;
-        self.blocked = self.held || self.ime_enter_quarantined;
-        self.first_pass = true;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ActivationKey {
+    Enter,
+    Space,
+}
+fn activation_key(key: &winit::keyboard::Key) -> Option<ActivationKey> {
+    use winit::keyboard::{Key, NamedKey};
+    match key {
+        Key::Named(NamedKey::Enter) => Some(ActivationKey::Enter),
+        Key::Named(NamedKey::Space) => Some(ActivationKey::Space),
+        Key::Character(text) if text.as_str() == " " => Some(ActivationKey::Space),
+        _ => None,
+    }
+}
+impl ActivationFence {
+    fn begin(&mut self, ime: bool) {
+        self.blocked = self.held || ime;
         self.armed = true;
-        self.ime_quarantined |= self.ime_composing;
-        // Commit may precede its confirming key-down. Preserve that key fence
-        // through terminal IME events and focus snapshots until physical up.
-        // A canceled old composition conservatively consumes the first Enter.
     }
-
-    pub fn observe(&mut self, event: &winit::event::WindowEvent) -> bool {
-        use winit::{
-            event::{ElementState, WindowEvent},
-            keyboard::{Key, NamedKey},
-        };
-        if let WindowEvent::Focused(focused) = event {
-            self.focused(*focused);
-        }
-        if let WindowEvent::Ime(ime) = event {
-            return self.ime(ime);
-        }
-        let WindowEvent::KeyboardInput { event, is_synthetic, .. } = event else {
-            return false;
-        };
-        if event.logical_key != Key::Named(NamedKey::Enter) {
-            return false;
-        }
-        self.key(event.state == ElementState::Pressed, *is_synthetic, event.repeat)
-    }
-
-    fn ime(&mut self, ime: &winit::event::Ime) -> bool {
-        use winit::event::Ime;
-        let suppress = self.ime_quarantined;
-        match ime {
-            // An empty Preedit can precede Commit, so only an explicit terminal
-            // event releases a composition captured before Review.
-            Ime::Preedit(..) => self.ime_composing = true,
-            Ime::Commit(_) | Ime::Disabled => {
-                self.ime_composing = false;
-                self.ime_quarantined = false;
-            }
-            Ime::Enabled => {}
-        }
-        suppress
-    }
-
-    fn focused(&mut self, focused: bool) {
+    fn focused(&mut self, focused: bool, ime: bool) {
         if self.focused == focused {
             return;
         }
         self.focused = focused;
         if focused {
             self.held = self.before_focus;
-            self.blocked = (self.blocked && self.held) || self.ime_enter_quarantined;
+            self.blocked = (self.blocked && self.held) || ime;
         }
         self.before_focus = false;
     }
-
-    fn key(&mut self, pressed: bool, synthetic: bool, repeat: bool) -> bool {
+    fn key(&mut self, pressed: bool, synthetic: bool, repeat: bool, first: bool, ime: bool) -> bool {
         if !pressed {
             if !synthetic {
                 self.held = false;
                 self.blocked = false;
                 self.armed = false;
                 self.before_focus = false;
-                self.ime_enter_quarantined = false;
             }
             return false;
         }
@@ -155,9 +120,7 @@ impl ReviewInput {
         if !self.focused {
             self.before_focus = true;
         }
-        if self.first_pass || self.ime_quarantined || self.ime_enter_quarantined {
-            // This press will be rejected by the new-target frame fence. Its
-            // later OS repeats must remain rejected until a physical release.
+        if first || ime {
             self.blocked = true;
             self.armed = true;
         } else if self.armed && (synthetic || repeat) {
@@ -167,11 +130,181 @@ impl ReviewInput {
         }
         !synthetic && self.blocked
     }
+}
+#[derive(Default)]
+pub(super) struct ReviewInput {
+    enter: ActivationFence,
+    space: ActivationFence,
+    first_pass: bool,
+    pointer_down: u8,
+    pointer_blocked: u8,
+    pointer_before_focus: u8,
+    ime_composing: bool,
+    ime_quarantined: bool,
+    ime_enter_quarantined: bool,
+    ime_space_quarantined: bool,
+    ime_epoch: u64,
+    ime_confirmation: Option<u64>,
+    ime_exhausted: bool,
+}
+impl ReviewInput {
+    fn begin(&mut self) {
+        let ime = self.ime_composing || self.ime_quarantined || self.ime_confirmation.is_some();
+        self.ime_enter_quarantined |= ime;
+        self.ime_space_quarantined |= ime;
+        self.enter.begin(self.ime_enter_quarantined);
+        self.space.begin(self.ime_space_quarantined);
+        self.pointer_blocked |= self.pointer_down;
+        self.first_pass = true;
+        self.ime_quarantined |= self.ime_composing;
+    }
+    pub(super) fn can_quarantine(&self) -> bool {
+        !self.ime_exhausted
+    }
+    pub(super) fn begin_show(&mut self) -> bool {
+        if !self.can_quarantine() {
+            return false;
+        }
+        self.begin();
+        true
+    }
+    pub fn observe(&mut self, event: &winit::event::WindowEvent) -> bool {
+        use winit::event::{ElementState, WindowEvent};
+        if let WindowEvent::Focused(focused) = event {
+            self.focused(*focused);
+        }
+        if let WindowEvent::Ime(ime) = event {
+            return self.ime(ime);
+        }
+        if let WindowEvent::MouseInput { state, button, .. } = event {
+            return self.pointer(*button, *state == ElementState::Pressed);
+        }
+        let WindowEvent::KeyboardInput { event, is_synthetic, .. } = event else {
+            return false;
+        };
+        if let Some(blocked) = self.activation_event(
+            &event.logical_key,
+            event.state == ElementState::Pressed,
+            *is_synthetic,
+            event.repeat,
+        ) {
+            return blocked;
+        }
+        self.first_pass && !*is_synthetic && event.state == ElementState::Pressed
+    }
+    fn activation_event(&mut self, key: &winit::keyboard::Key, pressed: bool, synthetic: bool, repeat: bool) -> Option<bool> {
+        Some(match activation_key(key)? {
+            ActivationKey::Enter => self.key(pressed, synthetic, repeat),
+            ActivationKey::Space => self.space_key(pressed, synthetic, repeat),
+        })
+    }
+    fn pointer(&mut self, button: winit::event::MouseButton, pressed: bool) -> bool {
+        use winit::event::MouseButton;
+        let bit = match button {
+            MouseButton::Left => 1,
+            MouseButton::Right => 2,
+            MouseButton::Middle => 4,
+            MouseButton::Back => 8,
+            MouseButton::Forward => 16,
+            MouseButton::Other(_) => return self.first_pass,
+        };
+        if pressed {
+            self.pointer_down |= bit;
+            if !self.enter.focused {
+                self.pointer_before_focus |= bit;
+            }
+            if self.first_pass {
+                self.pointer_blocked |= bit;
+            }
+            self.pointer_blocked & bit != 0
+        } else {
+            let blocked = self.pointer_blocked & bit != 0;
+            self.pointer_down &= !bit;
+            self.pointer_blocked &= !bit;
+            self.pointer_before_focus &= !bit;
+            blocked
+        }
+    }
+    fn ime(&mut self, ime: &winit::event::Ime) -> bool {
+        use winit::event::Ime;
+        let suppress = self.ime_quarantined;
+        match ime {
+            Ime::Preedit(..) => {
+                if !self.ime_composing && !self.ime_exhausted {
+                    if let Some(next) = self.ime_epoch.checked_add(1) {
+                        self.ime_epoch = next;
+                    } else {
+                        self.ime_exhausted = true;
+                    }
+                }
+                self.ime_composing = true;
+                self.ime_confirmation = Some(self.ime_epoch);
+            }
+            Ime::Commit(_) | Ime::Disabled => {
+                self.ime_composing = false;
+                self.ime_quarantined = false;
+                // Commit may precede its confirmation Enter/Space, including
+                // before a Show boundary. Retain ownership until physical up.
+                self.ime_confirmation = Some(self.ime_epoch);
+            }
+            Ime::Enabled => {}
+        }
+        suppress
+    }
+    fn focused(&mut self, focused: bool) {
+        let changed = self.enter.focused != focused;
+        self.enter.focused(focused, self.ime_enter_quarantined);
+        self.space.focused(focused, self.ime_space_quarantined);
+        if changed {
+            if focused {
+                // As with Enter, an actual press before focus is retained;
+                // absence of a snapshot allows release outside this window.
+                // Old releases cannot click because Show drains the old queue
+                // and clears only transient pointer/drag state before focus.
+                self.pointer_down = self.pointer_before_focus;
+                self.pointer_blocked &= self.pointer_down;
+            }
+            self.pointer_before_focus = 0;
+        }
+    }
+    fn key(&mut self, pressed: bool, synthetic: bool, repeat: bool) -> bool {
+        let blocked = self.enter.key(
+            pressed,
+            synthetic,
+            repeat,
+            self.first_pass,
+            self.ime_quarantined || self.ime_enter_quarantined,
+        );
+        if !pressed && !synthetic {
+            self.ime_enter_quarantined = false;
+            if !self.ime_composing {
+                self.ime_confirmation = None;
+            }
+        }
+        blocked
+    }
+    fn space_key(&mut self, pressed: bool, synthetic: bool, repeat: bool) -> bool {
+        let blocked = self.space.key(
+            pressed,
+            synthetic,
+            repeat,
+            self.first_pass,
+            self.ime_quarantined || self.ime_space_quarantined,
+        );
+        if !pressed && !synthetic {
+            self.ime_space_quarantined = false;
+            if !self.ime_composing {
+                self.ime_confirmation = None;
+            }
+        }
+        blocked
+    }
 
     /// The final App input boundary, after egui-winit, native Alt codes and
     /// ordinary queued input assembly, immediately before run_ui.
     pub fn finish_frame_input(&mut self, raw: &mut egui::RawInput, alt_text: &mut Vec<String>) {
         raw.events.extend(alt_text.drain(..).map(egui::Event::Text));
+        crate::session_host::worker::ordinary::queued_input(raw);
         self.filter(raw);
     }
 
@@ -183,11 +316,13 @@ impl ReviewInput {
                 !matches!(
                     event,
                     egui::Event::Key { pressed: true, .. }
+                        | egui::Event::AccessKitActionRequest(_)
                         | egui::Event::Text(_)
                         | egui::Event::Paste(_)
                         | egui::Event::Cut
                         | egui::Event::Ime(_)
                         | egui::Event::PointerButton { .. }
+                        | egui::Event::Touch { .. }
                 )
             });
         }
@@ -198,7 +333,7 @@ impl ReviewInput {
 mod tests {
     use super::*;
 
-    fn native_editor_frame(
+    pub(super) fn native_editor_frame(
         ctx: &egui::Context,
         input: &mut ReviewInput,
         alt_text: &mut Vec<String>,
@@ -551,5 +686,136 @@ mod tests {
             assert!(!input.key(false, false, false));
             assert!(!input.key(true, false, false), "physical release permits the next explicit send");
         }
+    }
+}
+
+#[cfg(test)]
+mod show_input_tests {
+    use super::tests::native_editor_frame;
+    use super::*;
+    use winit::{
+        event::{Ime, MouseButton, WindowEvent},
+        keyboard::{Key, NamedKey},
+    };
+    #[test]
+    fn show_shared_input_handles_both_native_space_spellings_and_requires_exact_real_release() {
+        for key in [Key::Named(NamedKey::Space), Key::Character(" ".into())] {
+            let mut input = ReviewInput::default();
+            input.focused(true);
+            assert_eq!(input.activation_event(&key, true, false, false), Some(false));
+            assert!(input.begin_show());
+            input.finish_frame_input(&mut egui::RawInput::default(), &mut Vec::new());
+            assert_eq!(
+                input.activation_event(&Key::Named(NamedKey::Enter), false, false, false),
+                Some(false)
+            );
+            assert_eq!(input.activation_event(&key, true, false, true), Some(true));
+            assert_eq!(input.activation_event(&key, false, true, false), Some(false));
+            assert_eq!(input.activation_event(&key, true, false, false), Some(true));
+            assert_eq!(input.activation_event(&key, false, false, false), Some(false));
+            assert_eq!(input.activation_event(&key, true, false, false), Some(false));
+        }
+    }
+    #[test]
+    fn show_shared_pointer_quarantine_drops_old_release_but_preserves_fresh_press_and_release() {
+        let mut input = ReviewInput::default();
+        input.focused(true);
+        assert!(!input.pointer(MouseButton::Left, true));
+        assert!(input.begin_show());
+        input.finish_frame_input(&mut egui::RawInput::default(), &mut Vec::new());
+        assert!(!input.pointer(MouseButton::Right, false));
+        assert!(input.pointer(MouseButton::Left, true));
+        assert!(input.pointer(MouseButton::Left, false));
+        assert!(!input.pointer(MouseButton::Left, true));
+        assert!(!input.pointer(MouseButton::Left, false));
+        input.focused(false);
+        input.begin_show();
+        input.focused(true);
+        input.finish_frame_input(&mut egui::RawInput::default(), &mut Vec::new());
+        assert!(!input.pointer(MouseButton::Left, true));
+    }
+    #[test]
+    fn show_shared_ime_commit_before_boundary_keeps_late_confirmation_owned_until_physical_up() {
+        let mut input = ReviewInput::default();
+        input.focused(true);
+        assert!(!input.observe(&WindowEvent::Ime(Ime::Preedit("pending".into(), None))));
+        assert!(!input.observe(&WindowEvent::Ime(Ime::Commit("committed before focus".into()))));
+        assert!(input.begin_show());
+        input.finish_frame_input(&mut egui::RawInput::default(), &mut Vec::new());
+        assert!(input.key(true, false, false));
+        assert!(input.space_key(true, false, false));
+        assert!(!input.key(false, true, false));
+        assert!(input.key(true, false, false));
+        assert!(!input.key(false, false, false));
+        assert!(!input.key(true, false, false));
+        assert!(!input.space_key(false, false, false));
+        assert!(!input.space_key(true, false, false));
+        input.ime_epoch = u64::MAX;
+        input.ime_composing = false;
+        input.observe(&WindowEvent::Ime(Ime::Preedit("exhausted".into(), None)));
+        assert!(!input.can_quarantine());
+        assert!(!input.begin_show());
+    }
+    #[test]
+    fn show_actual_egui_input_boundary_preserves_canonical_selection_and_undo_while_dropping_old_ime_alt_and_text() {
+        let ctx = egui::Context::default();
+        let mut input = ReviewInput::default();
+        input.focused(true);
+        let mut alt_text = Vec::new();
+        let mut draft = "Preserved draft".to_owned();
+        let field = "show_same_editor";
+        native_editor_frame(&ctx, &mut input, &mut alt_text, field, &mut draft, Vec::new());
+        native_editor_frame(
+            &ctx,
+            &mut input,
+            &mut alt_text,
+            field,
+            &mut draft,
+            vec![egui::Event::Text(" edited".into())],
+        );
+        let id = egui::Id::unique(field);
+        let before = egui::TextEdit::load_state(&ctx, id).unwrap();
+        let selection = before.cursor.char_range().unwrap();
+        let canonical = draft.clone();
+        let undo = before.undoer().undo(&(selection, canonical.clone())).cloned();
+        assert!(undo.is_some());
+        input.observe(&WindowEvent::Ime(Ime::Preedit("old pending".into(), None)));
+        assert!(input.begin_show());
+        let mut codes = crate::alt_codes::AltCodes::default();
+        codes.alt_pressed();
+        assert!(codes.key_pressed(winit::keyboard::KeyCode::Numpad3, false));
+        codes.reset();
+        assert!(codes.alt_released(Some("late old release")).is_none());
+        alt_text.push("old queued alt".into());
+        native_editor_frame(
+            &ctx,
+            &mut input,
+            &mut alt_text,
+            field,
+            &mut draft,
+            vec![
+                egui::Event::Text("old queued text".into()),
+                egui::Event::Ime(egui::ImeEvent::Commit("old queued IME".into())),
+            ],
+        );
+        assert!(input.observe(&WindowEvent::Ime(Ime::Preedit(String::new(), None))));
+        assert!(input.observe(&WindowEvent::Ime(Ime::Commit("late old IME".into()))));
+        native_editor_frame(&ctx, &mut input, &mut alt_text, field, &mut draft, Vec::new());
+        let after = egui::TextEdit::load_state(&ctx, id).unwrap();
+        let retained = after.cursor.char_range().unwrap();
+        assert_eq!(draft, canonical);
+        assert_eq!(retained, selection);
+        assert_eq!(after.undoer().undo(&(retained, draft.clone())).cloned(), undo);
+        assert!(input.key(true, false, false));
+        assert!(!input.key(false, false, false));
+        native_editor_frame(
+            &ctx,
+            &mut input,
+            &mut alt_text,
+            field,
+            &mut draft,
+            vec![egui::Event::Text(" fresh".into())],
+        );
+        assert!(draft.contains("fresh"));
     }
 }

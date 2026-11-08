@@ -393,3 +393,79 @@ fn control_v2_metadata_requires_exact_none_scope_and_control_send_invalidates_ol
         })
     );
 }
+
+#[test]
+fn control_v2_unavailable_updates_only_original_operation_and_cannot_replace_known_native_receipt() {
+    let mut host = ordinary_host();
+    let worker = binding().worker.worker;
+    let original = host.show_viewer_control_v2(request(1), 1).unwrap();
+    let ControlV2Message::Command(captured) = original.message else {
+        panic!()
+    };
+    let failure = event(2, 1, ControlV2Event::ControlUnavailable { command: captured });
+    let before = (host.entries[&worker].received, host.entries[&worker].last_seen, host.activation);
+    let observed = host.observe_control_v2(&failure, 2).unwrap();
+    assert_eq!(observed.show_unavailable, Some(request(1)));
+    assert!(observed.effects.is_empty());
+    assert_eq!(
+        (host.entries[&worker].received, host.entries[&worker].last_seen, host.activation),
+        before
+    );
+    assert_eq!(host.query_show_viewer_control_v2(request(1), 2), Err(Error::Stale));
+    host.show_viewer_control_v2(request(2), 2).unwrap();
+    let receipt = ShowViewerReceipt {
+        request: request(2),
+        outcome: ShowViewerOutcome::ForegroundRefused,
+    };
+    host.observe_control_v2(&event(3, 2, ControlV2Event::ShowViewerReceipt(receipt)), 3)
+        .unwrap();
+    let failure = event(
+        4,
+        2,
+        ControlV2Event::ControlUnavailable {
+            command: ControlV2Command::ShowViewer(request(2)),
+        },
+    );
+    assert_eq!(host.observe_control_v2(&failure, 4), Err(Error::Stale));
+    assert_eq!(host.entries[&worker].shows.entries[1].receipt, Some(receipt));
+    assert_eq!(host.active(), None);
+    assert!(!host.busy());
+}
+
+#[test]
+fn control_v2_old_source_show_receipt_keeps_current_native_liveness_and_status_unchanged() {
+    let mut host = ordinary_host();
+    let show = host.show_viewer_control_v2(request(1), 1).unwrap();
+    host.observe_control_v2(&online_status(2), 2).unwrap();
+    let worker = binding().worker.worker;
+    let before = (
+        host.entries[&worker].last_seen,
+        host.entries[&worker].roster.clone(),
+        host.entries[&worker].ordinary,
+        host.active(),
+        host.pending.map(|pending| (pending.sequence, pending.activation, pending.deadline)),
+    );
+    let receipt = ShowViewerReceipt {
+        request: request(1),
+        outcome: ShowViewerOutcome::EffectUncertain,
+    };
+    let observed = host
+        .observe_control_v2(&event(3, show.sequence, ControlV2Event::ShowViewerReceipt(receipt)), 10)
+        .unwrap();
+    assert_eq!(observed.show_receipt, Some(receipt));
+    assert!(observed.effects.is_empty());
+    assert_eq!(
+        host.entries[&worker].received, 3,
+        "shared current-boot sender counter remains monotonic"
+    );
+    assert_eq!(
+        (
+            host.entries[&worker].last_seen,
+            host.entries[&worker].roster.clone(),
+            host.entries[&worker].ordinary,
+            host.active(),
+            host.pending.map(|pending| (pending.sequence, pending.activation, pending.deadline))
+        ),
+        before
+    );
+}

@@ -609,9 +609,9 @@ impl App {
                 !r.failed() && !r.device_lost()
             })
             && presentation.is_none_or(|p| p.window.inner_size().width != 0 && p.window.inner_size().height != 0)
-            && !self.exit_prompt.open
+            && !self.exit_prompt.is_open()
             && !self.login_form.busy
-            && self.options_ui.capture.is_none()
+            && self.options_ui.capture().is_none()
             && self.world.main_region.and_then(|h| self.world.region_offset(h)).is_some()
     }
     fn board_observation(&self, previous: Option<Facts>) -> Option<(Facts, Option<NativeActionScope>)> {

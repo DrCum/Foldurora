@@ -26,6 +26,7 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
+pub(crate) mod control_v2;
 pub(crate) mod preview_control;
 #[cfg(any(windows, test))]
 use super::preview_projection::{
@@ -42,6 +43,9 @@ const REACHABLE: Duration = Duration::from_secs(5);
 const CLOSE_WAIT: Duration = Duration::from_secs(2);
 const MAX_CONFIG: usize = 4096;
 const MAX_QUEUE: usize = 16;
+// Deliberate promotion gate. Keep both real endpoints on V1 until the joined
+// V2 IO/native consumer receives independent source review and Root validation.
+pub(crate) const CONTROL_PROTOCOL_VERSION: u16 = PROTOCOL_VERSION;
 
 #[derive(Clone)]
 pub(crate) struct SavedAccount {
@@ -582,7 +586,7 @@ pub(super) struct WorkerConfig {
 impl WorkerConfig {
     pub fn validate(&self) -> anyhow::Result<()> {
         anyhow::ensure!(
-            self.version == PROTOCOL_VERSION && self.generation != 0 && self.lease_epoch != 0 && self.host_pid != 0,
+            self.version == CONTROL_PROTOCOL_VERSION && self.generation != 0 && self.lease_epoch != 0 && self.host_pid != 0,
             "invalid worker configuration"
         );
         anyhow::ensure!(
@@ -635,9 +639,12 @@ impl WorkerConfig {
     }
 
     fn accepts(&self, envelope: &Envelope) -> bool {
-        envelope.binding.worker == self.identity
-            && envelope.lease_epoch == self.lease_epoch
-            && envelope.binding.session.is_none_or(|session| {
+        self.accepts_binding(envelope.binding, envelope.lease_epoch)
+    }
+    fn accepts_binding(&self, binding: Binding, lease_epoch: u64) -> bool {
+        binding.worker == self.identity
+            && lease_epoch == self.lease_epoch
+            && binding.session.is_none_or(|session| {
                 session.session == self.session
                     && session.generation >= self.generation
                     && self.expected_account.is_none_or(|key| key == session.account)
@@ -740,7 +747,7 @@ fn read_envelope(path: &Path) -> io::Result<Envelope> {
     aurora_session::decode(&read_bytes(path, aurora_session::MAX_MESSAGE_BYTES)?).map_err(io::Error::other)
 }
 
-pub(super) struct WorkerIo {
+pub(super) struct LegacyWorkerIo {
     commands: Receiver<Envelope>,
     replies: Sender<(Binding, u64, Event)>,
     status: Arc<Mutex<Option<(Binding, WorkerStatus)>>>,
@@ -748,7 +755,7 @@ pub(super) struct WorkerIo {
     failed: Arc<AtomicBool>,
 }
 
-impl WorkerIo {
+impl LegacyWorkerIo {
     pub fn start(config: WorkerConfig, directory: PathBuf) -> anyhow::Result<Self> {
         let (commands_tx, commands) = bounded(MAX_QUEUE);
         let (replies, replies_rx) = bounded(MAX_QUEUE);
@@ -788,9 +795,57 @@ impl WorkerIo {
         self.stop.store(true, Ordering::Release);
     }
 }
-impl Drop for WorkerIo {
+impl Drop for LegacyWorkerIo {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
+    }
+}
+
+pub(super) enum WorkerIo {
+    V1(LegacyWorkerIo),
+    V2(control_v2::WorkerEndpoint),
+}
+impl WorkerIo {
+    pub fn start(config: WorkerConfig, directory: PathBuf) -> anyhow::Result<Self> {
+        match config.version {
+            PROTOCOL_VERSION => LegacyWorkerIo::start(config, directory).map(Self::V1),
+            aurora_session::control_v2::CONTROL_V2_VERSION => {
+                let origin = Instant::now();
+                Ok(Self::V2(control_v2::WorkerEndpoint::start(config, directory, origin)?))
+            }
+            _ => anyhow::bail!("unsupported explicit control version"),
+        }
+    }
+    pub fn v2(&self) -> Option<&control_v2::WorkerEndpoint> {
+        if let Self::V2(io) = self { Some(io) } else { None }
+    }
+    pub fn commands(&self) -> impl Iterator<Item = Envelope> + '_ {
+        let legacy = if let Self::V1(io) = self { Some(io) } else { None };
+        legacy.into_iter().flat_map(|io| io.commands())
+    }
+    pub fn reply(&self, binding: Binding, reply_to: u64, event: Event) -> bool {
+        match self {
+            Self::V1(io) => io.reply(binding, reply_to, event),
+            Self::V2(_) => false,
+        }
+    }
+    pub fn status(&self, binding: Binding, status: WorkerStatus) {
+        match self {
+            Self::V1(io) => io.status(binding, status),
+            Self::V2(io) => io.status(binding, status, None),
+        }
+    }
+    pub fn failed(&self) -> bool {
+        match self {
+            Self::V1(io) => io.failed(),
+            Self::V2(io) => io.failed(),
+        }
+    }
+    pub fn stop(&self) {
+        match self {
+            Self::V1(io) => io.stop(),
+            Self::V2(io) => io.stop(),
+        }
     }
 }
 
@@ -1000,6 +1055,7 @@ struct Child {
     received: u64,
     last_seen: Option<Instant>,
     outbox: Outbox,
+    control_v2: Option<control_v2::HostControl>,
     prepared: Option<(Binding, u64, Option<HostedViewport>)>,
     granted: Option<(Binding, u64)>,
     detached: bool,
@@ -1012,6 +1068,41 @@ struct Child {
 }
 
 impl Child {
+    fn enqueue_control(&mut self, envelope: Envelope) -> io::Result<()> {
+        if let Some(control) = &mut self.control_v2 {
+            control.enqueue(
+                aurora_session::control_v2::ControlV2Envelope::adapt_control(envelope).map_err(io::Error::other)?,
+                Instant::now(),
+            )
+        } else {
+            self.outbox.enqueue(envelope)
+        }
+    }
+    fn incoming_v2(&mut self) -> Vec<aurora_session::control_v2::ControlV2Envelope> {
+        use aurora_session::control_v2::{self as wire, ControlV2Event, ControlV2Message};
+        let Some(control) = &mut self.control_v2 else { return Vec::new() };
+        if let Ok(bytes) = read_bytes(&self.directory.join(control_v2::INGRESS), wire::MAX_CONTROL_ACK_BYTES)
+            && let Ok(receipt) = wire::decode_ingress_ack(&bytes)
+        {
+            control.ingress(&receipt);
+        }
+        let reply = read_bytes(&self.directory.join(control_v2::REPLY), wire::MAX_CONTROL_V2_BYTES)
+            .ok()
+            .and_then(|bytes| wire::decode_control(&bytes).ok())
+            .filter(|reply| self.config.accepts_binding(reply.binding, reply.lease_epoch))
+            .and_then(|reply| control.reply(&reply));
+        let status = read_bytes(&self.directory.join(control_v2::STATUS), wire::MAX_CONTROL_V2_BYTES)
+            .ok()
+            .and_then(|bytes| wire::decode_control(&bytes).ok())
+            .filter(|status| {
+                status.reply_to == 0
+                    && matches!(status.message, ControlV2Message::Event(ControlV2Event::Status { .. }))
+                    && self.config.accepts_binding(status.binding, status.lease_epoch)
+            });
+        let mut incoming: Vec<_> = status.into_iter().chain(reply).collect();
+        incoming.sort_by_key(|envelope| envelope.sequence);
+        incoming
+    }
     fn accepts(&self, envelope: &Envelope) -> bool {
         self.config.accepts(envelope)
     }
@@ -1056,6 +1147,15 @@ impl Child {
     }
 
     fn flush(&mut self) -> io::Result<()> {
+        if let Some(control) = &mut self.control_v2 {
+            if self.detached {
+                return control.flush_retirement(&self.directory);
+            }
+            if control.flush(&self.directory, Instant::now())?.is_some() {
+                return Err(io::Error::other("original Show capture expired before publication"));
+            }
+            return Ok(());
+        }
         if let Some(envelope) = self.outbox.next() {
             publish_envelope(&self.directory.join("command.json"), &envelope)?;
             self.outbox.published(envelope.sequence);
@@ -1357,7 +1457,7 @@ impl Broker {
                         }
                         _ => {}
                     }
-                    child.outbox.enqueue(envelope)?;
+                    child.enqueue_control(envelope)?;
                 }
                 Effect::Notice(HostNotice::Switched(worker)) => {
                     self.error = None;
@@ -1529,6 +1629,88 @@ impl Broker {
         Ok(())
     }
 
+    fn poll_control_v2(&mut self, index: usize, now: u64) -> anyhow::Result<()> {
+        use aurora_session::control_v2::{ControlV2Effect, ControlV2Event, ControlV2Message};
+        for envelope in self.children[index].incoming_v2() {
+            if matches!(&envelope.message, ControlV2Message::Event(ControlV2Event::ControlUnavailable { command })
+                if !matches!(command, aurora_session::control_v2::ControlV2Command::ShowViewer(_) | aurora_session::control_v2::ControlV2Command::QueryShowViewer(_)))
+            {
+                if matches!(
+                    &envelope.message,
+                    ControlV2Message::Event(ControlV2Event::ControlUnavailable {
+                        command: aurora_session::control_v2::ControlV2Command::Heartbeat { .. }
+                    })
+                ) {
+                    // Unbound Heartbeat cannot report an Online Status under
+                    // original None. Its receipt retires transport only; a
+                    // separate current-source Status earns roster liveness.
+                    continue;
+                }
+                // Transport already retained its exact original outcome/ACK.
+                // Never reinterpret an unavailable operation as native success
+                // or update current roster/lease/activation from its old scope.
+                anyhow::bail!("worker V2 control operation became unavailable");
+            }
+            let observation = match self.coordinator.observe_control_v2(&envelope, now) {
+                Ok(observation) => observation,
+                Err(_) if matches!(envelope.message, ControlV2Message::Event(ControlV2Event::Detached)) => {
+                    // Host detach already retired roster liveness. The V2
+                    // writer admitted this exact original terminal reply.
+                    Default::default()
+                }
+                Err(_) => continue, // exact old transport replies still drain
+            };
+            if observation.show_unavailable.is_some() || observation.show_receipt.is_some() || observation.show_query.is_some() {
+                // Show/query completes only retained operation metadata. In
+                // particular an old-source receipt cannot refresh Child status,
+                // current liveness, preview ownership or an activation handoff.
+                continue;
+            }
+            let mut effects = Vec::with_capacity(observation.effects.len());
+            for effect in observation.effects {
+                effects.push(match effect {
+                    ControlV2Effect::Notice(notice) => Effect::Notice(notice),
+                    ControlV2Effect::Send(envelope) => Effect::Send(
+                        envelope
+                            .existing_control()?
+                            .ok_or_else(|| io::Error::other("Show cannot become a normal control effect"))?,
+                    ),
+                });
+            }
+            let child = &mut self.children[index];
+            child.received = envelope.sequence;
+            child.last_seen = Some(Instant::now());
+            if let ControlV2Message::Event(ControlV2Event::Granted { activation }) = &envelope.message {
+                child.granted = Some((envelope.binding, *activation));
+            }
+            if matches!(envelope.message, ControlV2Message::Event(ControlV2Event::Detached)) {
+                child.detached = true;
+            }
+            if let Some(entry) = self
+                .coordinator
+                .workers()
+                .find(|entry| entry.binding.worker.worker == child.config.identity.worker)
+            {
+                #[cfg(any(windows, test))]
+                if child.status.as_ref().is_some_and(|old| {
+                    old.native_window != entry.status.native_window
+                        || old.blocked != entry.status.blocked
+                        || old.phase != entry.status.phase
+                }) {
+                    let _ = self.preview_frontdoor.capture_intent();
+                }
+                #[cfg(any(windows, test))]
+                if child.binding != entry.binding || !entry.live || entry.status.phase != Phase::Online {
+                    child.preview.retire();
+                }
+                child.binding = entry.binding;
+                child.status = Some(entry.status.clone());
+            }
+            self.effects(effects)?;
+        }
+        Ok(())
+    }
+
     fn poll(&mut self, now: u64) -> anyhow::Result<()> {
         // Keep the process handles in this broker until exit has actually been
         // observed; a detached ordinary window is never a kill permission.
@@ -1539,7 +1721,11 @@ impl Broker {
                 let effects = self.coordinator.remove(self.children[index].config.identity.worker);
                 self.effects(effects)?;
             }
-            if self.children[index].exited || self.children[index].detached {
+            if self.children[index].exited || self.children[index].detached && self.children[index].control_v2.is_none() {
+                continue;
+            }
+            if self.children[index].control_v2.is_some() {
+                self.poll_control_v2(index, now)?;
                 continue;
             }
             let incoming = self.children[index].incoming();
@@ -1993,7 +2179,7 @@ fn host_loop(
         #[cfg(any(windows, test))]
         broker.poll_previews(now);
         for child in &mut broker.children {
-            if !child.detached
+            if (!child.detached || child.control_v2.is_some())
                 && let Err(failure) = child.flush()
             {
                 broker.error = Some(failure.to_string());
@@ -2024,7 +2210,7 @@ fn new_config(
     chat_port: Option<u16>,
 ) -> anyhow::Result<WorkerConfig> {
     let config = WorkerConfig {
-        version: PROTOCOL_VERSION,
+        version: CONTROL_PROTOCOL_VERSION,
         identity: WorkerIdentity {
             installation,
             host,
@@ -2073,6 +2259,8 @@ fn launch(
         session: None,
     };
     let chat = super::chat_broker::Peer::new(config.identity, config.lease_epoch);
+    let control_v2 = (config.version == aurora_session::control_v2::CONTROL_V2_VERSION)
+        .then(|| control_v2::HostControl::new(config.identity, config.lease_epoch));
     Ok(Child {
         #[cfg(any(windows, test))]
         preview: preview_control::ChildPreview::new(),
@@ -2084,6 +2272,7 @@ fn launch(
         received: 0,
         last_seen: None,
         outbox: Outbox::default(),
+        control_v2,
         prepared: None,
         granted: None,
         detached: false,

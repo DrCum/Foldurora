@@ -417,9 +417,9 @@ impl App {
             capture_generation: gfx.map_or(0, |gfx| gfx.renderer.viewport_capture_generation()),
             capture_ready: gfx.is_some_and(|gfx| !gfx.renderer.failed() && !gfx.renderer.device_lost() && !gfx.renderer.vr_engaged())
                 && self.host_submission_allowed()
-                && self.options_ui.capture.is_none()
+                && self.options_ui.capture().is_none()
                 && !self.drawing_paused(),
-            lifecycle_ready: !self.exit_prompt.open
+            lifecycle_ready: !self.exit_prompt.is_open()
                 && !self.login_form.busy
                 && self.gpu_stall.recover.is_none()
                 && !self.gpu_stall.close

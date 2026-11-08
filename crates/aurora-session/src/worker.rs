@@ -1,5 +1,6 @@
 use crate::control_v2::{
     ControlV2Command, ControlV2Envelope, ControlV2Message, ControlV2Reply, ControlV2Transition, ControlV2Work, SHOW_VIEWER_MILLIS,
+    V2StartupClock,
 };
 use crate::show_viewer::ShowViewerOutcome;
 use crate::{
@@ -46,6 +47,12 @@ struct Admission {
     received_ms: u64,
     now_ms: u64,
 }
+#[derive(PartialEq, Eq)]
+enum StartupClock {
+    Pending,
+    Initialized,
+    Ineligible,
+}
 
 /// Only validated, fresh local receipt renews this lease. The transport must
 /// call tick even while no window frame is drawn. Returned effects are applied
@@ -64,6 +71,7 @@ pub struct WorkerGuard {
     waiting: Option<Waiting>,
     prepared: bool,
     last_frame: Option<FrameProof>,
+    startup_clock: StartupClock,
 }
 
 impl WorkerGuard {
@@ -85,6 +93,7 @@ impl WorkerGuard {
             waiting: None,
             prepared: false,
             last_frame: None,
+            startup_clock: StartupClock::Pending,
         })
     }
 
@@ -93,6 +102,30 @@ impl WorkerGuard {
             worker: self.identity,
             session: self.session,
         }
+    }
+    /// One-shot initialization before this actual core has admitted any work
+    /// or produced effects. Old ingress keeps its original stamp and therefore
+    /// fails admission; this baseline is NEVER a native control receipt.
+    pub fn initialize_startup_control_v2(&mut self, clock: V2StartupClock) -> Result<(), Error> {
+        let now_ms = clock.millis();
+        let eligible = self.startup_clock == StartupClock::Pending
+            && self.sequence == 0
+            && self.received <= now_ms
+            && self.mode == WorkerMode::Standby
+            && self.activation == 0
+            && self.session.is_none()
+            && self.generation == 0
+            && self.viewport.is_none()
+            && self.waiting.is_none()
+            && !self.prepared
+            && self.last_frame.is_none();
+        self.startup_clock = StartupClock::Ineligible;
+        if !eligible {
+            return Err(Error::Stale);
+        }
+        self.received = now_ms;
+        self.startup_clock = StartupClock::Initialized;
+        Ok(())
     }
     pub fn mode(&self) -> WorkerMode {
         self.mode
@@ -109,6 +142,10 @@ impl WorkerGuard {
     pub fn viewport(&self) -> Option<HostedViewport> {
         self.viewport
     }
+    /// State information only, never physical ordinary-window permission.
+    pub fn ordinary_standby(&self) -> bool {
+        self.mode == WorkerMode::Standby && self.waiting.is_none() && self.viewport.is_none() && !self.prepared
+    }
     /// Scheduling permission only: it never fabricates native keyboard focus.
     pub fn render_priority(&self, keyboard_focused: bool) -> bool {
         matches!(self.mode, WorkerMode::Active | WorkerMode::Preparing) && (self.foreground || keyboard_focused)
@@ -123,6 +160,7 @@ impl WorkerGuard {
         if session == self.session {
             return Ok(WorkerEffects::default());
         }
+        self.startup_clock = StartupClock::Ineligible;
         if session.is_some_and(|next| next.generation <= self.generation) {
             return Err(Error::Stale);
         }
@@ -148,6 +186,7 @@ impl WorkerGuard {
     /// Before device/surface recreation: a prepared frame for the retired
     /// display can never authorize the replacement. A new Prepare is needed.
     pub fn invalidate_display(&mut self) -> WorkerEffects {
+        self.startup_clock = StartupClock::Ineligible;
         self.last_frame = None;
         self.waiting = None;
         self.prepared = false;
@@ -164,6 +203,7 @@ impl WorkerGuard {
     }
 
     fn detach(&mut self) -> WorkerEffects {
+        self.startup_clock = StartupClock::Ineligible;
         self.mode = WorkerMode::Detached;
         self.waiting = None;
         self.prepared = false;
@@ -177,6 +217,9 @@ impl WorkerGuard {
     }
 
     pub fn tick(&mut self, now_ms: u64) -> WorkerEffects {
+        if now_ms < self.received {
+            self.startup_clock = StartupClock::Ineligible;
+        }
         if self.mode != WorkerMode::Detached && now_ms.saturating_sub(self.received) >= LEASE_MILLIS {
             self.detach()
         } else {
@@ -268,7 +311,11 @@ impl WorkerGuard {
         if binding.worker != self.identity || lease_epoch != self.lease_epoch {
             return Err(Error::Binding);
         }
-        if self.mode == WorkerMode::Detached || sequence <= self.sequence || received_ms > now_ms || received_ms < self.received {
+        if received_ms > now_ms || received_ms < self.received {
+            self.startup_clock = StartupClock::Ineligible;
+            return Err(Error::Stale);
+        }
+        if self.mode == WorkerMode::Detached || sequence <= self.sequence {
             return Err(Error::Stale);
         }
         if binding.session != self.session && (exact_binding || session_bound || binding.session.is_some()) {
@@ -278,6 +325,7 @@ impl WorkerGuard {
             return Ok(Some(self.detach()));
         }
         self.sequence = sequence;
+        self.startup_clock = StartupClock::Ineligible;
         self.received = received_ms;
         Ok(None)
     }
@@ -418,6 +466,7 @@ impl WorkerGuard {
         if self.last_frame.is_some_and(|old| !frame.newer_than(Some(old)) && frame != old) {
             return Err(Error::Stale);
         }
+        self.startup_clock = StartupClock::Ineligible;
         self.last_frame = Some(frame);
         let Some(Waiting::Prepared(sequence, baseline, boundary)) = self.waiting else {
             return Ok(None);

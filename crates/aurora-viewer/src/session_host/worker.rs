@@ -5,9 +5,13 @@ use super::transport::{self, WorkerConfig, WorkerIo};
 use aurora_session::{AccountKey, Command, Event, GridKey, Message, RejectReason, WorkerEffects, WorkerGuard, WorkerMode, WorkerStatus};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 pub(crate) mod action;
+mod control_v2;
+pub(crate) mod ordinary;
+pub(crate) use control_v2::ShowWork;
 mod preview;
 pub(crate) use preview::AcceptedNativePreviewSource;
 /// Fixed reservation inside the worker image lane's 1 MiB metadata headroom.
@@ -18,6 +22,7 @@ struct Startup {
     directory: PathBuf,
 }
 static STARTUP: OnceLock<Startup> = OnceLock::new();
+static BRIDGE_CLAIMED: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn initialize_startup(path: Option<&Path>) -> anyhow::Result<()> {
     let Some(path) = path else {
@@ -50,7 +55,7 @@ pub(crate) fn initialize_startup(path: Option<&Path>) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum DisplayGate {
     Login,
     Draining {
@@ -115,13 +120,33 @@ pub(crate) struct WorkerBridge {
     preview_grant: Option<PreviewGrant>,
     chat: Option<super::chat_io::WorkerChannel>,
     preview: Option<preview::Runtime>,
+    control_v2: Option<control_v2::Runtime>,
+    ordinary: Option<crate::app::host_show_viewer::OrdinaryObservation>,
+}
+impl Drop for WorkerBridge {
+    fn drop(&mut self) {
+        ordinary::invalidate();
+        self.retire_control_v2(false);
+        self.ordinary = None;
+        self.io.stop();
+    }
 }
 
 impl WorkerBridge {
+    fn set_gate(&mut self, gate: DisplayGate) {
+        if self.gate != gate {
+            ordinary::invalidate();
+            self.gate = gate;
+        }
+    }
     pub fn from_startup() -> anyhow::Result<Option<Self>> {
         let Some(startup) = STARTUP.get() else {
             return Ok(None);
         };
+        anyhow::ensure!(
+            !BRIDGE_CLAIMED.swap(true, Ordering::AcqRel),
+            "worker boot control owner cannot be reconstructed"
+        );
         let chat = startup.config.chat.as_ref().and_then(|chat| {
             let permit = super::chat_transport::Permit {
                 identity: startup.config.identity,
@@ -137,11 +162,14 @@ impl WorkerBridge {
             }
         });
         let preview = preview::Runtime::from_config(&startup.config);
+        let io = WorkerIo::start(startup.config.clone(), startup.directory.clone())?;
+        let since = io.v2().map(|io| io.origin);
+        let control_v2 = io.v2().map(|_| control_v2::Runtime::new(&startup.config)).transpose()?;
         Ok(Some(Self {
             config: startup.config.clone(),
-            io: WorkerIo::start(startup.config.clone(), startup.directory.clone())?,
+            io,
             guard: WorkerGuard::new(startup.config.identity, startup.config.lease_epoch, 0)?,
-            since: None,
+            since,
             detached: false,
             generation: startup.config.generation - 1,
             previous_account: None,
@@ -159,6 +187,8 @@ impl WorkerBridge {
             preview_grant: None,
             chat,
             preview,
+            control_v2,
+            ordinary: None,
         }))
     }
 
@@ -168,6 +198,16 @@ impl WorkerBridge {
         self.status = status;
         if self.detached {
             return WorkerEffects::default();
+        }
+        if self.control_v2.is_some() && !self.control_clock_started() {
+            // Before first genuine App-ready evidence, transport may retain
+            // original stamped ingress but no Guard command/source/effect is
+            // admitted. Coordinator's independent startup allowance applies.
+            return if self.io.failed() {
+                self.fail_closed()
+            } else {
+                WorkerEffects::default()
+            };
         }
         if account != self.previous_account {
             if account.is_some() {
@@ -189,6 +229,10 @@ impl WorkerBridge {
             session.generation = self.generation;
             session
         });
+        if session != self.guard.binding().session {
+            ordinary::invalidate();
+            self.cancel_control_source();
+        }
         let Ok(mut effects) = self.guard.update_session(session) else {
             return self.fail_closed();
         };
@@ -199,6 +243,18 @@ impl WorkerBridge {
             self.last_frame = None;
         }
         let now = session_clock(&mut self.since, Instant::now());
+        if self.control_v2.is_some() {
+            merge_effects(&mut effects, self.poll_control_v2());
+            if self.control_clock_started() {
+                merge_effects(&mut effects, self.guard.tick(now));
+            }
+            if self.guard.mode() == WorkerMode::Detached {
+                merge_effects(&mut effects, self.fail_closed());
+            }
+            self.sync_chat_source();
+            self.refresh_preview_source();
+            return final_display_effects(effects, self.guard.mode());
+        }
         // Collect before mutating self; the transport queue has a strict cap.
         let commands: Vec<_> = self.io.commands().collect();
         for envelope in commands {
@@ -209,7 +265,7 @@ impl WorkerBridge {
                 && (!self.supported || !self.admitted || (self.status.blocked && !matches!(command, Command::Revoke { .. })))
             {
                 if envelope.binding == self.guard.binding() && envelope.lease_epoch == self.config.lease_epoch {
-                    self.io.reply(
+                    self.reply_original(
                         self.guard.binding(),
                         envelope.sequence,
                         Event::Rejected {
@@ -240,14 +296,14 @@ impl WorkerBridge {
                     // has been shown; detach until it has been restored.
                     if matches!(reply.event, Event::Granted { .. } | Event::Detached) {
                         self.request_sequence = reply.reply_to;
-                    } else if !self.io.reply(self.guard.binding(), reply.reply_to, reply.event) {
+                    } else if !self.reply_original(self.guard.binding(), reply.reply_to, reply.event) {
                         merge_effects(&mut effects, self.fail_closed());
                     }
                 } else if matches!(command, Command::Heartbeat { .. } | Command::SetViewport { .. }) {
                     let mut status = self.status.clone();
                     status.blocked |= !self.supported || (!self.admitted && self.status.phase == aurora_session::Phase::Online);
                     status.last_frame = self.last_frame;
-                    self.io.reply(self.guard.binding(), envelope.sequence, Event::Status(status));
+                    self.reply_original(self.guard.binding(), envelope.sequence, Event::Status(status));
                 }
             }
         }
@@ -449,12 +505,16 @@ impl WorkerBridge {
     }
 
     pub fn invalidate_display(&mut self) -> WorkerEffects {
+        ordinary::invalidate();
         let mut effects = self.guard.invalidate_display();
         merge_effects(&mut effects, self.fail_closed());
         effects
     }
 
     fn fail_closed(&mut self) -> WorkerEffects {
+        ordinary::invalidate();
+        self.retire_control_v2(true);
+        self.ordinary = None;
         self.retire_preview_source();
         self.preview_grant = None;
         self.detached = true;
@@ -505,9 +565,15 @@ impl WorkerBridge {
                 return false;
             }
             self.cancel_fence(renderer);
-            self.presentation.restore(window);
-            self.gate = DisplayGate::Detached;
-            self.io.reply(self.guard.binding(), self.request_sequence, Event::Detached);
+            let restored = self.presentation.restore(window);
+            self.set_gate(DisplayGate::Detached);
+            if self.control_v2.is_none() || restored {
+                self.reply_original(self.guard.binding(), self.request_sequence, Event::Detached);
+            } else if let Some(runtime) = &mut self.control_v2 {
+                // Retire the original reservation without falsely promising a
+                // successful native restore. No retry or new permission follows.
+                runtime.unavailable(self.request_sequence);
+            }
             self.io.stop();
             return false;
         }
@@ -520,7 +586,7 @@ impl WorkerBridge {
         }
         if !self.supported {
             self.presentation.restore(window);
-            self.gate = DisplayGate::Login;
+            self.set_gate(DisplayGate::Login);
             self.publish_status();
             return false;
         }
@@ -542,10 +608,17 @@ impl WorkerBridge {
     }
 
     fn publish_status(&self) {
+        if self.control_v2.is_some() && !self.control_clock_started() {
+            return;
+        }
         let mut status = self.status.clone();
         status.blocked |= !self.supported || (!self.admitted && status.phase == aurora_session::Phase::Online);
         status.last_frame = self.last_frame;
-        self.io.status(self.guard.binding(), status);
+        if let Some(io) = self.io.v2() {
+            io.status(self.guard.binding(), status, self.ordinary_target());
+        } else {
+            self.io.status(self.guard.binding(), status);
+        }
     }
 
     fn apply_display(
@@ -559,24 +632,24 @@ impl WorkerBridge {
         }
         if self.guard.binding().session.is_none() {
             self.cancel_fence(renderer);
-            self.gate = DisplayGate::Login;
+            self.set_gate(DisplayGate::Login);
             self.admitted = false;
             return Ok(());
         }
         if effects.quiesce && self.guard.binding().session.is_some() {
             let (ticket, through) = self.start_fence(renderer)?;
-            self.gate = DisplayGate::Draining {
+            self.set_gate(DisplayGate::Draining {
                 ticket,
                 reply_to: self.request_sequence,
                 through,
-            };
+            });
         }
         if effects.prepare {
             self.cancel_fence(renderer);
             self.presentation.hide(window);
-            self.gate = DisplayGate::Fitting {
+            self.set_gate(DisplayGate::Fitting {
                 reply_to: self.request_sequence,
-            };
+            });
         }
         if matches!(
             self.gate,
@@ -592,7 +665,7 @@ impl WorkerBridge {
                     NativeState::WorkerChanged => anyhow::bail!("native worker viewport changed after preparation"),
                     NativeState::HostChanged => {
                         self.cancel_fence(renderer);
-                        self.gate = DisplayGate::GeometryPending;
+                        self.set_gate(DisplayGate::GeometryPending);
                         self.presentation.hide(window);
                     }
                     NativeState::Ready => {}
@@ -613,14 +686,14 @@ impl WorkerBridge {
             );
         }
         if effects.grant_input {
-            self.gate = DisplayGate::Active;
+            self.set_gate(DisplayGate::Active);
             window.set_visible(true);
             window.focus_window();
             if let Some(viewport) = self.guard.viewport() {
                 native_order(window, viewport)?;
             }
             anyhow::ensure!(
-                self.io.reply(
+                self.reply_original(
                     self.guard.binding(),
                     self.request_sequence,
                     Event::Granted {
@@ -650,7 +723,7 @@ impl WorkerBridge {
                     // old window hidden until a new exact viewport is usable.
                     return Ok(());
                 }
-                self.gate = DisplayGate::Settling { reply_to, stable: 0 };
+                self.set_gate(DisplayGate::Settling { reply_to, stable: 0 });
             }
             DisplayGate::Draining { ticket, reply_to, through } => {
                 if renderer.poll_session_fence(ticket)?.is_some() {
@@ -665,12 +738,12 @@ impl WorkerBridge {
                             .quiesced(reply_to, progress)?
                             .ok_or_else(|| anyhow::anyhow!("quiescence request changed before completion"))?;
                         anyhow::ensure!(
-                            self.io.reply(self.guard.binding(), reply.reply_to, reply.event),
+                            self.reply_original(self.guard.binding(), reply.reply_to, reply.event),
                             "host reply queue is full"
                         );
                     }
                     self.admitted = true;
-                    self.gate = DisplayGate::Standby;
+                    self.set_gate(DisplayGate::Standby);
                     self.presentation.hide(window);
                 }
             }
@@ -678,10 +751,10 @@ impl WorkerBridge {
                 let size = window.inner_size();
                 renderer.resize(size.width, size.height);
                 if stable < 1 {
-                    self.gate = DisplayGate::Settling {
+                    self.set_gate(DisplayGate::Settling {
                         reply_to,
                         stable: stable + 1,
-                    };
+                    });
                 } else {
                     let boundary = renderer.session_boundary()?;
                     let boundary = aurora_session::PrepareBoundary {
@@ -690,7 +763,7 @@ impl WorkerBridge {
                         after_frame: boundary.after_frame,
                     };
                     self.guard.prepare_boundary(reply_to, boundary)?;
-                    self.gate = DisplayGate::Preparing { reply_to, boundary };
+                    self.set_gate(DisplayGate::Preparing { reply_to, boundary });
                 }
             }
             DisplayGate::FrameFence {
@@ -705,9 +778,9 @@ impl WorkerBridge {
                         .frame_ready(reply_to, proof)?
                         .ok_or_else(|| anyhow::anyhow!("prepared frame was not accepted"))?;
                     self.last_frame = Some(proof);
-                    self.gate = DisplayGate::Prepared;
+                    self.set_gate(DisplayGate::Prepared);
                     anyhow::ensure!(
-                        self.io.reply(self.guard.binding(), reply.reply_to, reply.event),
+                        self.reply_original(self.guard.binding(), reply.reply_to, reply.event),
                         "host reply queue is full"
                     );
                 }
@@ -726,11 +799,11 @@ impl WorkerBridge {
         let result = (|| -> Result<(), aurora_render::SessionFenceError> {
             if renderer.session_boundary()?.after_frame > boundary.after_frame {
                 let (ticket, _) = self.start_fence(renderer)?;
-                self.gate = DisplayGate::FrameFence {
+                self.set_gate(DisplayGate::FrameFence {
                     ticket,
                     reply_to,
                     boundary,
-                };
+                });
             }
             Ok(())
         })();
@@ -932,6 +1005,7 @@ struct NativePresentation {
 
 impl NativePresentation {
     fn fit(&mut self, window: &winit::window::Window, viewport: aurora_session::HostedViewport, host_pid: u32) -> anyhow::Result<bool> {
+        ordinary::invalidate();
         #[cfg(windows)]
         {
             if self.saved.is_none() {
@@ -970,22 +1044,39 @@ impl NativePresentation {
     }
 
     fn hide(&mut self, window: &winit::window::Window) {
+        if !self.hidden {
+            ordinary::invalidate();
+        }
         self.hidden = true;
         window.set_visible(false);
     }
 
-    fn restore(&mut self, window: &winit::window::Window) {
+    fn restore(&mut self, window: &winit::window::Window) -> bool {
         #[cfg(windows)]
-        {
-            self.host_rect = None;
-            if let Some(saved) = self.saved.take() {
-                native::restore(window, saved);
-            }
+        let require_shown = self.hidden || self.saved.is_some() || self.host_rect.is_some();
+        if self.hidden {
+            ordinary::invalidate();
         }
+        #[cfg(windows)]
+        let restored = {
+            if self.saved.is_some() || self.host_rect.is_some() {
+                ordinary::invalidate();
+            }
+            self.host_rect = None;
+            self.saved.take().is_none_or(|saved| native::restore(window, saved))
+        };
         if self.hidden {
             window.set_minimized(false);
             window.set_visible(true);
             self.hidden = false;
+        }
+        #[cfg(windows)]
+        {
+            restored && native::restored(window, require_shown)
+        }
+        #[cfg(not(windows))]
+        {
+            false
         }
     }
 }
@@ -1042,7 +1133,7 @@ fn visible_native_presentation(
 #[cfg(windows)]
 mod native {
     use windows_sys::Win32::{
-        Foundation::{HWND, POINT, RECT},
+        Foundation::{GetLastError, HWND, POINT, RECT, SetLastError},
         Graphics::Gdi::ClientToScreen,
         UI::WindowsAndMessaging::{
             GW_HWNDNEXT, GW_OWNER, GWL_EXSTYLE, GWL_STYLE, GetClientRect, GetForegroundWindow, GetWindow, GetWindowLongPtrW, GetWindowRect,
@@ -1267,10 +1358,10 @@ mod native {
         ))
     }
 
-    pub(super) fn restore(window: &Window, saved: Saved) {
+    pub(super) fn restore(window: &Window, saved: Saved) -> bool {
         let hwnd = super::native_window(window) as HWND;
         if hwnd.is_null() {
-            return;
+            return false;
         }
         // save() runs after standby hides the window. Its WS_VISIBLE bit is
         // not the desired standalone visibility, and winit caches that state.
@@ -1279,10 +1370,16 @@ mod native {
         window.set_decorations(saved.style & WS_CAPTION as isize != 0);
         window.set_min_inner_size(Some(LogicalSize::new(800, 560)));
         // SAFETY: restore only this process's own saved styles and geometry.
-        unsafe {
-            SetWindowLongPtrW(hwnd, GWL_STYLE, saved.style & !(WS_VISIBLE as isize));
-            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, saved.extended);
-            SetWindowPos(
+        let positioned = unsafe {
+            // A zero previous extended style is valid; inspect last-error to
+            // distinguish it from failure without skipping remaining restore.
+            SetLastError(0);
+            let style = SetWindowLongPtrW(hwnd, GWL_STYLE, saved.style & !(WS_VISIBLE as isize));
+            let style_ok = style != 0 || GetLastError() == 0;
+            SetLastError(0);
+            let extended = SetWindowLongPtrW(hwnd, GWL_EXSTYLE, saved.extended);
+            let extended_ok = extended != 0 || GetLastError() == 0;
+            let positioned = SetWindowPos(
                 hwnd,
                 std::ptr::null_mut(),
                 saved.rect.left,
@@ -1290,14 +1387,34 @@ mod native {
                 saved.rect.right - saved.rect.left,
                 saved.rect.bottom - saved.rect.top,
                 SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOZORDER,
-            );
-        }
+            ) != 0;
+            style_ok && extended_ok && positioned
+        };
         window.set_maximized(saved.maximized);
         window.set_fullscreen(saved.fullscreen);
         window.set_minimized(false);
         window.set_visible(true);
         window.set_skip_taskbar(false);
         window.request_redraw();
+        positioned
+    }
+
+    pub(super) fn restored(window: &Window, require_shown: bool) -> bool {
+        let hwnd = super::native_window(window) as HWND;
+        let mut pid = 0;
+        // SAFETY: inspect only the actual winit-owned Window after restoring it.
+        // A failed/destroyed/managed surface cannot acknowledge V2 Detach.
+        unsafe {
+            !hwnd.is_null()
+                && IsWindow(hwnd) != 0
+                && GetWindowThreadProcessId(hwnd, &mut pid) != 0
+                && pid == std::process::id()
+                && GetWindow(hwnd, GW_OWNER).is_null()
+                && GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_CHILD as isize == 0
+                // Already ordinary windows keep the resident's minimized state;
+                // only an actual managed/hidden restore promises visibility.
+                && (!require_shown || IsWindowVisible(hwnd) != 0 && IsIconic(hwnd) == 0)
+        }
     }
 }
 

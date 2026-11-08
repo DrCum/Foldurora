@@ -15,7 +15,11 @@ pub(super) struct WindowPlan {
 }
 
 impl App {
-    pub(super) fn open_window(&self, event_loop: &ActiveEventLoop, plan: &WindowPlan) -> Result<Arc<Window>, winit::error::OsError> {
+    pub(super) fn open_window(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        plan: &WindowPlan,
+    ) -> Result<(Arc<Window>, Option<host_show_viewer::PhysicalWindowOwner>), winit::error::OsError> {
         let mut attrs = crate::cli::with_desktop_id(Window::default_attributes())
             .with_title(self.native_window_title())
             // Metal needs a visible layer to present its first drawable.
@@ -34,8 +38,9 @@ impl App {
             attrs = attrs.with_position(position);
         }
         let window = Arc::new(event_loop.create_window(attrs)?);
-        crate::window_hold::install(&window);
-        Ok(window)
+        let observed = crate::window_hold::install(&window);
+        let owner = self.show_window.created(&window, observed);
+        Ok((window, owner))
     }
 
     /// The renderer for `window`, the user's settings applied once the
@@ -175,6 +180,7 @@ impl App {
     /// stays on screen until the new one has presented (`retired_window`).
     /// False when no new renderer could be made: the caller closes as before.
     pub(super) fn recover_from_gpu_loss(&mut self, event_loop: &ActiveEventLoop, safe: bool) -> bool {
+        self.retire_show_window();
         self.invalidate_host_display();
         let Some(old) = self.gfx.take() else {
             return false;
@@ -196,7 +202,7 @@ impl App {
         if safe {
             self.safe_graphics_after_losses();
         }
-        let window = match self.open_window(event_loop, &plan) {
+        let (window, show_window_owner) = match self.open_window(event_loop, &plan) {
             Ok(w) => w,
             Err(e) => {
                 log::error!("GPU recovery: cannot create a window: {e}");
@@ -218,6 +224,7 @@ impl App {
         self.gfx = Some(Gfx {
             renderer,
             egui_state,
+            show_window_owner,
             window,
             shown: false,
             maximize_on_show: maximized,

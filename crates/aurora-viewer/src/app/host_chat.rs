@@ -68,7 +68,7 @@ impl NativeChat for AppChat<'_> {
     }
     fn snapshot(&self, conversation: Conversation) -> Option<NativeSnapshot> {
         self.source()?;
-        snapshot(&self.app.world, conversation, !self.app.exit_prompt.open)
+        snapshot(&self.app.world, conversation, !self.app.exit_prompt.is_open())
     }
     fn lines(&self, conversation: Conversation, cursor: NativeCursor, limit: usize) -> NativePage {
         if self.source().is_none() {
@@ -82,14 +82,14 @@ impl NativeChat for AppChat<'_> {
     }
     fn read_metadata(&self, conversation: Conversation) -> Option<aurora_session::chat::ReadMetadata> {
         self.source()?;
-        read_metadata(&self.app.world, conversation, !self.app.exit_prompt.open)
+        read_metadata(&self.app.world, conversation, !self.app.exit_prompt.is_open())
     }
     fn mark_read(&mut self, request: aurora_session::chat::MarkReadRequest) -> aurora_session::chat::ReadOutcome {
         if self.source() != Some(request.key.source) {
             return aurora_session::chat::ReadOutcome::RejectedNative;
         }
         let bridge = self.bridge;
-        mark_native_read(&mut self.app.world, request, !self.app.exit_prompt.open, &|| {
+        mark_native_read(&mut self.app.world, request, !self.app.exit_prompt.is_open(), &|| {
             bridge.bound_session().and_then(|binding| ChatSource::try_from(binding).ok()) == Some(request.key.source)
         })
     }
@@ -100,7 +100,7 @@ impl NativeChat for AppChat<'_> {
         if self.source() != Some(key.source) {
             return SendOutcome::RejectedNative;
         }
-        let Some(state) = snapshot(&self.app.world, key.conversation, !self.app.exit_prompt.open) else {
+        let Some(state) = snapshot(&self.app.world, key.conversation, !self.app.exit_prompt.is_open()) else {
             return SendOutcome::RejectedNative;
         };
         if !state.ready || !state.can_send {

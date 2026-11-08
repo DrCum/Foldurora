@@ -448,7 +448,7 @@ pub struct OptionsUi {
     /// chosen in the file dialog.
     crosshair_dialog: Option<std::sync::mpsc::Receiver<std::path::PathBuf>>,
     /// Shortcut or gesture waiting for its next input, captured by the app.
-    pub capture: Option<Capture>,
+    capture: Option<Capture>,
     joystick_capture: Option<pages::joystick::JoystickCapture>,
     capture_modifier: Option<winit::keyboard::KeyCode>,
     clear: Option<(crate::keybinds::Action, usize)>,
@@ -479,18 +479,34 @@ pub struct OptionsUi {
 }
 
 impl OptionsUi {
+    pub fn capture(&self) -> Option<Capture> {
+        self.capture
+    }
+    pub fn set_capture(&mut self, capture: Option<Capture>) {
+        if self.capture != capture || self.capture_modifier.is_some() {
+            crate::session_host::worker::ordinary::invalidate();
+        }
+        self.capture = capture;
+        self.capture_modifier = None;
+    }
+    fn set_joystick_capture(&mut self, capture: Option<pages::joystick::JoystickCapture>) {
+        if self.joystick_capture.is_some() || capture.is_some() {
+            crate::session_host::worker::ordinary::invalidate();
+        }
+        self.joystick_capture = capture;
+    }
     pub fn joystick_capturing(&self) -> bool {
         self.joystick_capture.is_some()
     }
 
     pub fn cancel_capture(&mut self) {
-        self.capture = None;
+        self.set_capture(None);
         self.capture_modifier = None;
-        self.joystick_capture = None;
+        self.set_joystick_capture(None);
     }
 
     pub fn cancel_joystick_capture(&mut self) {
-        self.joystick_capture = None;
+        self.set_joystick_capture(None);
     }
 
     pub fn prepare_scale_input(&mut self, input: &egui::RawInput, pixels_per_point: f32, numeric_captured: bool) {
@@ -524,6 +540,9 @@ impl OptionsUi {
     }
 
     pub fn take_capture(&mut self) -> Option<Capture> {
+        if self.capture.is_some() || self.capture_modifier.is_some() {
+            crate::session_host::worker::ordinary::invalidate();
+        }
         self.capture_modifier = None;
         self.capture.take()
     }
@@ -993,7 +1012,7 @@ fn binding_cell(
     if resp.clicked() {
         st.cancel_capture();
         if !capturing {
-            st.capture = Some(Capture::Binding(a, slot));
+            st.set_capture(Some(Capture::Binding(a, slot)));
         }
     }
     if resp.secondary_clicked() && b.is_some() {

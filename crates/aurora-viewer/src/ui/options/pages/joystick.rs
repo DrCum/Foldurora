@@ -176,7 +176,7 @@ fn button_hint(cx: &mut Cx, label: &str, hint: &str, field: F<i8>, capture_axes:
                 st.cancel_capture();
                 if !capturing && let Some(device) = st.joystick.selected(&s.joystick) {
                     let button = ButtonCapture::new(field.path, device);
-                    st.joystick_capture = Some(if capture_axes && device.axis_count > 0 {
+                    st.set_joystick_capture(Some(if capture_axes && device.axis_count > 0 {
                         JoystickCapture::Zoom(ZoomCapture {
                             button,
                             axis: crate::joystick::capture::AxisCapture::new(device),
@@ -184,7 +184,7 @@ fn button_hint(cx: &mut Cx, label: &str, hint: &str, field: F<i8>, capture_axes:
                         })
                     } else {
                         JoystickCapture::Button(button)
-                    });
+                    }));
                 }
             }
             if ui
@@ -253,7 +253,7 @@ fn axis_binding(
         {
             st.cancel_capture();
             if !capturing && let Some(device) = st.joystick.selected(settings) {
-                st.joystick_capture = Some(JoystickCapture::Axis(AxisCapture::new(channel, device)));
+                st.set_joystick_capture(Some(JoystickCapture::Axis(AxisCapture::new(channel, device))));
             }
         }
         if ui

@@ -51,7 +51,7 @@ impl App {
 
     pub(super) fn altgr_text_input(&self, ke: &KeyEvent) -> bool {
         self.alt_graph
-            && self.options_ui.capture.is_none()
+            && self.options_ui.capture().is_none()
             && produces_text(&ke.logical_key, ke.text.as_deref())
             && self.shortcut_text_owner()
     }
@@ -71,7 +71,7 @@ impl App {
             },
             self.alt_graph,
             self.altgr_text_input(ke),
-            self.options_ui.capture.is_some(),
+            self.options_ui.capture().is_some(),
         )
     }
 
@@ -80,7 +80,7 @@ impl App {
     pub(super) fn altgr_native_key(&self, ke: &KeyEvent) -> bool {
         self.alt_graph
             && ke.state == ElementState::Pressed
-            && (self.options_ui.capture.is_some()
+            && (self.options_ui.capture().is_some()
                 || !self.egui_ctx.egui_wants_keyboard_input()
                 || !produces_text(&ke.logical_key, ke.text.as_deref()))
     }
@@ -99,7 +99,7 @@ impl App {
         let input = Input::key(KeyCode::F9);
         for (slot, shift) in [false, true].into_iter().enumerate() {
             (self.ctrl, self.alt, self.shift, self.alt_graph) = (false, false, shift, true);
-            self.options_ui.capture = Some(Capture::Binding(Action::DevToolbox, slot));
+            self.options_ui.set_capture(Some(Capture::Binding(Action::DevToolbox, slot)));
             if let Some(captured) = self.options_ui.capture_key(KeyCode::F9, true, false) {
                 self.finish_capture(captured);
             }
@@ -237,7 +237,7 @@ mod tests {
         for slot in 0..2 {
             for shift in [false, true] {
                 let mut options = OptionsUi::default();
-                options.capture = Some(Capture::Binding(Action::DevToolbox, slot));
+                options.set_capture(Some(Capture::Binding(Action::DevToolbox, slot)));
                 assert_eq!(options.capture_key(KeyCode::AltRight, true, false), None);
                 let input = options.capture_key(KeyCode::F9, true, false).flatten().expect("captured F9");
                 let mods = keyboard_mods(

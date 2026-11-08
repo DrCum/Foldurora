@@ -9,6 +9,13 @@ impl App {
         let Some(mut bridge) = self.host_session.take() else {
             return;
         };
+        let mut startup = aurora_session::WorkerEffects::default();
+        if bridge.uses_control_v2() {
+            if let Some(ready) = self.ready_show_window() {
+                startup = bridge.app_ready_control_v2(ready);
+            }
+            bridge.observe_ordinary(self.observe_show_window());
+        }
         let phase = match self.screen {
             Screen::World => Phase::Online,
             Screen::Loading { .. } => Phase::Connecting,
@@ -33,17 +40,27 @@ impl App {
                 .map_or(0, |gfx| crate::session_host::worker::native_window(&gfx.window)),
             keyboard_focused: self.focused,
             blocked: phase != Phase::Online
-                || self.exit_prompt.open
+                || self.exit_prompt.is_open()
                 || self.login_form.busy
-                || self.options_ui.capture.is_some()
+                || self.options_ui.capture().is_some()
                 || self.gfx.is_none(),
             last_frame: None,
         };
-        let effects = bridge.tick(status, account);
+        let mut effects = bridge.tick(status, account);
+        effects.release_input |= startup.release_input;
+        effects.restore_window |= startup.restore_window;
         if effects.release_input {
             self.release_host_input();
         }
         self.pump_host_display(&mut bridge, effects);
+        if bridge.uses_control_v2() {
+            bridge.observe_ordinary(self.observe_show_window());
+            if let Some(work) = bridge.take_show_work() {
+                let result = self.show_owned_viewer(&bridge, &work);
+                bridge.finish_show_work(work, result);
+            }
+            bridge.publish_ordinary();
+        }
         self.host_session = Some(bridge);
         // The bridge is restored before policy observation: take() above is
         // a temporary borrow, never a source disappearance.
@@ -120,7 +137,7 @@ impl App {
             let moved = self.move_complete_at.map(|t| t.elapsed().as_secs_f32()).unwrap_or(0.0);
             let terrain = self.world.terrain_progress();
             if loading_ready(self.world.movement_complete, since.elapsed(), terrain, moved) {
-                self.screen = Screen::World;
+                self.set_screen(Screen::World);
                 self.world.notifications.started = true;
                 self.camera.snap();
                 // the loading screen fades out over the world

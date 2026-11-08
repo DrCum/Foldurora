@@ -5427,3 +5427,37 @@ EffectUncertain outcomes. Production WorkerIo/App/native/Shell/UI remain V1 and
 unchanged. Real stamped16 ingress/reply ownership, strict ordinary physical
 leases, synchronous native callee and input quarantine require independent
 consumer review before V2 promotion. There is no fallback decoder or UI entry.
+
+
+The next ControlV2 source stage connects the actual `WorkerIo`/`Child`/Broker/
+`WorkerBridge`/App graph while `CONTROL_PROTOCOL_VERSION` remains1. The existing
+V1 wire is unchanged. V2's physical IO owner retains fifteen combined channel/
+App-head credits plus one stamped staging item, sixteen original reply slots,
+and separate exact ingress/reply ACK files. Async native continuations retain
+original reply reservations rather than the FIFO head. All GUI work is bounded
+and nonblocking; private reads/publication stay on the existing IO threads.
+One boot ledger survives source/window transitions and cannot be reconstructed.
+
+`app/host_show_viewer` privately mints an App incarnation and physical-window
+lease at actual creation. Retirement precedes GPU recovery/window destruction;
+temporary Gfx/Bridge moves carry the same owner. Monotonic revocation barriers
+cover source/display, exit/modal/popup and capture ownership. Native Show requires
+exact original full source/lease/observation, an ordinary Login display gate,
+strict Standby without handoff, and an actual current owned enabled visible
+root window. Loading/Connecting is permitted only through this same ordinary
+Login gate; World and disconnected World never qualify. Queries cannot create
+permission. The callee quarantines transient old Enter/Space/pointer/IME/Alt
+input without clearing canonical editor text/selection/Undo, then checks fresh
+scope/time after native queries and before each synchronous restore/focus step.
+Foreground refusal/uncertainty is terminal; there is no delayed native retry.
+
+A one-shot V2 startup-clock initialization occurs only at the first genuine
+App-ready boundary, with untouched seq0/Standby core/ledger. Original monotonic
+origin and ingress bytes/stamps remain unchanged. Pre-ready transferred/staged
+commands cannot gain authority from readiness. Admission, timeout, detach,
+source/display changes, regression or a consumed attempt permanently prevent
+reinitialization. This is not a native receipt or lease rearm. Sixteen additional
+consumer-stage CPU/actual-egui source cases are authored UNRUN. Full private-file,
+Windows/native, build and existing-test validation remain Root-owned and pending;
+selector promotion, Broker Show intent/tracker, persistent preferences and Host
+Quick Actions UI are not implemented or enabled in this stage.

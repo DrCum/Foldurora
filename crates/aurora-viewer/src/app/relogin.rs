@@ -52,7 +52,7 @@ impl App {
     }
 
     fn begin_login_wait(&mut self, pending: Pending) {
-        self.login_form.busy = true;
+        self.set_login_busy(true);
         self.login_form.error = None;
         self.login_progress = Some(pending.progress(Instant::now()));
         self.relogin.pending = Some(pending);
@@ -70,7 +70,7 @@ impl App {
             let message = pending.message.clone();
             self.relogin.pending = None;
             self.relogin.retries = 0;
-            self.login_form.busy = false;
+            self.set_login_busy(false);
             self.login_form.transition = None;
             self.login_progress = None;
             self.login_form.error = message;

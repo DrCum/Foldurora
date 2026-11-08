@@ -37,8 +37,8 @@ impl App {
             || !self.host_input_allowed()
             || !self.focused
             || self.folder_jump.composing()
-            || self.exit_prompt.open
-            || self.options_ui.capture.is_some()
+            || self.exit_prompt.is_open()
+            || self.options_ui.capture().is_some()
             || self.options_ui.joystick_capturing()
             || self.web_has_focus()
             || self.media.focus.is_some()
@@ -70,8 +70,8 @@ impl App {
             .is_some_and(|owner| self.inventory_ui.jump_owner_visible(ctx, self.panels.inventory, owner));
         let live = matches!(self.screen, Screen::World) && !self.login_form.busy && self.host_input_allowed();
         let blocked = !self.focused
-            || self.exit_prompt.open
-            || self.options_ui.capture.is_some()
+            || self.exit_prompt.is_open()
+            || self.options_ui.capture().is_some()
             || self.options_ui.joystick_capturing()
             || self.web_has_focus()
             || self.media.focus.is_some();

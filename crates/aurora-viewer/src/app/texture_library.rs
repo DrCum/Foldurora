@@ -703,7 +703,7 @@ impl App {
     }
     pub(super) fn texture_library_drag_input(&mut self, ctx: &egui::Context, renderer: &Renderer) -> Option<Drop> {
         self.library_drag.highlighted = None;
-        if !matches!(self.screen, Screen::World) || self.world.teleporting || self.exit_prompt.open {
+        if !matches!(self.screen, Screen::World) || self.world.teleporting || self.exit_prompt.is_open() {
             return None;
         }
         let drag = ui::inventory::world_drag(ctx)?;

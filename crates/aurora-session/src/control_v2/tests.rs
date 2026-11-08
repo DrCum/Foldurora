@@ -571,3 +571,156 @@ fn control_v2_ledger_query_distinguishes_unknown_pending_and_immutable_cancelled
     assert_eq!(ledger.retained_count(), 2);
     assert_eq!(ledger.query(request(3)), Ok(ShowViewerLookup::Unknown));
 }
+
+#[test]
+fn control_v2_startup_clock_is_one_shot_without_retiming_old_ingress_or_renewing_native_receipt() {
+    let mut guard = WorkerGuard::new(binding().worker, 7, 0).unwrap();
+    guard.initialize_startup_control_v2(V2StartupClock::at_app_ready(20_000)).unwrap();
+    let old = command(1, ControlV2Command::ShowViewer(request(1)));
+    assert_eq!(guard.on_control_v2(&old, 1, 20_001), Err(Error::Stale));
+    assert_eq!(guard.mode(), WorkerMode::Standby);
+    assert!(!guard.input_owned() && !guard.render_owned());
+    let fresh = command(2, ControlV2Command::ShowViewer(request(2)));
+    assert_eq!(
+        guard.on_control_v2(&fresh, 20_002, 20_003).unwrap().work,
+        Some(ControlV2Work::ShowViewer {
+            request: request(2),
+            outcome: None
+        })
+    );
+    assert_eq!(
+        guard.initialize_startup_control_v2(V2StartupClock::at_app_ready(30_000)),
+        Err(Error::Stale)
+    );
+    assert!(guard.tick(35_002).restore_window);
+    assert_eq!(
+        guard.initialize_startup_control_v2(V2StartupClock::at_app_ready(40_000)),
+        Err(Error::Stale)
+    );
+    assert_eq!(guard.mode(), WorkerMode::Detached);
+    let value = serde_json::json!({"version":2,"binding":binding(),"lease_epoch":7,"sequence":1,"reply_to":0,
+        "message":{"direction":"command","body":{"type":"initialize_startup_clock","data":20_000}}});
+    assert_eq!(decode_control(&serde_json::to_vec(&value).unwrap()), Err(Error::Malformed));
+}
+#[test]
+fn control_v2_startup_clock_refuses_every_prior_admission_effect_regression_or_consumed_attempt() {
+    for scenario in 0..8 {
+        let mut guard = WorkerGuard::new(binding().worker, 7, 0).unwrap();
+        match scenario {
+            0 => {
+                let normal = Envelope {
+                    version: 1,
+                    binding: binding(),
+                    lease_epoch: 7,
+                    sequence: 1,
+                    reply_to: 0,
+                    message: Message::Command(Command::Heartbeat {
+                        workspace_foreground: false,
+                    }),
+                };
+                guard.on_command(&normal, 1).unwrap();
+            }
+            1 => {
+                guard
+                    .on_control_v2(
+                        &command(
+                            1,
+                            ControlV2Command::Heartbeat {
+                                workspace_foreground: false,
+                            },
+                        ),
+                        1,
+                        1,
+                    )
+                    .unwrap();
+            }
+            2 => {
+                guard.invalidate_display();
+            }
+            3 => {
+                guard.update_session(Some(session())).unwrap();
+                guard.update_session(None).unwrap();
+            }
+            4 => {
+                guard.tick(crate::LEASE_MILLIS);
+            }
+            5 => {
+                guard.initialize_startup_control_v2(V2StartupClock::at_app_ready(10)).unwrap();
+                guard.tick(9);
+            }
+            6 => {
+                assert_eq!(
+                    guard.on_control_v2(&command(1, ControlV2Command::ShowViewer(request(1))), 10, 9),
+                    Err(Error::Stale)
+                );
+            }
+            _ => {
+                guard
+                    .frame_ready(
+                        0,
+                        FrameProof {
+                            device_epoch: 1,
+                            surface_epoch: 1,
+                            frame: 1,
+                        },
+                    )
+                    .unwrap();
+            }
+        }
+        assert_eq!(
+            guard.initialize_startup_control_v2(V2StartupClock::at_app_ready(30_000)),
+            Err(Error::Stale)
+        );
+        assert_eq!(
+            guard.initialize_startup_control_v2(V2StartupClock::at_app_ready(40_000)),
+            Err(Error::Stale)
+        );
+    }
+    let mut guard = WorkerGuard::new(binding().worker, 7, 10).unwrap();
+    assert_eq!(
+        guard.initialize_startup_control_v2(V2StartupClock::at_app_ready(9)),
+        Err(Error::Stale)
+    );
+    assert_eq!(
+        guard.initialize_startup_control_v2(V2StartupClock::at_app_ready(11)),
+        Err(Error::Stale)
+    );
+}
+#[test]
+fn control_v2_unavailable_is_exact_transport_retirement_without_existing_control_or_ledger_success() {
+    for original in [
+        command(
+            1,
+            ControlV2Command::Heartbeat {
+                workspace_foreground: false,
+            },
+        ),
+        command(2, ControlV2Command::Detach),
+        command(3, ControlV2Command::ShowViewer(request(1))),
+        command(4, ControlV2Command::QueryShowViewer(request(1))),
+    ] {
+        let ControlV2Message::Command(captured) = &original.message else {
+            panic!()
+        };
+        let unavailable = event(
+            10,
+            original.sequence,
+            ControlV2Event::ControlUnavailable { command: captured.clone() },
+        );
+        assert_eq!(decode_control(&encode_control(&unavailable).unwrap()), Ok(unavailable.clone()));
+        assert!(matches_reply(&original, &unavailable));
+        assert_eq!(unavailable.existing_control(), Ok(None));
+        let mut wrong = unavailable.clone();
+        wrong.reply_to += 1;
+        assert!(!matches_reply(&original, &wrong));
+        wrong = unavailable;
+        wrong.binding.session = Some(session());
+        assert!(!matches_reply(&original, &wrong));
+    }
+    let mut ledger = ShowViewerLedger::new(binding().worker, 7).unwrap();
+    ledger.reserve(request(1)).unwrap();
+    ledger.reserve(request(2)).unwrap();
+    assert_eq!(ledger.pending_requests().collect::<Vec<_>>(), vec![request(1), request(2)]);
+    ledger.finish(request(1), ShowViewerOutcome::Cancelled).unwrap();
+    assert_eq!(ledger.pending_requests().collect::<Vec<_>>(), vec![request(2)]);
+}

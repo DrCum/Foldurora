@@ -77,13 +77,14 @@ pub fn active() -> bool {
 
 /// Called for every main window (at start and after a GPU recovery), on
 /// the thread that created it.
-pub fn install(window: &Window) {
+pub fn install(window: &Window) -> bool {
     #[cfg(windows)]
-    if std::env::var("AURORA_WINDOW_HOLD").as_deref() != Ok("0") {
-        imp::install(window);
-    }
+    return imp::install(window, std::env::var("AURORA_WINDOW_HOLD").as_deref() != Ok("0"));
     #[cfg(not(windows))]
-    let _ = window;
+    {
+        let _ = window;
+        false
+    }
 }
 
 #[cfg(windows)]
@@ -101,8 +102,8 @@ mod imp {
         Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM},
         Graphics::Gdi::{RDW_INTERNALPAINT, RDW_UPDATENOW, RedrawWindow},
         UI::WindowsAndMessaging::{
-            CallWindowProcW, GWLP_WNDPROC, GetCursorPos, SC_MOVE, SC_SIZE, SetWindowLongPtrW, WM_ENTERMENULOOP, WM_EXITMENULOOP,
-            WM_NCLBUTTONDOWN, WM_SYSCOMMAND, WNDPROC,
+            CallWindowProcW, GWLP_WNDPROC, GetCursorPos, SC_MOVE, SC_SIZE, SetWindowLongPtrW, WM_DESTROY, WM_ENABLE, WM_ENTERMENULOOP,
+            WM_ENTERSIZEMOVE, WM_EXITMENULOOP, WM_EXITSIZEMOVE, WM_NCDESTROY, WM_NCLBUTTONDOWN, WM_SYSCOMMAND, WNDPROC,
         },
     };
     use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -119,6 +120,7 @@ mod imp {
     /// The system menu is open.
     static MENU: AtomicBool = AtomicBool::new(false);
     static HELPER: OnceLock<Thread> = OnceLock::new();
+    static PACING: AtomicBool = AtomicBool::new(false);
     /// Period of the frame limiter, in microseconds (0: no limit).
     static PERIOD: AtomicU32 = AtomicU32::new(0);
     /// The cursor counts as moving for this long after its last move.
@@ -129,7 +131,7 @@ mod imp {
     }
 
     pub fn paces(period: Duration) -> bool {
-        if !held() {
+        if !PACING.load(Ordering::Acquire) || !held() {
             return false;
         }
         PERIOD.store(period.as_micros().min(u32::MAX as u128) as u32, Ordering::Release);
@@ -145,24 +147,26 @@ mod imp {
         (point.x, point.y)
     }
 
-    pub fn install(window: &winit::window::Window) {
+    pub fn install(window: &winit::window::Window, pacing: bool) -> bool {
         let Ok(handle) = window.window_handle() else {
-            return;
+            return false;
         };
         let RawWindowHandle::Win32(handle) = handle.as_raw() else {
-            return;
+            return false;
         };
         let hwnd = handle.hwnd.get();
+        PACING.store(pacing, Ordering::Release);
         TARGET.store(hwnd, Ordering::Release);
-        if HELPER.get().is_some() {
-            subclass(hwnd);
-            return;
+        if !pacing || HELPER.get().is_some() {
+            // Lifecycle revocation is independent of optional hold pacing.
+            // An opt-out never becomes a permissive native-show fallback.
+            return subclass(hwnd);
         }
         let helper = thread::Builder::new().name("window-hold".into()).spawn(move || {
             let mut at = cursor();
             let mut moved = None;
             loop {
-                while !held() {
+                while !PACING.load(Ordering::Acquire) || !held() {
                     thread::park();
                     moved = None;
                 }
@@ -194,16 +198,16 @@ mod imp {
             }
         });
         let Ok(helper) = helper else {
-            return;
+            return subclass(hwnd);
         };
         let _ = HELPER.set(helper.thread().clone());
-        subclass(hwnd);
+        subclass(hwnd)
     }
 
     /// Our procedure in front of the window's. One previous procedure is kept
     /// for every window hooked: a window whose own differs (not winit's) is
     /// left as it was, without the hold.
-    fn subclass(hwnd: isize) {
+    fn subclass(hwnd: isize) -> bool {
         // SAFETY: `hwnd` is a live window of this thread, and `hook` has the
         // signature of a window procedure. The previous procedure is stored
         // before any message can reach `hook`: the messages of this window
@@ -214,16 +218,17 @@ mod imp {
             if previous == 0 {
                 // refused: the window keeps its own procedure
                 log::warn!("window hold: the window procedure could not be replaced, left without the hold");
-                return;
+                return false;
             }
             let kept = PREVIOUS.load(Ordering::Acquire);
             if kept != 0 && kept != previous {
                 SetWindowLongPtrW(hwnd as HWND, GWLP_WNDPROC, previous);
                 log::warn!("window hold: a window with another procedure, left without the hold");
-                return;
+                return false;
             }
             PREVIOUS.store(previous, Ordering::Release);
         }
+        true
     }
 
     fn wake() {
@@ -233,6 +238,15 @@ mod imp {
     }
 
     unsafe extern "system" fn hook(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+        // Actual native blocker/destruction transitions revoke old ordinary
+        // observations even if a modal opens and closes within one App tick.
+        // This is one-way evidence only; no handle ever mints permission.
+        if matches!(
+            msg,
+            WM_ENABLE | WM_DESTROY | WM_NCDESTROY | WM_ENTERMENULOOP | WM_EXITMENULOOP | WM_ENTERSIZEMOVE | WM_EXITSIZEMOVE
+        ) {
+            crate::session_host::worker::ordinary::invalidate();
+        }
         // SAFETY: `PREVIOUS` holds the value `SetWindowLongPtrW` returned for
         // this window: a window procedure (or a handle to one, which
         // `CallWindowProcW` accepts), never 0 once the hook is installed.

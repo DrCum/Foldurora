@@ -69,9 +69,9 @@ impl App {
             || self.snapshots.ui.full_frame
             || self.snapshots.ui.freeze
             || renderer.vr_engaged()
-            || self.exit_prompt.open
+            || self.exit_prompt.is_open()
             || self.login_form.busy
-            || self.options_ui.capture.is_some()
+            || self.options_ui.capture().is_some()
             || self.options_ui.restore.is_some()
         {
             return false;

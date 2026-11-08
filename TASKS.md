@@ -3811,3 +3811,21 @@ Open-source technologies that could set Aurora apart (human request of 2026-10-1
     staged15+1/full16 reply-credit/independent ACK path, physical ordinary native
     consumer and input quarantine still need separate source review before
     production promotion. Root alone executes required checks.
+
+  - ControlV2 actual IO/native consumer stage (source-only, 2026-11-08): real
+    WorkerIo/Child/Broker/Bridge/App callee graph, fifteen combined downstream
+    credits plus one immutable stamped staging item, sixteen reserved original
+    reply slots, distinct bounded ingress/reply ACK paths and async correlation.
+    Physical App/window creation/retirement and monotonic mutation barriers
+    fence actual ordinary Login/Loading native restore/focus. Old transient
+    Enter/both native Space spellings/pointer/IME/Alt input is quarantined while
+    canonical text/selection/Undo survives. One-shot first-App-ready startup
+    clock keeps old staged ingress stale and cannot rearm after admission,
+    expiry, detach or source/display changes. Closed unavailable transport
+    outcomes never fabricate native success or overwrite an immutable ledger.
+    Sixteen new definitions are authored UNRUN; all102 prior session/Quick
+    definitions remain exact, including all14 pure/data and16 API cases.
+    Production selection stays1. Independent source review and Root compilation/
+    whole-workspace/native checks remain required. Broker Show intent/tracker,
+    private persistent preferences and captured Host UI are deferred; no Quick
+    Action or ordinary Show Viewer entry is exposed in this source stage.

@@ -17,6 +17,21 @@ pub const MAX_CONTROL_V2_BYTES: usize = 4096;
 pub const MAX_CONTROL_ACK_BYTES: usize = 1024;
 pub const SHOW_VIEWER_MILLIS: u64 = 2000;
 
+/// Local DATA for the one genuine App-ready startup boundary, not a wire
+/// command, lease receipt or rearm permission. Actual caller must own that
+/// boundary; Guard additionally refuses after any admission/effect/attempt.
+pub struct V2StartupClock {
+    ready_ms: u64,
+}
+impl V2StartupClock {
+    pub fn at_app_ready(ready_ms: u64) -> Self {
+        Self { ready_ms }
+    }
+    pub(crate) fn millis(self) -> u64 {
+        self.ready_ms
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ControlV2Command {
@@ -129,6 +144,12 @@ pub enum ControlV2Event {
     },
     ShowViewerReceipt(ShowViewerReceipt),
     ShowViewerQuery(ShowViewerQueryResult),
+    /// Exact captured operation became unavailable. This retires transport
+    /// ownership without claiming a native outcome or disclosing a stale
+    /// ledger receipt; it never means Status/quiescence/Grant/Detach success.
+    ControlUnavailable {
+        command: ControlV2Command,
+    },
 }
 impl ControlV2Event {
     pub(crate) fn control(&self) -> Option<Event> {
@@ -153,7 +174,7 @@ impl ControlV2Event {
                 activation: *activation,
                 reason: *reason,
             },
-            Self::ShowViewerReceipt(_) | Self::ShowViewerQuery(_) => return None,
+            Self::ShowViewerReceipt(_) | Self::ShowViewerQuery(_) | Self::ControlUnavailable { .. } => return None,
         })
     }
     pub(crate) fn from_control(event: Event) -> Self {
@@ -194,6 +215,19 @@ pub struct ControlV2Envelope {
     pub message: ControlV2Message,
 }
 impl ControlV2Envelope {
+    /// Explicit typed normal-control adaptation for the real transport owner.
+    /// This never decodes V1 bytes or converts Show/query into native control.
+    pub fn adapt_control(envelope: Envelope) -> Result<Self, Error> {
+        envelope.validate()?;
+        Ok(Self::from_control(envelope))
+    }
+    pub fn existing_control(&self) -> Result<Option<Envelope>, Error> {
+        self.validate()?;
+        Ok(match &self.message {
+            ControlV2Message::Command(command) => command.control().map(|command| self.control_envelope(Message::Command(command))),
+            ControlV2Message::Event(event) => event.control().map(|event| self.control_envelope(Message::Event(event))),
+        })
+    }
     pub fn validate(&self) -> Result<(), Error> {
         if self.version != CONTROL_V2_VERSION {
             return Err(Error::Version);
@@ -237,6 +271,21 @@ impl ControlV2Envelope {
                         }
                         result.validate()?;
                         Some(result.request.target)
+                    }
+                    ControlV2Event::ControlUnavailable { command } => {
+                        if self.reply_to == 0 {
+                            return Err(Error::Sequence);
+                        }
+                        let original = Self {
+                            version: CONTROL_V2_VERSION,
+                            binding: self.binding,
+                            lease_epoch: self.lease_epoch,
+                            sequence: self.reply_to,
+                            reply_to: 0,
+                            message: ControlV2Message::Command(command.clone()),
+                        };
+                        original.validate()?;
+                        None
                     }
                     _ => None,
                 }
@@ -312,6 +361,7 @@ pub fn matches_reply(command: &ControlV2Envelope, reply: &ControlV2Envelope) -> 
         return false;
     };
     match (command_body, event) {
+        (original, ControlV2Event::ControlUnavailable { command: captured }) => original == captured && command.binding == reply.binding,
         (ControlV2Command::ShowViewer(request), ControlV2Event::ShowViewerReceipt(receipt)) => {
             command.binding == reply.binding && receipt.matches(*request)
         }
@@ -480,6 +530,9 @@ pub struct ControlV2Observation {
     pub effects: Vec<ControlV2Effect>,
     pub show_receipt: Option<ShowViewerReceipt>,
     pub show_query: Option<ShowViewerQueryResult>,
+    /// Transport operation failed without fabricating/changing a native
+    /// ledger outcome. It cannot advance current presentation ownership.
+    pub show_unavailable: Option<ShowViewerRequest>,
 }
 
 #[cfg(test)]

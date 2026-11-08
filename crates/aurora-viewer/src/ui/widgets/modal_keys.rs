@@ -88,6 +88,7 @@ pub(super) fn begin(ctx: &Context, layer: LayerId) -> Scope {
     let pass = ctx.cumulative_pass_nr();
     let mut state: State = ctx.data(|d| d.get_temp(state_id(id))).unwrap_or_default();
     if state.last_pass == 0 || state.last_pass + 1 < pass {
+        crate::session_host::worker::ordinary::invalidate();
         // opening: not shown on the previous pass
         state = State {
             focus_pending: true,

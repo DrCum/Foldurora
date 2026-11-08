@@ -13,6 +13,7 @@ struct ShowOperation {
     sequence: u64,
     query: Option<u64>,
     receipt: Option<ShowViewerReceipt>,
+    unavailable: bool,
 }
 #[derive(Default)]
 pub(super) struct ShowOperations {
@@ -116,7 +117,7 @@ impl Coordinator {
                     .shows
                     .entries
                     .iter()
-                    .position(|op| op.receipt.is_some() && op.query.is_none())
+                    .position(|op| (op.receipt.is_some() || op.unavailable) && op.query.is_none())
                     .ok_or(Error::Capacity)?,
             )
         } else {
@@ -133,6 +134,7 @@ impl Coordinator {
             sequence,
             query: None,
             receipt: None,
+            unavailable: false,
         });
         entry.shows.highwater = request.request;
         entry.sent = sequence;
@@ -161,6 +163,9 @@ impl Coordinator {
         if operation.request != request {
             return Err(Error::Binding);
         }
+        if operation.unavailable {
+            return Err(Error::Stale);
+        }
         if operation.query.is_some() {
             return Err(Error::Busy);
         }
@@ -183,6 +188,41 @@ impl Coordinator {
         let ControlV2Message::Event(event) = &envelope.message else {
             return Err(Error::Invalid);
         };
+        if let ControlV2Event::ControlUnavailable { command } = event {
+            // Exact operation metadata only: no receive/liveness/activation
+            // counter changes and no fabricated native ledger outcome.
+            let (request, query) = match command {
+                ControlV2Command::ShowViewer(request) => (*request, false),
+                ControlV2Command::QueryShowViewer(request) => (*request, true),
+                _ => return Err(Error::Unavailable),
+            };
+            let entry = self.entries.get_mut(&envelope.binding.worker.worker).ok_or(Error::Unavailable)?;
+            if envelope.binding.worker != entry.roster.binding.worker || envelope.lease_epoch != entry.lease_epoch {
+                return Err(Error::Binding);
+            }
+            let operation = entry
+                .shows
+                .entries
+                .iter_mut()
+                .find(|op| op.request == request)
+                .ok_or(Error::Stale)?;
+            let expected = if query {
+                operation.query.ok_or(Error::Stale)?
+            } else {
+                operation.sequence
+            };
+            if envelope.reply_to != expected || operation.unavailable || !query && operation.receipt.is_some() {
+                return Err(Error::Stale);
+            }
+            if query {
+                operation.query = None;
+            }
+            operation.unavailable = operation.receipt.is_none();
+            return Ok(ControlV2Observation {
+                show_unavailable: Some(request),
+                ..Default::default()
+            });
+        }
         if let Some(control) = event.control() {
             // The real V1 state machine handles every normal activation/status
             // result; the adapter is typed and does not decode another wire.
@@ -244,6 +284,9 @@ impl Coordinator {
             .iter_mut()
             .find(|op| op.request == request)
             .ok_or(Error::Stale)?;
+        if operation.unavailable {
+            return Err(Error::Stale);
+        }
         if is_query {
             operation.query = None;
         }
@@ -251,7 +294,11 @@ impl Coordinator {
             operation.receipt = terminal;
         }
         entry.received = envelope.sequence;
-        entry.last_seen = self.now;
+        // The sender counter spans this boot, but an old-source operation
+        // receipt is not a fresh receipt from the current native source.
+        if envelope.binding == entry.roster.binding {
+            entry.last_seen = self.now;
+        }
         Ok(ControlV2Observation {
             show_receipt: if let ControlV2Event::ShowViewerReceipt(receipt) = event {
                 Some(*receipt)
