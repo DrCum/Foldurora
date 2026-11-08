@@ -45,6 +45,7 @@ impl Source {
         !self.account.is_nil()
             && !self.session.is_nil()
             && !self.root.is_nil()
+            && self.root != world.inventory.lib_root
             && world.agent_id == self.account
             && world.inventory.owner == self.account
             && world.inventory.root == self.root
@@ -55,7 +56,7 @@ impl Source {
                 .inventory
                 .folders
                 .get(&self.root)
-                .is_some_and(|folder| folder.info.id == self.root && !folder.library)
+                .is_some_and(|folder| folder.info.id == self.root && !folder.library && folder.info.type_default != 14)
     }
     fn available(self, world: &World) -> bool {
         self.matches(world) && !world.rlva.has("showinv")
@@ -71,7 +72,7 @@ impl Source {
 /// A single explicit target check, never a full-tree visibility projection.
 /// Only actual ordinary/outfit categories, below own root and outside Trash.
 pub(crate) fn eligible(inv: &Inventory, id: Uuid) -> bool {
-    if id.is_nil() || inv.owner.is_nil() || inv.root.is_nil() || id == inv.root {
+    if id.is_nil() || inv.owner.is_nil() || inv.root.is_nil() || id == inv.root || inv.root == inv.lib_root {
         return false;
     }
     let Some(folder) = inv.folders.get(&id) else {
@@ -82,6 +83,9 @@ pub(crate) fn eligible(inv: &Inventory, id: Uuid) -> bool {
     }
     let mut at = id;
     for _ in 0..MAX_DEPTH {
+        if at == inv.lib_root {
+            return false;
+        }
         let Some(folder) = inv.folders.get(&at) else {
             return false;
         };
