@@ -140,7 +140,13 @@ fn folder_jump_shortcut_uses_actual_inventory_focus_then_pointer_and_expires_hid
 
 #[test]
 fn folder_jump_native_keys_observe_both_space_forms_and_snapshot_orders_while_no_command_is_eligible() {
-    for key in [Key::Named(NamedKey::Enter), Key::Named(NamedKey::Space), Key::Character(" ".into())] {
+    for key in [
+        Key::Named(NamedKey::Enter),
+        Key::Named(NamedKey::Space),
+        Key::Character(" ".into()),
+        Key::Character("j".into()),
+        Key::Character("J".into()),
+    ] {
         for before_focus in [false, true] {
             let mut chooser = Chooser::default();
             chooser.event(&WindowEvent::Focused(true));
