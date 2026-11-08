@@ -1,0 +1,87 @@
+name: Isolated decoded sound fade checks
+on:
+  push:
+    branches: [checks/upstream-decoded-sound-fade-20261108]
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+concurrency:
+  group: isolated-decoded-sound-fade-checks
+  cancel-in-progress: true
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+  CARGO_BUILD_JOBS: '2'
+  SOURCE_SHA: 65da1dfbcecfda273c5f1cb0650746374499732a
+jobs:
+  audio:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout pinned public port source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 65da1dfbcecfda273c5f1cb0650746374499732a
+          fetch-depth: 0
+          filter: blob:none
+      - name: Source and runner
+        run: |
+          mkdir -p .scratch/validation
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git rev-parse HEAD | tee .scratch/validation/source.txt
+          echo "$GITHUB_SHA" > .scratch/validation/workflow.txt
+          rustc --version | tee .scratch/validation/rust.txt
+          cargo --version | tee .scratch/validation/cargo.txt
+          df -h .
+          rustup component add rustfmt clippy
+      - name: Existing audio system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev
+          git hash-object crates/aurora-audio/tests/data/abrupt-tone.ogg | tee .scratch/validation/fixture-blob.txt
+      - name: Restore compatible repository Linux CI cache
+        uses: ./.github/actions/rust-cache
+        with:
+          name: linux-tests
+      - name: Formatting
+        run: |
+          cargo fmt --all -- --check 2>&1 | tee .scratch/validation/fmt.log
+      - name: Affected library Clippy
+        run: |
+          cargo clippy --profile ci --locked -p aurora-audio --all-targets -- -D warnings -A dead-code 2>&1 | tee .scratch/validation/clippy.log
+      - name: Audio regressions
+        run: |
+          cargo test --profile ci --locked -p aurora-audio -- --nocapture 2>&1 | tee .scratch/validation/audio.log
+      - name: Verify all five sound fade regressions executed
+        run: |
+          python3 - <<'PYCODE'
+          import pathlib,re
+          log=pathlib.Path('.scratch/validation/audio.log').read_text()
+          log=re.sub(r'\x1b\[[0-9;]*m','',log)
+          expected=[
+            'decoded_clip_edges_do_not_step_from_silence_or_at_a_loop_seam',
+            'decoded_short_clips_keep_their_middle_and_raw_pcm_keeps_its_edges',
+            'decoded_vorbis_clip_has_no_start_stop_or_loop_step',
+            'decoded_clip_edges_stay_smooth_in_ui_world_and_looped_playback',
+            'decoded_stereo_edges_preserve_relative_channel_level_and_polarity',
+          ]
+          for name in expected:
+            assert '::'+name+' ... ok' in log,name
+          print('All five sound fade regressions executed and passed.')
+          PYCODE
+      - name: Verify source remained frozen
+        if: always()
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git diff --exit-code
+      - name: Upload raw scoped checks
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: decoded-sound-fade-65da1dfbcecf
+          path: .scratch/validation/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
