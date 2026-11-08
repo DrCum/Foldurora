@@ -5396,3 +5396,16 @@ through retirement, immutable private controller/path/CAS scope and exact termin
 receipts. Eight portable fixtures are authored UNRUN. Both modules are currently
 test-registered; no menu/button/shortcut/endpoint/control/native effect is enabled.
 This is phase1 of the approved quick-action front, not product completion.
+
+### Explicit Show Viewer receipt data prerequisite
+
+`aurora_session::show_viewer` adds closed DATA for a full worker/session/lease
+and nonreused App/physical-window/ordinary-mode observation, exact request and
+immutable terminal receipt. Its16-entry ledger reserves before effect, never
+evicts pending ownership, rejects changed targets/old IDs, and never overwrites
+terminal outcomes. These values are correlation only, with no HWND, clock,
+native/control/input/render permission or effect. Six pure cases are authored
+UNRUN. The existing control protocol remains V1: wire/version integration,
+original IO ingress retention, actual App-owned observation/strict permit and
+synchronous native consumer require a separate reviewed atom before any quick UI
+entry. Phase1 model/codec and this receipt API do not complete quick actions.

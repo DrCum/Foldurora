@@ -14,6 +14,7 @@ mod preview;
 pub mod preview_image;
 pub mod preview_wire;
 mod protocol;
+pub mod show_viewer;
 mod worker;
 
 pub use coordinator::{Coordinator, Effect, HostNotice, RosterEntry, STARTUP_MILLIS};
