@@ -664,7 +664,7 @@ fn preview_io_owned_loopback_valid_mac_wrong_original_claim_keeps_cache_and_pend
         )
         .unwrap();
     until(|| (budget.used() == 0 && io.host.image_budget().used() == baseline).then_some(()));
-    assert!(io.host.take_update().unwrap().sources.into_iter().all(|s| s.frame.is_none()));
+    assert!(until(|| io.host.take_update()).sources.into_iter().all(|s| s.frame.is_none()));
     assert_eq!(
         model
             .retained(io.host.shared.clock(Instant::now()))
