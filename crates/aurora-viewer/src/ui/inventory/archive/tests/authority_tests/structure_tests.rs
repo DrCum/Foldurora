@@ -36,11 +36,50 @@ enum FrameLate {
     VisualControlCover,
     ChangedParent,
 }
+
+#[test]
+fn inventory_archive_structure_real_customizable_body_allocates_below_original_archive_row_in_both_styles() {
+    for classic in [true, false] {
+        let mut frames = Frames::style(classic);
+        frames.open_context();
+        let control = frames.state.archive_context.activation.control.unwrap();
+        assert!(control.committed(&frames.frames.ctx));
+        let witness = control.structure.unwrap();
+        frames.frames.ctx.viewport(|viewport| {
+            let widgets = &viewport.prev_pass.widgets;
+            let (layer, index) = widgets.order(control.widget).unwrap();
+            let later = widgets
+                .get_layer(layer)
+                .skip(index + 1)
+                .filter(|widget| widget.visible && finite_positive(widget.interact_rect) && !witness.contains(widget.id))
+                .collect::<Vec<_>>();
+            assert!(
+                later.iter().any(|widget| widget.enabled && widget.sense.senses_click()),
+                "real ordinary context body is present"
+            );
+            assert!(
+                later
+                    .iter()
+                    .all(|widget| widget.interact_rect.top() >= control.registered.rect.bottom()),
+                "the body cannot rewind into the original row"
+            );
+            assert!(
+                later
+                    .iter()
+                    .all(|widget| !widget.interact_rect.intersect(control.registered.interact_rect).is_positive())
+            );
+        });
+    }
+}
+
 fn nested(late: FrameLate) -> (egui::Context, Control) {
     let ctx = egui::Context::default();
     crate::theme::Theme::default().apply(&ctx, 1.0);
     let mut saved = None;
-    for _ in 0..3 {
+    let mut previous: Option<Control> = None;
+    let mut ready = false;
+    for _ in 0..16 {
+        let apply = if ready { late } else { FrameLate::None };
         let mut changed_parent = None;
         let mut output = ctx.run_ui(
             egui::RawInput {
@@ -69,7 +108,7 @@ fn nested(late: FrameLate) -> (egui::Context, Control) {
                             saved = Control::capture(ui, &response, InputRead::default());
                         });
                         let response = prepared.end(ui);
-                        match late {
+                        match apply {
                             FrameLate::None => {}
                             FrameLate::DuplicateOuter => {
                                 ui.interact(
@@ -117,8 +156,16 @@ fn nested(late: FrameLate) -> (egui::Context, Control) {
             },
         );
         output.textures_delta.clear();
+        if ready {
+            return (ctx, saved.unwrap());
+        }
+        if let Some(control) = saved {
+            ready = control.committed(&ctx)
+                && previous.is_some_and(|previous| previous.same_widget(control) && previous.structure == control.structure);
+            previous = Some(control);
+        }
     }
-    (ctx, saved.unwrap())
+    panic!("actual visible nested menu baseline did not settle before turnover");
 }
 
 #[test]
