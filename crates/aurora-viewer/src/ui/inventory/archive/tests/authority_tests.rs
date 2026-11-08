@@ -560,4 +560,38 @@ fn inventory_archive_authority_modifier_revocation_preserves_context_ticket_popu
     assert!(input.read().key_allowed(egui::Key::Enter));
 }
 
+#[test]
+fn inventory_archive_authority_pointer_release_keeps_first_owner_focus_across_late_editor_and_discard_retry() {
+    for include in [false, true] {
+        let mut frames = Frames::new();
+        let control = original(&mut frames, include);
+        frames.pointer(control.rect.center(), egui::PointerButton::Primary, true);
+        let before = frames.frames.ctx.cumulative_pass_nr();
+        frames.late = Late::Focus;
+        frames.discard = true;
+        controller_testing::reset_assignments();
+        frames.pointer(control.rect.center(), egui::PointerButton::Primary, false);
+        assert!(
+            frames.frames.ctx.cumulative_pass_nr() >= before + 2,
+            "real whole-run retry occurred"
+        );
+        assert!(
+            !frames.proposals.is_empty(),
+            "retain the original release proposal for final rejection"
+        );
+        let focused = frames.frames.ctx.memory(|memory| memory.focused());
+        assert_eq!(focused, Some(egui::Id::unique("archive_authority_late_editor")));
+        let activation = if include {
+            &frames.state.archive_include_context.activation
+        } else {
+            &frames.state.archive_context.activation
+        };
+        assert!(activation.settled_focus.is_some());
+        assert_ne!(activation.settled_focus, Some(focused), "retry cannot remint the release focus");
+        assert!(!valid(&frames));
+        assert!(!frames.state.archive.as_ref().unwrap().policy.included());
+        assert_eq!(controller_testing::assignments(), 0);
+    }
+}
+
 mod structure_tests;

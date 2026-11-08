@@ -985,7 +985,11 @@ impl Activation {
         // Pointer activation need not focus the row. Retain the actual focus
         // after its owner finishes, so a later editor cannot take authority
         // between this original release and the whole-run consumer.
-        self.settled_focus = self.released.map(|_| ctx.memory(|memory| memory.focused()));
+        // A discarded pass may run the owner again after that later editor.
+        // Keep the FIRST release snapshot for this frame across every retry.
+        if self.settled_focus.is_none() {
+            self.settled_focus = self.released.map(|_| ctx.memory(|memory| memory.focused()));
+        }
         if let Some(control) = &mut self.control {
             if control.frame == ctx.cumulative_frame_nr() && control.pass == ctx.cumulative_pass_nr() {
                 control.structure = ctx.viewport(|viewport| structure::Witness::capture(&viewport.this_pass.widgets, control));
