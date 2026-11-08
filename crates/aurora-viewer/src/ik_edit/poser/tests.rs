@@ -823,7 +823,12 @@ fn poser_library_saves_bvh_confirms_overwrite_and_correlates_loads_to_the_origin
     let owner = Uuid::new_v4();
     let subject = Uuid::new_v4();
     let root = crate::settings::account_dir(&owner);
-    assert!(root.starts_with(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/unit-test-user-data")));
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("viewer crate lives in the workspace's crates directory");
+    assert!(root.starts_with(workspace.join("target/unit-test-user-data")));
+    assert!(!root.components().any(|component| component == std::path::Component::ParentDir));
     let rig = world.avatar_lib.rig.clone();
     let session = &editor.poser.sessions[&world.agent_id];
     let document = document::Document::capture(&rig, session, "Portrait".into(), 4);
