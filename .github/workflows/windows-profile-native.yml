@@ -1,0 +1,142 @@
+name: Windows Profile native component checks
+
+# Isolated component evidence only; this is not product or final-tree acceptance.
+on:
+  push:
+    branches: [diagnostics/windows-profile-native-20261108]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-profile:
+    if: github.ref == 'refs/heads/diagnostics/windows-profile-native-20261108'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      CARGO_TERM_COLOR: never
+      # Preserve the pinned LF source bytes on the Windows checkout.
+      GIT_CONFIG_COUNT: '1'
+      GIT_CONFIG_KEY_0: core.autocrlf
+      GIT_CONFIG_VALUE_0: 'false'
+      BASE_COMMIT: 6ac6fbe1dae2ec69f8512949b54f6ccfbdf6e374
+      SECURITY_PATH: crates/aurora-viewer/src/session_host/profile/settings_file/security.rs
+      SECURITY_BLOB: 023a9bb0bb975d49e06a0ebc3408827ffb819f4a
+      SECURITY_SHA256: be94b8199d470d2e070695a08f6af17dcf4cb55f0baa5c4916fa58742ac4bdb9
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+      - name: Prepare diagnostics
+        run: New-Item -ItemType Directory -Force .scratch/windows-profile-native | Out-Null
+      - name: Verify isolated frozen source
+        id: source
+        env:
+          EXPECTED_COMMIT: ${{ github.sha }}
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -ne $env:EXPECTED_COMMIT) { throw 'Unexpected checkout.' }
+          git merge-base --is-ancestor $env:BASE_COMMIT HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Frozen base is not an ancestor.' }
+          $changed = @(git diff --name-status $env:BASE_COMMIT HEAD)
+          if ($LASTEXITCODE -ne 0 -or $changed.Count -ne 1 -or $changed[0] -ne "A`t.github/workflows/windows-profile-native.yml") { throw 'Unexpected source changes.' }
+          $blob = (git rev-parse "HEAD:$env:SECURITY_PATH").Trim()
+          if ($LASTEXITCODE -ne 0 -or $blob -ne $env:SECURITY_BLOB) { throw 'Unexpected security blob.' }
+          $hash = (Get-FileHash -LiteralPath $env:SECURITY_PATH -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne $env:SECURITY_SHA256) { throw 'Unexpected security bytes.' }
+          $dirty = git status --porcelain --untracked-files=no
+          if ($LASTEXITCODE -ne 0 -or $dirty) { throw 'Tracked source is dirty.' }
+      - name: Rust stable
+        id: toolchain
+        run: |
+          ./.github/drop-extra-targets.ps1
+          rustup update stable --no-self-update
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          rustup component add rustfmt clippy
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $compiler = (& rustc --version).Trim()
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "compiler=$compiler" >> $env:GITHUB_OUTPUT
+      - name: Native settings file tests
+        id: settings
+        continue-on-error: true
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          cargo test --profile ci -p aurora-viewer --locked session_host::profile::settings_file -- --test-threads=1 2>&1 |
+            Tee-Object -FilePath .scratch/windows-profile-native/settings.log
+          $code = $LASTEXITCODE
+          "exit_code=$code" >> $env:GITHUB_OUTPUT
+          exit $code
+      - name: Profile copy core tests
+        id: copy
+        continue-on-error: true
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          cargo test --profile ci -p aurora-viewer --locked session_host::profile_copy::tests:: -- --test-threads=1 2>&1 |
+            Tee-Object -FilePath .scratch/windows-profile-native/copy.log
+          $code = $LASTEXITCODE
+          "exit_code=$code" >> $env:GITHUB_OUTPUT
+          exit $code
+      - name: Record component provenance and actual results
+        id: manifest
+        if: always()
+        env:
+          EXPECTED_COMMIT: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SOURCE_RESULT: ${{ steps.source.outcome }}
+          TOOLCHAIN_RESULT: ${{ steps.toolchain.outcome }}
+          RUST_COMPILER: ${{ steps.toolchain.outputs.compiler }}
+          SETTINGS_RESULT: ${{ steps.settings.outcome }}
+          SETTINGS_EXIT: ${{ steps.settings.outputs.exit_code }}
+          COPY_RESULT: ${{ steps.copy.outcome }}
+          COPY_EXIT: ${{ steps.copy.outputs.exit_code }}
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          $headOk = $LASTEXITCODE -eq 0 -and $actual -eq $env:EXPECTED_COMMIT
+          $dirty = git status --porcelain --untracked-files=no
+          $clean = $LASTEXITCODE -eq 0 -and -not $dirty
+          $blob = (git rev-parse "HEAD:$env:SECURITY_PATH").Trim()
+          $blobOk = $LASTEXITCODE -eq 0 -and $blob -eq $env:SECURITY_BLOB
+          $hash = (Get-FileHash -LiteralPath $env:SECURITY_PATH -Algorithm SHA256).Hash.ToLowerInvariant()
+          $workflowHash = (Get-FileHash -LiteralPath .github/workflows/windows-profile-native.yml -Algorithm SHA256).Hash.ToLowerInvariant()
+          $checks = [ordered]@{}
+          foreach ($entry in @(@('settings', 'session_host::profile::settings_file', $env:SETTINGS_RESULT, $env:SETTINGS_EXIT), @('copy', 'session_host::profile_copy::tests::', $env:COPY_RESULT, $env:COPY_EXIT))) {
+            $log = Join-Path .scratch/windows-profile-native "$($entry[0]).log"
+            $cases = @()
+            if (Test-Path -LiteralPath $log) {
+              $cases = @(Select-String -LiteralPath $log -Pattern '^test (session_host::\S+) \.\.\. ok$' | ForEach-Object { $_.Matches[0].Groups[1].Value })
+            }
+            $checks[$entry[0]] = [ordered]@{ filter = $entry[1]; outcome = $entry[2]; exit_code = $entry[3]; passed_cases = $cases; passed_count = $cases.Count }
+          }
+          $passed = $headOk -and $clean -and $blobOk -and $hash -eq $env:SECURITY_SHA256 -and $env:SOURCE_RESULT -eq 'success' -and $env:TOOLCHAIN_RESULT -eq 'success'
+          foreach ($check in $checks.Values) { $passed = $passed -and $check.outcome -eq 'success' -and $check.exit_code -eq '0' -and $check.passed_count -gt 0 }
+          $manifest = [ordered]@{
+            schema = 1; commit = $actual; expected_commit = $env:EXPECTED_COMMIT; base_commit = $env:BASE_COMMIT
+            source_clean = [bool]$clean; security_path = $env:SECURITY_PATH; security_blob = $blob; expected_security_blob = $env:SECURITY_BLOB
+            security_sha256 = $hash; expected_security_sha256 = $env:SECURITY_SHA256; workflow_sha256 = $workflowHash
+            workflow_run = $env:RUN_URL; compiler = $env:RUST_COMPILER; profile = 'ci'; target = 'x86_64-pc-windows-msvc'
+            source_verification = $env:SOURCE_RESULT; toolchain = $env:TOOLCHAIN_RESULT; checks = $checks; all_checks_passed = [bool]$passed
+            scope = 'Native Windows Profile settings-file and copy-core components on frozen 6ac6fbe1 only; not final integration, UI, human, grid, packaging or product acceptance.'
+          }
+          New-Item -ItemType Directory -Force .scratch/windows-profile-native | Out-Null
+          $manifest | ConvertTo-Json -Depth 8 | Set-Content .scratch/windows-profile-native/component-manifest.json -Encoding utf8NoBOM
+      - name: Upload component diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Foldurora-windows-profile-native-${{ github.sha }}
+          path: .scratch/windows-profile-native/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Require successful component checks
+        if: always()
+        run: |
+          $manifest = Get-Content -LiteralPath .scratch/windows-profile-native/component-manifest.json -Raw | ConvertFrom-Json
+          if ($manifest.all_checks_passed -ne $true) { throw 'Component checks failed or did not run; inspect the actual exit codes and logs.' }
