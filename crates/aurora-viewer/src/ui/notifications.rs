@@ -1153,6 +1153,131 @@ mod tests {
         assert_eq!(text, "Line 1\nLine 2    Tab\nEnd");
     }
 
+    /// Enter edits the original prompt; only its Send button creates the
+    /// captured ScriptDialogReply, in both notification styles. Optional CPU
+    /// images use the supported opaque skin and synthetic prompt data.
+    #[test]
+    fn script_text_box_enter_edits_and_send_uses_the_original_prompt_in_both_styles() {
+        type Capture = (crate::crash::software::Painter, Vec<u32>);
+        let capture_path = std::env::var_os("AURORA_CAPTURE").map(std::path::PathBuf::from);
+        for aurora in [false, true] {
+            let ctx = egui::Context::default();
+            let mut theme = crate::theme::Theme::default();
+            if capture_path.is_some() {
+                theme.panel_alpha = 255;
+            }
+            theme.apply(&ctx, 1.0);
+            let p = theme.palette();
+            let icons = Icons::default();
+            let world = World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+            let sender: std::net::SocketAddr = ([127, 0, 0, 1], 13000).into();
+            let object = Uuid::from_u128(3);
+            let mut list = Notifications::default();
+            let id = list.push(
+                Kind::Script,
+                "Test script",
+                "Enter several lines, then choose Send.",
+                Data::TextBox {
+                    sender,
+                    object,
+                    channel: -42,
+                },
+            );
+            list.list[0].text = "Line 1\nLine 2\nLine 3\nLine 4\nLine 5".into();
+            let mut capture: Option<Capture> = capture_path.as_ref().map(|_| (Default::default(), vec![0; 640 * 480]));
+            let mut time = 0.0;
+            let mut draw = |events, list: &mut Notifications, capture: &mut Option<Capture>| {
+                time += 0.1;
+                let mut answer = None;
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, 480.0))),
+                        time: Some(time),
+                        events,
+                        focused: true,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        ui.set_width(390.0);
+                        answer = card(
+                            ui,
+                            &p,
+                            &icons,
+                            &world,
+                            &HashMap::new(),
+                            &mut HashSet::new(),
+                            &mut list.list[0],
+                            !aurora,
+                            aurora,
+                        );
+                    },
+                );
+                let send = output
+                    .shapes
+                    .iter()
+                    .find_map(|s| match &s.shape {
+                        egui::Shape::Text(t) if t.galley.text() == aurora_i18n::tr!("common-send") => {
+                            Some(t.pos + t.galley.size() * 0.5)
+                        }
+                        _ => None,
+                    })
+                    .expect("Send is visible");
+                if let Some((painter, pixels)) = capture {
+                    assert!((output.pixels_per_point - 1.0).abs() < 0.001);
+                    let primitives = ctx.tessellate(output.shapes.clone(), output.pixels_per_point);
+                    assert!(primitives.iter().all(|p| matches!(p.primitive, egui::epaint::Primitive::Mesh(_))));
+                    painter.paint(pixels, [640, 480], &primitives, &output.textures_delta, output.pixels_per_point, p.panel);
+                }
+                output.textures_delta.clear();
+                (answer, send)
+            };
+            for _ in 0..12 {
+                assert!(draw(vec![], &mut list, &mut capture).0.is_none());
+            }
+            ctx.memory_mut(|m| m.request_focus(egui::Id::unique(("script_text_box", id))));
+            for _ in 0..2 {
+                assert!(draw(vec![], &mut list, &mut capture).0.is_none());
+            }
+            let before = list.list[0].text.matches('\n').count();
+            let key = |pressed| egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            };
+            assert!(draw(vec![key(true)], &mut list, &mut capture).0.is_none());
+            assert_eq!(list.list[0].text.matches('\n').count(), before + 1, "Enter inserts a line");
+            assert!(draw(vec![key(false)], &mut list, &mut capture).0.is_none());
+            let (_, send) = draw(vec![], &mut list, &mut capture);
+            if let (Some(path), Some((_, pixels))) = (&capture_path, &capture) {
+                let stem = path.file_stem().expect("capture stem").to_string_lossy();
+                let style = if aurora { "aurora" } else { "legacy" };
+                let path = path.with_file_name(format!("{stem}-{style}.png"));
+                let rgba: Vec<u8> = pixels
+                    .iter()
+                    .flat_map(|p| [(*p >> 16) as u8, (*p >> 8) as u8, *p as u8, 255])
+                    .collect();
+                image::save_buffer(path, &rgba, 640, 480, image::ColorType::Rgba8).expect("synthetic CPU textbox capture");
+            }
+            let click = |pressed| egui::Event::PointerButton {
+                pos: send,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            assert!(draw(vec![egui::Event::PointerMoved(send)], &mut list, &mut capture).0.is_none());
+            assert!(draw(vec![click(true)], &mut list, &mut capture).0.is_none());
+            assert!(matches!(draw(vec![click(false)], &mut list, &mut capture).0, Some(Response::SendText)));
+            let text = list.list[0].text.clone();
+            let (commands, _) = list.respond(id, Response::SendText, |_| Uuid::nil(), Uuid::nil());
+            assert!(matches!(commands.as_slice(), [aurora_net::NetCommand::ScriptDialogReply {
+                sender: Some(actual), object_id, channel, index: 0, label,
+            }] if *actual == sender && *object_id == object && *channel == -42 && label == &text));
+            assert!(list.list.is_empty(), "the original prompt closes after Send");
+        }
+    }
+
     /// #2832: the llTextBox toast holds still from one frame to the next:
     /// its field, scrolling past three lines, ran a fraction of a point
     /// past the card on some frames, and the toast, anchored to the right,
