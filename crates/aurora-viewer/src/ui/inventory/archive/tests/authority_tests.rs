@@ -26,10 +26,7 @@ impl Late {
     pub(super) fn apply(self, ui: &mut egui::Ui, control: Control) {
         match self {
             Self::None => return,
-            Self::Transform(transform) => {
-                ui.ctx().set_transform_layer(control.layer, transform);
-                return;
-            }
+            Self::Transform(_) | Self::Disable | Self::Hide => return,
             Self::CoverLayer | Self::VisualLayer => {
                 egui::Area::new(egui::Id::unique("archive_authority_late_area"))
                     .order(egui::Order::Foreground)
@@ -71,14 +68,6 @@ impl Late {
                     control.widget,
                     control.registered.sense | egui::Sense::drag(),
                 );
-            }
-            Self::Disable => {
-                child.disable();
-                child.interact(control.registered.rect, control.widget, control.registered.sense);
-            }
-            Self::Hide => {
-                child.set_invisible();
-                child.interact(control.registered.rect, control.widget, control.registered.sense);
             }
             Self::SameLayerCover | Self::VisualCover => {
                 child.interact(
@@ -135,15 +124,7 @@ fn original(frames: &mut Frames, include: bool) -> Control {
             .center();
         frames.pointer(position, egui::PointerButton::Primary, true);
         frames.pointer(position, egui::PointerButton::Primary, false);
-        for _ in 0..3 {
-            frames.run(Vec::new());
-        }
-        frames
-            .state
-            .archive_include_context
-            .activation
-            .control
-            .expect("actual Include control")
+        frames.settled(true)
     } else {
         frames.open_context();
         frames.state.archive_context.activation.control.expect("actual Archive control")

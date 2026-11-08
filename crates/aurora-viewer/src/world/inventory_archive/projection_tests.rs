@@ -4,6 +4,7 @@ use crate::world::inventory_archive::visibility::{CpuTurn, OwnerPolicy, Projecti
 
 fn loaded() -> World {
     let mut world = world();
+    world.rlva.configure(true);
     world.inventory.folders.get_mut(&id(8)).unwrap().library = true;
     for (parent, children) in [(1, vec![2, 4, 5]), (2, vec![3]), (5, vec![6]), (7, vec![8])] {
         world.inventory.folders.get_mut(&id(parent)).unwrap().children = children.into_iter().map(id).collect();
