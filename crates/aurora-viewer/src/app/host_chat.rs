@@ -221,7 +221,9 @@ fn incoming(world: &World, conversation: Conversation, ui_ready: bool) -> Option
     if !policy.ready || !policy.can_read {
         return None;
     }
-    let Conversation::Direct(peer) = conversation else { return None };
+    let (Conversation::Direct(peer) | Conversation::Group(peer)) = conversation else {
+        return None;
+    };
     world.shared_chat_activity(uuid(peer))
 }
 

@@ -91,23 +91,143 @@ fn im(native: &mut CloseNative, peer: Uuid) {
         }));
 }
 fn capture(native: &mut CloseNative, worker: &mut WorkerChat, sequence: u64) -> CloseRequest {
+    capture_for(native, worker, direct(PEER), sequence)
+}
+fn capture_for(native: &mut CloseNative, worker: &mut WorkerChat, conversation: Conversation, sequence: u64) -> CloseRequest {
     let packets = worker.handle(native, &poll(source(1), sequence)).unwrap();
     let row = packets
         .iter()
         .find_map(|packet| match &packet.message {
-            ChatMessage::Event(ChatEvent::ReadBatch(rows)) => rows.iter().find(|row| row.conversation == direct(PEER)),
+            ChatMessage::Event(ChatEvent::ReadBatch(rows)) => rows.iter().find(|row| row.conversation == conversation),
             _ => None,
         })
         .unwrap();
     CloseRequest {
         key: ChatKey {
             source: source(1),
-            conversation: direct(PEER),
+            conversation,
         },
         request: sequence,
         policy_revision: row.policy_revision,
         stream: row.incoming_stream.unwrap(),
     }
+}
+
+fn group_native() -> (CloseNative, Conversation) {
+    let mut native = native();
+    let id = Uuid::from_u128(0x812);
+    let w = &mut native.inner.world;
+    w.groups.groups.push(aurora_net::GroupMembership {
+        id,
+        name: "Synthetic group".into(),
+        insignia: Uuid::nil(),
+        powers: 0,
+        accept_notices: true,
+        list_in_profile: false,
+        contribution: 0,
+    });
+    let mut info = crate::world::groups::SessionInfo::default();
+    info.name = "Synthetic group".into();
+    info.group = true;
+    info.active = true;
+    w.groups.sessions.insert(id, info);
+    w.social.session_mut(id);
+    (native, Conversation::Group(conversation_id(id).unwrap()))
+}
+fn group_im(native: &mut CloseNative, conversation: Conversation) {
+    let Conversation::Group(id) = conversation else {
+        panic!("Group fixture")
+    };
+    native
+        .inner
+        .world
+        .apply(aurora_net::NetEvent::InstantMessage(aurora_net::InstantMessage {
+            from_agent_id: PEER,
+            from_name: "Synthetic resident".into(),
+            to_agent_id: OWNER,
+            dialog: crate::world::groups::dialog::SESSION_SEND,
+            session_id: uuid(id),
+            message: "Synthetic group incoming".into(),
+            offline: false,
+            from_group: false,
+            binary_bucket: Vec::new(),
+            timestamp: 0,
+        }));
+}
+
+#[test]
+fn group_close_actual_worker_fence_is_immutable_and_never_leaves_reads_or_sends() {
+    let (mut native, group) = group_native();
+    let Conversation::Group(id) = group else { unreachable!() };
+    let id = uuid(id);
+    let mut worker = WorkerChat::default();
+    group_im(&mut native, group);
+    let request = capture_for(&mut native, &mut worker, group, 1);
+    group_im(&mut native, group); // Before the original native capture.
+    let now = Instant::now();
+    let original = receipt(worker.handle_received(&mut native, &command(request, 2, false), now, now).unwrap());
+    let CloseReceiptState::Terminal(CloseOutcome::Closed(fence)) = original.result else {
+        panic!("Group fence")
+    };
+    assert_eq!(Some(fence), incoming(&native.inner.world, group, true));
+    let current = native.inner.world.social.ims.iter().find(|session| session.other == id).unwrap();
+    assert_eq!(current.unread, 2, "Close is not Read");
+    assert!(native.inner.world.shared_group_initialized(id));
+    assert!(native.inner.world.groups.out.is_empty() && native.inner.sent.is_empty());
+    assert_eq!(native.inner.world.social.focus_im, None);
+    im(&mut native, PEER); // Another conversation must not update this Group.
+    assert_eq!(incoming(&native.inner.world, group, true), Some(fence));
+    group_im(&mut native, group);
+    assert_eq!(incoming(&native.inner.world, group, true).unwrap().newer_than(fence), Some(true));
+    let later = now + Duration::from_secs(9);
+    assert_eq!(
+        receipt(
+            worker
+                .handle_received(&mut native, &command(request, 3, true), later, later)
+                .unwrap()
+        ),
+        original
+    );
+    assert_eq!(
+        receipt(
+            worker
+                .handle_received(&mut native, &command(request, 4, false), now, later)
+                .unwrap()
+        ),
+        original
+    );
+    assert_eq!(native.captures, 1);
+    assert!(native.inner.world.groups.out.is_empty() && native.inner.sent.is_empty());
+}
+
+#[test]
+fn group_close_empty_native_barrier_and_missing_authority_do_not_guess_activity() {
+    let (mut native, group) = group_native();
+    let mut worker = WorkerChat::default();
+    let request = capture_for(&mut native, &mut worker, group, 1);
+    assert_eq!(incoming(&native.inner.world, group, true), None);
+    assert_eq!(
+        close_native_conversation(&native.inner.world, request, true, &|| true),
+        CloseOutcome::Closed(NativeIncoming {
+            stream: request.stream,
+            serial: 0
+        })
+    );
+    assert_eq!(
+        close_native_conversation(&native.inner.world, request, true, &|| false),
+        CloseOutcome::RejectedNative
+    );
+    assert_eq!(
+        close_native_conversation(&native.inner.world, request, false, &|| true),
+        CloseOutcome::RejectedNative
+    );
+    restrict(&mut native.inner.world, "@recvim=n");
+    assert_eq!(
+        close_native_conversation(&native.inner.world, request, true, &|| true),
+        CloseOutcome::RejectedNative
+    );
+    assert!(native.inner.world.groups.out.is_empty());
+    assert_eq!(native.captures, 0);
 }
 fn command(request: CloseRequest, sequence: u64, query: bool) -> ChatPacket {
     ChatPacket {

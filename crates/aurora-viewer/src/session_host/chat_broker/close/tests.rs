@@ -55,6 +55,53 @@ fn closed(serial: u64) -> CloseReceiptState {
 }
 
 #[test]
+fn group_close_host_pending_and_other_conversations_cannot_replace_original_fence() {
+    let (mut peer, _worker) = connected();
+    let group = Conversation::Group(ConversationId::from_bytes([77; 16]).unwrap());
+    let mut group_row = row(22, 1);
+    group_row.conversation = group;
+    peer.observe(&event(&peer, 1, ChatEvent::ReadBatch(vec![group_row.clone()])))
+        .unwrap();
+    let mut request = request(10);
+    request.key.conversation = group;
+    peer.admit_close(request, Instant::now()).unwrap();
+    assert!(peer.closes.hidden(group));
+    group_row.incoming = Some(NativeIncoming { stream: 22, serial: 2 });
+    peer.observe(&event(&peer, 2, ChatEvent::ReadBatch(vec![group_row.clone()])))
+        .unwrap();
+    assert!(peer.closes.hidden(group), "no guessed fence while pending");
+    ack(&mut peer, 3, request, closed(2)).unwrap();
+    assert!(peer.closes.hidden(group), "the pre-capture arrival stays hidden");
+    observe_row(&mut peer, 4, 22, 100); // Direct with the identical UUID bytes.
+    assert!(peer.closes.hidden(group), "typed identities never alias");
+    group_row.incoming = None;
+    peer.observe(&event(&peer, 5, ChatEvent::ReadBatch(vec![group_row.clone()])))
+        .unwrap();
+    assert!(peer.closes.hidden(group), "recreation/unknown is not zero or newer");
+    group_row.incoming = Some(NativeIncoming { stream: 22, serial: 3 });
+    peer.observe(&event(&peer, 6, ChatEvent::ReadBatch(vec![group_row.clone()])))
+        .unwrap();
+    assert!(!peer.closes.hidden(group));
+    let next = CloseRequest { request: 11, ..request };
+    peer.admit_close(next, Instant::now()).unwrap();
+    ack(&mut peer, 7, request, closed(2)).unwrap();
+    assert_eq!(
+        peer.closes.pending.as_ref().unwrap().request,
+        next,
+        "late receipt cannot retire a newer Group close"
+    );
+    ack(&mut peer, 8, next, closed(3)).unwrap();
+    group_row.incoming = Some(NativeIncoming {
+        stream: 23,
+        serial: u64::MAX,
+    });
+    group_row.incoming_stream = Some(23);
+    peer.observe(&event(&peer, 9, ChatEvent::ReadBatch(vec![group_row]))).unwrap();
+    assert!(peer.closes.hidden(group), "a different incarnation cannot reopen");
+    assert!(peer.read_pending.is_none() && peer.review_pending.is_none());
+}
+
+#[test]
 fn host_close_fence_includes_arrivals_before_ack_and_only_newer_native_incoming_reopens() {
     let (mut peer, _worker) = connected();
     observe_row(&mut peer, 1, 22, 1);

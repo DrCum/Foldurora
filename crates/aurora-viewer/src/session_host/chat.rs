@@ -358,7 +358,10 @@ impl WorkerChat {
                 } else {
                     None
                 },
-                incoming_stream: if matches!(key, Conversation::Direct(_)) && state.policy.ready && state.policy.can_read {
+                incoming_stream: if matches!(key, Conversation::Direct(_) | Conversation::Group(_))
+                    && state.policy.ready
+                    && state.policy.can_read
+                {
                     native.incoming_stream()
                 } else {
                     None

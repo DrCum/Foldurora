@@ -708,6 +708,16 @@
   pending. The earlier first-click observation remains unexplained by native
   frame evidence; no earlier candidate's validation transfers to this change.
 
+- 🔧 Group Close in host (Folderstorm port, 2026-11-08; no issue): separate
+  successor to frozen initialized-Group source `4cfad9363`. Uses actual eligible
+  native Group insertion, original login stream, immutable Close receipts and
+  canonical six-surface draft/Undo retention. Native sessions/unread/outboxes/
+  focus are untouched. Only strictly newer eligible incoming in that Group
+  reopens; Conference, history, own/system, metadata and other chats cannot.
+  Chat V6 rejects old V5 peers; control/native protocols unchanged. Source
+  review, qualified Linux Clippy and all seven focused regressions pass.
+  Combined full-candidate checks follow; no Windows/native acceptance claimed.
+
 - 🔧 Initialized Group Shared Chat (Folderstorm port, 2026-11-08; no issue):
   source work extends the canonical Shared Chat/monitor surfaces with live
   text, literal sending and explicit native Mark read for an existing initialized

@@ -39,15 +39,22 @@ impl World {
     /// Called only by actual conversation insertion, including its first line.
     /// History, cards, own echoes, typing/system callbacks and scans never mint.
     pub(super) fn record_shared_chat_incoming(&mut self, session: Uuid, line: &ChatLine) {
+        // Session type comes from the native owner, never from a host tag. In
+        // particular a conference or uninitialized group cannot fall through
+        // to the resident path. Group activity is ordinary live session text.
+        let readable = if self.is_group_session(&session) {
+            matches!(line.kind, ChatKind::Im) && self.shared_group_readable(session)
+        } else {
+            !self.groups.is_member(&session) && self.shared_chat_direct_readable(session)
+        };
         if self.shared_chat_activity_current().is_none()
             || self.agent_id.is_nil()
             || !self.mutes.is_loaded()
-            || self.is_group_session(&session)
             || line.origin != Origin::Live
             || !matches!(line.kind, ChatKind::Im | ChatKind::ObjectIm)
             || line.source.is_nil()
             || line.source == self.agent_id
-            || !self.shared_chat_direct_readable(session)
+            || !readable
             || !self.rlva_allows_im("recvim", line.source)
             || self.mutes.text_muted(&line.source, &line.from)
         {

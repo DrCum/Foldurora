@@ -22,8 +22,8 @@ pub use close::*;
 #[cfg(test)]
 mod group_tests;
 
-/// V5 admits initialized group read rows; V4 consumers reject those rows.
-pub const VERSION: u16 = 5;
+/// V6 also admits Group Close and native incoming stamps; V5 rejects those.
+pub const VERSION: u16 = 6;
 pub const MAX_PACKET_BYTES: usize = 4096;
 /// One native UDP chat/IM part (`aurora-net::message_split`), in UTF-8 bytes.
 pub const MAX_TEXT_BYTES: usize = 1023;

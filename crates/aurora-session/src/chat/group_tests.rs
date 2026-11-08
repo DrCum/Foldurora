@@ -60,8 +60,10 @@ fn shared_group_codec_bounds_real_read_rows_and_rejects_v4_consumers() {
     let bytes = encode(&packet).unwrap();
     assert!(bytes.len() <= MAX_PACKET_BYTES);
     assert_eq!(decode(&bytes).unwrap(), packet);
-    packet.version = 4;
-    assert_eq!(packet.validate(), Err(ChatError::Version));
+    for old in [4, 5] {
+        packet.version = old;
+        assert_eq!(packet.validate(), Err(ChatError::Version));
+    }
 }
 
 #[test]
@@ -92,7 +94,7 @@ fn shared_group_read_does_not_grant_close_review_or_conference_authority() {
             key,
             request: 1,
             policy_revision: 1,
-            stream: 1
+            stream: 0 // A read observation supplies no native Close stream.
         }
         .validate()
         .is_err()
@@ -107,9 +109,59 @@ fn shared_group_read_does_not_grant_close_review_or_conference_authority() {
 #[test]
 fn shared_group_read_rows_refuse_close_fences_and_unread_without_native_permission() {
     let mut row = row();
-    row.incoming_stream = Some(1);
-    assert_eq!(row.validate(source()), Err(ChatError::Denied));
+    row.incoming_stream = Some(0);
+    assert_eq!(row.validate(source()), Err(ChatError::Sequence));
     row.incoming_stream = None;
     row.can_read = false;
     assert_eq!(row.validate(source()), Err(ChatError::Denied));
+}
+
+#[test]
+fn group_close_codec_bounds_maximum_provenance_and_requires_current_readable_policy() {
+    let source = source();
+    let rows: Vec<_> = (0..MAX_READ_ROWS)
+        .map(|index| {
+            let mut row = row();
+            row.conversation = Conversation::Group(ConversationId::from_bytes([index as u8 + 7; 16]).unwrap());
+            row.title = Label::new(&"\"\\".repeat(64)).unwrap();
+            row.policy_revision = u64::MAX;
+            row.incoming_stream = Some(u64::MAX);
+            row.incoming = Some(NativeIncoming {
+                stream: u64::MAX,
+                serial: u64::MAX,
+            });
+            row
+        })
+        .collect();
+    let packet = ChatPacket {
+        version: VERSION,
+        source,
+        sequence: u64::MAX,
+        reply_to: u64::MAX,
+        message: ChatMessage::Event(ChatEvent::ReadBatch(rows.clone())),
+    };
+    assert_eq!(decode(&encode(&packet).unwrap()).unwrap(), packet);
+    let mut changed = rows[0].clone();
+    changed.incoming_stream = Some(7);
+    assert_eq!(changed.validate(source), Err(ChatError::Binding));
+    let mut changed = rows[0].clone();
+    changed.can_read = false;
+    assert_eq!(changed.validate(source), Err(ChatError::Denied));
+    let mut request = CloseRequest {
+        key: ChatKey {
+            source,
+            conversation: group(),
+        },
+        request: 1,
+        policy_revision: 1,
+        stream: u64::MAX,
+    };
+    request.validate().unwrap();
+    for conversation in [
+        Conversation::Nearby,
+        Conversation::Conference(ConversationId::from_bytes([7; 16]).unwrap()),
+    ] {
+        request.key.conversation = conversation;
+        assert_eq!(request.validate(), Err(ChatError::Invalid));
+    }
 }

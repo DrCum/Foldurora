@@ -1089,7 +1089,7 @@ impl ChatUi {
                     && !self.read_busy
                     && !self.receipt.is_some_and(|receipt| receipt.outcome == SendOutcome::Pending)
                     && policy.can_read
-                    && matches!(policy.key.conversation, Conversation::Direct(_))
+                    && matches!(policy.key.conversation, Conversation::Direct(_) | Conversation::Group(_))
                     && matches!(mode, InputMode::Live | InputMode::Editing)
                     && focused
                     && !focus_changed

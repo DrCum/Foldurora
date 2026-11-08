@@ -47,7 +47,7 @@ impl CloseRequest {
         if self.request == 0 || self.policy_revision == 0 || self.stream == 0 {
             return Err(ChatError::Sequence);
         }
-        if !matches!(self.key.conversation, Conversation::Direct(_)) {
+        if !matches!(self.key.conversation, Conversation::Direct(_) | Conversation::Group(_)) {
             return Err(ChatError::Invalid);
         }
         Ok(())

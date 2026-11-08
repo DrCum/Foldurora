@@ -554,8 +554,12 @@ active/closed state, restoring/snoozed previews, group/sender receive policy,
 moderator text mute and fresh send policy gate every boundary. Literal group
 sends use `IM_SESSION_SEND` through the common App restriction boundary; a
 guarded own echo cannot join, unblock, unsnooze or focus a native conversation.
-V4 peers fail closed rather than misread Group read rows. Conference, Group
-Attention, Close and native Review remain excluded from this slice.
+V4 peers fail closed rather than misread Group read rows. V6 adds Group Close
+and native incoming stamps to the same immutable receipt/fence machinery;
+V5 peers also fail closed. Real eligible Group insertion advances the login-
+owned stream and only that conversation's stamp. Membership-only previews,
+conferences and blocked/nonincoming lines cannot mint or backfill activity.
+Conference, Group Attention and native Review remain subsequent slices.
 
 The Close-in-host producer retains its V4 closed data in `chat/close.rs`.
 `world/shared_chat_activity.rs` mints a checked native stream at actual LoggedIn,

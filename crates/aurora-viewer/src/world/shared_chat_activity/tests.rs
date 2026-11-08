@@ -46,6 +46,137 @@ fn line() -> ChatLine {
         origin: Origin::Live,
     }
 }
+
+fn initialized_group(w: &mut World, group: Uuid) {
+    w.groups.groups.push(aurora_net::GroupMembership {
+        id: group,
+        name: "Synthetic group".into(),
+        insignia: Uuid::nil(),
+        powers: 0,
+        accept_notices: true,
+        list_in_profile: false,
+        contribution: 0,
+    });
+    let mut info = crate::world::groups::SessionInfo::default();
+    info.group = true;
+    info.active = true;
+    w.groups.sessions.insert(group, info);
+    w.session_lines(group);
+}
+
+fn group_im(w: &mut World, group: Uuid) {
+    w.apply(aurora_net::NetEvent::InstantMessage(aurora_net::InstantMessage {
+        from_agent_id: PEER,
+        from_name: "Synthetic resident".into(),
+        to_agent_id: OWNER,
+        dialog: crate::world::groups::dialog::SESSION_SEND,
+        session_id: group,
+        message: "Synthetic group incoming".into(),
+        offline: false,
+        from_group: false,
+        binary_bucket: Vec::new(),
+        timestamp: 0,
+    }));
+}
+
+#[test]
+fn group_close_activity_actual_udp_is_per_conversation_not_a_shared_unread_counter() {
+    let mut w = world();
+    let group = Uuid::from_u128(0x996);
+    let other = Uuid::from_u128(0x997);
+    initialized_group(&mut w, group);
+    initialized_group(&mut w, other);
+    let zero = w.shared_chat_close_fence().unwrap();
+    group_im(&mut w, group);
+    let first = w.shared_chat_activity(group).unwrap();
+    assert_eq!(first.newer_than(zero), Some(true));
+    assert_eq!(w.shared_chat_activity(other), None);
+    group_im(&mut w, other);
+    im(&mut w, PEER, 0);
+    assert_eq!(w.shared_chat_activity(group), Some(first));
+    assert!(w.shared_chat_close_fence().unwrap().serial > first.serial);
+    let latest = w.shared_chat_close_fence();
+    w.own_shared_group_im(group, "Own group echo");
+    for _ in 0..32 {
+        assert_eq!(w.shared_chat_activity(group), Some(first));
+    }
+    assert_eq!(w.shared_chat_close_fence(), latest);
+    group_im(&mut w, group);
+    assert_eq!(w.shared_chat_activity(group).unwrap().newer_than(first), Some(true));
+}
+
+#[test]
+fn group_close_activity_uninitialized_restricted_and_nonincoming_lines_never_mint_or_backfill() {
+    let group = Uuid::from_u128(0x996);
+    for fault in 0..19 {
+        let mut w = world();
+        initialized_group(&mut w, group);
+        let zero = w.shared_chat_close_fence();
+        let mut entry = line();
+        match fault {
+            0 => w.groups.sessions.get_mut(&group).unwrap().group = false, // Conference.
+            1 => w.groups.sessions.get_mut(&group).unwrap().active = false,
+            2 => w.groups.sessions.get_mut(&group).unwrap().closed = true,
+            3 => {
+                w.groups.sessions.remove(&group);
+            } // Membership alone is not Direct.
+            4 => {
+                w.groups.restoring.insert(group);
+            }
+            5 => {
+                assert!(w.snooze_group_chat(group, 60));
+            }
+            6 => w.groups.mute_all_groups = true,
+            7..=10 => {
+                let rule = match fault {
+                    7 => "@recvim=n",
+                    8 => "@recvimfrom:00000000-0000-0000-0000-000000000996=n",
+                    9 => "@recvimfrom:00000000-0000-0000-0000-000000000992=n",
+                    _ => "@shownames=n",
+                };
+                w.rlva.configure(true);
+                w.apply(aurora_net::NetEvent::Chat(aurora_net::ChatMessage {
+                    from_name: "Synthetic controller".into(),
+                    source_id: Uuid::from_u128(0x995),
+                    owner_id: OWNER,
+                    source_type: aurora_net::ChatSourceType::Object,
+                    chat_type: aurora_net::ChatType::OwnerSay,
+                    position: glam::Vec3::ZERO,
+                    message: rule.into(),
+                }));
+            }
+            11 => entry.source = Uuid::nil(),
+            12 => entry.source = OWNER,
+            13 => entry.kind = ChatKind::ObjectIm,
+            14 => entry.origin = Origin::Log,
+            15 => entry.kind = ChatKind::System,
+            16 => entry.kind = ChatKind::OWN,
+            17 => {
+                w.mutes
+                    .add(
+                        crate::world::mutes::Mute {
+                            id: PEER,
+                            name: entry.from.clone(),
+                            kind: crate::world::mutes::MuteType::Agent,
+                            flags: 0,
+                        },
+                        0,
+                    )
+                    .unwrap();
+            }
+            _ => w.mutes.state = crate::world::mutes::LoadState::Initial,
+        }
+        w.conversation_push(group, entry, true);
+        assert_eq!(w.shared_chat_close_fence(), zero, "fault {fault}");
+        assert_eq!(w.shared_chat_activity(group), None, "fault {fault}");
+        if (7..=10).contains(&fault) {
+            w.rlva.configure(false);
+            assert_eq!(w.shared_chat_activity(group), None, "restoration cannot backfill");
+            group_im(&mut w, group);
+            assert_eq!(w.shared_chat_activity(group).unwrap().serial, 1);
+        }
+    }
+}
 fn im(w: &mut World, from: Uuid, dialog: u8) {
     w.apply(aurora_net::NetEvent::InstantMessage(aurora_net::InstantMessage {
         from_agent_id: from,

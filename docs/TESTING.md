@@ -380,6 +380,13 @@ sender restrictions, native read CAS and canonical six-surface drafts. Review
 codec regressions must also pass after any chat envelope version change. These
 synthetic checks do not establish native Windows or grid acceptance.
 
+Group Close follow-up regressions use
+`cargo test --profile ci --workspace --locked group_close_ -- --test-threads=1`.
+They exercise actual native incoming insertion/fences, immutable receipt replay,
+no native leave/read/send, typed conversation isolation and retained Unicode Undo
+across all six surfaces. Keep the earlier Direct Close and Group core cases in
+combined validation; a Group tag or unread count supplies no incoming authority.
+
 The fixture drives the actual chat widgets with egui pointer/text events and
 paints their meshes through the same CPU painter as `SoftwareWindow`. It
 creates fourteen PNGs with matching JSON records and a combined `manifest.json`:

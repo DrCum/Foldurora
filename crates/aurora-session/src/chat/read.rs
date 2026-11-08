@@ -88,7 +88,10 @@ impl ReadStateRow {
             return Err(ChatError::Sequence);
         }
         if self.incoming_stream.is_some()
-            && (!matches!(self.conversation, Conversation::Direct(_)) || !self.lease_current || !self.ready || !self.can_read)
+            && (!matches!(self.conversation, Conversation::Direct(_) | Conversation::Group(_))
+                || !self.lease_current
+                || !self.ready
+                || !self.can_read)
         {
             return Err(ChatError::Denied);
         }
