@@ -88,7 +88,34 @@ impl Frames {
         };
         frames.show(vec![], Late::None);
         frames.show(vec![], Late::None);
+        frames.settle();
         frames
+    }
+    fn settle(&mut self) {
+        // The actual Area move rect can still use the previous size on the
+        // second frame. Settle genuine empty layouts before minting any input;
+        // production geometry and original-press checks remain exact.
+        for _ in 0..8 {
+            let previous = self.model.controls.clone();
+            assert!(self.show(vec![], Late::None).is_none());
+            if !previous.is_empty()
+                && previous.len() == self.model.controls.len()
+                && previous.iter().zip(&self.model.controls).all(|(old, current)| {
+                    old.widget == current.widget
+                        && old.intent == current.intent
+                        && old.rect == current.rect
+                        && old.registered == current.registered
+                        && old.paint_clip == current.paint_clip
+                        && old.transform == current.transform
+                        && old.frame_origin == current.frame_origin
+                        && old.frame == current.frame
+                        && current.committed(&self.ctx)
+                })
+            {
+                return;
+            }
+        }
+        panic!("actual modal/control geometry did not settle within eight empty frames");
     }
     fn show(&mut self, events: Vec<Event>, late: Late) -> Option<Command> {
         self.frame += 1;
@@ -160,7 +187,20 @@ impl Frames {
     }
     fn inspect(&mut self) -> (Selection, u64) {
         let control = self.control(|intent| matches!(intent, Intent::Inspect(_)));
-        let command = self.click(control, Late::None).unwrap();
+        let command = self.click(control, Late::None).unwrap_or_else(|| {
+            let current = self.model.controls.iter().find(|current| current.widget == control.widget);
+            let differences = control.frame.zip(current.and_then(|current| current.frame)).map(|(old, current)| {
+                old.parents.into_iter().zip(current.parents).enumerate().filter(|(_, (old, current))| old != current).collect::<Vec<_>>()
+            });
+            panic!(
+                "Inspect lost original input: original_rect={:?}, current_rect={:?}, original_frame={:?}, current_frame={:?}, parent_differences={differences:?}, controls={}",
+                control.rect,
+                current.map(|current| current.rect),
+                control.frame_origin,
+                current.and_then(|current| current.frame_origin),
+                self.model.controls.len(),
+            )
+        });
         let Command::Inspect(selection) = command else { panic!("Inspect") };
         let (controller, inbox) = copy_fixture::controller(self.snapshot.clone());
         let request = controller.inspect_preferences(selection).unwrap();
@@ -190,6 +230,7 @@ impl Frames {
         });
         self.show(vec![], Late::None);
         self.show(vec![], Late::None);
+        self.settle();
         capture
     }
 }
@@ -828,6 +869,62 @@ fn profile_copy_ui_actual_modal_and_popup_retain_unique_structural_frame_and_rea
         assert_ne!(control.layer, picker.layer, "the source popup has its own actual Frame and Area");
         assert_eq!(control.frame_origin.unwrap().root, control.layer.id);
         assert_ne!(control.frame.unwrap().allocation.id, picker.frame.unwrap().allocation.id);
+    }
+}
+
+#[test]
+fn profile_copy_ui_actual_scroll_body_witnesses_both_frames_and_keeps_every_other_cover_ineligible() {
+    let frames = Frames::new();
+    for control in frames
+        .model
+        .controls
+        .iter()
+        .filter(|control| matches!(control.intent, Intent::Family(_, _) | Intent::Picker(_)))
+    {
+        let origin = control.frame_origin.unwrap();
+        let witness = control.frame.unwrap();
+        assert_eq!(
+            origin.frames().count(),
+            2,
+            "ScrollArea Frame::NONE and outer Modal Frame are both real enclosing Frames"
+        );
+        assert_eq!(1 + witness.outer.iter().flatten().count(), 2);
+        assert!(control.committed(&frames.ctx));
+        for frame in origin.frames() {
+            assert!(
+                witness
+                    .parents
+                    .iter()
+                    .flatten()
+                    .any(|parent| parent.id == frame.content && parent.parent_id == frame.parent)
+            );
+        }
+    }
+    let inspect = frames.control(|intent| matches!(intent, Intent::Inspect(_)));
+    assert_eq!(
+        inspect.frame_origin.unwrap().frames().count(),
+        1,
+        "the footer is outside the ScrollArea"
+    );
+    for late in [
+        Late::StructuralFrameMove,
+        Late::StructuralFrameSense,
+        Late::AmbiguousFrame,
+        Late::SameSizeVisualCover,
+    ] {
+        let mut frames = Frames::new();
+        let original = frames.control(|intent| matches!(intent, Intent::Family(_, _)));
+        let selection = frames.model.selection().unwrap();
+        assert!(frames.click(original, late).is_none());
+        assert_eq!(
+            frames.model.selection(),
+            Some(selection),
+            "a forged/moved frame or visual sibling cannot toggle the selected family"
+        );
+        assert_eq!(frames.model.dialog.as_ref().unwrap().bits, 15);
+        assert!(!original.committed(&frames.ctx));
+        assert!(frames.show(vec![], Late::None).is_none());
+        assert_eq!(frames.model.selection(), Some(selection), "no deferred toggle on a later layout");
     }
 }
 

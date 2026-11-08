@@ -41,6 +41,13 @@ Pinned egui Frame::begin reserves the background paint slot before contents,
 while Frame::end registers its enclosing hover allocation afterwards. Each
 control captures the actual enclosing Frame UiStack marker/configuration and
 at most16 checked parent WidgetRects up to its actual Modal or source Menu Area.
+All enclosing Frames are retained, bounded to8: pinned ScrollArea itself wraps
+its body in Frame::NONE, beneath the outer Modal/Menu Frame. Each is witnessed
+independently, so a genuine inner background cannot hide the outer background
+from the structural proof or exempt another visual sibling. Current and captured
+transforms/rectangles/Frame float data must be finite before equality. CPU fixtures
+wait at most8 empty layouts for actual final control/parent geometry to stabilize
+before input; production original-press geometry checks remain exact.
 After the container completes, the unique sibling allocation must exactly match
 the finalized content rect plus Frame margins/stroke, pinned round_ui geometry,
 parent clipping, layer and hover-only metadata. Its exact ID and parent-chain

@@ -1,5 +1,16 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Selective-copy nested Frame and CPU settling correction (2026-11-08;
+  no issue): Root's actual9c records showed ScrollArea's inner Frame::NONE plus
+  the outer Modal Frame, and a second-frame Area size still changing. Witness
+  all bounded actual enclosing Frames independently; exclude only their exact
+  unique allocations. Validate current/captured float geometry before equality.
+  The headless fixture now waits for bounded empty-layout stability before input,
+  retaining exact production geometry and all21 existing UI test bodies/assertions.
+  One additional nested-Frame/real-cover case is authored UNRUN. Root's17 failing
+  assertion results remain pinned; independent source review and actual rerun
+  are required. No owner, filesystem, native-input or backend policy is changed.
+
 - 🔧 Selective-copy structural Frame correction (2026-11-08; no issue): Root's
   Linux execution exposed pinned egui's enclosing Frame hover allocation as a
   false later cover. Capture the actual Frame UiStack marker/configuration and

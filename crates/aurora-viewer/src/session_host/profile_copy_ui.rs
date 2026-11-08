@@ -15,6 +15,7 @@ mod tests;
 const MAX_CONTROLS: usize = 24;
 const MAX_SOURCES: usize = 5;
 const MAX_CONTROL_PARENTS: usize = 16;
+const MAX_CONTROL_FRAMES: usize = 8;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Command {
@@ -56,34 +57,60 @@ struct FrameOrigin {
     parent: Id,
     root: Id,
     frame: egui::Frame,
+    outer: [Option<FrameSeed>; MAX_CONTROL_FRAMES - 1],
+}
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct FrameSeed {
+    content: Id,
+    parent: Id,
+    frame: egui::Frame,
 }
 impl FrameOrigin {
     fn capture(ui: &egui::Ui, layer: egui::LayerId, popup_source: bool) -> Option<Self> {
-        let mut frame = None;
+        let mut frames = [None; MAX_CONTROL_FRAMES];
+        let mut count = 0;
         for node in ui.stack().iter().take(MAX_CONTROL_PARENTS) {
-            if frame.is_none() && node.kind() == Some(egui::UiKind::Frame) {
-                frame = Some((node.unique_id, node.parent.as_ref()?.unique_id, *node.frame()));
+            if node.kind() == Some(egui::UiKind::Frame) {
+                if count == MAX_CONTROL_FRAMES || !node.frame().stroke.width.is_finite() || node.frame().stroke.width < 0.0 {
+                    return None;
+                }
+                frames[count] = Some(FrameSeed {
+                    content: node.unique_id,
+                    parent: node.parent.as_ref()?.unique_id,
+                    frame: *node.frame(),
+                });
+                count += 1;
             }
             if node.unique_id == layer.id {
                 let expected = if popup_source { egui::UiKind::Menu } else { egui::UiKind::Modal };
                 if node.kind() != Some(expected) {
                     return None;
                 }
-                let (content, parent, frame) = frame?;
+                let FrameSeed { content, parent, frame } = frames[0]?;
                 return Some(Self {
                     content,
                     parent,
                     root: node.unique_id,
                     frame,
+                    outer: std::array::from_fn(|index| frames[index + 1]),
                 });
             }
         }
         None
     }
+    fn frames(self) -> impl Iterator<Item = FrameSeed> {
+        std::iter::once(FrameSeed {
+            content: self.content,
+            parent: self.parent,
+            frame: self.frame,
+        })
+        .chain(self.outer.into_iter().flatten())
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct FrameWitness {
     allocation: egui::WidgetRect,
+    outer: [Option<egui::WidgetRect>; MAX_CONTROL_FRAMES - 1],
     parents: [Option<egui::WidgetRect>; MAX_CONTROL_PARENTS],
 }
 impl FrameWitness {
@@ -98,7 +125,12 @@ impl FrameWitness {
                 return None;
             }
             let parent = *widgets.get(id)?;
-            if parent.layer_id != control.layer || !parent.enabled || !parent.visible || !finite_positive(parent.rect) {
+            if parent.layer_id != control.layer
+                || !parent.enabled
+                || !parent.visible
+                || !finite_positive(parent.rect)
+                || !finite_positive(parent.interact_rect)
+            {
                 return None;
             }
             if id == origin.content {
@@ -117,37 +149,68 @@ impl FrameWitness {
         if !reached_root || !reached_content {
             return None;
         }
-        let content = widgets.get(origin.content)?;
-        let parent = widgets.get(origin.parent)?;
-        // Ui::remember_min_rect registers exactly the finalized min_rect used
-        // by Frame::Prepared::outer_rect; Ui::allocate_rect applies round_ui.
-        let outer = origin.frame.outer_rect(content.rect).round_ui();
-        let interact = outer.intersect(parent.interact_rect);
-        if !finite_positive(outer) || !finite_positive(interact) || !parent.rect.contains_rect(outer) || !outer.contains_rect(control.rect)
-        {
-            return None;
-        }
         let (layer, control_index) = widgets.order(control.widget)?;
         if layer != control.layer {
             return None;
         }
-        // An Area root may itself have the same hover geometry and be its
-        // own parent. It was registered BEFORE the contents, unlike Frame::end.
-        let mut matching = widgets.get_layer(layer).skip(control_index + 1).filter(|widget| {
-            widget.parent_id == origin.parent
-                && widget.layer_id == control.layer
-                && widget.id != origin.content
-                && widget.enabled
-                && widget.visible
-                && widget.sense == egui::Sense::hover()
-                && widget.rect == outer
-                && widget.interact_rect == interact
-        });
-        let allocation = *matching.next()?;
-        if matching.next().is_some() {
-            return None;
+        let mut allocations = [None; MAX_CONTROL_FRAMES];
+        for (index, frame) in origin.frames().enumerate() {
+            if !parents
+                .iter()
+                .flatten()
+                .any(|parent| parent.id == frame.content && parent.parent_id == frame.parent)
+                || !frame.frame.stroke.width.is_finite()
+                || frame.frame.stroke.width < 0.0
+            {
+                return None;
+            }
+            let content = widgets.get(frame.content)?;
+            let parent = widgets.get(frame.parent)?;
+            // ScrollArea itself adds an inner Frame::NONE. Every actual Frame
+            // reserves its paint early and registers its allocation afterwards.
+            // Ui::remember_min_rect stores the same min_rect used here, and
+            // pinned Ui::allocate_rect rounds that outer rect with round_ui.
+            let outer = frame.frame.outer_rect(content.rect).round_ui();
+            let interact = outer.intersect(parent.interact_rect);
+            if !finite_positive(outer)
+                || !finite_positive(interact)
+                || !parent.rect.contains_rect(outer)
+                || !outer.contains_rect(control.rect)
+            {
+                return None;
+            }
+            // A self-parent Area root is early bookkeeping, not Frame::end.
+            let mut matching = widgets.get_layer(layer).skip(control_index + 1).filter(|widget| {
+                widget.parent_id == frame.parent
+                    && widget.layer_id == control.layer
+                    && widget.id != frame.content
+                    && widget.enabled
+                    && widget.visible
+                    && widget.sense == egui::Sense::hover()
+                    && finite_positive(widget.rect)
+                    && finite_positive(widget.interact_rect)
+                    && widget.rect == outer
+                    && widget.interact_rect == interact
+            });
+            let allocation = *matching.next()?;
+            if matching.next().is_some()
+                || allocations[..index]
+                    .iter()
+                    .flatten()
+                    .any(|previous: &egui::WidgetRect| previous.id == allocation.id)
+            {
+                return None;
+            }
+            allocations[index] = Some(allocation);
         }
-        Some(Self { allocation, parents })
+        Some(Self {
+            allocation: allocations[0]?,
+            outer: std::array::from_fn(|index| allocations[index + 1]),
+            parents,
+        })
+    }
+    fn contains(self, id: Id) -> bool {
+        self.allocation.id == id || self.outer.into_iter().flatten().any(|allocation| allocation.id == id)
     }
 }
 fn parents_seen(control: Id, parents: &[Option<egui::WidgetRect>], id: Id) -> bool {
@@ -174,6 +237,11 @@ impl Control {
         // BOTH translations and the inverse before comparing identity: pinned
         // TSTransform::is_valid does not validate translation.y.
         let transform = self.transform.unwrap_or(egui::emath::TSTransform::IDENTITY);
+        let current = ctx.layer_transform_to_global(self.layer);
+        let current_transform = current.unwrap_or(egui::emath::TSTransform::IDENTITY);
+        if !finite_transform(current_transform) || !finite_transform(current_transform.inverse()) {
+            return false;
+        }
         let viewport = ctx.content_rect();
         let Some(rect) = transformed_rect(self.registered.rect, self.transform) else {
             return false;
@@ -189,7 +257,7 @@ impl Control {
             && finite_positive(viewport)
             && finite_positive(visible)
             && visible == self.rect
-            && ctx.layer_transform_to_global(self.layer) == self.transform
+            && current == self.transform
     }
     fn registry(&self, ctx: &egui::Context, committed: bool) -> bool {
         if !self.geometry(ctx) || !ctx.memory(|memory| memory.allows_interaction(self.layer)) {
@@ -205,6 +273,8 @@ impl Control {
                 widget.enabled
                     && widget.visible
                     && widget.sense.senses_click()
+                    && finite_positive(widget.rect)
+                    && finite_positive(widget.interact_rect)
                     && *widget == self.registered
                     && widget.id == self.widget
                     && widget.layer_id == self.layer
@@ -229,9 +299,10 @@ impl Control {
                 return false;
             };
             layer == self.layer
-                && !widgets.get_layer(layer).skip(index + 1).any(|widget| {
-                    widget.id != frame.allocation.id && widget.visible && widget.interact_rect.intersect(self.rect).is_positive()
-                })
+                && !widgets
+                    .get_layer(layer)
+                    .skip(index + 1)
+                    .any(|widget| !frame.contains(widget.id) && widget.visible && widget.interact_rect.intersect(self.rect).is_positive())
         });
         if !unoccluded {
             return false;
