@@ -1,0 +1,84 @@
+name: Isolated media backlog checks
+on:
+  push:
+    branches: [checks/upstream-media-backlog-20261108]
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+concurrency:
+  group: isolated-media-backlog-checks
+  cancel-in-progress: true
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+  CARGO_BUILD_JOBS: '2'
+  SOURCE_SHA: 475df44eee0525696151840ecf063540555a8bf1
+jobs:
+  media:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout pinned public port source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 475df44eee0525696151840ecf063540555a8bf1
+          fetch-depth: 0
+          filter: blob:none
+      - name: Source and runner
+        run: |
+          mkdir -p .scratch/validation
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git rev-parse HEAD | tee .scratch/validation/source.txt
+          echo "$GITHUB_SHA" > .scratch/validation/workflow.txt
+          rustc --version | tee .scratch/validation/rust.txt
+          cargo --version | tee .scratch/validation/cargo.txt
+          df -h .
+          rustup component add rustfmt clippy
+      - name: Restore compatible repository Linux CI cache
+        uses: ./.github/actions/rust-cache
+        with:
+          name: linux-tests
+      - name: Formatting
+        run: |
+          cargo fmt --all -- --check 2>&1 | tee .scratch/validation/fmt.log
+      - name: Affected library Clippy
+        run: |
+          cargo clippy --profile ci --locked -p aurora-media -p aurora-llsd --all-targets -- -D warnings -A dead-code 2>&1 | tee .scratch/validation/clippy.log
+      - name: Media and LLSD regressions
+        run: |
+          cargo test --profile ci --locked -p aurora-media -p aurora-llsd -- --nocapture 2>&1 | tee .scratch/validation/media-llsd.log
+      - name: Verify all seven new backlog regressions executed
+        run: |
+          python3 - <<'PYCODE'
+          import pathlib,re
+          log=pathlib.Path('.scratch/validation/media-llsd.log').read_text()
+          log=re.sub(r'\x1b\[[0-9;]*m','',log)
+          expected=[
+            'many_messages_in_one_read_come_out_in_order',
+            'a_message_split_across_reads_is_handed_out_once_complete',
+            'a_huge_backlog_is_read_within_the_budget_of_each_frame_and_nothing_is_lost',
+            'a_closed_connection_still_delivers_what_was_read',
+            'a_flooding_plugin_is_read_a_budget_per_idle_in_order_and_stays_alive',
+            'a_plugin_disconnect_delivers_queued_messages_before_closing_or_returning_an_error',
+            'interrupted_reads_and_a_later_error_preserve_complete_messages_and_the_partial_tail',
+          ]
+          for name in expected:
+            assert '::'+name+' ... ok' in log,name
+          print('All seven new backlog regressions executed and passed.')
+          PYCODE
+      - name: Verify source remained frozen
+        if: always()
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git diff --exit-code
+      - name: Upload raw scoped checks
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: media-backlog-475df44eee05
+          path: .scratch/validation/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
