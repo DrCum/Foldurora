@@ -215,6 +215,11 @@ fn collada_duplicate_controllers_ignore_formatting_but_reject_changed_attributes
         repeated
             .replacen("id=\"a-skin\" name=\"shared\"", "name=\"shared\" id=\"a-skin\"", 1)
             .replacen(">mPelvis<", ">\n mPelvis\t <", 1)
+            .replacen(
+                "<float_array count=\"1\">1</float_array>",
+                "<float_array count=\"1\">\n 1\t </float_array>",
+                1
+            )
     );
     collada::parse(formatted.as_bytes(), &skeleton).expect("equivalent XML attribute order and whitespace");
 
@@ -225,6 +230,29 @@ fn collada_duplicate_controllers_ignore_formatting_but_reject_changed_attributes
             .to_string()
             .contains("duplicate Collada ID for non-equivalent elements: a-skin")
     );
+}
+
+#[test]
+fn collada_duplicate_image_ids_preserve_meaningful_uri_whitespace() {
+    let document = collada_objects(r##"<node><instance_geometry url="#a"/></node>"##, false, false, false);
+    for (other, equivalent) in [("cloth one.png", true), ("cloth  one.png", false)] {
+        let images = format!(
+            r#"<library_images><image id="shared-image"><init_from>cloth one.png</init_from></image><image id="shared-image"><init_from>{other}</init_from></image></library_images><library_geometries>"#
+        );
+        let scene = document.replacen("<library_geometries>", &images, 1);
+        let parsed = collada::parse(scene.as_bytes(), &crate::Skeleton::default());
+        if equivalent {
+            parsed.expect("identical image definitions remain valid duplicates");
+        } else {
+            let error = parsed.expect_err("distinct filenames cannot share a duplicate image ID");
+            assert!(
+                error
+                    .to_string()
+                    .contains("duplicate Collada ID for non-equivalent elements: shared-image"),
+                "unexpected error: {error}"
+            );
+        }
+    }
 }
 
 fn cube() -> Model {

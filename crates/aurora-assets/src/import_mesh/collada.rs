@@ -80,10 +80,33 @@ fn equivalent(a: &Element, b: &Element) -> bool {
         return false;
     }
 
-    // Treat formatting whitespace as insignificant.
+    // Only parsed token lists can collapse internal whitespace. In particular,
+    // init_from is a URI: two spaces in a filename do not name the same image.
     let a_text = a.text();
     let b_text = b.text();
-    if !a_text.split_whitespace().eq(b_text.split_whitespace()) {
+    let token_list = matches!(
+        tag(a),
+        "float_array"
+            | "Name_array"
+            | "IDREF_array"
+            | "p"
+            | "v"
+            | "vcount"
+            | "color"
+            | "matrix"
+            | "translate"
+            | "rotate"
+            | "scale"
+            | "bind_shape_matrix"
+    );
+    let indentation =
+        a.elements().next().is_some() && b.elements().next().is_some() && a_text.trim().is_empty() && b_text.trim().is_empty();
+    let same_text = if token_list {
+        a_text.split_whitespace().eq(b_text.split_whitespace())
+    } else {
+        indentation || a_text == b_text
+    };
+    if !same_text {
         return false;
     }
 
