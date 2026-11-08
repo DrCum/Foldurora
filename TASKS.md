@@ -708,6 +708,18 @@
   pending. The earlier first-click observation remains unexplained by native
   frame evidence; no earlier candidate's validation transfers to this change.
 
+- 🔧 Conference roster prerequisite (2026-11-08; Folderstorm port, no issue):
+  immutable native batch parsing retains full-base versus ordered-delta
+  provenance without changing the existing presentation vector. Explicit empty
+  differs from missing; malformed/alias/permission/over-budget input cannot
+  supply a completeness witness. Limits are local authority-resource limits,
+  not claimed protocol participant limits. Seven focused workspace-lib cases
+  pass and independent source review found no concrete issue. No native-event/
+  lifecycle consumer or Conference host enablement yet. Remaining prerequisites:
+  original-request/session binding, bounded retained pending updates, baseline
+  plus delta application, closure/reset/remap retirement, and roster/incarnation
+  in the native policy stamp before all-participant sends are supported.
+
 - 🔧 Initial native session moderator text mute (2026-11-08; Folderstorm port
   follow-up, no issue): initialization through SessionStarted or accepted
   invitation now folds the account's explicit text mute before exposing its

@@ -571,6 +571,14 @@ metadata cannot clear an existing mute. Only explicit Boolean metadata changes
 it, and actual update notices preserve final-state change semantics. This does
 not establish complete Conference roster or asynchronous reply authority.
 Conference remains excluded pending participant-authority work.
+`aurora-net/social/agent_batch.rs` supplies an immutable parser prerequisite:
+private provenance distinguishes validated full bases (including empty) from
+ordered deltas, missing input and invalid data. The legacy presentation vector
+is preserved even when authority validation refuses the batch. Caller-supplied
+entry budgets invalidate, never truncate, the whole witness. No arbitrary Vec
+or parser validity alone proves a live session or complete current membership.
+Native event/lifecycle and correlated-reply integration remain required; this
+prerequisite does not enable Conference host actions.
 
 The Close-in-host producer retains its V4 closed data in `chat/close.rs`.
 `world/shared_chat_activity.rs` mints a checked native stream at actual LoggedIn,

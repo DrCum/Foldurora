@@ -6,6 +6,9 @@
 use aurora_llsd::Llsd;
 use uuid::Uuid;
 
+mod agent_batch;
+pub use agent_batch::{SessionAgentBatch, parse_session_agent_batch};
+
 /// A group the agent belongs to (AgentGroupDataUpdate, LLGroupData).
 #[derive(Debug, Clone, PartialEq)]
 pub struct GroupMembership {
