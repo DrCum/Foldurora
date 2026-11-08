@@ -9,6 +9,11 @@ nonblocking OS lock plus revision/content comparison. Source/model/item/previous
 assignment tickets, one pending save and canceled owner publication keep stale
 editors from retargeting. All three Favorites layouts share the first-member
 projection and original landmark actions; no remote Inventory operation is added.
+Native member contexts independently retain the original Favorite, model
+allocations, account/session and Inventory source even without a name-edit
+ticket. A reused row, changed source or fully clipped owner retires the entire
+context. Teleport, map, edit and clipboard requests repeat the current source
+and real landmark checks in App dispatch before their existing native effects.
 Two process-wide Favorite-name worker slots are acquired before channels/spawn
 and held until the actual worker exits, including canceled OS IO/mutex waits.
 Replacing a source immediately clears its model; a busy replacement stays empty

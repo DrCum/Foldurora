@@ -16,7 +16,7 @@ use crate::theme::Palette;
 use crate::ui::icons::Icons;
 use crate::ui::menu;
 use crate::ui::places::drag::{self, PlaceDrag as Dragged};
-use crate::world::favorites::{GroupEditTicket, GroupStatus};
+use crate::world::favorites::{ContextSource, GroupEditTicket, GroupStatus};
 use egui::{Color32, FontId, Id, Pos2, Rect, Sense, Vec2};
 use glam::DVec3;
 use uuid::Uuid;
@@ -24,6 +24,7 @@ use uuid::Uuid;
 /// One favourite as the bars show it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Favorite {
+    pub source: Option<ContextSource>,
     pub item: Uuid,
     pub asset: Uuid,
     pub name: String,
@@ -58,6 +59,13 @@ pub struct View {
 /// What a click in the favourites asks for.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FavAction {
+    /// A context command retains its exact source through App dispatch.
+    Context {
+        source: ContextSource,
+        item: Uuid,
+        asset: Uuid,
+        command: ContextCommand,
+    },
     /// LLFavoritesBarCtrl::onButtonClick: teleport through the landmark.
     Teleport(Uuid),
     ShowOnMap(DVec3),
@@ -75,6 +83,23 @@ pub enum FavAction {
     OpenPlaces,
     Access(FavoritesAccess),
     Fold(bool),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ContextCommand {
+    Teleport,
+    ShowOnMap(DVec3),
+    Edit,
+    CopySlurl(String),
+}
+
+fn context_command(favorite: &Favorite, command: ContextCommand) -> Option<FavAction> {
+    Some(FavAction::Context {
+        source: favorite.source.clone()?,
+        item: favorite.item,
+        asset: favorite.asset,
+        command,
+    })
 }
 
 impl From<FavAction> for BarAction {
@@ -179,6 +204,8 @@ fn grouped_entries<'a>(view: &'a View, filter: &str) -> Vec<Entry<'a>> {
 #[derive(Clone)]
 struct GroupEditor {
     owner: Id,
+    layer: egui::LayerId,
+    favorite: Favorite,
     pos: Pos2,
     open: bool,
     shown_frame: u64,
@@ -342,9 +369,49 @@ fn fav_menu(parent: &egui::Ui, resp: &egui::Response, p: &Palette, fav: &Favorit
         resp.ctx.data_mut(|data| data.remove::<GroupEditor>(editor_id));
         editor = None; // A closed/filtered owner cannot revive a hidden editor.
     }
+    if parent.is_sizing_pass() {
+        return; // Measurement is neither visibility nor a context lifetime renewal.
+    }
+    // ScrollArea visits fully clipped rows as well. Only the actual visible,
+    // enabled owner can retain a context; response IDs alone are positional.
+    let viewport = resp.ctx.content_rect();
+    let visible = resp
+        .rect
+        .intersect(resp.interact_rect)
+        .intersect(parent.clip_rect())
+        .intersect(viewport);
+    let relevant = parent.is_visible()
+        && parent.is_enabled()
+        && resp.enabled()
+        && resp.layer_id == parent.layer_id()
+        && resp.rect.is_finite()
+        && resp.interact_rect.is_finite()
+        && parent.clip_rect().is_finite()
+        && viewport.is_finite()
+        && visible.is_finite()
+        && visible.width() > 0.0
+        && visible.height() > 0.0;
+    if editor.as_ref().is_some_and(|editor| {
+        editor.owner == resp.id
+            && (!relevant
+                || editor.layer != resp.layer_id
+                || editor.favorite.item != fav.item
+                || editor.favorite.asset != fav.asset
+                || editor.favorite.source.is_none()
+                || editor.favorite.source != fav.source)
+    }) {
+        resp.ctx.data_mut(|data| data.remove::<GroupEditor>(editor_id));
+        egui::Popup::close_all(&resp.ctx);
+        return;
+    }
+    if !relevant || fav.source.is_none() {
+        return;
+    }
     if resp.secondary_clicked() {
         editor = Some(GroupEditor {
             owner: resp.id,
+            layer: resp.layer_id,
+            favorite: fav.clone(),
             pos: resp.interact_pointer_pos().unwrap_or(resp.rect.center()),
             open: true,
             shown_frame: frame,
@@ -357,6 +424,7 @@ fn fav_menu(parent: &egui::Ui, resp: &egui::Response, p: &Palette, fav: &Favorit
         return;
     };
     editor.shown_frame = frame;
+    let captured = editor.favorite.clone();
     let mut open = true;
     // A viewport has one memory-owned popup. Opening a standard context menu
     // here would replace the Favorites dropdown and destroy this row next
@@ -364,21 +432,26 @@ fn fav_menu(parent: &egui::Ui, resp: &egui::Response, p: &Palette, fav: &Favorit
     menu::choice_panel(parent, p, resp.id.with("favorite_member_context"), editor.pos, &mut open, |ui| {
         group_editor(ui, p, fav, resp.id, &mut editor, out);
         if menu::item(ui, p, "location-filled", aurora_i18n::tr!("common-teleport-3")) {
-            *out = Some(FavAction::Teleport(fav.asset));
+            *out = context_command(&captured, ContextCommand::Teleport);
         }
-        if menu::item_if(ui, p, "map", aurora_i18n::tr!("common-show-on-map"), fav.global.is_some())
-            && let Some(g) = fav.global
+        if menu::item_if(ui, p, "map", aurora_i18n::tr!("common-show-on-map"), captured.global.is_some())
+            && let Some(g) = captured.global
         {
-            *out = Some(FavAction::ShowOnMap(g));
+            *out = context_command(&captured, ContextCommand::ShowOnMap(g));
         }
         if menu::item(ui, p, "info-circle-filled", aurora_i18n::tr!("favorites-view-edit")) {
-            *out = Some(FavAction::Edit(fav.item));
+            *out = context_command(&captured, ContextCommand::Edit);
         }
         menu::todo(ui, p, "map-pin-filled", aurora_i18n::tr!("ui-places-move-to-landmarks"));
-        if menu::item_if(ui, p, "link-filled", aurora_i18n::tr!("common-copy-slurl"), fav.slurl.is_some())
-            && let Some(s) = &fav.slurl
+        if menu::item_if(
+            ui,
+            p,
+            "link-filled",
+            aurora_i18n::tr!("common-copy-slurl"),
+            captured.slurl.is_some(),
+        ) && let Some(s) = &captured.slurl
         {
-            ui.ctx().copy_text(s.clone());
+            *out = context_command(&captured, ContextCommand::CopySlurl(s.clone()));
         }
         menu::separator(ui, p);
         menu::todo(ui, p, "pencil-filled", aurora_i18n::tr!("common-rename"));
@@ -1302,6 +1375,7 @@ mod tests {
     #[test]
     fn the_filter_matches_names_and_regions() {
         let fav = |name: &str, region: &str| Favorite {
+            source: None,
             item: Uuid::new_v4(),
             asset: Uuid::nil(),
             name: name.into(),

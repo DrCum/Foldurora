@@ -71,6 +71,7 @@ fn place_portal_drags_start_from_every_favorites_and_places_view_and_leave_reord
         let access = [FavoritesAccess::Menu, FavoritesAccess::Row, FavoritesAccess::Dock][mode % 3];
         let view = favorites::View {
             list: vec![favorites::Favorite {
+                source: Some(world.favorites.context_source(world.agent_id, Uuid::nil(), &world.inventory)),
                 item: favorite,
                 asset: favorite,
                 name: "Portal favorite".into(),

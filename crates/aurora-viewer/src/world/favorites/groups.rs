@@ -237,7 +237,7 @@ fn read_assignments<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result
 /// Follow only this account's actual Inventory ancestry; never a row label or
 /// a cached rank. Bounded against malformed cycles, without an O(n) list scan
 /// for every view ticket.
-fn current_favorite(inventory: &Inventory, item: Uuid) -> bool {
+pub(super) fn current_favorite(inventory: &Inventory, item: Uuid) -> bool {
     let Some(item) = inventory
         .items
         .get(&item)
