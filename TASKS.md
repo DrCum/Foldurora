@@ -11,6 +11,10 @@
   owners, and validates native commands again at App dispatch. Four additional
   regressions cover ticket-free commands, held clicks across reorder/source
   replacement, real scrolling and final dispatch checks; authored and unrun.
+  A separate privacy follow-up shares Places' `showloc` SLURL availability and
+  repeats the current restriction before clipboard effects. One additional
+  actual-egui regression captures a URL before a real RLVa restriction change
+  and checks denied copying plus normal allowed flow; authored and unrun.
   first-member folders share the original ordered landmarks across menu, row and
   grid. Separate bounded account/profile/grid metadata uses original submitted
   login provenance, exact stale-editor checks, IO-only atomic publication and a

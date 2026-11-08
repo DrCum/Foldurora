@@ -236,7 +236,7 @@ pub fn history_sections(items: &[HistoryItem], filter: &str, now: f64) -> Vec<(u
 
 /// The region of a SLURL for a global position: the map's, else the region
 /// part of a history title ("Parcel, Region").
-fn slurl_at(world: &World, global: DVec3, title: &str) -> Option<String> {
+pub(crate) fn slurl_at(world: &World, global: DVec3, title: &str) -> Option<String> {
     if world.rlva.has("showloc") {
         return None;
     }
