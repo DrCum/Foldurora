@@ -10,6 +10,9 @@ use aurora_session::{
 use egui::{Event, Modifiers, PointerButton, Pos2, RawInput, Rect};
 use std::sync::Arc;
 
+#[path = "tests/conference_visual.rs"]
+mod conference_visual;
+
 pub(super) fn source(worker: u8) -> ChatSource {
     ChatSource {
         worker: WorkerIdentity {

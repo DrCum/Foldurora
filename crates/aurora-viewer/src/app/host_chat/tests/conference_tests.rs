@@ -117,7 +117,10 @@ fn shared_conference_native_allowed_membership_changes_invalidate_captured_send_
     let revision = first
         .iter()
         .find_map(|packet| match &packet.message {
-            ChatMessage::Event(ChatEvent::Conversation(info)) if info.policy.key.conversation == conference() => Some(info.policy.revision),
+            ChatMessage::Event(ChatEvent::ReadBatch(rows)) => rows
+                .iter()
+                .find(|row| row.conversation == conference())
+                .map(|row| row.policy_revision),
             _ => None,
         })
         .unwrap();
@@ -323,7 +326,10 @@ fn shared_conference_native_sender_suspend_and_absent_leave_cannot_reuse_cached_
     let revision = first
         .iter()
         .find_map(|packet| match &packet.message {
-            ChatMessage::Event(ChatEvent::Conversation(info)) if info.policy.key.conversation == conference() => Some(info.policy.revision),
+            ChatMessage::Event(ChatEvent::ReadBatch(rows)) => rows
+                .iter()
+                .find(|row| row.conversation == conference())
+                .map(|row| row.policy_revision),
             _ => None,
         })
         .unwrap();

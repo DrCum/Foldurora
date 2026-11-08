@@ -954,6 +954,7 @@ impl World {
 
     /// IM_SESSION_SEND / IM_SESSION_INVITE over UDP (llimprocessing.cpp).
     /// True when the message belonged to a session.
+    #[cfg(test)]
     pub(super) fn on_session_im(&mut self, im: &aurora_net::InstantMessage) -> bool {
         if matches!(im.dialog, dialog::SESSION_SEND | dialog::SESSION_INVITE) && !im.offline {
             self.observe_session_sender(im.session_id, im.from_agent_id);
