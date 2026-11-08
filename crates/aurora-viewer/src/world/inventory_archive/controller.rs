@@ -162,10 +162,10 @@ impl Controller {
         if let Mode::MemoryOnly(scope) = &mut self.mode {
             scope.retire();
         }
-        if let Some(model) = &mut self.model {
-            if model.status() != Status::Retired {
-                model.retire();
-            }
+        if let Some(model) = &mut self.model
+            && model.status() != Status::Retired
+        {
+            model.retire();
         }
         self.worker = None;
         self.pending = None;
@@ -234,17 +234,17 @@ impl Controller {
                 }
             }
         }
-        if self.pending.is_none() {
-            if let Some(ticket) = self.model.as_ref().and_then(Model::load_ticket) {
-                self.pending = Some(Pending::Load(ticket));
-                if self
-                    .worker
-                    .as_ref()
-                    .is_none_or(|worker| worker.submit(Request::Load(ticket)).is_err())
-                {
-                    self.transport_failed();
-                    return;
-                }
+        if self.pending.is_none()
+            && let Some(ticket) = self.model.as_ref().and_then(Model::load_ticket)
+        {
+            self.pending = Some(Pending::Load(ticket));
+            if self
+                .worker
+                .as_ref()
+                .is_none_or(|worker| worker.submit(Request::Load(ticket)).is_err())
+            {
+                self.transport_failed();
+                return;
             }
         }
         let Some(worker) = &self.worker else { return };
@@ -268,13 +268,13 @@ impl Controller {
                     self.pending = None;
                 }
             }
-            store::Reply::Saved { intent, result } if self.pending.as_ref() == Some(&Pending::Save(intent.clone())) => {
-                if model.complete_save(&intent, result.is_ok()) {
-                    if let Ok(original) = result {
-                        self.original = Some(original);
-                    }
-                    self.pending = None;
+            store::Reply::Saved { intent, result }
+                if self.pending.as_ref() == Some(&Pending::Save(intent.clone())) && model.complete_save(&intent, result.is_ok()) =>
+            {
+                if let Ok(original) = result {
+                    self.original = Some(original);
                 }
+                self.pending = None;
             }
             _ => {} // Old source/instance/intent cannot clear current pending state.
         }

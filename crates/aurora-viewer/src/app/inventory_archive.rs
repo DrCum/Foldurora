@@ -101,7 +101,6 @@ impl App {
         let gate = State::ordinary(instance, read.as_ref(), self.world.inventory_archive_instance);
         let include = proposal.include_desired(read.as_ref(), gate);
         let current = proposal.current_gate(gate);
-        drop(read);
         if let Some(desired) = include {
             state.assign_include(&self.world, desired);
             self.egui_ctx.request_repaint();

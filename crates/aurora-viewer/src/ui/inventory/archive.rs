@@ -249,7 +249,6 @@ pub(super) fn preflight(ctx: &egui::Context, world: &World, st: &mut InventoryUi
     };
     prune(ctx, st, gate);
     summarize(st, &world.inventory, gate);
-    drop(read);
     st.archive = Some(state);
 }
 
@@ -534,7 +533,6 @@ pub(super) fn owner(
         binding: read.as_ref().and_then(VisibilityRead::binding),
         exempt: !demands.ordinary,
     };
-    drop(read);
     (owner, source)
 }
 
