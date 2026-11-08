@@ -337,6 +337,7 @@ struct Frames {
     classic: bool,
     covered: Option<egui::Pos2>,
     late: authority_tests::Late,
+    cover_original: Option<Control>,
 }
 impl Frames {
     fn new() -> Self {
@@ -355,6 +356,7 @@ impl Frames {
             classic,
             covered: None,
             late: authority_tests::Late::None,
+            cover_original: None,
         }
     }
     fn run(&mut self, events: Vec<egui::Event>) -> Vec<crate::ui::widgets::elide_tests::Text> {
@@ -369,6 +371,7 @@ impl Frames {
             classic,
             covered,
             late,
+            cover_original,
         } = self;
         frames.run(events, |ui| {
             let actions = crate::ui::inventory::show(
@@ -401,6 +404,9 @@ impl Frames {
                 if let Some(control) = control {
                     late.apply(ui, control);
                 }
+            }
+            if let Some(control) = *cover_original {
+                authority_tests::Late::VisualCover.apply(ui, control);
             }
             if let Some(position) = *covered {
                 egui::Area::new(egui::Id::unique("archive_later_cover"))

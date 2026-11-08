@@ -893,7 +893,7 @@ impl Activation {
                             self.gesture = self
                                 .previous
                                 .filter(|previous| {
-                                    previous.registry(ui.ctx(), true)
+                                    previous.committed(ui.ctx())
                                         && previous.rect.contains(pos)
                                         && previous.same_widget(control)
                                         && ui.ctx().layer_id_at(pos) == Some(previous.layer)
@@ -917,7 +917,7 @@ impl Activation {
                                 .previous
                                 .filter(|previous| {
                                     input.key_allowed(key)
-                                        && previous.registry(ui.ctx(), true)
+                                        && previous.committed(ui.ctx())
                                         && previous.same_widget(control)
                                         && focused == Some(previous.widget)
                                 })
@@ -941,7 +941,7 @@ impl Activation {
         if self.released.is_none()
             && self.gesture.is_none()
             && let Some(previous) = self.previous.filter(|previous| {
-                previous.registry(ui.ctx(), true)
+                previous.committed(ui.ctx())
                     && previous.same_widget(control)
                     && ui.ctx().memory(|memory| memory.focused()) == Some(previous.widget)
             })
