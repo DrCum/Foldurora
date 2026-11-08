@@ -1,5 +1,33 @@
 # Aurora Viewer — task tracking
 
+- 🟡 Foldurora bounded imports/music catch-up (human request, 2026-11-08;
+  no fork issue; [PR #13](https://github.com/DrCum/Foldurora/pull/13);
+  base `388b299c`, upstream snapshot `45d6d5fc`): import local
+  texture watching `89d2223a`, equivalent COLLADA IDs `9fa79484`, parcel music
+  buffering `24fe0e77` and folder-upload order `6e326177` separately with `-x`.
+  Production patches match upstream; only TASKS conflicts were reconciled,
+  preserving existing fork work. Refreshed refs/open PRs showed no duplicate
+  or shared production edit with monitor `072bef3a`, Shared Chat, Attention,
+  host or current WIP branches. PRs #11 and #12 remain separate and unchanged.
+  Fork regressions additionally cover XML formatting/conflicting attributes,
+  initial music prebuffer and stable source indices through folder collapse.
+  Tested source `5fe69e5c` passed formatting, workspace Clippy with the existing
+  Linux dead-code allowance and 135 focused checks, including an inspected
+  synthetic CPU capture of the actual folder panel. Final-head CI is recorded
+  in the PR. Two optional external-fixture probes remain unrun. Imported
+  validation notes below describe historical upstream results, not new Foldurora
+  acceptance. Shared TASKS conflicts with PRs #11/#12 and monitor need Dev Agent
+  reconciliation; no shared app dispatch or localization is changed. Slick was
+  unavailable; no message was delivered.
+  - ⬜ Human native/grid checks: equivalent/conflicting rigs, local texture and
+    PBR-map refresh on existing faces, music start/stall/resume/stop/mute, folder
+    upload order/collapse/selection. The CPU panel image is not native/Vulkan
+    or grid acceptance; both editor layouts retain their existing guard paths.
+
+- ✅ Folder upload queue and destination preview follow Explorer order ([PR #2160](https://github.com/Aurora-Viewer/Aurora-Viewer/pull/2160); task `bulk-folder-upload-order`, 2026-11-08): virtual destination folders use case-insensitive natural order, with child folders before direct files; real inventory ancestry retains the picker’s rank order. `preview_keeps_inventory_sort_and_naturally_sorts_virtual_folders_before_files` covers `Textures` ranked before `Objects`, nested `Set2` / `Set10` destinations and loose files. Focused test passes. Full checks pass PowerShell parsing, formatting and Clippy; workspace tests: 6,605 passed, 1 unrelated host-layout failure, 15 ignored. Human visually checked the preview in demo on 2026-11-08; folder upload order was earlier checked in-world on 2026-11-03.
+
+- ✅ COLLADA upload accepts equivalent duplicate IDs ([#2105](https://github.com/Aurora-Viewer/Aurora-Viewer/issues/2105); task `collada-controller-ids`; [PR #2106](https://github.com/Aurora-Viewer/Aurora-Viewer/pull/2106)): some exporters (Blender's, with several rigged meshes on one armature) repeat the same element and its ID. A duplicate ID is accepted when both elements are equivalent (same name, attributes in any order, text without formatting whitespace, children); references resolve to the first one. Conflicting definitions still fail, with an error naming the ID (cut to 64 characters). Regression: `collada_duplicate_controller_ids_require_equivalent_definitions`. Validated by the contributor on the grid on 2026-11-03: rigged meshes sharing one armature upload; meshes with different armatures under the same ID are still refused.
+
 - 🔧 Selective upstream catch-up (human request, 2026-11-07; no issue): apply
   sixteen reviewed upstream commits individually with `-x` to frozen photo/
   branding base `f5ae21d5`, from upstream snapshot `576dd54a`. Production
@@ -494,6 +522,8 @@
 
 - ✅ Applied local appearances ([#1375](https://github.com/Aurora-Viewer/Aurora-Viewer/issues/1375), [PR #1642](https://github.com/Aurora-Viewer/Aurora-Viewer/pull/1642); task `local-previews-1375`, 2026-10-30): persistent scene warning with source counts, a direct on/off highlight button and confirmed account/grid-wide removal of texture/material applications, including absent objects. Keep the local library, files and mesh previews; retire picker rollback copies so Cancel cannot restore removed bindings. Reuse face coverage for pulsing surfaces, with a steady reduced-motion highlight. English, French and Japanese labels. Existing source/settings/face persistence is exercised across offline restarts. Texture/material applications expire seven days after application without region tracking or existence queries; reconnects, autosaves and source reloads do not renew them. Legacy bindings receive seven days on first migration. Expiration preserves local files/library/mesh previews and retires only affected picker rollback faces. Validated by the maintainer in demo and the normal test viewer on 2026-10-30; merge authorized.
   - Full `scripts/check.ps1` passes with `RUST_TEST_THREADS=1`: 6,356 passed, zero failures, 31 ignored; script parsing, formatting and Clippy clean. Five expiry regressions cover exact boundaries, legacy migration, reconnect/source-edit preservation, loaded/absent/parked objects, unchanged library/mesh bindings, face splitting and selective picker rollback. Native warning, highlight toggle, confirmation, cancellation, isolated restart/removal and live/already-expired restart captures inspected; expired applications are removed while sources remain saved.
+
+- 🟡 Reload changed local textures applied to object faces (human report, 2026-11-03; task `local-object-texture-reload`; no issue; [PR #2159](https://github.com/Aurora-Viewer/Aurora-Viewer/pull/2159)): files added through the Local texture picker are watched and their changed pixels are republished under the same local ID, so already-applied prim and mesh faces update without reselecting.
 
 - ✅ AltGr in keyboard shortcuts ([#1371](https://github.com/Aurora-Viewer/Aurora-Viewer/issues/1371), [PR #1597](https://github.com/Aurora-Viewer/Aurora-Viewer/pull/1597); task `altgr-shortcuts-1371`, 2026-10-30; validated by the human in the test viewer on 2026-10-30, merge authorized): capture and use AltGr as Ctrl + Alt in both shortcut slots, with the existing binding format, defaults and conflict checks. Characters and dead keys keep text/web/media input; function-key shortcuts still work in a text field. Prevent a second plain-key action in egui and the photo viewfinder, leave releases through, and never learn AltGr characters as key labels. Mouse camera gestures and mouselook cursor handling retain their existing paths (LLKeyboardWin32::currentMask, LLViewerWindow::handleKey, LLSetKeyBindDialog::recordAndHandleKey, LLToolCamera).
   - Full `scripts/check.ps1` green on the final code: 6,245 passed, zero failures, 31 ignored. Eight AltGr tests cover tracking, capture, persistence, conflicts, default command/held priorities, character/dead-key input and releases. Demo `AURORA_DEMO_OPTIONS=shortcuts:altgr` captures and executes AltGr + F9 and AltGr + Shift + F9, restoring the original demo bindings. Native FR captures inspected; both slots report `captured=true opened=true`. Camera demos `alt,640,420` and `altgr,640,420` have identical camera traces at frames 600, 630 and 661. All runs exit zero without logged application errors.
@@ -3021,6 +3051,7 @@ The same questions an hour long, **the most rewarding first**. Reading taken by 
   - ✅ Human approval received on 2026-10-16 after delivery of the local spatial and non-spatial call changes; agents did not connect to a grid.
   - Local build succeeded; offline `AURORA_DEMO_CALL=group` captured and inspected (connected group strip, normal startup / exit). This demo simulates calls and does not validate spatial audio or the live service.
 
+- 🟡 Parcel music no longer cuts out while camming fast in a busy region (#1996, #2619): the decoded music buffer holds 5 s instead of 1.5 s, a station starts after 1 s, and after a starvation playback resumes only once the buffer is 80 % full, like `LLStreamingAudio_FMODSTUDIO::update` (indra/llaudio/llstreamingaudio_fmodstudio.cpp; buffer sizes from indra/newview/llvieweraudio.cpp); a starvation is logged at most once every 10 s. Validated on the grid by the human on 2026-11-06; waiting for the reporter's confirmation on #1996.
 - 🟡 Audio engine wired up: live volumes, parcel radio (radio button; auto-play on entering disabled by default like `FSParcelMusicAutoPlay`, "Auto-play parcel music" setting; demo `AURORA_DEMO_MUSIC`). On Agni playback does start, but the parcel's stream (stream.virginradio.fr) fails with "Unknown host" at each reconnection: check in Firestorm whether the parcel's URL works; if so, look on the DNS resolution / proxy side
 - 🟡 Voice wired up: WebRTC session per region / parcel (estate or parcel channel, forbidden voice respected), Opus transmission of the microphone in push-to-talk or toggle, 3D position — connection established on Agni (2026-10-08), still to confirm that we hear the others and that they hear us, and the reconnection after a teleport
 - 🟡 Speaker of the top bar like Firestorm's status bar (human request of 2026-10-14, validated by the human in demo the same day, voice box included; refs #299; to verify on Agni: unticking the voice box disconnects the voice, microphone included, ticking it again reconnects; LLStatusBar::onClickVolume / onMouseEnterVolume, panel_volume_pulldown.xml; `ui/audio.rs`): a click mutes or restores all sound (Main mute, MuteAudio: world, interface, music, media and the voice heard; the microphone is not touched), the icon shows it struck through; hovering the speaker opens the volume panel, which stays while the pointer is on the speaker or the panel (or a slider is dragged past its edge) and closes 0.35 s after the pointer left both, or at once on a click elsewhere; in the panel only the music, the media and the voice keep an enable box (the others stay in Preferences › Sound); the voice box is the voice connection, like Firestorm's EnableVoiceChat: unticked, the voice disconnects, microphone included, the same setting as "Enable voice" in Preferences › Sound. Demo: `AURORA_DEMO_VOLUME=open|muted`
