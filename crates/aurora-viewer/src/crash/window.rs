@@ -730,7 +730,8 @@ mod tests {
 
     fn copied_text(details: &TechnicalDetails) -> String {
         let context = egui::Context::default();
-        let output = context.run_ui(Default::default(), |ui| details.copy(ui.ctx()));
+        let mut output = context.run_ui(Default::default(), |ui| details.copy(ui.ctx()));
+        output.textures_delta.clear();
         let copies: Vec<_> = output
             .platform_output
             .commands
