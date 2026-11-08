@@ -127,7 +127,13 @@ impl FrameWitness {
         {
             return None;
         }
-        let mut matching = widgets.get_layer(control.layer).filter(|widget| {
+        let (layer, control_index) = widgets.order(control.widget)?;
+        if layer != control.layer {
+            return None;
+        }
+        // An Area root may itself have the same hover geometry and be its
+        // own parent. It was registered BEFORE the contents, unlike Frame::end.
+        let mut matching = widgets.get_layer(layer).skip(control_index + 1).filter(|widget| {
             widget.parent_id == origin.parent
                 && widget.layer_id == control.layer
                 && widget.id != origin.content
@@ -138,7 +144,7 @@ impl FrameWitness {
                 && widget.interact_rect == interact
         });
         let allocation = *matching.next()?;
-        if matching.next().is_some() || widgets.order(allocation.id)?.1 <= widgets.order(control.widget)?.1 {
+        if matching.next().is_some() {
             return None;
         }
         Some(Self { allocation, parents })
