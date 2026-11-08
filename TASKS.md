@@ -1,5 +1,15 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Candidate Linux validation on standard native ancestry (no issue):
+  The isolated Windows-candidate workflow now also runs the repository's existing
+  `ci` profile on Ubuntu for the monitor integration branch. This validates
+  Unix file-security fixtures against real root/euid-owned prefixes; the managed
+  sandbox's unmapped readonly root remains refused. No ownership/private-target
+  check is relaxed and no failed case is skipped. Formatting, qualified Linux
+  Clippy, full workspace logs and exact source/provenance survive failures;
+  the final Linux gate reports failure honestly. Windows dev packaging is
+  unchanged. Source-only until the new workflow is actually run.
+
 - 🔧 Preview observation fixture contention correction (2026-11-08; no issue):
   Exact 6e51 Windows CI measured one `Busy` panic in the test-only
   `pending_claim` observation read. The fixture now yields and retries only
