@@ -4,6 +4,8 @@ use crate::{
 };
 use std::collections::BTreeMap;
 
+mod control_v2;
+
 const STEP_MILLIS: u64 = 12_000;
 const HEARTBEAT_MILLIS: u64 = 1000;
 /// Fixed allowance for native/GPU initialization before the first valid
@@ -45,8 +47,13 @@ struct Entry {
     generation: u64,
     last_seen: u64,
     last_heartbeat: Option<u64>,
+    ordinary: Option<crate::show_viewer::ShowViewerTarget>,
+    shows: control_v2::ShowOperations,
 }
 impl Entry {
+    fn next_sequence(&self) -> Result<u64, Error> {
+        self.sent.checked_add(1).ok_or(Error::Sequence)
+    }
     fn receipt_timeout(&self) -> u64 {
         if self.received == 0 { STARTUP_MILLIS } else { LEASE_MILLIS }
     }
@@ -165,6 +172,8 @@ impl Coordinator {
                 generation: 0,
                 last_seen: self.now,
                 last_heartbeat: None,
+                ordinary: None,
+                shows: control_v2::ShowOperations::default(),
             },
         );
         Ok(())
@@ -184,7 +193,7 @@ impl Coordinator {
 
     fn send(&mut self, worker: WorkerId, command: Command) -> Result<Envelope, Error> {
         let entry = self.entries.get_mut(&worker).ok_or(Error::Unavailable)?;
-        let sequence = entry.sent.checked_add(1).ok_or(Error::Sequence)?;
+        let sequence = entry.next_sequence()?;
         let mut binding = entry.roster.binding;
         if !command.session_bound() {
             binding.session = None;
@@ -198,6 +207,9 @@ impl Coordinator {
             message: Message::Command(command),
         };
         envelope.validate()?;
+        if !matches!(envelope.message, Message::Command(Command::Heartbeat { .. })) {
+            entry.ordinary = None;
+        }
         entry.sent = sequence;
         Ok(envelope)
     }
@@ -449,6 +461,9 @@ impl Coordinator {
         entry.received = envelope.sequence;
         entry.last_seen = self.now;
         if let Event::Status(status) = event {
+            // V1 has no ordinary observation. The V2 typed entry restores
+            // only the exact observation in that same validated Status.
+            entry.ordinary = None;
             let mut status = status.clone();
             if !session_changed && status.last_frame.is_none() {
                 status.last_frame = entry.roster.status.last_frame;

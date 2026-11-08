@@ -1,3 +1,7 @@
+use crate::control_v2::{
+    ControlV2Command, ControlV2Envelope, ControlV2Message, ControlV2Reply, ControlV2Transition, ControlV2Work, SHOW_VIEWER_MILLIS,
+};
+use crate::show_viewer::ShowViewerOutcome;
 use crate::{
     Binding, Command, Envelope, Error, Event, FrameProof, GpuProgress, HostedViewport, Message, PrepareBoundary, RejectReason,
     SessionIdentity, WorkerIdentity, WorkerMode,
@@ -31,6 +35,16 @@ pub struct WorkerTransition {
 enum Waiting {
     Quiescence(u64),
     Prepared(u64, Option<FrameProof>, Option<PrepareBoundary>),
+}
+
+struct Admission {
+    binding: Binding,
+    lease_epoch: u64,
+    sequence: u64,
+    session_bound: bool,
+    exact_binding: bool,
+    received_ms: u64,
+    now_ms: u64,
 }
 
 /// Only validated, fresh local receipt renews this lease. The transport must
@@ -175,25 +189,100 @@ impl WorkerGuard {
         let Message::Command(command) = &envelope.message else {
             return Err(Error::Invalid);
         };
-        if envelope.binding.worker != self.identity || envelope.lease_epoch != self.lease_epoch {
+        if let Some(effects) = self.admit(Admission {
+            binding: envelope.binding,
+            lease_epoch: envelope.lease_epoch,
+            sequence: envelope.sequence,
+            session_bound: command.session_bound(),
+            exact_binding: false,
+            received_ms: now_ms,
+            now_ms,
+        })? {
+            return Ok(WorkerTransition { effects, reply: None });
+        }
+        Ok(self.apply_command(command, envelope.sequence))
+    }
+
+    /// The caller supplies the ORIGINAL local IO stamp, not App dequeue time.
+    /// Admission consumes this Guard's shared control sequence once. Returned
+    /// Show work is bookkeeping only; actual reply/ledger reservation and the
+    /// current ordinary native owner remain mandatory before any effect.
+    pub fn on_control_v2(&mut self, envelope: &ControlV2Envelope, received_ms: u64, now_ms: u64) -> Result<ControlV2Transition, Error> {
+        envelope.validate()?;
+        let ControlV2Message::Command(command) = &envelope.message else {
+            return Err(Error::Invalid);
+        };
+        let control = command.control();
+        if let Some(effects) = self.admit(Admission {
+            binding: envelope.binding,
+            lease_epoch: envelope.lease_epoch,
+            sequence: envelope.sequence,
+            session_bound: control.as_ref().is_some_and(Command::session_bound),
+            exact_binding: control.is_none(),
+            received_ms,
+            now_ms,
+        })? {
+            return Ok(ControlV2Transition {
+                effects,
+                ..Default::default()
+            });
+        }
+        if let Some(command) = control {
+            let result = self.apply_command(&command, envelope.sequence);
+            return Ok(ControlV2Transition {
+                effects: result.effects,
+                reply: result.reply.map(ControlV2Reply::from_control),
+                work: None,
+            });
+        }
+        let work = match command {
+            ControlV2Command::ShowViewer(request) => ControlV2Work::ShowViewer {
+                request: *request,
+                outcome: if now_ms - received_ms >= SHOW_VIEWER_MILLIS {
+                    Some(ShowViewerOutcome::Expired)
+                } else if self.mode != WorkerMode::Standby || self.waiting.is_some() || self.viewport.is_some() {
+                    Some(ShowViewerOutcome::RejectedNative)
+                } else {
+                    None
+                },
+            },
+            ControlV2Command::QueryShowViewer(request) => ControlV2Work::QueryShowViewer(*request),
+            _ => return Err(Error::Invalid),
+        };
+        Ok(ControlV2Transition {
+            work: Some(work),
+            ..Default::default()
+        })
+    }
+
+    fn admit(&mut self, admission: Admission) -> Result<Option<WorkerEffects>, Error> {
+        let Admission {
+            binding,
+            lease_epoch,
+            sequence,
+            session_bound,
+            exact_binding,
+            received_ms,
+            now_ms,
+        } = admission;
+        if binding.worker != self.identity || lease_epoch != self.lease_epoch {
             return Err(Error::Binding);
         }
-        if self.mode == WorkerMode::Detached || envelope.sequence <= self.sequence || now_ms < self.received {
+        if self.mode == WorkerMode::Detached || sequence <= self.sequence || received_ms > now_ms || received_ms < self.received {
             return Err(Error::Stale);
         }
-        if command.session_bound() && envelope.binding.session != self.session
-            || !command.session_bound() && envelope.binding.session.is_some() && envelope.binding.session != self.session
-        {
+        if binding.session != self.session && (exact_binding || session_bound || binding.session.is_some()) {
             return Err(Error::Binding);
         }
         if now_ms - self.received >= LEASE_MILLIS {
-            return Ok(WorkerTransition {
-                effects: self.detach(),
-                reply: None,
-            });
+            return Ok(Some(self.detach()));
         }
-        self.sequence = envelope.sequence;
-        self.received = now_ms;
+        self.sequence = sequence;
+        self.received = received_ms;
+        Ok(None)
+    }
+
+    fn apply_command(&mut self, command: &Command, sequence: u64) -> WorkerTransition {
         let mut result = WorkerTransition::default();
         let mut rejected = false;
         match command {
@@ -201,7 +290,7 @@ impl WorkerGuard {
             Command::Detach => {
                 result.effects = self.detach();
                 result.reply = Some(Reply {
-                    reply_to: envelope.sequence,
+                    reply_to: sequence,
                     event: Event::Detached,
                 });
             }
@@ -209,7 +298,7 @@ impl WorkerGuard {
                 self.activation = *activation;
                 self.mode = WorkerMode::Revoking;
                 self.prepared = false;
-                self.waiting = Some(Waiting::Quiescence(envelope.sequence));
+                self.waiting = Some(Waiting::Quiescence(sequence));
                 result.effects = WorkerEffects {
                     release_input: true,
                     quiesce: true,
@@ -221,7 +310,7 @@ impl WorkerGuard {
                 self.mode = WorkerMode::Preparing;
                 self.viewport = *viewport;
                 self.prepared = false;
-                self.waiting = Some(Waiting::Prepared(envelope.sequence, self.last_frame, None));
+                self.waiting = Some(Waiting::Prepared(sequence, self.last_frame, None));
                 result.effects = WorkerEffects {
                     release_input: true,
                     prepare: true,
@@ -235,7 +324,7 @@ impl WorkerGuard {
                 self.prepared = false;
                 result.effects.grant_input = true;
                 result.reply = Some(Reply {
-                    reply_to: envelope.sequence,
+                    reply_to: sequence,
                     event: Event::Granted { activation: *activation },
                 });
             }
@@ -249,14 +338,14 @@ impl WorkerGuard {
         }
         if rejected {
             result.reply = Some(Reply {
-                reply_to: envelope.sequence,
+                reply_to: sequence,
                 event: Event::Rejected {
                     activation: command.activation(),
                     reason: RejectReason::InvalidState,
                 },
             });
         }
-        Ok(result)
+        result
     }
 
     /// Called after drawing has stopped and all prior submissions completed.

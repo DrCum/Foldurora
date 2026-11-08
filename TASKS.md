@@ -3797,3 +3797,17 @@ Open-source technologies that could set Aurora apart (human request of 2026-10-1
     authored UNRUN. No control command/version, native/IO consumer, observation
     minting or UI enablement is included. Actual consumers remain required; Root
     owns compilation/execution and the separate native/control source review.
+  - ControlV2 first API atom (source-only): separate closed control4096 and
+    acknowledgment1024 codecs/matchers, full Binding including None, original
+    command-byte digest and distinct ingress versus reply ownership. The actual
+    WorkerGuard/Coordinator share existing control state/counters with their V1
+    paths; Show/query remain body-free bookkeeping, not ordinary native permits.
+    Read-only ledger lookup distinguishes Unknown/Pending/Terminal and retains
+    Cancelled/EffectUncertain once. Existing V1 wire and production IO/native/
+    App/Shell/UI are unchanged; no V2 endpoint or button is enabled. Meaningful
+    source tests cover exact scope/version/digest/head correlation, original
+    future/expired stamps, counter exhaustion, bounded original operations and
+    normal real-core activation. All author tests remain UNRUN. The actual
+    staged15+1/full16 reply-credit/independent ACK path, physical ordinary native
+    consumer and input quarantine still need separate source review before
+    production promotion. Root alone executes required checks.

@@ -8,6 +8,7 @@
 //! Aurora has its own bounded V1 protocol, with no legacy wire compatibility.
 
 pub mod chat;
+pub mod control_v2;
 mod coordinator;
 mod identity;
 mod preview;

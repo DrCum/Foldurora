@@ -5409,3 +5409,21 @@ UNRUN. The existing control protocol remains V1: wire/version integration,
 original IO ingress retention, actual App-owned observation/strict permit and
 synchronous native consumer require a separate reviewed atom before any quick UI
 entry. Phase1 model/codec and this receipt API do not complete quick actions.
+
+`aurora_session::control_v2` is a separately versioned closed4096-byte codec
+with explicit Show/query/receipt data and separate <=1024-byte reply-retirement
+and command-ingress acknowledgment codecs. Exact ingress metadata includes the
+full optional Binding/lease/command sequence and original-byte SHA256; it cannot
+renew a lease or claim an effect. Reply ACK matches only the original published
+reply; the actual oldest-publication/credit owner remains an IO prerequisite.
+The real WorkerGuard shares admission/normal control state across its typed V1
+and V2 entries, rejects future/regressing original ingress stamps and consumes
+expired Show once without effect. Show/query work never grants native authority.
+The real Coordinator V2 entries reuse its existing activation state and counters;
+bounded16 original Show operations survive source/window changes, and their
+receipts cannot advance a handoff. `coordinator/control_v2.rs` owns those entries;
+the ledger adds read-only Unknown/Pending/Terminal lookup and terminal Cancelled/
+EffectUncertain outcomes. Production WorkerIo/App/native/Shell/UI remain V1 and
+unchanged. Real stamped16 ingress/reply ownership, strict ordinary physical
+leases, synchronous native callee and input quarantine require independent
+consumer review before V2 promotion. There is no fallback decoder or UI entry.

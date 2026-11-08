@@ -74,6 +74,10 @@ pub enum ShowViewerOutcome {
     /// Restore/focus was attempted, but native foreground was not confirmed.
     /// This terminal receipt never authorizes retrying the native mutation.
     ForegroundRefused,
+    /// Cancellation won before the native effect; this request stays terminal.
+    Cancelled,
+    /// An effect may have happened; uncertainty never authorizes another try.
+    EffectUncertain,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -94,6 +98,15 @@ impl ShowViewerReceipt {
 struct Entry {
     request: ShowViewerRequest,
     receipt: Option<ShowViewerReceipt>,
+}
+
+/// Read-only ledger information, never admission or native authority.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)] // Immutable closed receipts, at most16 retained entries.
+pub enum ShowViewerLookup {
+    Unknown,
+    Pending,
+    Terminal(ShowViewerReceipt),
 }
 
 /// Bounded bookkeeping for one actual WorkerIdentity/lease, not permission.
@@ -175,17 +188,26 @@ impl ShowViewerLedger {
     /// Read-only lookup is not a native retry. The caller supplies the ORIGINAL
     /// whole request; an altered target cannot retrieve a receipt by ID alone.
     pub fn receipt(&self, request: ShowViewerRequest) -> Result<Option<ShowViewerReceipt>, Error> {
+        Ok(match self.query(request)? {
+            ShowViewerLookup::Unknown | ShowViewerLookup::Pending => None,
+            ShowViewerLookup::Terminal(receipt) => Some(receipt),
+        })
+    }
+
+    /// Distinguishes an unreserved future ID from a retained pending request
+    /// without changing highwater, capacity or any terminal outcome.
+    pub fn query(&self, request: ShowViewerRequest) -> Result<ShowViewerLookup, Error> {
         self.validate(request)?;
         if let Some(entry) = self.entries.iter().find(|entry| entry.request.request == request.request) {
             if entry.request != request {
                 return Err(Error::Invalid);
             }
-            return Ok(entry.receipt);
+            return Ok(entry.receipt.map_or(ShowViewerLookup::Pending, ShowViewerLookup::Terminal));
         }
         if request.request <= self.highwater {
             Err(Error::Stale)
         } else {
-            Ok(None)
+            Ok(ShowViewerLookup::Unknown)
         }
     }
 
