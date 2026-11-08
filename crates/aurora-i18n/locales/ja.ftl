@@ -13361,33 +13361,6 @@ host-start-flush-failed = セッションホストの診断ログへの書き込
     診断ログ: { $path }
 
 # 永続的なキャラクタープロファイル。表示名とログイン中のアカウントは別です。
-host-profile-copy-open = 設定をコピー…
-host-profile-copy-title = 設定をコピー
-host-profile-copy-source = コピー元
-host-profile-copy-destination = コピー先：{ $destination }
-host-profile-copy-main = メインの保存済み設定
-host-profile-copy-main-help = 最新の設定を使うにはメインのビューアを保存するか閉じてください。このコピー元は読み取り専用です。
-host-profile-copy-graphics = グラフィックス
-host-profile-copy-interface = インターフェース
-host-profile-copy-colors = 色
-host-profile-copy-bindings = キーボードとマウスの割り当て
-host-profile-copy-selected-help = チェックしたグループだけを置き換えます。コピー元にない項目には、このビルドの初期値を使います。
-host-profile-copy-choose = グループを１つ以上選択してください。
-host-profile-copy-inspect = 確認
-host-profile-copy-inspecting = 保存済み設定を確認中…
-host-profile-copy-prepared = 適用できます。この確認は３０秒で期限切れになります。
-host-profile-copy-summary = { $family }：{ $fields }項目、{ $changed }件を変更、{ $defaulted }件は初期値
-host-profile-copy-applying = 設定を保存中…
-host-profile-copy-cancel-requested = キャンセルを要求しました…
-host-profile-copy-applied = { $destination }に保存しました。準備ができたら、このプロフィールを別途開いてください。
-host-profile-copy-canceled = 設定の保存前にキャンセルしました。
-host-profile-copy-expired = 確認の期限が切れました。適用する前にもう一度確認してください。
-host-profile-copy-changed = 保存済み設定が変更されました。もう一度確認してください。
-host-profile-copy-uncertain = 保存結果を確認できません。続行する前に{ $destination }をもう一度確認してください。
-host-profile-copy-failed = 設定をコピーできませんでした。既存のファイルは保持されています。
-host-profile-copy-invalid-file = 保存されたファイルが無効か、対応していません。既存のファイルは保持されています。
-host-profile-copy-unavailable = 要求を送信できませんでした。コントローラーが利用可能になってから、もう一度確認してください。
-host-profile-copy-retiring = 前の確認を終了中…
 
 host-profile-select = キャラクタープロフィール
 host-profile-default = キャラクター { $number }

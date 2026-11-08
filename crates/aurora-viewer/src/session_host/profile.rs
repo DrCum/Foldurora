@@ -13,7 +13,6 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
 use uuid::Uuid;
 
-pub(super) mod settings_file;
 #[cfg(any(windows, test))]
 mod windows_path;
 

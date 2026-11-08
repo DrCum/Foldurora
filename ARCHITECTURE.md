@@ -109,136 +109,15 @@ and World reset clears pending provenance. Consumers copy the original digest
 with the accepted account/session independently of IO readiness; no form value,
 raw URI or credential is persisted. Favorites retains its original file identity
 and behavior. Archive projection, private storage and UI are separate stages.
-Manual selective preference copy is a real Manage action in the CPU HostUi.
-The modal freezes its stopped target SlotId, starts with Main Saved as a strictly
-read-only source and all four families checked, and offers only Main Saved or
-another stopped slot (at most five source choices). Inspect shows the actual
-four-family typed fields/changed/defaulted counters; Apply carries the exact
-Prepared backend Capture. No copy action opens a profile or logs in. The first-
-Open offer, archive/Legacy XML import and broader settings families remain gaps.
-The modal, source popup and wrapped footer use bounded compact-width layout;
-the body scrolls while Inspect/Apply/Cancel remain outside it. EN/FR/JA labels
-are added together, including honest original-target Applied/uncertain results.
+The optional manual Profile Copy feature was removed by user request on
+2026-11-08. Manage retains profile selection and renaming, without any
+cross-profile preference-copy command, worker or UI. Normal settings saving,
+profile/account isolation, persistent slot locks, private NativeStore and
+atomic publication remain separate and unchanged. Locale-independent mouse
+binding compatibility is also retained. Historical implementation and failure
+evidence remain tied to their original commits; removal does not turn those
+results into passes or resolve the separate Windows long-path failures.
 
-The persistent CopyUi owns metadata only: one original request ledger, captured
-selection/incarnation and exact cancellation latch survive source/family changes
-and modal close. A -> B -> A cannot restore old Apply authority. Close queues
-cancellation through normal Shell try-only polling until admitted; local state
-never asserts cancellation beat publication. No acknowledged terminal means
-uncertainty, with the original request retained. A later matching Applied receipt
-still names its original target. Snapshot comparison includes copy state even
-when the completed metadata ticket did not change. Shell copy actions return
-before generic presentation notices, so they cannot alter an acknowledged world.
-
-Input authority starts from a previously settled clipped enabled control, its
-exact intent/widget/layer and one original pointer, Enter/Space or AccessKit
-press. Newly enabled Apply cannot consume Inspect's Enter or the Modal helper's
-synthetic primary click. At most24 controls are retained (five source choices,
-picker, four groups and three footer buttons fit); native Enter/Space observation
-reuses the existing release fence without changing chat behavior or suppressing
-unrelated Host input. Discard, focus/IME, geometry, modal, selection or operation
-turnover revokes authority. After the ENTIRE Context::run_ui, Shell redeems a
-single-use proof against final frame/pass, modal/focus and the EXACT committed
-prev_pass widget registry before sending metadata. Original widget identity,
-parent, enabled/visible state, click Sense, rect/interact clip and layer must
-match; no stale read_response fallback or later-layout proof is accepted. Both
-transform translations, positive scale/inverse and global finite geometry are
-checked; this modal supports identity transforms only. Later overlapping visible
-widgets in the same layer or visible Areas above it revoke every modality,
-including visual covers that do not themselves take input.
-Pinned egui Frame::begin reserves the background paint slot before contents,
-while Frame::end registers its enclosing hover allocation afterwards. Each
-control captures the actual enclosing Frame UiStack marker/configuration and
-at most16 checked parent WidgetRects up to its actual Modal or source Menu Area.
-All enclosing Frames are retained, bounded to8: pinned ScrollArea itself wraps
-its body in Frame::NONE, beneath the outer Modal/Menu Frame. Each is witnessed
-independently, so a genuine inner background cannot hide the outer background
-from the structural proof or exempt another visual sibling. Current and captured
-transforms/rectangles/Frame float data must be finite before equality. CPU fixtures
-wait at most8 empty layouts for actual final control/parent geometry to stabilize
-before input; production original-press geometry checks remain exact.
-After the container completes, the unique sibling allocation must exactly match
-the finalized content rect plus Frame margins/stroke, pinned round_ui geometry,
-parent clipping, layer and hover-only metadata. Its exact ID and parent-chain
-witness remain immutable through press, release and whole-run final redemption.
-Only this verified structural allocation is excluded from the later-cover scan;
-missing/ambiguous/changed structure and all other real visual covers still fail
-closed. This correction preserves the original69 Profile cases and adds two
-authored UNRUN cases; Root's earlier executed failures remain recorded.
-Native modifier/AltGraph transitions revoke copy input across raw batches even
-after Alt-down/up ABA; actual release/final modifiers must remain plain. This
-does not reset the unchanged native EnterRelease helper or another editor's state.
-A fresh backend Capture snapshot remains mandatory. Rejected/discarded proof has
-no retry or remint. Only that final Shell path starts a real HostController Inspect or Apply;
-exact-request cancellation uses bounded Shell polling after its original revoke.
-
-The production callee chain includes settings/profile_seed, profile/settings_file,
-profile_copy, Broker's Inspect/Apply/Cancel metadata variants, copy reservations
-in Open admission and slot availability, snapshot state, worker polling/stop and
-the real Manage consumer. Test fixtures and inspection-only summary helpers stay
-cfg(test); there is no dormant parallel endpoint or blanket dead-code allowance.
-The 31 independently source-cleared adapter cases and19 projection cases are
-preserved. Thirteen additional actual-egui/model/real-channel cases are authored
-UNRUN, including one explicitly isolated locale/font/layout case using the existing
-AURORA_COMPACT_HOST_VISUAL_LANGUAGE setting. This production-promotion atom still
-requires independent exact-source review, Root compilation/tests/native fixtures
-and human UI/native Windows acceptance before shipment. No native ACL/profile
-was inspected or fixture executed by the author.
-
-Six further actual-egui/final-registry/native-modifier metadata regressions are
-authored UNRUN for the narrow input correction, preserving all prior13 bodies
-and assertions (19 UI cases total). They cover late move/reclip/Sense/coverage/
-focus/transform changes for pointer/Enter/Space/AccessKit, actual committed
-disabled/hidden/removed/layer turnover, Inspect/Cancel no-effect refusal,
-raw/native modifier ABA, both Space forms and real release/fresh press recovery.
-The prior fb003e0e review is pinned BLOCKED on these two UI gaps; this correction
-needs independent exact-source follow-up and Root execution before shipment.
-
-The Broker/Lane transaction captures installation, controller, nonreused manager/
-UI instance, operation, selection incarnation, stable source/target slots and four
-typed families. Current ActorChild/detached ownership, queued Open and retained
-copy reservations precede worker-only SlotId-ordered profile TRY-locks. Locks
-remain through Inspect, the original 30-second confirmation and Apply/cancel.
-One process-wide persistent physical worker permit survives modal reset,
-controller drop, blocked IO and actual thread retirement. Controller/GUI channel
-admission/polling never waits for disk; only the physical worker can wait on its
-bounded command/result channels. Prepared cannot crowd out a definitive terminal.
-A durable strict-private temporary precedes fresh source digest/target byte CAS,
-held-lock identity and final controller/cancel/original-deadline checks immediately
-before one native rename, without delayed retry. Post-rename cancellation reports
-Applied for the original capture; lost terminal reports uncertainty without replay.
-
-Distinct closed SourceSettingsFile and TargetSettingsFile wrappers carry immutable
-ReadOnlySource/PrivateTarget roles through capture, every bounded reread and final
-CAS. Native factories accept only catalogue_dir/settings.json or native stopped
-slot_root/config/settings.json. Sources expose no publish or target conversion.
-Current-user ordinary0644 source files need no confidential ancestor, while plain/
-single-link/no-follow ownership, no other write, safe opened ancestry and stable
-current-path identity remain mandatory. Targets require an actual retained same-
-user private ancestor even for0600 files. Shared strict profile-lock/newtemp
-validators and the ordinary Settings/atomic_file savers are unchanged; no chmod,
-ACL repair, arbitrary path DTO or raw backup is added.
-
-At most128 no-follow opened ancestor handles per native file and at most32KiB
-native paths remain through confirmation and CAS; all retained/current-path
-security and identities are rechecked before and after bounded reads. Windows
-retained prefixes distinguish creating a different child (FILE_ADD_FILE/ADD_SUBDIR)
-from replacing the retained existing child (DELETE_CHILD/DELETE/WRITE_DAC/OWNER).
-Permitted prefix creation never supplies confinement. Final settings parent/file
-keep the conservative object role; file masks2/4 remain mutation. Applicable
-object/callback/unknown grants and untrusted mutation fail closed. Current-user
-source files can have broad read-only grants; administrator-owned source/target
-settings still require closed TokenUser/System/Administrators applicable allows
-plus a same-user private ancestor. Inherit-only ACEs supply no current-object
-confinement; deny ACEs never excuse unsafe allows. Root's read-only Windows runner
-diagnostic established the exact TrustedInstaller service SID as a root-prefix
-owner, with no applicable grants for that SID. Only that fully validated SID can
-be an additional RetainedPrefix owner: it receives no ACL-principal trust,
-settings-parent/file ownership or private-ancestor credit. All other unestablished
-owners remain refused. Existing retained/current handles, native path identities
-and owner/DACL checks remain mandatory before and after reads/CAS, with no
-permission repair. The Unix source fixture discards optional privacy evidence
-while retaining every real opened ancestor, avoiding CI-private-parent assumptions.
 Windows unit-test host profiles alone use a strict TokenUser-private namespace
 beneath canonical native TEMP, named by the full SHA256 of the compile-time
 worktree path. The checkout-drive owner measured outside the accepted policy is
@@ -248,26 +127,11 @@ existing canonical/verbatim paths and strict creation/revalidation remain in use
 Production ProjectDirs, Unix host fixtures and the general Settings test root
 are unchanged; only synthetic host-profile IO moves to supported ancestry.
 
-The projection retains only four explicit native typed families:16 Graphics,
-18 Interface,37 byte-color fields and bounded native action/two-slot bindings.
-Current schema32,4MiB/depth32/nodes8192 validation rejects malformed/duplicate/newer
-or invalid selected values and preserves unselected target RawValue lexemes,
-including large integers. The existing serde_json raw_value feature does not
-introduce arbitrary_precision. Source whole raw is dropped before target output;
-no unselected source value reaches Debug, UI, logs or DTOs. Missing selected source
-fields use this build's actual defaults, acquired only inside the leased worker
-because keyboard layout may initialize lazily. No global Settings load/save runs.
-Peak bounded raw/string payload is up to16MiB plus bounded read sentinels, selected
-payload up to256KiB and separately bounded parse/retained-ancestor metadata; no
-whole-process memory claim is made. Native presentation ranges remain shared with
-ordinary normalization in its original order.
-
 `keybinds::Input` persists Middle/Back/Forward mouse identities independently of
 UI locale. Serde accepts earlier EN/FR/JA token aliases and emits the stable
 existing English tokens; constructors and native defaults use those same values.
 Unknown strings and Other buttons remain opaque unchanged, without settings
 repair or action substitution. Visible labels still use the existing catalogues.
-This prerequisite enables no profile-copy UI, IO, or automatic native action.
 
 `world/inventory_archive` owns the closed local UUID-set codec, strict native
 source/edit/publication model and one bounded incremental visibility projection.

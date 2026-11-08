@@ -15,7 +15,6 @@ use egui::{Id, Rect, RichText, TextEdit, vec2};
 pub(super) enum Action {
     OpenLogin(Option<AccountKey>, Option<SlotId>),
     RenameSlot(SlotId, SlotLabel),
-    CopyPreferences(super::profile_copy_ui::Action),
     Activate(WorkerId),
     Detach(WorkerId),
     OpenChat(aurora_session::chat::ChatSource),
@@ -37,7 +36,6 @@ pub(super) enum Notice {
 
 #[derive(Default)]
 pub(super) struct HostUi {
-    pub(super) copy_preferences: super::profile_copy_ui::CopyUi,
     selected: Option<WorkerId>,
     search: String,
     management_open: bool,
@@ -61,10 +59,6 @@ pub(super) struct Output {
 
 impl HostUi {
     pub fn modal_open(&self) -> bool {
-        self.copy_blocked() || self.copy_preferences.is_open()
-    }
-
-    pub fn copy_blocked(&self) -> bool {
         self.close_prompt || self.rename.is_some()
     }
 
@@ -331,11 +325,6 @@ impl HostUi {
             action = self.rename_dialog(&ctx).or(action);
         } else {
             self.rename = None;
-        }
-        if closing || snapshot.stopped || self.copy_blocked() {
-            self.copy_preferences.close();
-        } else if let Some(copy) = self.copy_preferences.show(&ctx, p, snapshot, false) {
-            action = Some(Action::CopyPreferences(copy));
         }
         Output { action, world }
     }
@@ -769,7 +758,7 @@ impl HostUi {
                 aurora_i18n::tr!("common-rename"),
                 ActionKind::Flat,
                 vec2(0.0, 28.0),
-                selected.is_some() && !closing && !snapshot.stopped && !self.copy_preferences.is_open(),
+                selected.is_some() && !closing && !snapshot.stopped,
             );
             #[cfg(test)]
             ui.ctx()
@@ -778,17 +767,6 @@ impl HostUi {
                 && let Some(slot) = selected
             {
                 self.rename = Some((slot.id, slot.label.as_str().to_owned()));
-            }
-            let copy = ui.add_enabled(
-                selected.is_some_and(|slot| slot.available) && !closing && !snapshot.stopped && !self.modal_open(),
-                egui::Button::new(aurora_i18n::tr!("host-profile-copy-open")).wrap(),
-            );
-            #[cfg(test)]
-            ui.ctx().data_mut(|data| data.insert_temp(Id::unique("host_copy_open"), copy.rect));
-            if copy.clicked()
-                && let Some(slot) = selected
-            {
-                self.copy_preferences.open(slot.id, snapshot);
             }
             if selected.is_some_and(|slot| !slot.available) {
                 ui.label(RichText::new(aurora_i18n::tr!("host-profile-occupied")).small().color(p.muted));
@@ -921,8 +899,7 @@ fn matches(label: &str, grid: &str, query: &str) -> bool {
 /// The IO thread may publish a fresh Arc for unchanged receipts. Only visible
 /// changes should repaint the full software surface, including on a large host.
 pub(super) fn same_snapshot(a: &HostSnapshot, b: &HostSnapshot) -> bool {
-    a.copy_preferences == b.copy_preferences
-        && a.attention_preferences == b.attention_preferences
+    a.attention_preferences == b.attention_preferences
         && a.slots == b.slots
         && a.registry_error == b.registry_error
         && a.stopped == b.stopped
@@ -2031,26 +2008,23 @@ mod tests {
     }
 
     #[test]
-    fn profile_copy_manage_entry_opens_real_modal_without_opening_or_retargeting_profile() {
+    fn slot_management_keeps_rename_without_cross_profile_copy_entry() {
         let mut snapshot = snapshot();
         let mut frames = Frames::new();
         assert_eq!(frames.click(&snapshot, Id::unique("host_manage"), false), None);
-        assert_eq!(frames.click(&snapshot, Id::unique("host_copy_open"), false), None);
-        assert!(frames.ui.copy_preferences.is_open() && frames.ui.modal_open());
-        for _ in 0..3 {
-            assert_eq!(frames.show(&snapshot, vec![], false), None);
-            assert!(
-                frames.ui.copy_preferences.is_open(),
-                "opening release cannot dismiss the new copy modal"
-            );
-        }
-        frames.ui.copy_preferences.close();
-        snapshot.slots[0].available = false;
-        assert_eq!(frames.click(&snapshot, Id::unique("host_copy_open"), false), None);
         assert!(
-            !frames.ui.copy_preferences.is_open(),
-            "occupied target has no presentation entry authority"
+            frames
+                .ctx
+                .data(|data| data.get_temp::<Rect>(Id::unique("host_copy_open")))
+                .is_none()
         );
+        assert!(!frames.ui.modal_open());
+        assert_eq!(frames.click(&snapshot, Id::unique("host_slot_rename"), false), None);
+        assert!(frames.ui.rename.is_some() && frames.ui.modal_open());
+        frames.ui.rename = None;
+        snapshot.stopped = true;
+        assert_eq!(frames.click(&snapshot, Id::unique("host_slot_rename"), false), None);
+        assert!(frames.ui.rename.is_none() && !frames.ui.modal_open());
     }
 
     #[test]

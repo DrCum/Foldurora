@@ -1,5 +1,25 @@
 # Aurora Viewer — task tracking
 
+- Foldurora Contacts/removal integration (2026-11-09 UTC): preserve frozen
+  Contacts8aa03f97, whose format/qualified Linux lint passed and unfiltered group
+  suite measured8961passed/18failed/61ignored,33 summaries, zero filtered.
+  Its17 Profile Copy filesystem failures and separate software-GPU terrain case
+  remain original failed evidence. Integrate private removal85242ec7 separately,
+  retaining every b256 Windows path/NativeStore/Workspace/Archive safeguard and
+  unrelated regression. The isolated removal's Windows153 viewer and13 i18n
+  focused passes are not combined acceptance. New combined checks, exact source
+  delivery authorization and pinned Windows build/native acceptance are pending.
+  Do not dispatch the superseded standaloneBC20 request.
+
+- Profile Copy removed by user request (2026-11-08): remove the optional
+  internal cross-profile preferences UI, host commands, worker and exclusive
+  projection/file adapter/tests. Keep profile isolation, slot locks, shared
+  NativeStore/atomic publication and native mouse-binding compatibility.
+  Earlier copy-specific implementation/review entries below are historical,
+  not active shipping requirements. Original negative results remain unchanged;
+  the other twelve Windows failures require the separate long-path correction.
+  Focused validation for this isolated removal is recorded with its checkpoint.
+
 - 🔧 Foldurora Host Friends/New IM (2026-11-09 UTC): source now joins the
   original-login Names/FSData/Saved prerequisites with bounded ChatV9 Friends,
   captured single-flight Search, model-only once-only Open and Shared/Monitor

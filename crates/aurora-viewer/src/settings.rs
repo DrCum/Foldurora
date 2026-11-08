@@ -8,7 +8,6 @@ pub mod area_search;
 pub mod backup;
 mod hover_height;
 mod presentation;
-pub(crate) mod profile_seed;
 mod saver;
 pub mod stream_list;
 

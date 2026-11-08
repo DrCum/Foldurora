@@ -62,7 +62,6 @@ pub(crate) struct WorkerSummary {
 
 #[derive(Clone, Default)]
 pub(crate) struct HostSnapshot {
-    pub copy_preferences: Option<super::profile_copy::State>,
     pub slots: Vec<SlotSummary>,
     pub registry_error: Option<String>,
     pub attention_preferences: super::attention_prefs::PreferenceState,
@@ -98,9 +97,6 @@ impl std::fmt::Display for HostError {
 impl std::error::Error for HostError {}
 
 enum HostIntent {
-    InspectPreferences(super::profile_copy::Selection),
-    ApplyPreferences(super::profile_copy::Capture),
-    CancelPreferences(super::profile_copy::Selection, u64),
     #[cfg(any(windows, test))]
     Preview(RequestKind, preview_projection::OperationSlot),
     Open(Option<AccountKey>, Option<SlotId>),
@@ -131,7 +127,6 @@ enum HostIntent {
 impl HostIntent {
     fn controls_presentation(&self) -> bool {
         match self {
-            Self::InspectPreferences(_) | Self::ApplyPreferences(_) | Self::CancelPreferences(_, _) => false,
             #[cfg(any(windows, test))]
             Self::Preview(_, _) => false,
             // Review reports its own body-free outcome. Its local failures
@@ -218,52 +213,6 @@ pub(crate) struct HostController {
     stop: Arc<AtomicBool>,
     stopped: Arc<AtomicBool>,
     foreground: Arc<AtomicBool>,
-}
-
-/// Real metadata admission/channel, without a thread, socket or native file.
-#[cfg(test)]
-pub(super) mod copy_fixture {
-    use super::*;
-    use crate::session_host::profile_copy::{Capture, Selection};
-    #[derive(Debug, PartialEq, Eq)]
-    pub enum Request {
-        Inspect(Selection),
-        Apply(Capture),
-        Cancel(Selection, u64),
-    }
-    pub struct Inbox(Receiver<HostRequest>);
-    impl Inbox {
-        pub fn take(&self) -> Option<(u64, Request)> {
-            self.0.try_recv().ok().map(|request| {
-                (
-                    request.ticket,
-                    match request.intent {
-                        HostIntent::InspectPreferences(selection) => Request::Inspect(selection),
-                        HostIntent::ApplyPreferences(capture) => Request::Apply(capture),
-                        HostIntent::CancelPreferences(selection, original) => Request::Cancel(selection, original),
-                        _ => panic!("copy UI emitted an unrelated host intent"),
-                    },
-                )
-            })
-        }
-    }
-    pub fn controller(snapshot: HostSnapshot) -> (HostController, Inbox) {
-        let (sender, receiver) = bounded(MAX_QUEUE);
-        let frontdoor = Arc::new(preview_control::Frontdoor::default());
-        let reader = PreviewReader::new(frontdoor.clone());
-        (
-            HostController {
-                preview_frontdoor: frontdoor,
-                preview_reader: reader,
-                requests: Mutex::new(RequestSender { sender, next: 1 }),
-                snapshot: Arc::new(Mutex::new(Arc::new(snapshot))),
-                stop: Arc::new(AtomicBool::new(false)),
-                stopped: Arc::new(AtomicBool::new(false)),
-                foreground: Arc::new(AtomicBool::new(false)),
-            },
-            Inbox(receiver),
-        )
-    }
 }
 
 /// In-process synthetic data and an intent inbox, exclusively for the ignored
@@ -474,18 +423,6 @@ impl HostController {
 
     pub fn rename_slot(&self, slot: SlotId, label: SlotLabel) -> Result<u64, HostError> {
         self.send(HostIntent::RenameSlot(slot, label))
-    }
-
-    pub(crate) fn inspect_preferences(&self, selection: super::profile_copy::Selection) -> Result<u64, HostError> {
-        self.send(HostIntent::InspectPreferences(selection))
-    }
-
-    pub(crate) fn apply_preferences(&self, capture: super::profile_copy::Capture) -> Result<u64, HostError> {
-        self.send(HostIntent::ApplyPreferences(capture))
-    }
-
-    pub(crate) fn cancel_preferences(&self, selection: super::profile_copy::Selection, operation: u64) -> Result<u64, HostError> {
-        self.send(HostIntent::CancelPreferences(selection, operation))
     }
 
     pub fn save_attention_preferences(&self, preferences: super::attention_prefs::Preferences) -> Result<u64, HostError> {
@@ -1313,8 +1250,6 @@ fn review_activation(effects: &[Effect]) -> Option<u64> {
 }
 
 struct Broker {
-    // Drop revokes copy IO before releasing the controller registry lock.
-    copy_preferences: super::profile_copy::Lane,
     #[cfg(any(windows, test))]
     preview_frontdoor: Arc<preview_control::Frontdoor>,
     #[cfg(any(windows, test))]
@@ -1597,18 +1532,6 @@ impl Broker {
             self.reviews.interrupt(ReviewStatus::Cancelled);
         }
         match intent {
-            HostIntent::InspectPreferences(selection) => {
-                let stopped = [Some(selection.target), selection.source.slot()].into_iter().flatten().all(|slot| {
-                    !self.opens.iter().any(|open| open.slot == slot)
-                        && !self.children.iter().any(|child| !child.exited && child.config.slot == Some(slot))
-                });
-                self.copy_preferences
-                    .inspect_admitted(self.installation, self.host, ticket, selection, stopped);
-            }
-            HostIntent::ApplyPreferences(capture) => {
-                let _ = self.copy_preferences.apply(capture);
-            }
-            HostIntent::CancelPreferences(selection, operation) => self.copy_preferences.cancel_request(selection, operation),
             #[cfg(any(windows, test))]
             HostIntent::Preview(kind, slot) => self.preview_projection.queue(ticket, kind, slot),
             HostIntent::Open(account, requested) => {
@@ -1937,9 +1860,6 @@ impl Broker {
 
     fn choose_slot(&self, requested: Option<SlotId>) -> anyhow::Result<SlotId> {
         for slot in SlotId::all().filter(|slot| requested.is_none_or(|wanted| wanted == *slot)) {
-            if self.copy_preferences.reserved(slot) {
-                continue;
-            }
             if !self.opens.iter().any(|open| open.slot == slot)
                 && !self.children.iter().any(|child| !child.exited && child.config.slot == Some(slot))
                 && self.registry.available(slot)?
@@ -2105,7 +2025,6 @@ impl Broker {
         opening.sort();
         opening.dedup();
         HostSnapshot {
-            copy_preferences: self.copy_preferences.state().cloned(),
             registry_error: self.registry_error.clone(),
             attention_preferences: self.registry.attention_preferences().clone(),
             slots: SlotId::all()
@@ -2113,7 +2032,6 @@ impl Broker {
                     id,
                     label: self.registry.label(id).clone(),
                     available: self.slot_available[usize::from(u8::from(id))]
-                        && !self.copy_preferences.reserved(id)
                         && !self.opens.iter().any(|open| open.slot == id)
                         && !self.children.iter().any(|child| !child.exited && child.config.slot == Some(id)),
                 })
@@ -2163,7 +2081,6 @@ fn host_loop(
     }
     let registry = Registry::open(installation, host)?;
     let mut broker = Broker {
-        copy_preferences: super::profile_copy::Lane::default(),
         #[cfg(any(windows, test))]
         preview_frontdoor,
         #[cfg(any(windows, test))]
@@ -2206,7 +2123,6 @@ fn host_loop(
         let now = began.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
         broker.coordinator.set_workspace_foreground(foreground.load(Ordering::Acquire));
         if stop.load(Ordering::Acquire) && closing.is_none() {
-            broker.copy_preferences.stop();
             #[cfg(any(windows, test))]
             broker.preview_projection.stop();
             broker.reviews.interrupt(ReviewStatus::Cancelled);
@@ -2218,7 +2134,6 @@ fn host_loop(
             }
         }
         broker.scan_slots();
-        broker.copy_preferences.poll();
         for request in rx.try_iter().take(MAX_QUEUE) {
             if closing.is_some() {
                 break;
@@ -2498,7 +2413,6 @@ mod tests {
         let preview_frontdoor = Arc::new(preview_control::Frontdoor::default());
         let preview_reader = PreviewReader::new(preview_frontdoor.clone());
         let mut broker = Broker {
-            copy_preferences: super::super::profile_copy::Lane::default(),
             preview_frontdoor,
             preview_projection: BrokerProjection::new(preview_reader, installation, host, false),
             registry: Registry::open(installation, host).unwrap(),
