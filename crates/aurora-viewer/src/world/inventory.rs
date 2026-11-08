@@ -545,6 +545,7 @@ impl Inventory {
         }
     }
 
+    #[cfg(test)]
     pub fn item_count(&self) -> usize {
         self.items.len()
     }
