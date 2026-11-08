@@ -13,6 +13,9 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
 use uuid::Uuid;
 
+#[cfg(test)]
+pub(super) mod settings_file;
+
 struct Active {
     root: PathBuf,
     // Keep the OS lock until process exit, including after host detachment.
