@@ -339,7 +339,12 @@ pub(super) fn show(
     }
     let editing = (!profile.locked).then(|| super::context_catalog::editing_entries(&catalog.entries, facts));
     let entries = editing.as_deref().unwrap_or(&catalog.entries);
-    if let Some(index) = super::context_customize::show(ui, p, id, &scope, entries, profile, &mut st.menu_editor)
+    // The customizable body sets its own maximum height. Keep that layout
+    // region below the preceding Archive row: egui's height setter resets
+    // its cursor to the region's minimum, including any previous contents.
+    if let Some(index) = ui
+        .scope(|ui| super::context_customize::show(ui, p, id, &scope, entries, profile, &mut st.menu_editor))
+        .inner
         && let Some(command) = catalog.commands.get_mut(index).and_then(Option::take)
     {
         super::context_catalog::execute(command, ui, inv, st, prefs, facts, actions);
