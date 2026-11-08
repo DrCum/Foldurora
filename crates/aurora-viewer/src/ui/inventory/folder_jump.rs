@@ -169,12 +169,10 @@ impl Chooser {
     pub(crate) fn event(&mut self, event: &WindowEvent) {
         match event {
             WindowEvent::Focused(focused) => {
-                if !focused {
-                    if self.owned_composition {
-                        self.ime_quarantined = true;
-                        self.quarantine_epoch = Some(self.composition_epoch);
-                        self.quarantine_terminal_seen = self.owned_terminal_epoch == Some(self.composition_epoch);
-                    }
+                if !focused && self.owned_composition {
+                    self.ime_quarantined = true;
+                    self.quarantine_epoch = Some(self.composition_epoch);
+                    self.quarantine_terminal_seen = self.owned_terminal_epoch == Some(self.composition_epoch);
                 }
                 self.enter.focused(*focused);
                 self.space.focused(*focused);

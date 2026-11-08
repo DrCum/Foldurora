@@ -748,7 +748,10 @@ fn favorites_real_egui_cached_context_slurl_respects_actual_showloc_added_before
                     .expect("actual Copy SLURL menu row")
             })
         };
-        assert!(copy_row(&live).sense.click, "the original available URL has an enabled row");
+        assert!(
+            copy_row(&live).sense.senses_click(),
+            "the original available URL has an enabled row"
+        );
         if restrict_after_capture {
             assert!(live.rlva.receive(&ChatMessage {
                 from_name: "Synthetic restriction issuer".into(),
@@ -763,7 +766,7 @@ fn favorites_real_egui_cached_context_slurl_respects_actual_showloc_added_before
         live.frame(Vec::new());
         assert_eq!(live.view().list[0].slurl.is_none(), restrict_after_capture);
         assert_eq!(
-            copy_row(&live).sense.click,
+            copy_row(&live).sense.senses_click(),
             !restrict_after_capture,
             "the open context follows current availability"
         );

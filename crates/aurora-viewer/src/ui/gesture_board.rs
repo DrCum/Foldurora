@@ -453,7 +453,7 @@ impl State {
                 })
                 .map(|painted| painted.control)
                 .or_else(|| next(&mut self.next_control));
-            let Some(control) = control else { return None };
+            let control = control?;
             self.building.insert(
                 response.id,
                 Painted {

@@ -284,7 +284,7 @@ impl Frames {
                 .prev_pass
                 .widgets
                 .get_layer(layer)
-                .filter(|widget| widget.sense.click && widget.interact_rect.contains(pos))
+                .filter(|widget| widget.sense.senses_click() && widget.interact_rect.contains(pos))
                 .last()
                 .copied()
                 .expect("actual painted button")
