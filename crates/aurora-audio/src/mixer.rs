@@ -1360,6 +1360,24 @@ mod tests {
     }
 
     #[test]
+    fn music_first_start_uses_the_short_threshold() {
+        let rate = ENGINE_SAMPLE_RATE as usize;
+        let (mut prod, cons) = rtrb::RingBuffer::<f32>::new(5 * rate * ENGINE_CHANNELS);
+        let mut source = PcmSource::new_with_rebuffer(Channel::Music, cons, rate, 4 * rate, None, None, None);
+        let mut bus = vec![0.0; 480 * ENGINE_CHANNELS];
+        let mut tmp = Vec::new();
+        prod.push_entire_slice(&vec![0.1; (rate - 1) * ENGINE_CHANNELS]).unwrap();
+        assert!(source.mix_into(&mut bus, &mut tmp));
+        assert!(!source.playing);
+        assert_eq!(source.queued_samples(), (rate - 1) * ENGINE_CHANNELS);
+
+        prod.push_entire_slice(&[0.1; ENGINE_CHANNELS]).unwrap();
+        assert!(source.mix_into(&mut bus, &mut tmp));
+        assert!(source.playing);
+        assert_eq!(source.queued_samples(), (rate - 480) * ENGINE_CHANNELS);
+    }
+
+    #[test]
     fn music_resumes_only_after_four_fifths_of_its_ring_refills() {
         let ring_frames = 5 * ENGINE_SAMPLE_RATE as usize;
         let (mut prod, cons) = rtrb::RingBuffer::<f32>::new(ring_frames * ENGINE_CHANNELS);
