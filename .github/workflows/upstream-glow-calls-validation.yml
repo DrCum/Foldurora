@@ -1,0 +1,73 @@
+name: Isolated Glow and call continuity validation
+on:
+  push:
+    branches: [checks/upstream-glow-calls-20261108]
+permissions:
+  contents: read
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_BUILD_JOBS: 2
+  SOURCE_SHA: 85191933c4ac42991f6cf841a0e1377e37f61b1d
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    steps:
+      - name: Checkout pinned public port source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 85191933c4ac42991f6cf841a0e1377e37f61b1d
+          fetch-depth: 0
+          filter: blob:none
+      - name: Source and runner
+        shell: bash
+        run: |
+          mkdir -p .scratch/validation
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git rev-parse HEAD | tee .scratch/validation/source.txt
+          rustc --version | tee .scratch/validation/rust.txt
+          cargo --version | tee .scratch/validation/cargo.txt
+          df -h .
+      - name: Existing CI system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev
+          rustup component add rustfmt clippy
+      - name: Restore repository Linux CI cache
+        uses: ./.github/actions/rust-cache
+        with:
+          name: linux-tests
+      - name: Formatting
+        run: cargo fmt --all -- --check 2>&1 | tee .scratch/validation/fmt.log
+      - name: Qualified workspace Clippy
+        run: cargo clippy --profile ci --workspace --all-targets --locked -- -D warnings -A dead-code 2>&1 | tee .scratch/validation/clippy.log
+      - name: Graphics presets and saved profiles
+        run: cargo test --profile ci --workspace --locked --offline graphics_presets:: 2>&1 | tee .scratch/validation/graphics.log
+      - name: Voice continuity and channel restrictions
+        run: cargo test --profile ci --workspace --locked --offline voice::tests:: 2>&1 | tee .scratch/validation/voice.log
+      - name: Safe graphics backup and restore
+        run: cargo test --profile ci --workspace --locked --offline safe_graphics:: 2>&1 | tee .scratch/validation/safe-graphics.log
+      - name: Theme guards
+        run: cargo test --profile ci --workspace --locked --offline theme_guard 2>&1 | tee .scratch/validation/theme.log
+      - name: Translation catalogs
+        run: |
+          cargo test --profile ci --workspace --locked --offline every_language_has_english_keys_and_variables 2>&1 | tee .scratch/validation/catalog-keys.log
+          cargo test --profile ci --workspace --locked --offline every_bundled_message_formats_with_its_declared_variables 2>&1 | tee .scratch/validation/catalog-format.log
+      - name: Full workspace suite on the frozen port candidate
+        timeout-minutes: 25
+        run: timeout 1200 cargo test --profile ci --workspace --locked --offline --no-fail-fast 2>&1 | tee .scratch/validation/full-suite.log
+      - name: Verify source remained frozen
+        if: always()
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git diff --exit-code
+      - name: Upload raw commands and results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: glow-calls-85191933c4ac
+          path: .scratch/validation/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
