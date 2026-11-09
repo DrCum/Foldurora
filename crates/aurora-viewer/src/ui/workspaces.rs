@@ -18,6 +18,7 @@ pub(crate) struct WorkspaceUi {
     display_topology: Option<Arrangement>,
     background_target: usize,
     image_brightness: Option<u8>,
+    local_busy: bool,
 }
 impl Default for WorkspaceUi {
     fn default() -> Self {
@@ -35,10 +36,14 @@ impl Default for WorkspaceUi {
             display_topology: None,
             background_target: 0,
             image_brightness: None,
+            local_busy: false,
         }
     }
 }
 impl WorkspaceUi {
+    pub(crate) fn background_local_busy(&mut self, busy: bool) {
+        self.local_busy = busy;
+    }
     pub(crate) fn background_displays(&mut self, current: Option<&Arrangement>) {
         if self.display_topology.as_ref() != current {
             self.display_topology = current.cloned();
@@ -125,6 +130,7 @@ impl WorkspaceUi {
                         Status::CameraUnavailable => tr!("workspaces-camera-unavailable"),
                         Status::HudUnavailable => tr!("workspaces-huds-unavailable"),
                         Status::PictureUnavailable => tr!("workspaces-picture-unavailable"),
+                        Status::LocalImageUnavailable => tr!("workspaces-local-unavailable"),
                     };
                     ui.label(status);
                     if let Some(r) = c.preview.as_ref().map(|p| p.candidate).or(c.active).and_then(|id| c.record(id)) {
@@ -308,9 +314,19 @@ impl WorkspaceUi {
                                         command = Some(Command::BackgroundImage(target.clone()));
                                         self.image_brightness = None;
                                     }
+                                    if ui
+                                        .add_enabled(!self.local_busy, egui::Button::new(tr!("workspaces-local-choose")))
+                                        .clicked()
+                                    {
+                                        command = Some(Command::BackgroundLocal(target.clone()));
+                                        self.image_brightness = None;
+                                    }
+                                    if self.local_busy {
+                                        ui.label(tr!("workspaces-local-working"));
+                                    }
                                     ui.label(tr!("workspaces-picture-rights"));
                                     let paint = background.paint(target.as_ref().map(|t| &t.0), target.as_ref().map(|t| t.1));
-                                    if let Some(picture) = paint.picture() {
+                                    if let Some(picture) = paint.draw_image() {
                                         let name = |mode| match mode {
                                             ImageMode::Fill => tr!("workspaces-picture-fill"),
                                             ImageMode::Fit => tr!("workspaces-picture-fit"),
@@ -319,7 +335,7 @@ impl WorkspaceUi {
                                             ImageMode::Tile => tr!("workspaces-picture-tile"),
                                             ImageMode::Span => tr!("workspaces-picture-span"),
                                         };
-                                        let mut mode = picture.mode;
+                                        let mut mode = picture.mode();
                                         egui::ComboBox::from_id_salt("workspace_image_placement")
                                             .selected_text(name(mode))
                                             .show_ui(ui, |ui| {
@@ -336,12 +352,12 @@ impl WorkspaceUi {
                                                     }
                                                 }
                                             });
-                                        if mode != picture.mode {
+                                        if mode != picture.mode() {
                                             command = Some(Command::BackgroundMode(target.clone(), mode));
                                         }
                                         let percent = self
                                             .image_brightness
-                                            .get_or_insert(((u16::from(picture.brightness) * 100 + 127) / 255) as u8);
+                                            .get_or_insert(((u16::from(picture.brightness()) * 100 + 127) / 255) as u8);
                                         ui.add(
                                             egui::Slider::new(percent, 0..=100)
                                                 .text(tr!("workspaces-picture-brightness"))
@@ -1086,5 +1102,25 @@ mod tests {
         changed.bind(None);
         assert!(!changed.accepts(&action.ticket));
         assert!(draw(&mut frames, &mut st, &changed, vec![]).1.is_none());
+    }
+    #[test]
+    fn native_workspace_local_import_busy_control_emits_only_one_current_source_request() {
+        let (c, mut st) = fixture();
+        let original = c.catalogue.as_ref().unwrap().encode().unwrap();
+        let mut frames = Frames::new();
+        st.background_local_busy(true);
+        assert!(click(&mut frames, &mut st, &c, aurora_i18n::tr!("workspaces-local-choose")).is_none());
+        st.background_local_busy(false);
+        let action = click(&mut frames, &mut st, &c, aurora_i18n::tr!("workspaces-local-choose")).unwrap();
+        assert!(matches!(action.command, Command::BackgroundLocal(None)));
+        assert!(c.accepts(&action.ticket));
+        assert_eq!(
+            c.catalogue.as_ref().unwrap().encode().unwrap(),
+            original,
+            "native dialog starts only in App, never paint"
+        );
+        let mut changed = c;
+        changed.bind(None);
+        assert!(!changed.accepts(&action.ticket));
     }
 }

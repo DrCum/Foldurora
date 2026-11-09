@@ -337,6 +337,7 @@ pub(crate) enum NativeStoreKind {
     Workspaces,
     Boards,
     InventoryArchive,
+    WorkspaceImages,
 }
 impl NativeStoreKind {
     fn directory(self) -> &'static str {
@@ -344,6 +345,7 @@ impl NativeStoreKind {
             Self::Workspaces => "named-workspaces",
             Self::Boards => "gesture-boards",
             Self::InventoryArchive => "inventory-archive",
+            Self::WorkspaceImages => "workspace-images",
         }
     }
     fn filename(self) -> &'static str {
@@ -351,6 +353,7 @@ impl NativeStoreKind {
             Self::Workspaces => "named-v1.json",
             Self::Boards => "boards-v1.json",
             Self::InventoryArchive => "archive-v1.json",
+            Self::WorkspaceImages => "images-v1.json",
         }
     }
     pub(crate) const fn max_bytes(self) -> usize {
@@ -358,6 +361,7 @@ impl NativeStoreKind {
             Self::Workspaces => 256 * 1024,
             Self::Boards => 4 * 1024 * 1024,
             Self::InventoryArchive => 128 * 1024,
+            Self::WorkspaceImages => 32 * 1024 * 1024,
         }
     }
 }
@@ -904,6 +908,29 @@ mod tests {
         assert!(workspaces.path.join("named-v1.json").is_file());
         assert!(boards.path.join("boards-v1.json").is_file());
     }
+    #[test]
+    fn native_workspace_images_kind_keeps_fixed_identity_paths_and_all_legacy_limits() {
+        let account = Uuid::new_v4();
+        let grid = "a".repeat(64);
+        let image = NativeDirectory::select(NativeStoreKind::WorkspaceImages, account, &grid).unwrap();
+        assert!(
+            image
+                .path
+                .ends_with(Path::new("workspace-images").join(account.to_string()).join(&grid))
+        );
+        assert!(image.matches(NativeStoreKind::WorkspaceImages, account, &grid));
+        assert!(!image.matches(NativeStoreKind::Workspaces, account, &grid));
+        assert!(!image.matches(NativeStoreKind::WorkspaceImages, Uuid::new_v4(), &grid));
+        assert!(!image.matches(NativeStoreKind::WorkspaceImages, account, &"b".repeat(64)));
+        assert_eq!(NativeStoreKind::WorkspaceImages.filename(), "images-v1.json");
+        assert_eq!(
+            NativeStoreKind::WorkspaceImages.max_bytes(),
+            crate::workspace::local_images::model::MAX_FILE
+        );
+        assert_eq!(NativeStoreKind::Workspaces.max_bytes(), 256 * 1024);
+        assert_eq!(NativeStoreKind::Boards.max_bytes(), 4 * 1024 * 1024);
+        assert_eq!(NativeStoreKind::InventoryArchive.max_bytes(), 128 * 1024);
+    }
     #[cfg(windows)]
     #[test]
     fn native_store_windows_long_ordinary_paths_preserve_private_publication_and_original_bytes() {
@@ -933,6 +960,7 @@ mod tests {
             NativeStoreKind::Workspaces,
             NativeStoreKind::Boards,
             NativeStoreKind::InventoryArchive,
+            NativeStoreKind::WorkspaceImages,
         ] {
             let account = Uuid::new_v4();
             let grid = "a".repeat(64);

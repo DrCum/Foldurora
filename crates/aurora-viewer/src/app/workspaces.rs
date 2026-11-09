@@ -407,6 +407,7 @@ impl App {
             return;
         }
         if matches!(action.command, Command::Cancel) {
+            self.workspace_local_images.cancel_import();
             self.workspaces.inventory_pending = None;
             self.workspace_huds.retire();
             if self.workspaces.preview.is_some() {
@@ -415,6 +416,7 @@ impl App {
             return;
         }
         if matches!(action.command, Command::Retry) {
+            self.workspace_local_images.cancel_import();
             self.workspace_huds.retire();
             if self.workspaces.pending.is_none() {
                 self.workspaces.catalogue = None;
@@ -427,6 +429,7 @@ impl App {
             return;
         }
         self.workspace_images.cancel_picker();
+        self.workspace_local_images.cancel_import();
         if !matches!(action.command, Command::DecideHuds(..)) {
             self.workspace_huds.retire();
         }
@@ -669,15 +672,23 @@ impl App {
                 self.workspace_save_definitions(next);
             }
             Command::BackgroundImage(target) => self.workspace_picture_choose(target, window),
+            Command::BackgroundLocal(target) => self.workspace_local_begin(target, window),
             Command::BackgroundPicture(target, picture) => self.workspace_picture_write(target, picture, window),
             Command::BackgroundMode(target, mode) => {
                 let paint = self
                     .workspaces
                     .background()
                     .paint(target.as_ref().map(|t| &t.0), target.as_ref().map(|t| t.1));
-                if let Some(mut picture) = paint.picture().cloned() {
-                    picture.mode = mode;
-                    self.workspace_picture_write(target, picture, window);
+                match paint.draw_image() {
+                    Some(crate::workspace::model::DrawImage::Texture(mut picture)) => {
+                        picture.mode = mode;
+                        self.workspace_picture_write(target, picture, window);
+                    }
+                    Some(crate::workspace::model::DrawImage::Local(mut picture)) => {
+                        picture.mode = mode;
+                        self.workspace_local_picture_write(target, picture, window);
+                    }
+                    None => {}
                 }
             }
             Command::BackgroundBrightness(target, brightness) => {
@@ -685,9 +696,16 @@ impl App {
                     .workspaces
                     .background()
                     .paint(target.as_ref().map(|t| &t.0), target.as_ref().map(|t| t.1));
-                if let Some(mut picture) = paint.picture().cloned() {
-                    picture.brightness = brightness;
-                    self.workspace_picture_write(target, picture, window);
+                match paint.draw_image() {
+                    Some(crate::workspace::model::DrawImage::Texture(mut picture)) => {
+                        picture.brightness = brightness;
+                        self.workspace_picture_write(target, picture, window);
+                    }
+                    Some(crate::workspace::model::DrawImage::Local(mut picture)) => {
+                        picture.brightness = brightness;
+                        self.workspace_local_picture_write(target, picture, window);
+                    }
+                    None => {}
                 }
             }
             Command::CaptureCamera(capture) => {

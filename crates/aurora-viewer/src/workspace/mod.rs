@@ -4,5 +4,6 @@ pub(crate) mod controller;
 pub(crate) mod hud_lane;
 pub(crate) mod huds;
 pub(crate) mod images;
+pub(crate) mod local_images;
 pub(crate) mod model;
 pub(crate) mod store;

@@ -150,6 +150,7 @@ mod wearable_editor;
 mod workspace_displays;
 mod workspace_images;
 mod workspace_inventory;
+mod workspace_local_images;
 mod workspaces;
 mod world_click_demo;
 mod worn_demo;
@@ -660,6 +661,7 @@ pub struct App {
     workspace_ui: ui::workspaces::WorkspaceUi,
     workspace_displays: workspace_displays::Displays,
     workspace_images: workspace_images::Images,
+    workspace_local_images: workspace_local_images::Runtime,
     workspace_huds: crate::workspace::huds::Runtime,
     loading_stage: String,
     move_complete_at: Option<Instant>,
@@ -1650,6 +1652,7 @@ impl App {
             workspace_ui: Default::default(),
             workspace_displays: Default::default(),
             workspace_images: Default::default(),
+            workspace_local_images: Default::default(),
             workspace_huds: Default::default(),
             loading_stage: String::new(),
             move_complete_at: None,
@@ -3141,6 +3144,7 @@ impl App {
         self.clear_blender_preview();
         self.blender_live = Default::default();
         self.workspace_images.clear(&mut self.scene);
+        self.workspace_local_images.retire();
         if let Some(g) = &mut self.gfx {
             self.scene.clear(&mut g.renderer);
         }
@@ -11043,6 +11047,16 @@ impl App {
             self.workspaces.binding,
             ui::workspace_background::pictures::references(&picture_regions),
         );
+        self.workspace_local_prepare(
+            &gfx.renderer,
+            &gfx.window,
+            if picture_enabled {
+                ui::workspace_background::pictures::local_references(&picture_regions)
+            } else {
+                Vec::new()
+            },
+        );
+        self.workspace_ui.background_local_busy(self.workspace_local_images.busy());
         self.workspace_huds_prepare(&gfx.renderer, &gfx.window);
         self.inventory_ui.archive_input(self.inventory_archive_ui.input());
         let mut full = ctx.run_ui(raw, |ui| {
@@ -11072,6 +11086,9 @@ impl App {
                         .workspace_images
                         .policy
                         .current(&self.world, picture_source.as_ref(), self.workspaces.binding);
+                let current_local_images =
+                    self.workspace_local_images
+                        .current(&self.world, picture_source.as_ref(), self.workspaces.binding);
                 ui::workspace_background::paint(
                     ui.ctx(),
                     canvas,
@@ -11080,6 +11097,7 @@ impl App {
                     self.workspace_displays.arrangement(),
                     self.workspace_displays.rectangles(),
                     current_images.then_some(&self.workspace_images.view),
+                    current_local_images.then_some(&self.workspace_local_images.view),
                 );
             }
             let bounds = self.effective_viewport_settings().toolbar_rect((w, h), ui.ctx().viewport_rect());

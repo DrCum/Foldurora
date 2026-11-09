@@ -67,17 +67,89 @@ pub(crate) struct Picture {
     pub mode: ImageMode,
     pub brightness: u8,
 }
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "ManagedWire", into = "ManagedWire")]
+pub(crate) struct ManagedRef {
+    pub image: Uuid,
+    pub account: Uuid,
+    pub grid: String,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ManagedWire {
+    image: Uuid,
+    account: Uuid,
+    grid: String,
+}
+impl TryFrom<ManagedWire> for ManagedRef {
+    type Error = &'static str;
+    fn try_from(w: ManagedWire) -> Result<Self, Self::Error> {
+        if w.image.is_nil()
+            || w.account.is_nil()
+            || w.grid.len() != 64
+            || !w.grid.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+        {
+            return Err("managed image reference");
+        }
+        Ok(Self {
+            image: w.image,
+            account: w.account,
+            grid: w.grid,
+        })
+    }
+}
+impl From<ManagedRef> for ManagedWire {
+    fn from(r: ManagedRef) -> Self {
+        Self {
+            image: r.image,
+            account: r.account,
+            grid: r.grid,
+        }
+    }
+}
+impl ManagedRef {
+    pub(crate) fn new(image: Uuid, account: Uuid, grid: String) -> Result<Self, &'static str> {
+        ManagedWire { image, account, grid }.try_into()
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct LocalPicture {
+    pub reference: ManagedRef,
+    pub mode: ImageMode,
+    pub brightness: u8,
+}
+#[derive(Clone)]
+pub(crate) enum DrawImage {
+    Texture(Picture),
+    Local(LocalPicture),
+}
+impl DrawImage {
+    pub(crate) fn mode(&self) -> ImageMode {
+        match self {
+            Self::Texture(p) => p.mode,
+            Self::Local(p) => p.mode,
+        }
+    }
+    pub(crate) fn brightness(&self) -> u8 {
+        match self {
+            Self::Texture(p) => p.brightness,
+            Self::Local(p) => p.brightness,
+        }
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum Paint {
     Color { rgb: [u8; 3] },
     Texture { picture: Picture, fallback: [u8; 3] },
+    Local { picture: LocalPicture, fallback: [u8; 3] },
 }
 impl Paint {
     pub(crate) fn fallback(&self) -> [u8; 3] {
         match self {
             Self::Color { rgb } => *rgb,
-            Self::Texture { fallback, .. } => *fallback,
+            Self::Texture { fallback, .. } | Self::Local { fallback, .. } => *fallback,
         }
     }
     pub(crate) fn picture(&self) -> Option<&Picture> {
@@ -87,7 +159,14 @@ impl Paint {
         }
     }
     pub(crate) fn spanning(&self) -> bool {
-        self.picture().is_some_and(|p| p.mode == ImageMode::Span)
+        self.draw_image().is_some_and(|p| p.mode() == ImageMode::Span)
+    }
+    pub(crate) fn draw_image(&self) -> Option<DrawImage> {
+        match self {
+            Self::Texture { picture, .. } => Some(DrawImage::Texture(picture.clone())),
+            Self::Local { picture, .. } => Some(DrawImage::Local(picture.clone())),
+            _ => None,
+        }
     }
 }
 
@@ -148,6 +227,38 @@ impl DisplayPaints {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn workspace_local_picture_reference_is_profile_metadata_and_preserves_the_inventory_picture_wire_shape() {
+        let account = Uuid::new_v4();
+        let grid = "a".repeat(64);
+        let reference = ManagedRef::new(Uuid::new_v4(), account, grid.clone()).unwrap();
+        let local = Paint::Local {
+            picture: LocalPicture {
+                reference: reference.clone(),
+                mode: ImageMode::Fit,
+                brightness: 200,
+            },
+            fallback: [1, 2, 3],
+        };
+        let bytes = serde_json::to_vec(&local).unwrap();
+        assert_eq!(serde_json::from_slice::<Paint>(&bytes).unwrap(), local);
+        assert!(ManagedRef::new(Uuid::nil(), account, grid.clone()).is_err());
+        assert!(ManagedRef::new(reference.image, Uuid::nil(), grid.clone()).is_err());
+        assert!(ManagedRef::new(reference.image, account, "file:///private".into()).is_err());
+        let mut invalid = serde_json::to_value(reference).unwrap();
+        invalid["path"] = "private".into();
+        assert!(serde_json::from_value::<ManagedRef>(invalid).is_err());
+        let texture = TextureRef::new(Uuid::new_v4(), Uuid::new_v4(), grid).unwrap();
+        let legacy = serde_json::to_value(Picture {
+            texture,
+            mode: ImageMode::Fill,
+            brightness: 255,
+        })
+        .unwrap();
+        assert!(legacy.get("texture").is_some());
+        assert!(legacy.get("reference").is_none());
+        assert_eq!(legacy.as_object().unwrap().len(), 3);
+    }
     #[test]
     fn workspace_picture_references_refuse_paths_nil_and_non_native_grid_keys() {
         assert!(TextureRef::new(Uuid::nil(), Uuid::new_v4(), "a".repeat(64)).is_err());

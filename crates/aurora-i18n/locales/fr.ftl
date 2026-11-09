@@ -13670,3 +13670,7 @@ workspaces-picture-tile = Mosaïque
 workspaces-picture-span = Étendre sur tous les écrans
 workspaces-picture-brightness = Luminosité
 workspaces-picture-apply-brightness = Appliquer la luminosité
+
+workspaces-local-choose = Importer une image locale…
+workspaces-local-unavailable = Impossible d’importer ou de charger cette image. La bibliothèque est peut-être indisponible ou pleine.
+workspaces-local-working = Préparation de l’image…
