@@ -29,6 +29,11 @@ fn source_matches(world: &World, source: &Source) -> bool {
             .login
             .as_ref()
             .is_some_and(|login| !login.session_id.is_nil() && login.session_id == source.login)
+        && world
+            .inventory_archive
+            .as_ref()
+            .and_then(|archive| archive.native_grid(world))
+            .is_some_and(|grid| grid.namespace() == source.grid)
         && !world.rlva.has("showinv")
         && world
             .objects

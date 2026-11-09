@@ -89,6 +89,9 @@ pub struct PlainTree {
 }
 
 impl PlainTree {
+    pub(super) fn workspace_open(&self) -> Vec<Uuid> {
+        self.open.iter().copied().take(crate::workspace::model::MAX_EXPANDED + 1).collect()
+    }
     pub fn is_open(&self, id: Uuid) -> bool {
         self.open.contains(&id)
     }

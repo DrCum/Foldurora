@@ -13624,7 +13624,7 @@ workspaces-favorite = Favori
 workspaces-unfavorite = Retirer des favoris
 workspaces-startup-named = Enregistré : { $name }
 
-workspaces-remember-folders = Mémoriser le dossier principal de l’inventaire (restauré à l’application)
+workspaces-remember-folders = Mémoriser le dossier principal et les dossiers développés
 workspaces-folder-unavailable = Le dossier n’a pas été restauré. Ouvrez l’inventaire et réessayez.
 workspaces-capture-graphics = Mémoriser les réglages graphiques actuels
 workspaces-capture-camera = Mémoriser les réglages de caméra relatifs à l’avatar
@@ -13648,3 +13648,5 @@ workspaces-huds-declined = Restauration des HUD refusée.
 workspaces-huds-interrupted = Restauration des HUD interrompue. Une opération native déjà acceptée peut encore aboutir.
 workspaces-huds-timeout = Délai de restauration dépassé. Certains objets peuvent encore être en attente ; aucun nouvel essai envoyé.
 workspaces-huds-failed = L’action native d’apparence n’a pas pu démarrer. Des HUD précédents ont peut-être été ajoutés.
+
+workspaces-expanded-unavailable = Dossiers développés indisponibles. Utilisez l’arborescence principale, attendez son chargement et ne développez pas plus de 256 dossiers.

@@ -301,6 +301,17 @@ impl Controller {
             self.projection.pump(world, model, turn);
         }
     }
+    /// Original native submitted-login namespace, independent of IO completion.
+    /// This is correlation only; it grants neither visibility nor store access.
+    pub(crate) fn native_grid(&self, world: &World) -> Option<GridDigest> {
+        if self.memory_only() || self.profile_changed() {
+            return None;
+        }
+        self.model
+            .as_ref()
+            .filter(|model| model.matches(world))
+            .map(|model| model.source().grid())
+    }
     /// Native publication identity only, for retiring reviewed workspace HUD
     /// work. Does not grant visibility or mutation; callers still borrow their
     /// own ordinary read for every displayed/actionable item. Inventory changes

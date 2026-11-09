@@ -4,7 +4,8 @@ use super::{App, Renderer, Screen, Window, ui};
 use crate::workspace::{
     controller::{Action, Command, Pending, Source, Status},
     model::{
-        Background, Bars, CameraContext, CaptureGroups, Catalogue, Graphics, HudSet, LIMIT, Layout, Record, Startup, Viewport, valid_name,
+        Background, Bars, CameraContext, CaptureGroups, Catalogue, ExpandedFolders, Graphics, HudSet, LIMIT, Layout, Record, Startup,
+        Viewport, valid_name,
     },
     store::{Lane, Request},
 };
@@ -158,7 +159,13 @@ impl App {
         } else {
             None
         };
+        let inventory_expanded = if groups.inventory {
+            self.workspace_capture_expanded().ok().flatten()
+        } else {
+            None
+        };
         Some(Layout {
+            inventory_expanded,
             huds,
             inventory_folder,
             background: groups.background.then(|| self.workspaces.background()),
@@ -188,6 +195,9 @@ impl App {
                 huds: c.capture_huds,
             });
         let mut layout = self.workspace_capture(groups).ok_or(Status::CameraUnavailable)?;
+        if groups.inventory {
+            layout.inventory_expanded = self.workspace_capture_expanded()?;
+        }
         if groups.huds {
             let source = self.workspaces.source.as_ref().ok_or(Status::HudUnavailable)?;
             let selected = self
@@ -597,6 +607,7 @@ impl App {
                 next.remember_folders = remember;
                 if !remember && let Some(last) = &mut next.last_layout {
                     last.inventory_folder = None;
+                    last.inventory_expanded = None;
                 }
                 self.workspace_save_definitions(next);
             }
@@ -734,6 +745,7 @@ impl App {
             let huds = p.layout.huds.clone();
             let background = p.layout.background;
             let folder_restored = self.workspace_restore_folder(p.layout.inventory_folder);
+            let expanded_restored = self.workspace_restore_expanded(p.layout.inventory_expanded.as_ref());
             self.workspaces.finish_placement(p);
             if let Some(huds) = huds {
                 self.workspace_huds_offer(&huds, renderer, window);
@@ -747,6 +759,8 @@ impl App {
             }
             if !folder_restored {
                 self.workspaces.status = Status::FolderUnavailable;
+            } else if !expanded_restored {
+                self.workspaces.status = Status::ExpandedUnavailable;
             }
             self.settings.workspace_held = None;
             ui::layout::workspace_preview(&self.egui_ctx, None);
@@ -772,6 +786,13 @@ impl App {
         self.workspace_huds_tick(renderer, window);
     }
     pub(super) fn workspace_modified(&mut self) -> bool {
+        let now = std::time::Instant::now();
+        if let Some((revision, at, modified)) = self.workspaces.modified_sample
+            && revision == self.workspaces.revision
+            && now.saturating_duration_since(at) < std::time::Duration::from_millis(250)
+        {
+            return modified;
+        }
         let saved = self
             .workspaces
             .active
@@ -790,12 +811,82 @@ impl App {
         if !self.workspace_camera_allowed() {
             saved.camera = None;
         }
-        !graphics_match
+        let modified = !graphics_match
             || self
                 .workspace_capture(saved.groups())
-                .is_some_and(|current| !saved.matches(&current))
+                .is_some_and(|current| !saved.matches(&current));
+        self.workspaces.modified_sample = Some((self.workspaces.revision, now, modified));
+        modified
     }
 
+    fn workspace_expanded_source(&self) -> bool {
+        self.workspaces.source.as_ref().is_some_and(|source| {
+            Some(source) == self.workspace_source().as_ref()
+                && self
+                    .world
+                    .inventory_archive
+                    .as_ref()
+                    .and_then(|archive| archive.native_grid(&self.world))
+                    .is_some_and(|grid| grid.namespace() == source.grid)
+        })
+    }
+    fn workspace_capture_expanded(&mut self) -> Result<Option<ExpandedFolders>, Status> {
+        if !self
+            .inventory_ui
+            .jump_owner_visible(&self.egui_ctx, self.panels.inventory, Uuid::nil())
+        {
+            return Ok(None);
+        }
+        let Some(refs) = self.inventory_ui.workspace_expanded_refs() else {
+            return Ok(None);
+        };
+        if !self.workspace_expanded_source() {
+            return Err(Status::ExpandedUnavailable);
+        }
+        if self.world.inventory.owner != self.world.agent_id || self.world.rlva.has("showinv") {
+            return Err(Status::ExpandedUnavailable);
+        }
+        let (_, read) = super::folder_jump::archive_read(&mut self.inventory_ui, &self.world, Uuid::nil());
+        let read = read
+            .filter(|r| r.status() == crate::world::inventory_archive::visibility::VisibilityStatus::Ready && r.revision().is_some())
+            .ok_or(Status::ExpandedUnavailable)?;
+        let expanded =
+            ui::inventory::workspace_state::capture(&self.world.inventory, &refs, read.mask()).map_err(|_| Status::ExpandedUnavailable)?;
+        Ok(Some(expanded))
+    }
+    fn workspace_restore_expanded(&mut self, wanted: Option<&ExpandedFolders>) -> bool {
+        let Some(wanted) = wanted else { return true };
+        if !self.workspace_expanded_source() {
+            return false;
+        }
+        if self.world.inventory.owner != self.world.agent_id
+            || self.world.rlva.has("showinv")
+            || !self
+                .inventory_ui
+                .jump_owner_visible(&self.egui_ctx, self.panels.inventory, Uuid::nil())
+        {
+            return false;
+        }
+        let Some(refs) = self.inventory_ui.workspace_expanded_refs() else {
+            return false;
+        };
+        let current = {
+            let (_, read) = super::folder_jump::archive_read(&mut self.inventory_ui, &self.world, Uuid::nil());
+            let Some(read) = read
+                .filter(|r| r.status() == crate::world::inventory_archive::visibility::VisibilityStatus::Ready && r.revision().is_some())
+            else {
+                return false;
+            };
+            if !ui::inventory::workspace_state::restorable(&self.world.inventory, wanted, read.mask()) {
+                return false;
+            }
+            let Ok(current) = ui::inventory::workspace_state::capture(&self.world.inventory, &refs, read.mask()) else {
+                return false;
+            };
+            current
+        };
+        self.inventory_ui.workspace_restore_expanded(wanted, &current)
+    }
     fn workspace_restore_folder(&mut self, folder: Option<Uuid>) -> bool {
         let Some(folder) = folder else {
             return true;
@@ -903,6 +994,9 @@ impl App {
         {
             return;
         }
+        if !self.workspaces.sample_last(std::time::Instant::now(), force) {
+            return;
+        }
         let Ok(mut layout) = self.workspace_capture_for_save() else {
             return;
         };
@@ -915,6 +1009,14 @@ impl App {
                 .as_ref()
                 .and_then(|c| c.last_layout.as_ref())
                 .and_then(|l| l.inventory_folder);
+        }
+        if layout.inventory_expanded.is_none() && self.workspaces.catalogue.as_ref().is_some_and(|c| c.remember_folders) {
+            layout.inventory_expanded = self
+                .workspaces
+                .catalogue
+                .as_ref()
+                .and_then(|c| c.last_layout.as_ref())
+                .and_then(|l| l.inventory_expanded.clone());
         }
         let now = std::time::Instant::now();
         let stable = self

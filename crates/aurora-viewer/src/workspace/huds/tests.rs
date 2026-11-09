@@ -27,7 +27,7 @@ fn fixture(flags: &[Uuid]) -> (World, Source) {
     let source = Source {
         agent: world.agent_id,
         login: world.login.as_ref().unwrap().session_id,
-        grid: "a".repeat(64),
+        grid: world.inventory_archive.as_ref().unwrap().native_grid(&world).unwrap().namespace(),
         hosted: None,
     };
     (world, source)
@@ -185,4 +185,19 @@ fn workspace_hud_projection_obeys_add_locks_and_hides_locked_worn_names_and_show
     command(&mut world, "@showinv=n");
     assert!(worn(&world, &source, &mut policy).is_none());
     assert!(resolve(&world, &source, &mut policy, &wanted()).is_none());
+}
+
+#[test]
+fn workspace_hud_projection_refuses_grid_mismatch_against_original_native_login_namespace() {
+    let (world, mut source) = fixture(&[]);
+    let mut policy = State::default();
+    assert_eq!(resolve(&world, &source, &mut policy, &wanted()).unwrap().len(), 1);
+    source.grid = "a".repeat(64);
+    assert!(resolve(&world, &source, &mut policy, &wanted()).is_none());
+    assert!(worn(&world, &source, &mut policy).is_none());
+    let mut runtime = Runtime::default();
+    runtime.sync(&world, Some(&source), 1, true);
+    runtime.offer(&world, &source, &wanted());
+    assert!(runtime.lane.review.is_none());
+    assert!(!runtime.busy());
 }
