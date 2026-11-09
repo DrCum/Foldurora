@@ -15,7 +15,7 @@ New combined Advanced Workspace candidate, published and remotely verified:
   https://github.com/DrCum/Foldurora/pull/35
 - Commit `da8ee12fd417ecb62eac22d40cb4b91d8da94e86`
 - Tree `497c1f4f63314fd68630d1e81204fafae981b802`
-- Owned worktree `/workspace/work/workspace-folders-20261109`, clean/frozen.
+- Frozen source ref preserved; owned worktree now continues separately below.
 - Stacks on Inventory images PR34 `ccccf418a4d1e4061324d29eb397493fc9e2e012`,
   per-display colors PR31 `b8ab61831e104942f706f401f822cca3258871de`, additional
   Inventory PR30 `8b211528a6db6516cf83d588b106201a5bce434d` and a903 below.
@@ -98,29 +98,67 @@ inactive or functional MCP enablement acceptance. Source clean;2074 prior artifa
 metadata records and129 cache hashes/worktrees/heads preserved. Git-LF lock and
 normalized checkout matched without modifying checkout/settings.
 
-## Next source work
+## Subsequent integrated source — new combined checkpoint
 
-Review/integrate open upstream PR18 media `475df44eee0525696151840ecf063540555a8bf1`,
-PR19 audio `65da1dfbcecfda273c5f1cb0650746374499732a`, PR26 confirmation
-`16071c7d9f53d65214b34a8f18e6f0453e0313e3`, PR32 controls/keyboard
-`0d2d1ae9f09d1cfe0f090f06eebf4f832f693d6c`; recheck heads/base/presence.
-PR11–16 already integrated; never repeat. Functional MCP PR33 head
-`674a1a73989b5319f955b7b2cf4b26e9e4e0c3a6` on d0d8,153 changed files; reviewed
-implementation `16b3f9895b2843d85dbf7d1573e73306e707f2bd` has author-focused tests,
-not lead full/native acceptance. Substantive source review required, especially
-new sensitive workspace refs in MCP serialization. Retain lead OVERLAPPED fixes
-and a903 descriptor assertions. No competing enablement implementation.
+Frozen guarded MCP/upstream/workspace source:
+- Branch `feat/mcp-advanced-integration-20261109`, draft PR37
+  https://github.com/DrCum/Foldurora/pull/37
+- Commit `1ba972d1419b22ee918515b12ecd5e6d42c4ca45`
+- Tree `5cda6cd40d64c9355bf381fa4689532f79c52515`
+- Remote source/tree verified, owned worktree clean; all earlier frozen refs stay.
 
-Inactive Monitor PR21 author head42734a3d integrated disabled in d08b2438; no
-production caller/aggregate admission/native transport/drain claimed. Recheck
-owner head before overlap. Do not mistake validated prototype for live monitors.
-Check working agents' PRs at feature boundaries. Keep new source separate from
-frozen validation candidates; do not wait idle on human tests when permitted
-integration review remains. No whole-Folderstorm/Aurora completion is claimed.
+Parent76913ee8d4d04855d22f4a3b1bae80040ecbcf3f/tree8d163af37f4993b9a8eeeccb99f47da8888402ee,
+PR36, integrates reviewed PR18media475df44e/19audio65da1dfb/26confirmation16071c7d/
+32controls0d2d1ae9. Non-TASKS patches applied cleanly, existing progress retained.
+Qualified combined lint0, audio106/0/4 inherited ignores, media25/0/0, i18n13/theme1.
+22new cases:12 audio/media executed,10viewer compiled/unrun. PR11–16 not repeated.
+
+PR37 locally integrates MCP33 head674a1a73989b5319f955b7b2cf4b26e9e4e0c3a6,
+reviewed author implementation16b3f9895b2843d85dbf7d1573e73306e707f2bd. Native
+controller/character tools, explicit opt-in, per-profile/session-only permissions,
+native frozen Ask, official SDK/private IPC and source fences are integrated.
+Strict MCP and qualified aggregate/native/prototype all-target Clippy pass;
+MCP70+session56+core30+actual SDK stdio4=160distinct focused passes,0failed/0ignored;
+i18n13/theme1 and Python LSL syntax pass. Lummao/runtime and native viewer/net
+execution remain unrun. Initial missing descriptor domain and obsolete assistant
+field compile failures retained/corrected. Domain fixture copies actual discovery
+domain; original a903 assertions/sharing/security remain. Native workspace and
+curated MCP preference transactions exclude each other.
+
+**Explicit MCP limitation:** workspace apply/previous are not native capabilities
+and fail unsupported. The alternate saved context/HUD backend and its three
+exclusive tests are NOT integrated, not passed or silently waived. Current native
+workspace model/controller/UI/profile/layout files are byte-identical to76913.
+Read-only list/status/preview uses fresh actual source/profile/grid/privacy and
+allowlisted geometry/chrome; saved HUD/Inventory/local-image refs/names/pixels
+are omitted. Native named workspaces only, no synthesized separate layout kind.
+A mutation bridge must fence asynchronous final effects against original MCP
+capture and retain native HUD consent/archive/RLVa. This dependency remains open;
+no full MCP/whole-port completion. Source doc FOLDURORA_MCP_ADVANCED_INTEGRATION_20261109.md.
+Review notice https://github.com/DrCum/Foldurora/pull/33#issuecomment-6743332165
+
+Default combined Windows requirements1356 = a9031184 +37workspace +22upstream
++113MCP public cases. Five new Linux/Unix-only source cases stay separate: two
+new SDK stdio cases (executed among4) and three native upload-handle viewer cases
+(compiled/unrun due link limit). Zero directly annotated baseline cases removed.
+Private inputs/audits/logs remain private; no new full Linux/Windows/package pass.
+New conditional request is published and byte-verified:
+https://github.com/DrCum/Foldurora/blob/296a492af3717e4f710959145376060549ce9d7f/docs/FOLDURORA_COMBINED_WINDOWS_REQUEST_1BA972D1.md
+Slick FIRST checks history. If da8ee12f started, preserve/finish it and queue new
+source afterward; if still undelivered, supersede its prepared request and relay
+this combined superset ONCE. Direct status unavailable; no delivery/ack claimed.
+Do not cancel, duplicate or infer a running build from a prepared request.
+
+Inactive Monitor PR21 author head42734a3d remains unchanged and integrated disabled
+in d08b2438. New render/session source requires renewed feature gates at the next
+combined Windows checkpoint. Production caller/admission/native transport/drain
+and live inactive acceptance remain open. Check current PR heads before follow-up.
+Shelved phases stay shelved; no unrelated source work while this focused goal has
+remaining review/validation dependencies. No GitHub PR was merged.
 
 ## Preservation, historical failures and acceptance
 
-Same32GB environment, about138MiB free. One heavy cloud check; no new subagents/
+Same32GB environment, about70MiB free. One heavy cloud check; no new subagents/
 Astra. Reuse compatible ci graph. Full Linux viewer linking resource blocked;
 no rerun to chase deferred failures or software-GPU terrain. Source/check logs
 under `/workspace/scratch/workspace-*-20261109/` and descriptor scratch. Previous
