@@ -78,6 +78,7 @@ fn fixture(workers: usize, conversations: usize) -> HostSnapshot {
             .collect();
         let reads = conversations.iter().map(|info| (info.policy.key.conversation, unread())).collect();
         host.chat.push(Arc::new(HostChatSnapshot {
+            contacts: Default::default(),
             source,
             authenticated: true,
             live: true,

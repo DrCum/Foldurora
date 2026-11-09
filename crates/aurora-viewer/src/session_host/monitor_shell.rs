@@ -364,6 +364,20 @@ impl Shell {
             return;
         };
         match action {
+            MonitorAction::Contact(contact) => {
+                if contact.source() != binding.source.chat() || (view == View::Cycling && self.monitors.model().playing()) {
+                    return;
+                }
+                match contact {
+                    super::chat_ui::ContactAction::Refresh(source) => {
+                        let _ = self.controller.refresh_contacts(source);
+                    }
+                    super::chat_ui::ContactAction::Open(draft) => match self.controller.open_direct(draft.request) {
+                        Ok(ticket) => self.shared_chat.queued_open(draft, ticket),
+                        Err(_) => self.shared_chat.open_queue_failed(draft),
+                    },
+                }
+            }
             MonitorAction::Send(draft) => {
                 if draft.key.source != binding.source.chat() || (view == View::Cycling && self.monitors.model().playing()) {
                     return;

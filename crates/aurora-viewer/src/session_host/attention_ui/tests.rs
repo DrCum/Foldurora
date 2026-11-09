@@ -68,6 +68,7 @@ pub(super) fn host() -> HostSnapshot {
             }),
         });
         snapshot.chat.push(Arc::new(HostChatSnapshot {
+            contacts: Default::default(),
             source,
             authenticated: true,
             live: true,

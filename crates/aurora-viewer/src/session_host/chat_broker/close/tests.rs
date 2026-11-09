@@ -282,3 +282,28 @@ fn host_close_changed_policy_recovers_original_receipt_and_lost_authority_cannot
         assert_eq!(peer.closes.operations.back().unwrap().status, CloseStatus::Uncertain);
     }
 }
+
+#[test]
+fn contacts_explicit_open_retires_original_close_but_never_a_later_close_or_incoming_fence() {
+    let (mut peer, _worker) = connected();
+    observe_row(&mut peer, 1, 22, 1);
+    let first = request(10);
+    peer.admit_close(first, Instant::now()).unwrap();
+    let captured = peer.closes.highwater();
+    peer.closes.explicit_open(conversation(), captured);
+    assert!(!peer.closes.hidden(conversation()));
+    assert!(peer.closes.pending.is_none());
+    assert_eq!(peer.closes.snapshot().opened_through.get(&conversation()), Some(&10));
+    ack(&mut peer, 2, first, closed(1)).unwrap();
+    assert!(!peer.closes.hidden(conversation()), "late old Close receipt cannot hide again");
+    let later = request(11);
+    peer.admit_close(later, Instant::now()).unwrap();
+    peer.closes.explicit_open(conversation(), captured);
+    assert!(peer.closes.hidden(conversation()), "duplicate Open receipt cannot undo later Close");
+    assert_eq!(peer.closes.pending.as_ref().unwrap().request, later);
+    ack(&mut peer, 3, later, closed(1)).unwrap();
+    observe_row(&mut peer, 4, 22, 1);
+    assert!(peer.closes.hidden(conversation()), "Open minted no native incoming credit");
+    observe_row(&mut peer, 5, 22, 2);
+    assert!(!peer.closes.hidden(conversation()));
+}

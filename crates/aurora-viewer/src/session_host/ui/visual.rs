@@ -73,6 +73,7 @@ fn fixture_snapshot() -> HostSnapshot {
             lease_epoch: 1,
         };
         snapshot.chat.push(Arc::new(super::super::transport::HostChatSnapshot {
+            contacts: Default::default(),
             source,
             authenticated: true,
             live: true,

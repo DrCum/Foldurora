@@ -124,6 +124,7 @@ impl SharedChat {
             // The canonical queued operation/receipt ledgers remain untouched.
             for state in &mut model.states {
                 state.ui.with_surface(surface, |ui| {
+                    let _ = ui.take_contact_action();
                     let _ = ui.take_read_action();
                     let _ = ui.take_close_action();
                 });
@@ -280,6 +281,9 @@ impl SharedChat {
         if source.validate().is_err() || self.selected == Some(source) {
             return;
         }
+        if let Some(state) = self.states.iter_mut().find(|state| Some(state.ui.source()) == self.selected) {
+            state.ui.with_surface(self.surface, ChatUi::cancel_contact_open);
+        }
         self.selected = Some(source);
         self.cancel_gestures();
     }
@@ -341,6 +345,34 @@ impl SharedChat {
             .map(|state| state.ui.native_fixture_status(ctx)).collect::<Vec<_>>()})
     }
 
+    pub fn take_contact_action_for(&mut self, surface: ChatSurface) -> Option<super::chat_ui::ContactAction> {
+        self.with_surface(surface, |model| model.take_contact_action())
+    }
+    pub fn take_contact_action(&mut self) -> Option<super::chat_ui::ContactAction> {
+        self.states
+            .iter_mut()
+            .find(|state| Some(state.ui.source()) == self.selected)?
+            .ui
+            .with_surface(self.surface, ChatUi::take_contact_action)
+    }
+    pub fn open_queue_failed(&mut self, draft: super::chat_ui::OpenDraft) {
+        if let Some(state) = self
+            .states
+            .iter_mut()
+            .find(|state| state.ui.source() == draft.request.selection.source)
+        {
+            state.ui.open_queue_failed(draft);
+        }
+    }
+    pub fn queued_open(&mut self, draft: super::chat_ui::OpenDraft, ticket: u64) {
+        if let Some(state) = self
+            .states
+            .iter_mut()
+            .find(|state| state.ui.source() == draft.request.selection.source)
+        {
+            state.ui.queued_open(draft, ticket);
+        }
+    }
     pub fn take_close_action_for(&mut self, surface: ChatSurface) -> Option<CloseDraft> {
         self.with_surface(surface, |model| model.take_close_action())
     }

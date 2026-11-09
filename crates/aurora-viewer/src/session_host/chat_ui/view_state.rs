@@ -49,6 +49,7 @@ pub(super) struct ReadingState {
 }
 
 pub(super) struct ChatViewState {
+    pub contacts: super::contacts::ContactsUi,
     pub conversation: Conversation,
     pub policy: Option<NativeChatPolicy>,
     pub interaction: u64,
@@ -66,6 +67,7 @@ pub(super) struct ChatViewState {
 impl Default for ChatViewState {
     fn default() -> Self {
         Self {
+            contacts: Default::default(),
             conversation: Conversation::Nearby,
             policy: None,
             interaction: 0,

@@ -13620,3 +13620,15 @@ host-chat-close-uncertain = La fermeture n’a pas pu être confirmée. La conve
 host-chat-close-failed = Impossible de fermer la conversation. Réessayez lorsque le personnage sera disponible.
 
 ui-chat-support-contact-blocked = Ce compte ne peut pas envoyer de message direct à ce contact.
+
+# Sélecteur d’amis lié au personnage hôte.
+host-contacts-filter = Filtrer les amis
+host-contacts-online = En ligne uniquement
+host-contacts-loading = Chargement des amis…
+host-contacts-failed = Impossible d’actualiser les amis. Réessayez dans un instant.
+host-contacts-limited = Affichage de 2 048 amis au maximum.
+host-contacts-open = Ouvrir un IM
+host-contacts-opening = Ouverture de la conversation de ce personnage…
+host-contacts-uncertain = Ouverture non confirmée. La demande ne sera pas répétée.
+host-contacts-opened = Conversation ouverte. Les non lus et les brouillons sont inchangés.
+host-contacts-open-failed = Impossible d’ouvrir cette conversation. Vérifiez la connexion et les autorisations de ce personnage.

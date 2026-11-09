@@ -234,5 +234,15 @@ fn contacts_worker_pages_keep_snapshot_but_policy_and_source_changes_revoke_old_
         },
         state: OpenDirectState::Unknown,
     };
-    assert_eq!(worker.contacts.opens.as_ref().unwrap().query(unknown.request).unwrap(), unknown);
+    // Rejected old-source packets cannot initialize the new contact backend.
+    assert!(worker.contacts.opens.is_none());
+    let now = Instant::now();
+    let query = ChatPacket {
+        source: source(2),
+        ..packet(4, ChatCommand::QueryOpenDirect(unknown.request))
+    };
+    let recovered = worker.handle_received(&mut native, &query, now, now).unwrap();
+    assert_eq!(receipt(&recovered).receipt, unknown);
+    assert!(receipt(&recovered).view.is_none());
+    assert_eq!(native.opens, 0);
 }

@@ -14,6 +14,9 @@ use aurora_session::chat::{
 use aurora_session::chat::{MarkReadRequest, ReadMetadata, ReadOutcome};
 use egui::{Id, RichText, TextEdit, vec2};
 
+mod contacts;
+pub(super) use contacts::{ContactAction, OpenDraft};
+
 mod view_state;
 pub(crate) use view_state::ChatSurface;
 use view_state::ChatViewState;
@@ -253,6 +256,7 @@ impl ChatUi {
 
     pub(super) fn close_surface(&mut self, surface: ChatSurface) {
         self.with_surface(surface, |model| {
+            model.cancel_contact_open();
             model.cancel_gesture();
             model.view.owner_generation = 0;
         });
@@ -320,7 +324,14 @@ impl ChatUi {
         let current = snapshot.filter(|snapshot| snapshot.source == self.source && eligible(snapshot));
         self.hidden = current.map_or_else(BTreeSet::new, |snapshot| snapshot.closes.hidden.clone());
         if let Some(request) = self.pending_close {
-            if current.is_none_or(|snapshot| snapshot.closes.operations.iter().any(|operation| operation.request == request)) {
+            if current.is_none_or(|snapshot| {
+                snapshot.closes.operations.iter().any(|operation| operation.request == request)
+                    || snapshot
+                        .closes
+                        .opened_through
+                        .get(&request.key.conversation)
+                        .is_some_and(|through| *through >= request.request)
+            }) {
                 self.pending_close = None;
             } else {
                 self.hidden.insert(request.key.conversation);
@@ -360,6 +371,7 @@ impl ChatUi {
                 if model.hidden.contains(&model.view.conversation) {
                     model.select(Conversation::Nearby);
                 }
+                model.sync_contact_open(current);
                 model.sync_view(current);
             });
         }
@@ -591,6 +603,7 @@ impl ChatUi {
         if self.view.conversation == conversation || self.hidden.contains(&conversation) || !supported(conversation) {
             return;
         }
+        self.cancel_contact_open();
         self.view.policy = None;
         self.view.conversation = conversation;
         self.cancel_gesture();
@@ -1029,6 +1042,20 @@ impl ChatUi {
             ui.label(RichText::new(aurora_i18n::tr!("host-chat-identity", account = account, grid = grid)).strong());
             ui.label(RichText::new(aurora_i18n::tr!("host-chat-bound-help")).small().color(p.muted));
             let current = snapshot.filter(|snapshot| snapshot.source == self.source && self.available);
+            if self.view.contacts.show(
+                ui,
+                current,
+                self.source,
+                self.instance,
+                self.surface,
+                if source_changed || navigating || stale_owner || !focused || focus_changed || popup_open || self.view.ime_composing {
+                    InputMode::Navigating
+                } else {
+                    mode
+                },
+            ) {
+                self.cancel_gesture();
+            }
             let selected = current
                 .and_then(|snapshot| {
                     snapshot
@@ -1340,6 +1367,7 @@ mod tests {
             })
             .collect();
         HostChatSnapshot {
+            contacts: Default::default(),
             source,
             authenticated: true,
             live: true,
@@ -2233,5 +2261,6 @@ mod tests {
     }
     mod close_tests;
     mod conference_tests;
+    mod contacts_tests;
     mod group_tests;
 }

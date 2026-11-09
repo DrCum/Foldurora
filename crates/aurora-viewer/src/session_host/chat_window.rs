@@ -209,6 +209,21 @@ impl ChatWindow {
         let delay = self.surface.present(event_loop, &context, output, palette.panel)?;
         self.last_frame = Some(Instant::now());
         self.repaint = Instant::now().checked_add(delay);
+        if let Some(contact) = model.take_contact_action() {
+            match contact {
+                super::chat_ui::ContactAction::Refresh(source) => {
+                    let _ = controller.refresh_contacts(source);
+                }
+                super::chat_ui::ContactAction::Open(draft) => {
+                    match controller.open_direct(draft.request) {
+                        Ok(ticket) => model.queued_open(draft, ticket),
+                        Err(_) => model.open_queue_failed(draft),
+                    }
+                    self.repaint = Some(Instant::now());
+                    return Ok(());
+                }
+            }
+        }
         if let Some(draft) = model.take_close_action() {
             match controller.close_chat(draft.request(0)) {
                 Ok(ticket) => model.queued_close(draft, ticket),

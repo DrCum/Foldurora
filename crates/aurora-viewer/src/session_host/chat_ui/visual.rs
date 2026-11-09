@@ -82,6 +82,7 @@ fn snapshot(source: ChatSource) -> HostChatSnapshot {
     })
     .collect();
     HostChatSnapshot {
+        contacts: Default::default(),
         source,
         authenticated: true,
         live: true,

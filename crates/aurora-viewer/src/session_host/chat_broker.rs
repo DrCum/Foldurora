@@ -13,6 +13,10 @@ use aurora_session::chat::{MAX_READ_RECEIPTS, MarkReadRequest, ReadMetadata, Rea
 use aurora_session::chat::{MAX_REVIEW_RECEIPTS, ReviewCapture, ReviewConversationRequest, ReviewReceiptQuery};
 use std::collections::{BTreeMap, VecDeque};
 
+mod contacts;
+use contacts::ContactsBook;
+pub(crate) use contacts::{ContactsSnapshot, OpenOperation, OpenStatus};
+
 mod close;
 use close::CloseBook;
 #[cfg(test)]
@@ -67,6 +71,7 @@ pub(crate) struct HostChatSnapshot {
     pub reads: BTreeMap<Conversation, ReadMetadata>,
     pub read_operations: Vec<ReadOperation>,
     pub closes: CloseSnapshot,
+    pub contacts: ContactsSnapshot,
     pub gap: bool,
 }
 
@@ -106,6 +111,7 @@ pub(crate) struct Peer {
     read_operations: VecDeque<ReadOperation>,
     read_pending: Option<PendingRead>,
     closes: CloseBook,
+    contacts: ContactsBook,
     review_operations: VecDeque<ReviewRecord>,
     review_pending: Option<PendingReview>,
     review_high_water: u64,
@@ -134,6 +140,7 @@ impl Peer {
             read_operations: VecDeque::new(),
             read_pending: None,
             closes: CloseBook::default(),
+            contacts: ContactsBook::default(),
             review_operations: VecDeque::new(),
             review_pending: None,
             review_high_water: 0,
@@ -196,6 +203,7 @@ impl Peer {
             self.history = source.and_then(|source| ChatHistory::new(source).ok());
             self.conversations.clear();
             self.closes = CloseBook::default();
+            self.contacts = ContactsBook::default();
             self.receipts.clear();
             self.read_operations.clear();
             self.read_pending = None;
@@ -251,6 +259,7 @@ impl Peer {
         }
         self.uncertain();
         self.closes.revoke();
+        self.contacts.revoke();
         self.reads.clear();
         if let Some(pending) = &self.read_pending {
             let request = pending.request;
@@ -626,6 +635,8 @@ impl Peer {
                 Err(_) => self.disconnect(),
             }
         }
+        changed |= self.poll_contacts(now);
+        changed |= self.poll_open_direct(now);
         changed |= self.poll_read_receipt(now);
         self.poll_review_receipt(now);
         self.poll_close_receipt(now);
@@ -666,9 +677,24 @@ impl Peer {
             return Err(ChatError::Invalid);
         };
         match event {
-            // Chooser consumption is added with the controller model. Ignore
-            // optional producer metadata until that model is installed.
-            ChatEvent::ContactsPolicy(_) | ChatEvent::ContactPage(_) | ChatEvent::ContactPageFailed(_) | ChatEvent::OpenDirect(_) => {}
+            ChatEvent::ContactsPolicy(policy) => self.contacts.policy(*policy)?,
+            ChatEvent::ContactPage(page) => self.contacts.page(packet.reply_to, page)?,
+            ChatEvent::ContactPageFailed(key) => self.contacts.failed(packet.reply_to, *key)?,
+            ChatEvent::OpenDirect(reply) => {
+                let reopen = self.contacts.receipt(reply)?;
+                if let Some((key, through)) = reopen
+                    && self.contacts.snapshot(true).policy.is_some_and(|policy| policy.can_browse)
+                {
+                    // Receipt alone cannot disclose a title or reopen a row.
+                    // Only the current, validated view authorizes presentation.
+                    let view = reply.view.as_ref().ok_or(ChatError::Denied)?;
+                    self.conversation(&ConversationInfo {
+                        policy: view.policy,
+                        title: view.title.clone(),
+                    })?;
+                    self.closes.explicit_open(key.conversation, through);
+                }
+            }
             ChatEvent::Conversation(info) => {
                 self.conversation(info)?;
             }
@@ -786,6 +812,7 @@ impl Peer {
             }
             ChatEvent::Unsupported => {
                 self.closes.revoke();
+                self.contacts.revoke();
                 self.conversations.clear();
                 self.reads.clear();
                 self.history = ChatHistory::new(packet.source).ok();
@@ -843,6 +870,7 @@ impl Peer {
             } else {
                 CloseSnapshot::default()
             },
+            contacts: self.contacts.snapshot(self.live && authenticated),
             gap: self.gap || self.history.as_ref().is_some_and(ChatHistory::has_gap),
         };
         if self.snapshot.as_ref().is_none_or(|previous| **previous != next) {

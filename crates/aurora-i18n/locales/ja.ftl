@@ -13585,3 +13585,15 @@ host-chat-close-uncertain = 会話を閉じたことを確認できませんで�
 host-chat-close-failed = 会話を閉じることができませんでした。キャラクターが利用可能になってから、もう一度お試しください。
 
 ui-chat-support-contact-blocked = このアカウントではこの相手にダイレクトメッセージを送信できません。
+
+# ホストのキャラクターに結び付いたフレンド選択。
+host-contacts-filter = フレンドを絞り込む
+host-contacts-online = オンラインのみ
+host-contacts-loading = フレンドを読み込み中…
+host-contacts-failed = フレンドを更新できませんでした。しばらくしてから再試行してください。
+host-contacts-limited = 最大2,048人のフレンドを表示します。
+host-contacts-open = IMを開く
+host-contacts-opening = このキャラクターの会話を開いています…
+host-contacts-uncertain = 会話を開いたか確認できません。要求は繰り返しません。
+host-contacts-opened = 会話を開きました。未読と下書きは変更されません。
+host-contacts-open-failed = この会話を開けませんでした。このキャラクターの接続と権限を確認してください。

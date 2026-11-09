@@ -89,6 +89,7 @@ fn group_attention_review_broker_preserves_native_reads_and_latches_group_replac
         // tests for mutation. This case exercises the snapshot gate below.
         if change == 3 {
             let snapshot = HostChatSnapshot {
+                contacts: Default::default(),
                 source: source(),
                 authenticated: true,
                 live: true,

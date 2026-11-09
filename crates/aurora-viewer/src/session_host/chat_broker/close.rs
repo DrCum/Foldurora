@@ -23,6 +23,7 @@ pub(crate) struct CloseSnapshot {
     pub hidden: BTreeSet<Conversation>,
     pub targets: BTreeMap<Conversation, u64>,
     pub operations: Vec<CloseOperation>,
+    pub opened_through: BTreeMap<Conversation, u64>,
 }
 struct Hidden {
     request: CloseRequest,
@@ -41,8 +42,35 @@ pub(super) struct CloseBook {
     operations: VecDeque<CloseOperation>,
     pending: Option<PendingClose>,
     highwater: u64,
+    opened_through: BTreeMap<Conversation, u64>,
 }
 impl CloseBook {
+    pub(super) fn highwater(&self) -> u64 {
+        self.highwater
+    }
+    pub(super) fn explicit_open(&mut self, conversation: Conversation, through: u64) {
+        if self.opened_through.len() == aurora_session::chat::MAX_CONVERSATIONS && !self.opened_through.contains_key(&conversation) {
+            return;
+        }
+        let previous = self.opened_through.entry(conversation).or_default();
+        *previous = (*previous).max(through);
+        if self
+            .hidden
+            .get(&conversation)
+            .is_some_and(|hidden| hidden.request.request <= through)
+        {
+            self.hidden.remove(&conversation);
+        }
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|pending| pending.request.key.conversation == conversation && pending.request.request <= through)
+        {
+            // Keep the original operation for immutable late receipt checking,
+            // but retire recovery and optimistic hiding. No incoming credit.
+            self.pending = None;
+        }
+    }
     pub fn hidden(&self, conversation: Conversation) -> bool {
         self.hidden.contains_key(&conversation)
     }
@@ -106,6 +134,7 @@ impl CloseBook {
             hidden: self.hidden.keys().copied().collect(),
             targets: self.targets.clone(),
             operations: self.operations.iter().copied().collect(),
+            opened_through: self.opened_through.clone(),
         }
     }
     pub fn receipt(&mut self, reply: CloseReceiptReply) -> Result<(), ChatError> {

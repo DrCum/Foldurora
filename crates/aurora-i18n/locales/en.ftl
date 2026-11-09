@@ -13624,3 +13624,15 @@ host-chat-close-uncertain = Close could not be confirmed. The conversation stays
 host-chat-close-failed = The conversation could not be closed. Try again when the character is available.
 
 ui-chat-support-contact-blocked = Direct messaging with this contact is unavailable for this account.
+
+# Source-bound host Friends chooser. Opening never sends or marks read.
+host-contacts-filter = Filter friends
+host-contacts-online = Online only
+host-contacts-loading = Loading friends…
+host-contacts-failed = Friends could not be refreshed. Try again shortly.
+host-contacts-limited = Showing up to 2,048 friends.
+host-contacts-open = Open IM
+host-contacts-opening = Opening this character’s conversation…
+host-contacts-uncertain = Open is unconfirmed. The request will not be repeated.
+host-contacts-opened = Conversation opened. Unread and drafts are unchanged.
+host-contacts-open-failed = This conversation could not be opened. Check this character’s connection and permissions.

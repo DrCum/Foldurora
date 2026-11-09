@@ -64,6 +64,7 @@ pub(super) fn host() -> HostSnapshot {
             }),
         });
         snapshot.chat.push(Arc::new(HostChatSnapshot {
+            contacts: Default::default(),
             source,
             authenticated: true,
             live: true,
@@ -208,10 +209,12 @@ impl Frames {
         let mut output = context.run_ui(raw, |ui| {
             let result = if index == 0 {
                 let send = self.chat.show_for(Self::surface(index), ui, &palette, mode);
+                let contact = self.chat.take_contact_action_for(Self::surface(index));
                 let close = self.chat.take_close_action_for(Self::surface(index));
                 let read = self.chat.take_read_action_for(Self::surface(index));
-                close
-                    .map(Action::Close)
+                contact
+                    .map(Action::Contact)
+                    .or_else(|| close.map(Action::Close))
                     .or_else(|| send.map(Action::Send))
                     .or_else(|| read.map(Action::Read))
             } else {

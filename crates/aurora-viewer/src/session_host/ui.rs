@@ -1547,6 +1547,7 @@ mod tests {
         let worker = snapshot.workers[0].binding.worker.worker;
         let source = ChatSource::try_from((snapshot.workers[0].binding, 1)).unwrap();
         let mut chat = HostChatSnapshot {
+            contacts: Default::default(),
             source,
             authenticated: false,
             live: true,

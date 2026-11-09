@@ -106,6 +106,7 @@ pub(super) enum Action {
     Send(SendDraft),
     Read(ReadDraft),
     Close(CloseDraft),
+    Contact(super::chat_ui::ContactAction),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -610,6 +611,7 @@ impl MonitorUi {
                 .frame(widgets::overlay_frame(ui.ctx(), p))
                 .show(ui, |_| {});
         }
+        let contact = chat.take_contact_action_for(view.surface());
         let close = chat.take_close_action_for(view.surface());
         let read = chat.take_read_action_for(view.surface()); // Never leave a latent UI Read behind a disabled body.
         if self.options_open {
@@ -645,6 +647,9 @@ impl MonitorUi {
             self.gesture = None;
         }
         if !passive && mode == InputMode::Live {
+            if let Some(contact) = contact {
+                return Some(Action::Contact(contact));
+            }
             if let Some(close) = close {
                 return Some(Action::Close(close));
             }

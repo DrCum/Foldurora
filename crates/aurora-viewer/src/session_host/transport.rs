@@ -112,6 +112,8 @@ enum HostIntent {
     Detach(WorkerId),
     ChatRead(MarkReadRequest),
     ChatClose(CloseRequest),
+    ChatContacts(ChatSource),
+    ChatOpenDirect(aurora_session::chat::OpenDirectRequest),
     ReviewConversation(ReviewCapture, HostedViewport),
     CancelReview(u64),
     ChatSend {
@@ -132,6 +134,8 @@ impl HostIntent {
             Self::ChatSend { .. }
             | Self::ChatRead(_)
             | Self::ChatClose(_)
+            | Self::ChatContacts(_)
+            | Self::ChatOpenDirect(_)
             | Self::ReviewConversation(_, _)
             | Self::CancelReview(_)
             | Self::RenameSlot(_, _)
@@ -533,6 +537,30 @@ impl HostController {
             policy_revision,
             text,
         })
+    }
+
+    pub fn refresh_contacts(&self, source: ChatSource) -> Result<u64, HostError> {
+        if !self.snapshot().chat.iter().any(|chat| {
+            chat.source == source && chat.authenticated && chat.live && chat.contacts.policy.is_some_and(|policy| policy.can_browse)
+        }) {
+            return Err(HostError::Unavailable);
+        }
+        self.send(HostIntent::ChatContacts(source))
+    }
+    pub fn open_direct(&self, request: aurora_session::chat::OpenDirectRequest) -> Result<u64, HostError> {
+        if !(aurora_session::chat::OpenDirectRequest { request: 1, ..request })
+            .validate()
+            .is_ok()
+            || !self.snapshot().chat.iter().any(|chat| {
+                chat.source == request.selection.source
+                    && chat.authenticated
+                    && chat.live
+                    && chat.contacts.selected(request.selection, request.resident, request.policy_revision)
+            })
+        {
+            return Err(HostError::Unavailable);
+        }
+        self.send(HostIntent::ChatOpenDirect(request))
     }
 
     pub fn close_chat(&self, request: CloseRequest) -> Result<u64, HostError> {
@@ -1606,6 +1634,40 @@ impl Broker {
             HostIntent::Detach(worker) => {
                 let effects = self.coordinator.detach(worker)?;
                 self.effects(effects)?;
+            }
+            HostIntent::ChatContacts(source) => {
+                let live = self
+                    .coordinator
+                    .workers()
+                    .any(|entry| entry.live && entry.binding == source.binding() && entry.status.phase == Phase::Online);
+                let child = self
+                    .children
+                    .iter_mut()
+                    .find(|child| child.config.identity == source.worker && child.config.lease_epoch == source.lease_epoch)
+                    .ok_or(HostError::Unavailable)?;
+                if !live || child.detached || child.exited || child.last_seen.is_none_or(|seen| seen.elapsed() > REACHABLE) {
+                    child.chat.set_control(None, false);
+                    anyhow::bail!(HostError::Unavailable);
+                }
+                child.chat.refresh_contacts(source, now)?;
+            }
+            HostIntent::ChatOpenDirect(mut request) => {
+                request.request = ticket;
+                let source = request.selection.source;
+                let live = self
+                    .coordinator
+                    .workers()
+                    .any(|entry| entry.live && entry.binding == source.binding() && entry.status.phase == Phase::Online);
+                let child = self
+                    .children
+                    .iter_mut()
+                    .find(|child| child.config.identity == source.worker && child.config.lease_epoch == source.lease_epoch)
+                    .ok_or(HostError::Unavailable)?;
+                if !live || child.detached || child.exited || child.last_seen.is_none_or(|seen| seen.elapsed() > REACHABLE) {
+                    child.chat.set_control(None, false);
+                    anyhow::bail!(HostError::Unavailable);
+                }
+                child.chat.admit_open_direct(request, now)?;
             }
             HostIntent::ChatClose(mut request) => {
                 request.request = ticket;
