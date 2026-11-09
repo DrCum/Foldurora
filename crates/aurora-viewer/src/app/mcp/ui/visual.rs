@@ -33,6 +33,20 @@ fn draw(frames: &mut Frames, state: &mut Assistant, config: &mut Configuration, 
         "review clicks must not change policy"
     );
 }
+// Report the actual production scroll clip independently from layout bounds.
+// Partial cards are not silently promoted to fully visible native evidence.
+fn review_actions(frames: &Frames, id: &str) -> Value {
+    let clip = frames.rect(egui::Id::unique(("assistant_action_clip", id)));
+    let deny = frames.rect(egui::Id::unique(("assistant_deny", id)));
+    let allow = frames.rect(egui::Id::unique(("assistant_allow", id)));
+    json!({
+        "clip":rect_json(clip),
+        "deny":rect_json(deny),"deny_visible":rect_json(deny.intersect(clip)),
+        "deny_fully_visible":clip.contains_rect(deny),"deny_center_visible":clip.contains(deny.center()),
+        "allow":rect_json(allow),"allow_visible":rect_json(allow.intersect(clip)),
+        "allow_fully_visible":clip.contains_rect(allow),"allow_center_visible":clip.contains(allow.center()),
+    })
+}
 fn poll(state: &Assistant, endpoint: HostId, id: &str) -> Value {
     state.runtime.request(
         1,
@@ -130,7 +144,7 @@ fn character_mcp_cpu_visual_fixture() {
             arguments_rect.is_positive(),
             "the actual argument clip must be reachable by the pointer"
         );
-        frames.capture(&env.directory, &format!("0{}-before-scroll", index + 2), json!({"actual_clip":rect_json(arguments_rect), "content":[content.x,content.y], "viewport":[viewport.x,viewport.y], "pending":true}));
+        frames.capture(&env.directory, &format!("0{}-before-scroll", index + 2), json!({"actual_clip":rect_json(arguments_rect), "content":[content.x,content.y], "viewport":[viewport.x,viewport.y], "pending":true,"review_actions":review_actions(&frames,&id)}));
         draw(
             &mut frames,
             &mut state,
@@ -150,14 +164,14 @@ fn character_mcp_cpu_visual_fixture() {
             draw(&mut frames, &mut state, &mut config, vec![]);
         }
         let offset = egui::scroll_area::State::load(&frames.context, scroll).unwrap().unclamped_offset();
-        frames.capture(&env.directory, &format!("0{}-after-scroll", index + 2), json!({"actual_clip":rect_json(arguments_rect), "content":[content.x,content.y], "viewport":[viewport.x,viewport.y], "offset":[offset.x,offset.y], "pending":true}));
+        frames.capture(&env.directory, &format!("0{}-after-scroll", index + 2), json!({"actual_clip":rect_json(arguments_rect), "content":[content.x,content.y], "viewport":[viewport.x,viewport.y], "offset":[offset.x,offset.y], "pending":true,"review_actions":review_actions(&frames,&id)}));
         // The shared Label may wrap: reviewability is independent of the axis.
         // The real pointer and wheel must bring every tail glyph into the clip.
         assert!(
             frames.text.iter().any(|text| text["review_tail_visible"] == true),
             "the complete frozen tail must be visibly reviewable after scrolling"
         );
-        frames.capture(&env.directory,&format!("0{}-frozen-review-tail",index+2),json!({"request_id":id,"frozen_text_bytes":text.len(),"full_tail_visible":true,"evidence_expanded":true,"deny":rect_json(frames.rect(egui::Id::unique(("assistant_deny",&id)))),"allow":rect_json(frames.rect(egui::Id::unique(("assistant_allow",&id)))),"no_default_enter":true}));
+        frames.capture(&env.directory,&format!("0{}-frozen-review-tail",index+2),json!({"request_id":id,"frozen_text_bytes":text.len(),"full_tail_visible":true,"evidence_expanded":true,"deny":rect_json(frames.rect(egui::Id::unique(("assistant_deny",&id)))),"allow":rect_json(frames.rect(egui::Id::unique(("assistant_allow",&id)))),"no_default_enter":true,"review_actions":review_actions(&frames,&id)}));
         let key = if allow { "assistant_allow" } else { "assistant_deny" };
         let at = frames.rect(egui::Id::unique((key, &id))).center();
         for pressed in [true, false] {
