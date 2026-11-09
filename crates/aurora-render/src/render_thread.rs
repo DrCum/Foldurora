@@ -78,7 +78,7 @@ pub fn handoff<J, R>() -> (Owner<J, R>, Worker<J, R>) {
         to_worker: Condvar::new(),
         to_owner: Condvar::new(),
     });
-    (Owner(shared.clone()), Worker(shared))
+    (Owner(shared.clone(), true), Worker(shared))
 }
 
 /// What a `submit` returns.
@@ -101,7 +101,8 @@ pub enum TrySubmitError<J> {
     WorkerGone(J),
 }
 
-pub struct Owner<J, R>(Arc<Shared<J, R>>);
+// The original owner closes on drop; a short-lived borrowed handle cannot.
+pub struct Owner<J, R>(Arc<Shared<J, R>>, bool);
 
 impl<J, R> Owner<J, R> {
     /// Wait until the worker holds nothing; the time it took.
@@ -178,6 +179,36 @@ impl<J, R> Owner<J, R> {
             previous,
             waited: Duration::ZERO,
         })
+    }
+
+    /// Reserve before preparing a preview. Busy never runs the closure, so no
+    /// scene journal/upload is consumed by a rejected submission.
+    #[cfg(feature = "monitor-prototype")]
+    pub fn try_submit_with(&self, build: impl FnOnce() -> J) -> Result<Option<Submitted<R>>, WorkerGone> {
+        let Some(mut s) = self.0.state.try_lock() else {
+            return Ok(None);
+        };
+        if s.worker_gone || s.closed {
+            return Err(WorkerGone);
+        }
+        if s.busy || s.job.is_some() {
+            return Ok(None);
+        }
+        let job = build();
+        let previous = s.result.take();
+        s.job = Some(job);
+        s.handed = Some(Instant::now());
+        self.0.to_worker.notify_one();
+        Ok(Some(Submitted {
+            previous,
+            waited: Duration::ZERO,
+        }))
+    }
+
+    #[cfg(feature = "monitor-prototype")]
+    pub fn borrowed(&self) -> Self {
+        // Only the original owner closes the rendezvous on drop.
+        Self(self.0.clone(), false)
     }
 
     /// Wait for the job handed over to be done; its result unless already
@@ -261,7 +292,9 @@ impl<J, R> Owner<J, R> {
 
 impl<J, R> Drop for Owner<J, R> {
     fn drop(&mut self) {
-        self.close();
+        if self.1 {
+            self.close();
+        }
     }
 }
 
@@ -317,6 +350,10 @@ impl<J, R> Drop for Worker<J, R> {
 /// What the render thread is asked to do.
 pub(crate) enum Job {
     Frame(Box<FramePacket>),
+    #[cfg(feature = "monitor-prototype")]
+    Monitor(Box<FramePacket>, crate::monitor::Request),
+    #[cfg(feature = "monitor-prototype")]
+    PollMonitor,
     /// Ordered after preceding frame packets. Every poll stays on the queue's
     /// owning render thread, including when ordinary frame pacing is disabled.
     SessionFence(u64),
@@ -333,6 +370,10 @@ pub(crate) enum Job {
 
 pub(crate) enum Done {
     Frame(Box<FrameResult>),
+    #[cfg(feature = "monitor-prototype")]
+    Monitor(Box<crate::packet::Spent>),
+    #[cfg(feature = "monitor-prototype")]
+    MonitorPolled,
     SessionFence(crate::session_fence::Reply),
     ViewportCaptureMaintenance {
         probe: crate::viewport_capture_retirement::Probe,
@@ -479,6 +520,13 @@ fn run(mut backend: Backend, worker: Worker<Job, Done>) -> Backend {
                 result.stats.thread_idle_ms = idle.as_secs_f32() * 1000.0;
                 Done::Frame(Box::new(result))
             }
+            #[cfg(feature = "monitor-prototype")]
+            Job::Monitor(packet, request) => Done::Monitor(Box::new(backend.render_monitor(*packet, request))),
+            #[cfg(feature = "monitor-prototype")]
+            Job::PollMonitor => {
+                backend.poll_monitor();
+                Done::MonitorPolled
+            }
             Job::Pick { x, y } => Done::Pick(backend.pick_world(x, y)),
             Job::SessionFence(ticket) => Done::SessionFence(backend.session_fence(ticket)),
             Job::MaintainViewportCapture(probe) => crate::viewport_capture_retirement::owner_result(probe, || {
@@ -547,6 +595,22 @@ mod tests {
         };
         tracker.receive(probe, pending);
         assert_eq!(tracker.progress(false), Ok(CaptureRetirementProgress::Idle));
+    }
+
+    #[cfg(feature = "monitor-prototype")]
+    #[test]
+    fn monitor_reservation_under_contention_does_not_prepare_or_consume_previous_result() {
+        let (owner, _worker) = handoff::<u32, u32>();
+        let mut state = owner.0.state.lock();
+        state.result = Some(9);
+        assert!(
+            owner
+                .try_submit_with(|| panic!("must not prepare while contended"))
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(state.result, Some(9));
+        assert!(state.job.is_none());
     }
 
     const TICK: Duration = Duration::from_millis(40);
