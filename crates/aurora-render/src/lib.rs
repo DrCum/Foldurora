@@ -34,6 +34,8 @@ mod label_depth;
 pub mod light_tiles;
 pub mod looks;
 pub mod main_thread;
+#[cfg(feature = "monitor-prototype")]
+pub mod monitor;
 mod motion_debug;
 mod motion_history;
 mod occlusion;

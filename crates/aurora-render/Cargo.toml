@@ -53,9 +53,12 @@ libc = "0.2.190"
 openxr = "0.22"
 
 [features]
+# Renderer-only prototype; no viewer/host enables this feature.
+monitor-prototype = []
 xr-static-loader = ["openxr/static"]
 
 [dev-dependencies]
+winit = "0.30.13"
 naga = { version = "30", features = ["wgsl-in"] }
 aurora-assets = { path = "../aurora-assets" }
 rayon = "1.12.0"
