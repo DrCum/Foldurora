@@ -24,7 +24,20 @@ fn reset_button(texts: &[crate::ui::widgets::elide_tests::Text], label: &str) ->
 }
 
 fn reset_undo(frames: &mut Frames, s: &mut Settings, st: &mut OptionsUi, open: &mut bool, texts: &[crate::ui::widgets::elide_tests::Text]) {
-    let at = reset_button(texts, aurora_i18n::tr!("money-tracker-undo"));
+    // Undo is a right-aligned Label. In egui 0.37 TextShape::pos is its
+    // right-hand galley anchor; Frames' generic Text.rect assumes a left
+    // anchor. Aim inside the actual glyphs, rather than beyond the label.
+    let text = crate::ui::widgets::elide_tests::painted(texts, aurora_i18n::tr!("money-tracker-undo"));
+    let at = text.rect.left_center() - egui::vec2(text.rect.width() * 0.5, 0.0);
+    assert!(
+        frames.ctx.viewport(|v| v
+            .this_pass
+            .widgets
+            .layers()
+            .flat_map(|(_, ws)| ws)
+            .any(|w| w.enabled && w.sense.senses_click() && w.interact_rect.contains(at) && w.rect.width() <= text.rect.width() + 1.0)),
+        "the pointer targets the interactive Undo label"
+    );
     let mut trace = Vec::new();
     for events in click(at) {
         let texts = reset_frame(frames, s, st, open, events).0;
