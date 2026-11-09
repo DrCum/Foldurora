@@ -59,7 +59,6 @@ pub struct OwnerEdit {
     pub expected: BTreeMap<String, u32>,
     pub before: Pose,
     pub changes: Pose,
-    pub typed: bool,
 }
 pub struct Service {
     pub owner: Owner,
@@ -711,7 +710,6 @@ impl Service {
                     expected,
                     before,
                     changes,
-                    typed: true,
                 });
             }
             _ => {}

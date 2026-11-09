@@ -43,12 +43,13 @@ fn target(app: &App, c: &Capture) -> Result<Uuid, &'static str> {
     Ok(id)
 }
 pub(super) fn preparation(app: &mut App, assistant: &Assistant, c: &Capture) -> Result<bool, &'static str> {
-    assistant.runtime.continue_preparation(c, Class::Read, || ())?;
-    prepare(app, &assistant.workspaces, c)?;
-    if app.workspaces.catalogue.is_some() {
-        return Ok(true);
-    }
-    app.workspace_ensure_catalogue()
+    // Linearize the actual bounded request admission, not just a no-op check,
+    // against cancellation, disconnect and permission changes. The existing IO
+    // worker performs the read; this callback only checks and queues demand.
+    assistant.runtime.continue_preparation(c, Class::Read, || {
+        prepare(app, &assistant.workspaces, c)?;
+        app.workspace_ensure_catalogue()
+    })?
 }
 pub(super) fn prepare(app: &App, _state: &State, c: &Capture) -> Result<Vec<Class>, &'static str> {
     if !supports(c.tool) {
