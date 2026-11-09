@@ -1,0 +1,31 @@
+    Finished `ci` profile [unoptimized] target(s) in 0.19s
+     Running unittests src/lib.rs (/workspace/Foldurora/target/ci/deps/aurora_render-2d44ace34a6b6e66)
+
+running 8 tests
+test monitor::tests::monitor_cadences_drop_missed_ticks_without_catchup ... ok
+test monitor::tests::monitor_busy_worker_does_not_prepare_scene_or_consume_uploads ... ok
+test monitor::tests::monitor_cancelled_before_submission_and_after_callback_never_delivers ... ok
+test monitor::tests::monitor_resize_invalidates_old_frames_and_does_not_accelerate_rate ... ok
+test monitor::tests::monitor_hidden_minimized_closed_and_promotion_keep_drain_reservation ... ok
+test monitor::tests::monitor_character_lifetimes_and_close_are_isolated ... ok
+test monitor::tests::monitor_small_gpu_targets_are_persistent_bounded_and_have_no_readback_usage ... ok
+Error [GENERAL | xrEnumerateInstanceExtensionProperties | OpenXR-Loader] : RuntimeManifestFile::FindManifestFiles - failed to determine active runtime file path for this environment
+Error [GENERAL | xrEnumerateInstanceExtensionProperties | OpenXR-Loader] : RuntimeInterface::LoadRuntimes - unknown error
+Error [GENERAL | xrEnumerateInstanceExtensionProperties | OpenXR-Loader] : RuntimeInterface::LoadRuntimes - failed to load a runtime
+Error [GENERAL | xrEnumerateInstanceExtensionProperties | OpenXR-Loader] : Failed to find default runtime with RuntimeInterface::LoadRuntime()
+Error [GENERAL | xrEnumerateInstanceExtensionProperties | OpenXR-Loader] : Failed querying extension properties
+test monitor::tests::monitor_world_packets_keep_surface_size_and_never_prove_presentation has been running for over 60 seconds
+
+thread 'monitor::tests::monitor_world_packets_keep_surface_size_and_never_prove_presentation' (5770) panicked at crates/aurora-render/src/monitor/tests.rs:276:13:
+Monitor never admitted
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test monitor::tests::monitor_world_packets_keep_surface_size_and_never_prove_presentation ... FAILED
+
+failures:
+
+failures:
+    monitor::tests::monitor_world_packets_keep_surface_size_and_never_prove_presentation
+
+test result: FAILED. 7 passed; 1 failed; 0 ignored; 0 measured; 465 filtered out; finished in 88.80s
+
+error: test failed, to rerun pass `-p aurora-render --lib`

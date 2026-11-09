@@ -142,6 +142,9 @@ pub(crate) struct FramePacket {
 }
 
 pub(crate) struct FrameResult {
+    /// Actual view encoding/submission, distinct from foreground presentation.
+    #[cfg(feature = "monitor-prototype")]
+    pub rendered: bool,
     pub index: u64,
     /// The renderer's side of the statistics (the scene's stores add theirs).
     pub stats: RenderStats,

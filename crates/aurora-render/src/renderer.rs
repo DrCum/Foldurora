@@ -20,6 +20,10 @@
 //! (main_thread.rs): the backend only sees the handles a packet carries,
 //! and it alone uses the queue.
 
+#[cfg(feature = "monitor-prototype")]
+#[path = "monitor/backend.rs"]
+mod monitor_backend;
+
 use crate::gpu_cull::{
     BIN_PROBE, BIN_REFL_MIRROR, BIN_REFL_WATER, BIN_SHADOW, BIN_SHADOW_ALPHA, BIN_SPOT, BIN_WATER_EXCLUSION, COUNT_PRE1, COUNT_PRE2,
     CullFrame, GpuCull, MAIN_BINS, REGION_PRE1, REGION_PRE2, SPOT_SHADOWS, frame_flags,
@@ -1561,6 +1565,10 @@ pub(crate) struct Backend {
     session_fences: crate::session_fence::GpuFences,
     viewport_capture: Option<crate::viewport_capture_gpu::GpuCapture>,
     external: bool,
+    #[cfg(feature = "monitor-prototype")]
+    monitor_seed: Option<Box<BackendInit>>,
+    #[cfg(feature = "monitor-prototype")]
+    monitor_view: Option<Box<monitor_backend::View>>,
     #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
     vr: Arc<crate::vr_control::Control>,
     #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
@@ -2710,6 +2718,8 @@ struct Ranges {
 impl Backend {
     /// Surface configuration, pipelines, targets and per-frame buffers.
     pub fn new(init: BackendInit) -> Result<Backend, RenderError> {
+        #[cfg(feature = "monitor-prototype")]
+        let monitor_seed = (!init.external).then(|| Box::new(init.clone()));
         #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
         let xr_seed = init.xr.as_ref().map(|_| Box::new(init.clone()));
         let BackendInit {
@@ -3214,6 +3224,10 @@ impl Backend {
         let mut r = Backend {
             device,
             queue,
+            #[cfg(feature = "monitor-prototype")]
+            monitor_seed,
+            #[cfg(feature = "monitor-prototype")]
+            monitor_view: None,
             surface: std::mem::ManuallyDrop::new(surface),
             config,
             external,
@@ -5512,6 +5526,8 @@ impl Backend {
     fn result(&mut self, index: u64, stats: RenderStats, captured: Option<(u32, u32, Vec<u8>)>, spent: Spent) -> FrameResult {
         let snapshot = self.end_snapshot();
         FrameResult {
+            #[cfg(feature = "monitor-prototype")]
+            rendered: false,
             index,
             stats,
             hover: self.depth_pick.latest(),
@@ -5977,6 +5993,9 @@ impl Backend {
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::TEXTURE_BINDING,
                 view_formats: &[],
             })))
+        } else if self.external {
+            // An external view may never fall back to the presentation surface.
+            None
         } else {
             match self.surface.get_current_texture() {
                 wgpu::CurrentSurfaceTexture::Success(t) => Some(FrameTarget::Surface(t)),
@@ -8976,7 +8995,10 @@ impl Backend {
         stats.water_reflection = do_water_refl;
         stats.mirror = mirror.is_some();
         let spent = Spent { writes, lists: draw_lists };
-        self.result(index, stats, captured, spent)
+        let result = self.result(index, stats, captured, spent);
+        #[cfg(feature = "monitor-prototype")]
+        let result = FrameResult { rendered: true, ..result };
+        result
     }
 
     /// Copy the swapchain image to a readback buffer (frame captures).
