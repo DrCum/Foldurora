@@ -38,7 +38,10 @@ impl State {
             self.since = None;
             return;
         };
-        if !prefs.show_hover_tooltips {
+        // Pictures stay available when text tooltips are off (#3008).
+        let text = prefs.show_hover_tooltips;
+        let picture = prefs.thumbnail_tooltips.then(|| asset(inv, id)).flatten();
+        if !text && picture.is_none() {
             self.since = None;
             return;
         }
@@ -51,7 +54,6 @@ impl State {
         if since.0 != response.id {
             *since = (response.id, now);
         }
-        let picture = prefs.thumbnail_tooltips.then(|| asset(inv, id)).flatten();
         if picture.is_some() && now - since.1 < DELAY {
             response
                 .ctx
@@ -70,6 +72,9 @@ impl State {
                 } else {
                     ui.add_sized(Vec2::splat(SIZE), egui::Label::new(aurora_i18n::tr!("common-loading-2")));
                 }
+            }
+            if !text {
+                return;
             }
             if let Some(it) = inv.items.get(&id) {
                 ui.label(&it.name);
@@ -230,6 +235,7 @@ mod tests {
         let images = HashMap::from([(picture, texture.clone())]);
         let prefs = InventoryPreferences {
             show_hover_tooltips: true,
+            thumbnail_tooltips: true,
             ..Default::default()
         };
         let p = crate::theme::Theme::default().palette();
@@ -310,8 +316,11 @@ mod tests {
         let mut inv = super::super::tests::view_inventory(false);
         let item = id(8104);
         inv.items.get_mut(&item).unwrap().desc = "Photo description".into();
-        let prefs = InventoryPreferences::default();
-        assert!(!prefs.show_hover_tooltips);
+        let prefs = InventoryPreferences {
+            show_hover_tooltips: false,
+            thumbnail_tooltips: false,
+            ..Default::default()
+        };
         let p = crate::theme::Theme::default().palette();
         let mut state = State::default();
         let mut wanted = HashSet::new();
@@ -325,20 +334,95 @@ mod tests {
         assert!(state.since.is_none());
     }
 
+    /// Pictures on hover still load when text tooltips are off (#3008).
+    #[test]
+    fn inventory_hover_pictures_work_with_text_tooltips_off() {
+        let mut frames = Frames::new();
+        let ctx = frames.ctx.clone();
+        let texture = ctx.load_texture(
+            "hover only picture",
+            egui::ColorImage::filled([64, 32], egui::Color32::WHITE),
+            Default::default(),
+        );
+        let mut inv = super::super::tests::view_inventory(false);
+        let item = id(8104);
+        inv.items.get_mut(&item).unwrap().desc = "Photo description".into();
+        let picture = inv.items[&item].asset_id;
+        let images = HashMap::from([(picture, texture.clone())]);
+        let prefs = InventoryPreferences {
+            show_hover_tooltips: false,
+            thumbnail_tooltips: true,
+            ..Default::default()
+        };
+        let p = crate::theme::Theme::default().palette();
+        let mut state = State::default();
+        let mut wanted = HashSet::new();
+        let pos = egui::pos2(40.0, 20.0);
+        let mut draw = |ui: &mut egui::Ui| {
+            let response = ui.add_sized([180.0, 24.0], egui::Label::new("Photo row"));
+            state.record(&response, item, None);
+            state.show(&p, &inv, &prefs, &images, &mut wanted);
+        };
+        frames.run(vec![], &mut draw);
+        frames.run(vec![egui::Event::PointerMoved(pos)], &mut draw);
+        for _ in 0..20 {
+            frames.run(vec![], &mut draw);
+        }
+        let texts = frames.hover(pos, |ui| {
+            let response = ui.add_sized([180.0, 24.0], egui::Label::new("Photo row"));
+            state.record(&response, item, None);
+            state.show(&p, &inv, &prefs, &images, &mut wanted);
+        });
+        assert_eq!(wanted, HashSet::from([picture]));
+        assert!(!texts.iter().any(|text| text.source == "Photo description"), "text tip stays off");
+        let shapes = frames.shapes(vec![], |ui| {
+            let response = ui.add_sized([180.0, 24.0], egui::Label::new("Photo row"));
+            state.record(&response, item, None);
+            state.show(&p, &inv, &prefs, &images, &mut wanted);
+        });
+        assert!(
+            shapes.iter().any(|shape| matches!(
+                shape,
+                egui::Shape::Rect(rect) if rect.fill_texture_id() == texture.id()
+            )),
+            "picture still paints"
+        );
+        // A cached image must disappear as soon as the owning inventory
+        // gains @viewtexture, even though text tooltips are already off.
+        inv.rlva_preview_mask = 1;
+        wanted.clear();
+        let shapes = frames.shapes(vec![], |ui| {
+            let response = ui.add_sized([180.0, 24.0], egui::Label::new("Photo row"));
+            state.record(&response, item, None);
+            state.show(&p, &inv, &prefs, &images, &mut wanted);
+        });
+        assert!(wanted.is_empty());
+        assert!(state.since.is_none());
+        assert!(!shapes.iter().any(|shape| matches!(
+            shape,
+            egui::Shape::Rect(rect) if rect.fill_texture_id() == texture.id()
+        )));
+    }
+
     #[test]
     fn inventory_hover_picture_uses_both_inventory_presentations_without_selecting() {
-        for width in [0.0, 440.0, 800.0, 1180.0] {
+        for (text, width) in [false, true]
+            .into_iter()
+            .flat_map(|text| [0.0, 440.0, 800.0, 1180.0].map(move |width| (text, width)))
+        {
             let mut frames = Frames::new();
             let ctx = frames.ctx.clone();
             let mut inv = super::super::tests::view_inventory(false);
             let item = id(8104);
             let mut st = InventoryUi {
                 search: inv.items[&item].name.clone(),
+                selection: HashSet::from([id(8100)]),
                 ..Default::default()
             };
             let mut prefs = InventoryPreferences {
                 show_details: false,
-                show_hover_tooltips: true,
+                show_hover_tooltips: text,
+                thumbnail_tooltips: true,
                 ..Default::default()
             };
             let facts = Facts::default();
@@ -373,8 +457,133 @@ mod tests {
             frames.hover(rect.center(), &mut draw);
             assert!(st.wanted_hover_images.contains(&inv.items[&item].asset_id), "width {width}");
             assert!(st.wanted_images.is_empty(), "hover does not populate the persistent UI cache");
-            assert!(st.selection.is_empty());
+            assert_eq!(st.selection, HashSet::from([id(8100)]), "hover keeps another selected item");
             assert!(actions.is_empty());
+            assert!(inv.queue.is_empty(), "hover never fetches inventory contents");
+        }
+    }
+
+    /// Real inventory content and tooltip paint, with a cached synthetic
+    /// picture and text tips off. The two editor looks share this path.
+    #[test]
+    fn inventory_hover_picture_only_capture_both_presentations() {
+        for classic in [false, true] {
+            let ctx = egui::Context::default();
+            let theme = crate::theme::Theme {
+                panel_alpha: 255,
+                ..Default::default()
+            };
+            theme.apply(&ctx, 1.0);
+            let p = theme.palette();
+            let mut inv = super::super::tests::view_inventory(false);
+            let item = id(8104);
+            let texture = ctx.load_texture(
+                "synthetic hover picture",
+                egui::ColorImage::filled([128, 64], egui::Color32::from_rgb(40, 130, 210)),
+                Default::default(),
+            );
+            let images = HashMap::from([(inv.items[&item].asset_id, texture.clone())]);
+            let mut st = InventoryUi {
+                search: inv.items[&item].name.clone(),
+                ..Default::default()
+            };
+            let mut prefs = InventoryPreferences {
+                show_details: false,
+                show_hover_tooltips: false,
+                thumbnail_tooltips: true,
+                ..Default::default()
+            };
+            let mut actions = Vec::new();
+            let mut painter = crate::crash::software::Painter::default();
+            let mut pixels = vec![0; 1280 * 900];
+            for frame in 0..80 {
+                let events = if frame == 4 {
+                    let rect = ctx
+                        .data(|d| d.get_temp::<egui::Rect>(egui::Id::unique(("inventory_drag_row", Uuid::nil(), item))))
+                        .expect("actual photo row");
+                    vec![egui::Event::PointerMoved(rect.center())]
+                } else {
+                    Vec::new()
+                };
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 900.0))),
+                        time: Some(frame as f64 / 60.0),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        st.visible.clear();
+                        ui.set_width(if classic { 440.0 } else { 800.0 });
+                        if classic {
+                            inventory_contents(
+                                ui,
+                                &p,
+                                &Icons::default(),
+                                &mut inv,
+                                &mut st,
+                                &mut prefs,
+                                &Facts::default(),
+                                &mut actions,
+                            );
+                        } else {
+                            aurora::contents(
+                                ui,
+                                &p,
+                                &Icons::default(),
+                                &mut inv,
+                                &mut st,
+                                &mut prefs,
+                                &Facts::default(),
+                                &Default::default(),
+                                &mut actions,
+                            );
+                        }
+                        st.hover.show(&p, &inv, &prefs, &images, &mut st.wanted_hover_images);
+                    },
+                );
+                let primitives = if frame == 79 {
+                    ctx.tessellate(output.shapes.clone(), output.pixels_per_point)
+                } else {
+                    Vec::new()
+                };
+                assert!(primitives.iter().all(|p| matches!(p.primitive, egui::epaint::Primitive::Mesh(_))));
+                if frame == 79 {
+                    assert!(
+                        primitives.iter().any(|p| matches!(&p.primitive,
+                            egui::epaint::Primitive::Mesh(mesh) if mesh.texture_id == texture.id()
+                        )),
+                        "picture actually paints with text tips off"
+                    );
+                }
+                painter.paint(
+                    &mut pixels,
+                    [1280, 900],
+                    &primitives,
+                    &output.textures_delta,
+                    output.pixels_per_point,
+                    p.panel,
+                );
+                output.textures_delta.clear();
+            }
+            assert!(st.selection.is_empty() && actions.is_empty());
+            assert!(inv.queue.is_empty());
+            if let Some(path) = std::env::var_os("AURORA_CAPTURE") {
+                let path = std::path::Path::new(&path);
+                let style = if classic { "classic" } else { "aurora" };
+                let rgba: Vec<u8> = pixels
+                    .iter()
+                    .flat_map(|p| [(*p >> 16) as u8, (*p >> 8) as u8, *p as u8, 255])
+                    .collect();
+                image::save_buffer(
+                    path.with_file_name(format!("inventory-picture-{style}.png")),
+                    &rgba,
+                    1280,
+                    900,
+                    image::ColorType::Rgba8,
+                )
+                .unwrap();
+            }
         }
     }
 }

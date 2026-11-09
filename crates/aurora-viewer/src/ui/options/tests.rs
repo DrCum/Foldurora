@@ -3,6 +3,9 @@ use crate::keybinds::{Action, Input};
 use crate::ui::widgets::elide_tests::Frames;
 use winit::keyboard::KeyCode;
 
+#[path = "hover_controls_tests.rs"]
+mod hover_controls;
+
 /// The real Preferences window, including its footer, modal and Undo bar.
 fn reset_frame(
     frames: &mut Frames,
@@ -2318,4 +2321,67 @@ fn the_system_font_search_filters_and_resets() {
 #[test]
 fn the_system_font_search_resets_above_its_button() {
     font_search(420.0);
+}
+
+#[test]
+fn show_friends_only_switches_from_controls_once_logged_in() {
+    // the rows of a search for the row's own label on Controls, in the
+    // interface's language (the tests may run in French): the shapes painted
+    fn frame(frames: &mut Frames, st: &mut OptionsUi, r: &mut OptionsResult, events: Vec<egui::Event>) -> Vec<egui::Shape> {
+        let p = crate::theme::Theme::default().palette();
+        let (mut s, d) = (Settings::default(), Settings::default());
+        let query = aurora_i18n::tr!("toolbar-command-friends-only");
+        frames.shapes(events, |ui| {
+            ui.set_width(700.0);
+            ui.spacing_mut().item_spacing.y = 0.0;
+            let mut cx = Cx::new(ui, p, &mut s, &d, st, r, Mode::Search, query);
+            run_page(&mut cx, Page::Controls, Some(0));
+        })
+    }
+    // the switch at the right of the row's label
+    fn switch(shapes: &[egui::Shape]) -> egui::Pos2 {
+        let label = shapes
+            .iter()
+            .find_map(|shape| match shape {
+                egui::Shape::Text(t) if t.galley.text() == aurora_i18n::tr!("toolbar-command-friends-only") => {
+                    Some(egui::Rect::from_min_size(t.pos, t.galley.size()))
+                }
+                _ => None,
+            })
+            .expect("the row of Show Friends Only");
+        shapes
+            .iter()
+            .filter_map(|shape| match shape {
+                egui::Shape::Rect(r)
+                    if r.rect.size() == crate::ui::widgets::SWITCH_SIZE
+                        && r.rect.left() > label.right()
+                        && (r.rect.center().y - label.center().y).abs() < 2.0 =>
+                {
+                    Some(r.rect)
+                }
+                _ => None,
+            })
+            .min_by(|a, b| a.left().total_cmp(&b.left()))
+            .expect("its switch")
+            .center()
+    }
+    // logged in it flips the world's state; logged out it is greyed
+    for (state, asked) in [(Some(false), Some(true)), (Some(true), Some(false)), (None, None)] {
+        let mut frames = Frames::new();
+        let mut st = OptionsUi {
+            friends_only: state,
+            friends_only_keep: state.map(|_| false),
+            ..Default::default()
+        };
+        let mut r = OptionsResult::default();
+        let mut shapes = Vec::new();
+        for _ in 0..3 {
+            shapes = frame(&mut frames, &mut st, &mut r, Vec::new());
+        }
+        for events in click(switch(&shapes)) {
+            frame(&mut frames, &mut st, &mut r, events);
+        }
+        assert_eq!(r.friends_only, asked, "logged in: {}", state.is_some());
+        assert_eq!(r.friends_only_keep, None, "the keep row is left alone");
+    }
 }
