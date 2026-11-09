@@ -475,6 +475,7 @@ mod tests {
             };
             theme.apply(&ctx, 1.0);
             let p = theme.palette();
+            let icons = Icons::load(&ctx, None);
             let mut inv = super::super::tests::view_inventory(false);
             let item = id(8104);
             let texture = ctx.load_texture(
@@ -516,21 +517,12 @@ mod tests {
                         st.visible.clear();
                         ui.set_width(if classic { 440.0 } else { 800.0 });
                         if classic {
-                            inventory_contents(
-                                ui,
-                                &p,
-                                &Icons::default(),
-                                &mut inv,
-                                &mut st,
-                                &mut prefs,
-                                &Facts::default(),
-                                &mut actions,
-                            );
+                            inventory_contents(ui, &p, &icons, &mut inv, &mut st, &mut prefs, &Facts::default(), &mut actions);
                         } else {
                             aurora::contents(
                                 ui,
                                 &p,
-                                &Icons::default(),
+                                &icons,
                                 &mut inv,
                                 &mut st,
                                 &mut prefs,

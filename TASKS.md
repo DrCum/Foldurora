@@ -1,3 +1,7 @@
+## Foldurora CPU layout evidence review (9 November 2026)
+
+- Preserve verified98b package (9164/0/61,1366 audit). Correct hover capture icon setup and add test-only review action clip/bounds evidence; product layout/capability unchanged. Focused captures pending; no repeat full build/package. Native footer/short-window behavior remains human acceptance.
+
 ## Foldurora Windows regression correction (9 November 2026)
 
 - Preserve FAILED ec0 (9160/2/61). Correct native catalogue accounting for explicitly unsupported workspace writes; retain153 exact dispositions. Add genuine Runtime refusal and native malformed-Library projection regressions, named image transitions and explicit fixture RLVa opt-in. Production permission/archive/storage/capability code unchanged. Windows execution/audit/package remain required.

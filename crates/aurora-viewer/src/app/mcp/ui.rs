@@ -139,6 +139,15 @@ pub(super) fn show(
                             let _ = evidence_header;
                         }
                         ui.horizontal_wrapped(|ui| {
+                            // Fixture-only visibility evidence; do not infer the
+                            // painted clip from a button's full layout bounds.
+                            #[cfg(test)]
+                            ui.ctx().data_mut(|data| {
+                                data.insert_temp(
+                                    egui::Id::unique(("assistant_action_clip", &approval.capture.request_id)),
+                                    ui.clip_rect(),
+                                )
+                            });
                             let deny = widgets::action_button(
                                 ui,
                                 p,
