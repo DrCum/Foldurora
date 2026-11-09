@@ -3,7 +3,7 @@
 use super::{App, Renderer, Screen, Window, ui};
 use crate::workspace::{
     controller::{Action, Command, Pending, Source, Status},
-    model::{Bars, Catalogue, LIMIT, Layout, Record, Startup, Viewport, valid_name},
+    model::{Bars, CameraContext, CaptureGroups, Catalogue, Graphics, LIMIT, Layout, Record, Startup, Viewport, valid_name},
     store::{Lane, Request},
 };
 use uuid::Uuid;
@@ -84,8 +84,58 @@ impl App {
             None => true,
         }
     }
-    fn workspace_capture(&self) -> Layout {
-        Layout {
+    fn workspace_camera_allowed(&self) -> bool {
+        matches!(self.screen, Screen::World)
+            && self
+                .workspaces
+                .source
+                .as_ref()
+                .is_some_and(|s| Some(s) == self.workspace_source().as_ref())
+            && self.camera.third_person()
+            && self.camera.focus_point().is_none()
+            && self.camera.free().is_none()
+            && !self.world.rlva.camera_preset_locked(Uuid::nil())
+            && self.world.rlva.camera_owner().is_none()
+    }
+    fn workspace_apply_settings(&mut self, layout: &Layout) {
+        let before = self.settings.camera.clone();
+        layout.settings(&mut self.settings, self.host_session.is_some());
+        if let Some(camera) = &layout.camera {
+            // Rollback and ordinary application use the same fresh native guards.
+            // A new source or lock must never be overwritten by an old Preview.
+            if self.workspaces.source.as_ref().is_none_or(|s| {
+                s.agent != self.world.agent_id
+                    || self.world.login.as_ref().is_none_or(|login| login.session_id != s.login)
+                    || crate::session_host::transport::grid_key(&self.settings.login_uri())
+                        .ok()
+                        .is_none_or(|grid| grid.to_string() != s.grid)
+            }) {
+                self.settings.camera = before;
+                return;
+            }
+            self.world.rlva.preserve_camera_settings(&mut self.settings.camera, &before);
+            if camera.validate().is_ok() && self.workspace_camera_allowed() {
+                // Preserve orbit/pitch and camera mode; only avatar-relative zoom
+                // is part of this group. Never replay free/object/photo anchors.
+                self.camera.set_zoom_fraction(camera.zoom);
+            }
+        }
+    }
+    fn workspace_capture(&mut self, groups: CaptureGroups) -> Option<Layout> {
+        if groups.camera && !self.workspace_camera_allowed() {
+            return None;
+        }
+        let folder = groups
+            .inventory
+            .then(|| self.inventory_ui.workspace_folder(&self.world.inventory))
+            .flatten();
+        let inventory_folder = folder.filter(|id| self.workspace_folder_allowed(*id));
+        Some(Layout {
+            inventory_folder,
+            camera: groups
+                .camera
+                .then(|| CameraContext::capture(&self.settings.camera, self.camera.zoom_fraction())),
+            graphics: groups.graphics.then(|| Graphics::capture(&self.settings)),
             geometry: ui::layout::workspace_capture(&self.egui_ctx),
             viewport: Viewport::from(&self.settings.world_viewport),
             bars: Bars {
@@ -93,12 +143,24 @@ impl App {
                 stretch: self.settings.place_bar_stretch,
                 rights_text: self.settings.place_bar_rights_text,
             },
-        }
+        })
+    }
+    fn workspace_capture_for_save(&mut self) -> Option<Layout> {
+        let groups = self
+            .workspaces
+            .catalogue
+            .as_ref()
+            .map_or(CaptureGroups::default(), |c| CaptureGroups {
+                inventory: c.remember_folders,
+                graphics: c.capture_graphics,
+                camera: c.capture_camera,
+            });
+        self.workspace_capture(groups)
     }
     pub(super) fn workspace_cancel_preview(&mut self, restore_geometry: bool) {
         let Some(p) = self.workspaces.preview.take() else { return };
         self.workspaces.placement = None;
-        p.baseline.settings(&mut self.settings, false);
+        self.workspace_apply_settings(&p.baseline);
         if restore_geometry {
             ui::layout::workspace_cancel_gesture(&self.egui_ctx);
             ui::layout::workspace_restore(&self.egui_ctx);
@@ -136,7 +198,9 @@ impl App {
             self.workspaces.advance();
         }
         self.workspaces.permit = permit;
-        if (self.panels.settings || !permit) && self.workspaces.preview.is_some() {
+        let camera_revoked =
+            self.workspaces.preview.as_ref().is_some_and(|p| p.baseline.camera.is_some()) && !self.workspace_camera_allowed();
+        if (self.panels.settings || !permit || camera_revoked) && self.workspaces.preview.is_some() {
             self.workspace_cancel_preview(true);
         }
         let polled = self.workspaces.lane.as_ref().map_or(Ok(None), Lane::poll);
@@ -301,35 +365,47 @@ impl App {
                 if layout.validate().is_err() {
                     return;
                 }
-                let current = self.workspace_capture();
-                if self.workspaces.preview.is_some() {
+                let Some(current) = self.workspace_capture(layout.groups()) else {
+                    self.workspaces.status = Status::CameraUnavailable;
+                    return;
+                };
+                if current.validate().is_err() {
+                    self.workspaces.status = Status::Invalid;
+                    return;
+                }
+                if let Some(baseline) = self.workspaces.preview.as_ref().map(|p| p.baseline.clone()) {
                     ui::layout::workspace_restore(&self.egui_ctx);
+                    self.workspace_apply_settings(&baseline);
                 }
                 let baseline = self.workspaces.begin_preview(layout, id, current, commit);
                 self.settings.workspace_held = Some(baseline.clone());
                 ui::layout::workspace_preview(&self.egui_ctx, Some(baseline.geometry));
-                self.workspaces
-                    .placement
-                    .as_ref()
-                    .expect("staged workspace")
-                    .layout
-                    .settings(&mut self.settings, self.host_session.is_some());
+                let layout = self.workspaces.placement.as_ref().expect("staged workspace").layout.clone();
+                self.workspace_apply_settings(&layout);
                 self.egui_ctx.stop_dragging();
                 self.egui_ctx.input_mut(|i| i.pointer = Default::default());
             }
             Command::Previous => {
-                let current = self.workspace_capture();
+                let groups = self
+                    .workspaces
+                    .previous
+                    .as_ref()
+                    .map_or(CaptureGroups::default(), |(layout, _)| layout.groups());
+                let Some(current) = self.workspace_capture(groups) else {
+                    self.workspaces.status = Status::CameraUnavailable;
+                    return;
+                };
+                if current.validate().is_err() {
+                    self.workspaces.status = Status::Invalid;
+                    return;
+                }
                 let Some(baseline) = self.workspaces.begin_previous(current) else {
                     return;
                 };
                 self.settings.workspace_held = Some(baseline.clone());
                 ui::layout::workspace_preview(&self.egui_ctx, Some(baseline.geometry));
-                self.workspaces
-                    .placement
-                    .as_ref()
-                    .expect("staged previous workspace")
-                    .layout
-                    .settings(&mut self.settings, self.host_session.is_some());
+                let layout = self.workspaces.placement.as_ref().expect("staged workspace").layout.clone();
+                self.workspace_apply_settings(&layout);
                 self.egui_ctx.stop_dragging();
                 self.egui_ctx.input_mut(|i| i.pointer = Default::default());
             }
@@ -350,7 +426,10 @@ impl App {
                             self.workspaces.status = Status::Invalid;
                             return;
                         }
-                        let layout = self.workspace_capture();
+                        let Some(layout) = self.workspace_capture_for_save() else {
+                            self.workspaces.status = Status::CameraUnavailable;
+                            return;
+                        };
                         if layout.validate().is_err() {
                             self.workspaces.status = Status::Invalid;
                             return;
@@ -418,7 +497,11 @@ impl App {
                 let mut next = self.workspaces.catalogue.clone().expect("ready workspace catalogue");
                 next.startup = startup;
                 if startup == Startup::LastArrangement {
-                    next.last_layout = Some(self.workspace_capture());
+                    let Some(layout) = self.workspace_capture_for_save() else {
+                        self.workspaces.status = Status::CameraUnavailable;
+                        return;
+                    };
+                    next.last_layout = Some(layout);
                 }
                 self.workspace_save_definitions(next);
             }
@@ -428,6 +511,39 @@ impl App {
                 }
                 let mut next = self.workspaces.catalogue.clone().expect("ready workspace catalogue");
                 next.show_favorites = show;
+                self.workspace_save_definitions(next);
+            }
+            Command::RememberFolders(remember) => {
+                if self.workspaces.preview.is_some() {
+                    return;
+                }
+                let mut next = self.workspaces.catalogue.clone().expect("ready workspace catalogue");
+                next.remember_folders = remember;
+                if !remember && let Some(last) = &mut next.last_layout {
+                    last.inventory_folder = None;
+                }
+                self.workspace_save_definitions(next);
+            }
+            Command::CaptureCamera(capture) => {
+                if self.workspaces.preview.is_some() {
+                    return;
+                }
+                let mut next = self.workspaces.catalogue.clone().expect("ready workspace catalogue");
+                next.capture_camera = capture;
+                if !capture && let Some(last) = &mut next.last_layout {
+                    last.camera = None;
+                }
+                self.workspace_save_definitions(next);
+            }
+            Command::CaptureGraphics(capture) => {
+                if self.workspaces.preview.is_some() {
+                    return;
+                }
+                let mut next = self.workspaces.catalogue.clone().expect("ready workspace catalogue");
+                next.capture_graphics = capture;
+                if !capture && let Some(last) = &mut next.last_layout {
+                    last.graphics = None;
+                }
                 self.workspace_save_definitions(next);
             }
             Command::Cancel | Command::Retry => {}
@@ -442,7 +558,9 @@ impl App {
             self.workspace_cancel_preview(false);
             return;
         }
-        if !self.workspace_permit(renderer, window) {
+        if !self.workspace_permit(renderer, window)
+            || (self.workspaces.preview.as_ref().is_some_and(|p| p.baseline.camera.is_some()) && !self.workspace_camera_allowed())
+        {
             self.workspace_cancel_preview(true);
             return;
         }
@@ -462,7 +580,11 @@ impl App {
             p.room = Some(room);
             self.workspaces.placement = Some(p);
         } else if p.commit {
+            let folder_restored = self.workspace_restore_folder(p.layout.inventory_folder);
             self.workspaces.finish_placement(p);
+            if !folder_restored {
+                self.workspaces.status = Status::FolderUnavailable;
+            }
             self.settings.workspace_held = None;
             ui::layout::workspace_preview(&self.egui_ctx, None);
             self.layout_autosave.request(std::time::Instant::now());
@@ -485,11 +607,55 @@ impl App {
             }
         }
     }
-    pub(super) fn workspace_modified(&self) -> bool {
-        self.workspaces
+    pub(super) fn workspace_modified(&mut self) -> bool {
+        let saved = self
+            .workspaces
             .active
             .and_then(|id| self.workspaces.record(id))
-            .is_some_and(|r| self.workspace_capture() != r.layout)
+            .map(|r| r.layout.clone());
+        let Some(mut saved) = saved else {
+            return false;
+        };
+        let graphics_match = saved
+            .graphics
+            .as_ref()
+            .is_none_or(|graphics| graphics.matches_settings(&self.settings));
+        // Ordinary frames compare the typed allowlist; no JSON decode/default
+        // Settings construction belongs in the recurring modified indicator.
+        saved.graphics = None;
+        if !self.workspace_camera_allowed() {
+            saved.camera = None;
+        }
+        !graphics_match
+            || self
+                .workspace_capture(saved.groups())
+                .is_some_and(|current| !saved.matches(&current))
+    }
+
+    fn workspace_restore_folder(&mut self, folder: Option<Uuid>) -> bool {
+        let Some(folder) = folder else {
+            return true;
+        };
+        let allowed = self.workspace_folder_allowed(folder);
+        if allowed {
+            self.inventory_ui.restore_workspace_folder(&self.world.inventory, folder);
+        }
+        allowed
+    }
+    fn workspace_folder_allowed(&mut self, folder: Uuid) -> bool {
+        let owner = Uuid::nil(); // The exact main Inventory owner, never a current extra window.
+        if self.world.inventory.owner != self.world.agent_id
+            || self.world.rlva.has("showinv")
+            || !self.inventory_ui.jump_owner_visible(&self.egui_ctx, self.panels.inventory, owner)
+        {
+            return false;
+        }
+        {
+            let (instance, read) = super::folder_jump::archive_read(&mut self.inventory_ui, &self.world, owner);
+            let gate = ui::inventory::archive::State::ordinary(instance, read.as_ref(), self.world.inventory_archive_instance);
+            read.as_ref().is_some_and(|read| read.passes(folder))
+                && ui::inventory::folder_jump::current_folder(&self.world.inventory, folder, gate.mask())
+        }
     }
 
     fn workspace_save_definitions(&mut self, mut next: Catalogue) {
@@ -536,19 +702,22 @@ impl App {
         if layout.validate().is_err() {
             return;
         }
-        let current = self.workspace_capture();
+        let Some(current) = self.workspace_capture(layout.groups()) else {
+            self.workspaces.status = Status::CameraUnavailable;
+            return;
+        };
+        if current.validate().is_err() {
+            self.workspaces.status = Status::Invalid;
+            return;
+        }
         let baseline = self.workspaces.begin_preview(layout, id.unwrap_or(Uuid::nil()), current, true);
         if id.is_none() {
             self.workspaces.placement.as_mut().expect("startup placement").active = None;
         }
         self.settings.workspace_held = Some(baseline.clone());
         ui::layout::workspace_preview(&self.egui_ctx, Some(baseline.geometry));
-        self.workspaces
-            .placement
-            .as_ref()
-            .expect("startup placement")
-            .layout
-            .settings(&mut self.settings, self.host_session.is_some());
+        let layout = self.workspaces.placement.as_ref().expect("staged workspace").layout.clone();
+        self.workspace_apply_settings(&layout);
         self.egui_ctx.request_repaint();
     }
 
@@ -567,7 +736,19 @@ impl App {
         {
             return;
         }
-        let layout = self.workspace_capture();
+        let Some(mut layout) = self.workspace_capture_for_save() else {
+            return;
+        };
+        if layout.inventory_folder.is_none() && self.workspaces.catalogue.as_ref().is_some_and(|c| c.remember_folders) {
+            // An unobserved/closed owner must not erase an earlier authorized
+            // folder reference in this same account/grid's saved arrangement.
+            layout.inventory_folder = self
+                .workspaces
+                .catalogue
+                .as_ref()
+                .and_then(|c| c.last_layout.as_ref())
+                .and_then(|l| l.inventory_folder);
+        }
         let now = std::time::Instant::now();
         let stable = self
             .workspaces

@@ -13623,3 +13623,9 @@ workspaces-startup-selected = Espace sélectionné
 workspaces-favorite = Favori
 workspaces-unfavorite = Retirer des favoris
 workspaces-startup-named = Enregistré : { $name }
+
+workspaces-remember-folders = Mémoriser le dossier principal de l’inventaire (restauré à l’application)
+workspaces-folder-unavailable = Le dossier n’a pas été restauré. Ouvrez l’inventaire et réessayez.
+workspaces-capture-graphics = Mémoriser les réglages graphiques actuels
+workspaces-capture-camera = Mémoriser les réglages de caméra relatifs à l’avatar
+workspaces-camera-unavailable = La restauration de caméra nécessite une vue avatar sans restriction. Revenez à cette vue et réessayez.

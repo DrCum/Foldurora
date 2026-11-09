@@ -78,198 +78,232 @@ impl WorkspaceUi {
         )
         .help(tr!("workspaces-help"))
         .show(ctx, p, &mut open, |ui| {
-            ui.push_id((c.instance, c.binding, c.revision), |ui| {
-                ui.label(tr!("workspaces-help"));
-                if c.source.as_ref().is_some_and(|s| s.hosted.is_some()) {
-                    ui.label(tr!("workspaces-hosted"));
-                }
-                let status = match if !c.permit && !matches!(c.status, Status::Error | Status::Loading | Status::Saving) {
-                    Status::Unavailable
-                } else {
-                    c.status
-                } {
-                    Status::Unavailable => tr!("workspaces-unavailable"),
-                    Status::Loading => tr!("workspaces-loading"),
-                    Status::Saving => tr!("workspaces-saving"),
-                    Status::Error => tr!("workspaces-error"),
-                    Status::Invalid => tr!("workspaces-invalid"),
-                    Status::Previewing => tr!("workspaces-previewing"),
-                    Status::Ready => tr!("workspaces-ready"),
-                };
-                ui.label(status);
-                if let Some(r) = c.preview.as_ref().map(|p| p.candidate).or(c.active).and_then(|id| c.record(id)) {
-                    ui.label(tr!(
-                        "workspaces-current",
-                        name = r.name.clone(),
-                        marker = if modified { " *" } else { "" }
-                    ));
-                }
-                if let Some(cat) = &c.catalogue {
-                    let mut show = cat.show_favorites;
-                    if ui
-                        .add_enabled(
-                            enabled && c.preview.is_none(),
-                            egui::Checkbox::new(&mut show, tr!("workspaces-show-favorites")),
-                        )
-                        .changed()
-                    {
-                        command = Some(Command::ShowFavorites(show));
+            egui::ScrollArea::vertical().id_salt("workspace_manager_body").show(ui, |ui| {
+                ui.push_id((c.instance, c.binding, c.revision), |ui| {
+                    ui.label(tr!("workspaces-help"));
+                    if c.source.as_ref().is_some_and(|s| s.hosted.is_some()) {
+                        ui.label(tr!("workspaces-hosted"));
                     }
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label(tr!("workspaces-startup"));
-                        if let Startup::Named { workspace } = cat.startup
-                            && let Some(record) = c.record(workspace)
+                    let status = match if !c.permit && !matches!(c.status, Status::Error | Status::Loading | Status::Saving) {
+                        Status::Unavailable
+                    } else {
+                        c.status
+                    } {
+                        Status::Unavailable => tr!("workspaces-unavailable"),
+                        Status::Loading => tr!("workspaces-loading"),
+                        Status::Saving => tr!("workspaces-saving"),
+                        Status::Error => tr!("workspaces-error"),
+                        Status::Invalid => tr!("workspaces-invalid"),
+                        Status::Previewing => tr!("workspaces-previewing"),
+                        Status::Ready => tr!("workspaces-ready"),
+                        Status::FolderUnavailable => tr!("workspaces-folder-unavailable"),
+                        Status::CameraUnavailable => tr!("workspaces-camera-unavailable"),
+                    };
+                    ui.label(status);
+                    if let Some(r) = c.preview.as_ref().map(|p| p.candidate).or(c.active).and_then(|id| c.record(id)) {
+                        ui.label(tr!(
+                            "workspaces-current",
+                            name = r.name.clone(),
+                            marker = if modified { " *" } else { "" }
+                        ));
+                    }
+                    if let Some(cat) = &c.catalogue {
+                        let mut show = cat.show_favorites;
+                        let mut folders = cat.remember_folders;
+                        let mut graphics = cat.capture_graphics;
+                        let mut camera = cat.capture_camera;
+                        if ui
+                            .add_enabled(
+                                enabled && c.preview.is_none(),
+                                egui::Checkbox::new(&mut camera, tr!("workspaces-capture-camera")),
+                            )
+                            .changed()
                         {
-                            ui.label(tr!("workspaces-startup-named", name = record.name.clone()));
+                            command = Some(Command::CaptureCamera(camera));
                         }
                         if ui
                             .add_enabled(
                                 enabled && c.preview.is_none(),
-                                egui::Button::new(tr!("workspaces-startup-none")).selected(cat.startup == Startup::Disabled),
+                                egui::Checkbox::new(&mut graphics, tr!("workspaces-capture-graphics")),
                             )
-                            .clicked()
+                            .changed()
                         {
-                            command = Some(Command::Startup(Startup::Disabled));
+                            command = Some(Command::CaptureGraphics(graphics));
                         }
                         if ui
                             .add_enabled(
                                 enabled && c.preview.is_none(),
-                                egui::Button::new(tr!("workspaces-startup-last")).selected(cat.startup == Startup::LastArrangement),
+                                egui::Checkbox::new(&mut folders, tr!("workspaces-remember-folders")),
                             )
-                            .clicked()
+                            .changed()
                         {
-                            command = Some(Command::Startup(Startup::LastArrangement));
-                        }
-                        if let Some(id) = self.selected.filter(|id| c.record(*id).is_some())
-                            && ui
-                                .add_enabled(
-                                    enabled && c.preview.is_none(),
-                                    egui::Button::new(tr!("workspaces-startup-selected"))
-                                        .selected(cat.startup == (Startup::Named { workspace: id })),
-                                )
-                                .clicked()
-                        {
-                            command = Some(Command::Startup(Startup::Named { workspace: id }));
-                        }
-                    });
-                }
-                egui::ScrollArea::vertical()
-                    .id_salt("workspace_records")
-                    .max_height(190.0)
-                    .show(ui, |ui| {
-                        if let Some(cat) = &c.catalogue {
-                            for r in &cat.records {
-                                let label = if cat.favorites.contains(&r.id) {
-                                    format!("★ {}", r.name)
-                                } else {
-                                    r.name.clone()
-                                };
-                                let row = ui.selectable_label(self.selected == Some(r.id), label);
-                                #[cfg(test)]
-                                ui.ctx()
-                                    .data_mut(|d| d.insert_temp(egui::Id::unique(("workspace_test_row", r.id)), row.id));
-                                if row.clicked() {
-                                    self.selected = Some(r.id);
-                                    self.name = r.name.clone();
-                                    self.selection_changed();
-                                }
-                            }
-                        }
-                    });
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.name)
-                        .id_salt("workspace_name")
-                        .char_limit(64)
-                        .hint_text(tr!("workspaces-name")),
-                );
-                ui.push_id(("workspace_selection_controls", selection_scope), |ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        if ui
-                            .add_enabled(enabled && c.preview.is_none(), egui::Button::new(tr!("workspaces-save")))
-                            .clicked()
-                        {
-                            command = Some(Command::Save(self.name.trim().to_owned()));
-                        }
-                        if let Some(id) = self.selected.filter(|id| c.record(*id).is_some()) {
-                            let favorite = c.catalogue.as_ref().is_some_and(|c| c.favorites.contains(&id));
-                            if ui
-                                .add_enabled(
-                                    enabled && c.preview.is_none(),
-                                    egui::Button::new(if favorite {
-                                        tr!("workspaces-unfavorite")
-                                    } else {
-                                        tr!("workspaces-favorite")
-                                    }),
-                                )
-                                .clicked()
-                            {
-                                command = Some(Command::Favorite(id));
-                            }
-                            if ui
-                                .add_enabled(enabled && c.preview.is_none(), egui::Button::new(tr!("workspaces-rename")))
-                                .clicked()
-                            {
-                                command = Some(Command::Rename(id, self.name.trim().to_owned()));
-                            }
-                            if ui
-                                .add_enabled(enabled && c.preview.is_none(), egui::Button::new(tr!("workspaces-delete")))
-                                .clicked()
-                            {
-                                self.delete = ticket.clone().filter(|t| t.record == Some(id)).map(|t| (t, id));
-                            }
-                            if ui.add_enabled(enabled, egui::Button::new(tr!("workspaces-preview"))).clicked() {
-                                command = Some(Command::Preview(id));
-                            }
-                            let switch = ui.add_enabled(enabled, egui::Button::new(tr!("workspaces-switch")));
-                            #[cfg(test)]
-                            ui.ctx()
-                                .data_mut(|d| d.insert_temp(egui::Id::unique("workspace_test_switch"), switch.id));
-                            if switch.clicked() {
-                                command = Some(Command::Switch(id));
-                            }
-                        }
-                        if ui
-                            .add_enabled(ticket.is_some() && c.preview.is_some(), egui::Button::new(tr!("workspaces-cancel")))
-                            .clicked()
-                        {
-                            command = Some(Command::Cancel);
+                            command = Some(Command::RememberFolders(folders));
                         }
                         if ui
                             .add_enabled(
-                                enabled && c.preview.is_none() && c.previous.is_some(),
-                                egui::Button::new(tr!("workspaces-previous")),
+                                enabled && c.preview.is_none(),
+                                egui::Checkbox::new(&mut show, tr!("workspaces-show-favorites")),
                             )
-                            .clicked()
+                            .changed()
                         {
-                            command = Some(Command::Previous);
+                            command = Some(Command::ShowFavorites(show));
                         }
-                        if ui
-                            .add_enabled(
-                                ticket.is_some() && c.pending.is_none() && c.status == Status::Error,
-                                egui::Button::new(tr!("workspaces-retry")),
-                            )
-                            .clicked()
-                        {
-                            command = Some(Command::Retry);
-                        }
-                    });
-                    if let Some(id) = self
-                        .delete
-                        .as_ref()
-                        .filter(|(t, id)| c.accepts(t) && c.record(*id).is_some())
-                        .map(|(_, id)| *id)
-                    {
                         ui.horizontal_wrapped(|ui| {
-                            ui.label(tr!("workspaces-delete-confirm"));
-                            if ui.add_enabled(enabled, egui::Button::new(tr!("workspaces-delete"))).clicked() {
-                                command = Some(Command::Delete(id));
-                                self.delete = None;
+                            ui.label(tr!("workspaces-startup"));
+                            if let Startup::Named { workspace } = cat.startup
+                                && let Some(record) = c.record(workspace)
+                            {
+                                ui.label(tr!("workspaces-startup-named", name = record.name.clone()));
                             }
-                            if ui.button(tr!("common-cancel")).clicked() {
-                                self.delete = None;
+                            if ui
+                                .add_enabled(
+                                    enabled && c.preview.is_none(),
+                                    egui::Button::new(tr!("workspaces-startup-none")).selected(cat.startup == Startup::Disabled),
+                                )
+                                .clicked()
+                            {
+                                command = Some(Command::Startup(Startup::Disabled));
+                            }
+                            if ui
+                                .add_enabled(
+                                    enabled && c.preview.is_none(),
+                                    egui::Button::new(tr!("workspaces-startup-last")).selected(cat.startup == Startup::LastArrangement),
+                                )
+                                .clicked()
+                            {
+                                command = Some(Command::Startup(Startup::LastArrangement));
+                            }
+                            if let Some(id) = self.selected.filter(|id| c.record(*id).is_some())
+                                && ui
+                                    .add_enabled(
+                                        enabled && c.preview.is_none(),
+                                        egui::Button::new(tr!("workspaces-startup-selected"))
+                                            .selected(cat.startup == (Startup::Named { workspace: id })),
+                                    )
+                                    .clicked()
+                            {
+                                command = Some(Command::Startup(Startup::Named { workspace: id }));
                             }
                         });
                     }
+                    egui::ScrollArea::vertical()
+                        .id_salt("workspace_records")
+                        .max_height(190.0)
+                        .show(ui, |ui| {
+                            if let Some(cat) = &c.catalogue {
+                                for r in &cat.records {
+                                    let label = if cat.favorites.contains(&r.id) {
+                                        format!("★ {}", r.name)
+                                    } else {
+                                        r.name.clone()
+                                    };
+                                    let row = ui.selectable_label(self.selected == Some(r.id), label);
+                                    #[cfg(test)]
+                                    ui.ctx()
+                                        .data_mut(|d| d.insert_temp(egui::Id::unique(("workspace_test_row", r.id)), row.id));
+                                    if row.clicked() {
+                                        self.selected = Some(r.id);
+                                        self.name = r.name.clone();
+                                        self.selection_changed();
+                                    }
+                                }
+                            }
+                        });
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.name)
+                            .id_salt("workspace_name")
+                            .char_limit(64)
+                            .hint_text(tr!("workspaces-name")),
+                    );
+                    ui.push_id(("workspace_selection_controls", selection_scope), |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            if ui
+                                .add_enabled(enabled && c.preview.is_none(), egui::Button::new(tr!("workspaces-save")))
+                                .clicked()
+                            {
+                                command = Some(Command::Save(self.name.trim().to_owned()));
+                            }
+                            if let Some(id) = self.selected.filter(|id| c.record(*id).is_some()) {
+                                let favorite = c.catalogue.as_ref().is_some_and(|c| c.favorites.contains(&id));
+                                if ui
+                                    .add_enabled(
+                                        enabled && c.preview.is_none(),
+                                        egui::Button::new(if favorite {
+                                            tr!("workspaces-unfavorite")
+                                        } else {
+                                            tr!("workspaces-favorite")
+                                        }),
+                                    )
+                                    .clicked()
+                                {
+                                    command = Some(Command::Favorite(id));
+                                }
+                                if ui
+                                    .add_enabled(enabled && c.preview.is_none(), egui::Button::new(tr!("workspaces-rename")))
+                                    .clicked()
+                                {
+                                    command = Some(Command::Rename(id, self.name.trim().to_owned()));
+                                }
+                                if ui
+                                    .add_enabled(enabled && c.preview.is_none(), egui::Button::new(tr!("workspaces-delete")))
+                                    .clicked()
+                                {
+                                    self.delete = ticket.clone().filter(|t| t.record == Some(id)).map(|t| (t, id));
+                                }
+                                if ui.add_enabled(enabled, egui::Button::new(tr!("workspaces-preview"))).clicked() {
+                                    command = Some(Command::Preview(id));
+                                }
+                                let switch = ui.add_enabled(enabled, egui::Button::new(tr!("workspaces-switch")));
+                                #[cfg(test)]
+                                ui.ctx()
+                                    .data_mut(|d| d.insert_temp(egui::Id::unique("workspace_test_switch"), switch.id));
+                                if switch.clicked() {
+                                    command = Some(Command::Switch(id));
+                                }
+                            }
+                            if ui
+                                .add_enabled(ticket.is_some() && c.preview.is_some(), egui::Button::new(tr!("workspaces-cancel")))
+                                .clicked()
+                            {
+                                command = Some(Command::Cancel);
+                            }
+                            if ui
+                                .add_enabled(
+                                    enabled && c.preview.is_none() && c.previous.is_some(),
+                                    egui::Button::new(tr!("workspaces-previous")),
+                                )
+                                .clicked()
+                            {
+                                command = Some(Command::Previous);
+                            }
+                            if ui
+                                .add_enabled(
+                                    ticket.is_some() && c.pending.is_none() && c.status == Status::Error,
+                                    egui::Button::new(tr!("workspaces-retry")),
+                                )
+                                .clicked()
+                            {
+                                command = Some(Command::Retry);
+                            }
+                        });
+                        if let Some(id) = self
+                            .delete
+                            .as_ref()
+                            .filter(|(t, id)| c.accepts(t) && c.record(*id).is_some())
+                            .map(|(_, id)| *id)
+                        {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label(tr!("workspaces-delete-confirm"));
+                                if ui.add_enabled(enabled, egui::Button::new(tr!("workspaces-delete"))).clicked() {
+                                    command = Some(Command::Delete(id));
+                                    self.delete = None;
+                                }
+                                if ui.button(tr!("common-cancel")).clicked() {
+                                    self.delete = None;
+                                }
+                            });
+                        }
+                    });
                 });
             });
         });
@@ -363,6 +397,9 @@ mod tests {
         };
         let s = crate::settings::Settings::default();
         let layout = Layout {
+            inventory_folder: None,
+            graphics: None,
+            camera: None,
             geometry: [None; 4],
             viewport: (&s.world_viewport).into(),
             bars: Bars {

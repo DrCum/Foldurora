@@ -13627,3 +13627,9 @@ workspaces-startup-selected = Selected workspace
 workspaces-favorite = Favorite
 workspaces-unfavorite = Remove favorite
 workspaces-startup-named = Saved: { $name }
+
+workspaces-remember-folders = Remember the main Inventory folder (restore on Switch)
+workspaces-folder-unavailable = Inventory folder was not restored. Open Inventory and try again.
+workspaces-capture-graphics = Remember current graphics settings
+workspaces-capture-camera = Remember avatar-relative camera settings
+workspaces-camera-unavailable = Camera restore requires an unrestricted avatar view. Return to it and try again.

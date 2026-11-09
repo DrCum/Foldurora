@@ -1,0 +1,26 @@
+    Finished `ci` profile [unoptimized] target(s) in 0.22s
+     Running unittests src/lib.rs (/workspace/Foldurora/target/ci/deps/aurora_render-2d44ace34a6b6e66)
+
+running 19 tests
+test render_thread::tests::a_dead_worker_never_blocks_the_owner ... ok
+test render_thread::tests::closing_ends_the_worker_loop ... ok
+test render_thread::tests::a_finished_result_can_be_taken_early_without_waiting ... ok
+test render_thread::tests::legacy_try_submit_drops_rejected_jobs_and_preserves_outcomes ... ok
+test render_thread::tests::monitor_reservation_under_contention_does_not_prepare_or_consume_previous_result ... ok
+test render_thread::tests::nonblocking_handoff_cannot_overtake_a_pending_or_running_frame ... ok
+test render_thread::tests::nonblocking_handoff_retries_contended_state_and_rejects_a_gone_worker ... ok
+test render_thread::tests::recoverable_try_submit_preserves_job_when_queued_running_or_lock_contended ... ok
+test render_thread::tests::recoverable_try_submit_returns_job_after_worker_failure_or_owner_close ... ok
+test render_thread::tests::recoverable_try_submit_transfers_jobs_and_previous_outputs_exactly_once ... ok
+test render_thread::tests::closing_while_a_job_is_in_hand_lets_it_finish ... ok
+test render_thread::tests::the_demo_stall_names_a_frame_and_a_length_in_demo_only ... ok
+test render_thread::tests::results_come_back_in_order_one_frame_late ... ok
+test render_thread::tests::the_switch_only_turns_the_thread_off_explicitly ... ok
+test render_thread::tests::a_worker_that_leaves_while_the_owner_waits_wakes_it ... ok
+test render_thread::tests::viewport_retirement_contended_owner_never_waits_or_replaces_previous_output ... ok
+test render_thread::tests::the_worker_measures_its_wait_for_the_owner ... ok
+test render_thread::tests::the_owner_waits_while_the_worker_is_busy ... ok
+test render_thread::tests::a_stuck_worker_only_holds_the_owner_until_its_deadline ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 456 filtered out; finished in 0.08s
+

@@ -1,6 +1,18 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+mod camera;
+pub(crate) use camera::CameraContext;
+mod graphics;
+pub(crate) use graphics::Graphics;
+
+#[derive(Clone, Copy, Default)]
+pub(crate) struct CaptureGroups {
+    pub inventory: bool,
+    pub graphics: bool,
+    pub camera: bool,
+}
+
 pub(crate) const LIMIT: usize = 32;
 pub(crate) const MAX_FILE: usize = 256 * 1024;
 
@@ -80,9 +92,24 @@ pub(crate) struct Layout {
     pub geometry: [Option<Geometry>; 4],
     pub viewport: Viewport,
     pub bars: Bars,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inventory_folder: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graphics: Option<Graphics>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub camera: Option<CameraContext>,
 }
 impl Layout {
     pub(crate) fn validate(&self) -> Result<(), &'static str> {
+        if let Some(camera) = &self.camera {
+            camera.validate()?;
+        }
+        if let Some(graphics) = &self.graphics {
+            graphics.validate()?;
+        }
+        if self.inventory_folder.is_some_and(|id| id.is_nil()) {
+            return Err("inventory folder");
+        }
         for g in self.geometry.iter().flatten() {
             if g.point >= 8
                 || g.offset.iter().any(|v| !v.is_finite() || v.abs() > 32768.0)
@@ -109,6 +136,46 @@ impl Layout {
         settings.classic_bars = self.bars.classic;
         settings.place_bar_stretch = self.bars.stretch;
         settings.place_bar_rights_text = self.bars.rights_text;
+        if let Some(graphics) = &self.graphics {
+            graphics.apply(settings);
+        }
+        if let Some(camera) = &self.camera {
+            camera.preferences(&mut settings.camera);
+        }
+    }
+    pub(crate) fn baseline_for(&self, target: &Self) -> Self {
+        let mut baseline = self.clone();
+        if target.inventory_folder.is_none() {
+            baseline.inventory_folder = None;
+        }
+        if target.camera.is_none() {
+            baseline.camera = None;
+        }
+        if target.graphics.is_none() {
+            baseline.graphics = None;
+        }
+        baseline
+    }
+    pub(crate) fn matches(&self, current: &Self) -> bool {
+        self.geometry == current.geometry
+            && self.viewport == current.viewport
+            && self.bars == current.bars
+            && self
+                .inventory_folder
+                .zip(current.inventory_folder)
+                .is_none_or(|(saved, live)| saved == live)
+            && self.graphics.as_ref().is_none_or(|saved| current.graphics.as_ref() == Some(saved))
+            && self
+                .camera
+                .as_ref()
+                .is_none_or(|saved| current.camera.as_ref().is_some_and(|live| saved.matches(live)))
+    }
+    pub(crate) fn groups(&self) -> CaptureGroups {
+        CaptureGroups {
+            inventory: self.inventory_folder.is_some(),
+            graphics: self.graphics.is_some(),
+            camera: self.camera.is_some(),
+        }
     }
 }
 
@@ -136,6 +203,12 @@ pub(crate) struct Catalogue {
     pub last_layout: Option<Layout>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub show_favorites: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub remember_folders: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub capture_graphics: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub capture_camera: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -175,6 +248,9 @@ impl Catalogue {
             startup: Startup::Disabled,
             last_layout: None,
             show_favorites: false,
+            remember_folders: false,
+            capture_graphics: false,
+            capture_camera: false,
         }
     }
     pub(crate) fn validate(&self) -> Result<(), &'static str> {
@@ -249,6 +325,9 @@ mod tests {
     use super::*;
     fn layout() -> Layout {
         Layout {
+            inventory_folder: None,
+            graphics: None,
+            camera: None,
             geometry: [Some(Geometry {
                 point: 7,
                 offset: [-32768.0, 32768.0],
@@ -424,5 +503,88 @@ mod tests {
         c.last_layout = Some(layout());
         c.last_layout.as_mut().unwrap().viewport.left = f32::NAN;
         assert!(c.validate().is_err());
+    }
+    #[test]
+    fn workspace_folder_restore_is_optional_validated_and_scoped_to_its_record() {
+        let mut live = layout();
+        let folder = Uuid::new_v4();
+        live.inventory_folder = Some(folder);
+        let saved = layout();
+        assert!(saved.matches(&live));
+        assert!(live.baseline_for(&saved).inventory_folder.is_none());
+        let mut target = saved.clone();
+        target.inventory_folder = Some(Uuid::new_v4());
+        assert!(!target.matches(&live));
+        let mut unknown = live.clone();
+        unknown.inventory_folder = None;
+        assert!(
+            target.matches(&unknown),
+            "an unobserved folder does not establish a layout difference"
+        );
+        assert_eq!(live.baseline_for(&target).inventory_folder, Some(folder));
+        target.inventory_folder = Some(Uuid::nil());
+        assert!(target.validate().is_err());
+    }
+    #[test]
+    fn workspace_folder_references_roundtrip_inside_account_scoped_catalogue() {
+        let mut c = Catalogue::empty(Uuid::new_v4(), "a".repeat(64));
+        let mut saved = layout();
+        let folder = Uuid::new_v4();
+        saved.inventory_folder = Some(folder);
+        c.remember_folders = true;
+        c.records.push(Record {
+            id: Uuid::new_v4(),
+            name: "Folder desk".into(),
+            layout: saved,
+        });
+        let b = c.encode().unwrap();
+        let loaded = Catalogue::decode(&b, c.account, &c.grid).unwrap();
+        assert_eq!(loaded.records[0].layout.inventory_folder, Some(folder));
+        assert!(loaded.remember_folders);
+        assert!(Catalogue::decode(&b, Uuid::new_v4(), &c.grid).is_err());
+    }
+    #[test]
+    fn workspace_graphics_preview_save_projection_and_cancel_preserve_unrelated_preferences() {
+        let mut settings = crate::settings::Settings::default();
+        crate::graphics_presets::Preset::Potato.apply(&mut settings);
+        let quality = crate::graphics_presets::saved::Saved::capture(&settings);
+        let mut baseline = layout();
+        baseline.graphics = Some(Graphics::capture(&settings));
+        let mut high = settings.clone();
+        crate::graphics_presets::Preset::High.apply(&mut high);
+        let mut candidate = baseline.clone();
+        candidate.graphics = Some(Graphics::capture(&high));
+        settings.workspace_held = Some(baseline.clone());
+        candidate.settings(&mut settings, false);
+        settings.fps_limit = 73;
+        let saved = settings.to_saved();
+        assert_eq!(crate::graphics_presets::saved::Saved::capture(&saved), quality);
+        assert_eq!(saved.fps_limit, 73);
+        assert_ne!(crate::graphics_presets::saved::Saved::capture(&settings), quality);
+        baseline.settings(&mut settings, false);
+        assert_eq!(crate::graphics_presets::saved::Saved::capture(&settings), quality);
+        assert_eq!(settings.fps_limit, 73);
+    }
+    #[test]
+    fn workspace_camera_preview_save_projection_does_not_persist_candidate_or_unrelated_preferences() {
+        let mut settings = crate::settings::Settings::default();
+        let mut baseline = layout();
+        baseline.camera = Some(CameraContext::capture(&settings.camera, 0.3));
+        let original = settings.camera.clone();
+        let mut changed = settings.camera.clone();
+        changed.apply_preset(crate::camera::CameraPreset::Front);
+        let mut target = baseline.clone();
+        target.camera = Some(CameraContext::capture(&changed, 0.8));
+        settings.workspace_held = Some(baseline.clone());
+        target.settings(&mut settings, false);
+        settings.camera.enable_mouselook = false;
+        settings.fps_limit = 73;
+        let saved = settings.to_saved();
+        assert_eq!(saved.camera.camera_offset, original.camera_offset);
+        assert!(!saved.camera.enable_mouselook);
+        assert_eq!(saved.fps_limit, 73);
+        assert_eq!(settings.camera.preset, crate::camera::CameraPreset::Front);
+        baseline.settings(&mut settings, false);
+        assert_eq!(settings.camera.camera_offset, original.camera_offset);
     }
 }

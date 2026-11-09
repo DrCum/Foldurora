@@ -33,6 +33,10 @@
 //! under a click ([`Renderer::pick_world`]), which runs after the frame in
 //! flight.
 
+#[cfg(feature = "monitor-prototype")]
+#[path = "monitor/main.rs"]
+mod monitor_main;
+
 use crate::arena::{GeometryArena, MeshAlloc, RecordStore};
 use crate::device_lost::DeviceLost;
 use crate::gpu_cull::{CullTables, GpuCull};
@@ -165,8 +169,10 @@ fn scene_gpu(
 }
 
 pub struct Renderer {
-    /// Where the backend runs. First field: dropped first, so the render
-    /// thread has left before the scene's stores go.
+    #[cfg(feature = "monitor-prototype")]
+    monitor: crate::monitor::Lane<crate::monitor::Frame>,
+    /// Queue owner: dropped before the scene stores (after prototype revocation),
+    /// so the render thread has left before those stores go.
     host: Host,
     vr: Arc<crate::vr_control::Control>,
     #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
@@ -674,6 +680,8 @@ impl Renderer {
         crate::start_progress::enter(crate::start_progress::Phase::Ready);
         crate::pipeline_cache::log_start();
         Ok(Renderer {
+            #[cfg(feature = "monitor-prototype")]
+            monitor: Default::default(),
             host,
             vr,
             #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
@@ -987,6 +995,8 @@ impl Renderer {
             return;
         }
         if self.size != (width, height) {
+            #[cfg(feature = "monitor-prototype")]
+            self.stop_monitor_prototype();
             self.invalidate_viewport_capture_physical();
             self.surface_epoch = crate::session_fence::next_surface_epoch(self.surface_epoch);
             self.size = (width, height);
@@ -1244,6 +1254,8 @@ impl Renderer {
     }
 
     fn fail(&mut self) {
+        #[cfg(feature = "monitor-prototype")]
+        self.stop_monitor_prototype();
         self.invalidate_viewport_capture_physical();
         if !std::mem::replace(&mut self.failed, true) {
             log::error!("the render thread is gone: nothing can be drawn any more");
@@ -1320,6 +1332,10 @@ impl Renderer {
         ui: Option<crate::EguiFrame>,
         output: Option<wgpu::Texture>,
     ) -> RenderStats {
+        #[cfg(feature = "monitor-prototype")]
+        if self.monitor.retire() {
+            self.motion_cut = true;
+        }
         let t0 = Instant::now();
         let mut ui = ui;
         if let Some((frame, queue)) = &self.demo_hang
@@ -1662,6 +1678,14 @@ impl Renderer {
     fn apply_done(&mut self, done: Done) {
         match done {
             Done::Frame(result) => self.apply(*result),
+            #[cfg(feature = "monitor-prototype")]
+            Done::Monitor(spent) => {
+                if self.spare.len() < SPARE_PACKETS {
+                    self.spare.push(*spent);
+                }
+            }
+            #[cfg(feature = "monitor-prototype")]
+            Done::MonitorPolled => {}
             Done::SessionFence(reply) => self.session_fences.receive(reply),
             Done::ViewportCaptureMaintenance { probe, pending } => self.viewport_capture_retirement.receive(probe, pending),
             Done::Pick(_) => {}
@@ -1695,6 +1719,8 @@ impl Renderer {
     /// or GPU. Stop submitting frames before this call and until consumption;
     /// only the caller knows which account/activation owns that rendering gate.
     pub fn request_session_fence(&mut self, ticket: u64) -> Result<(), SessionFenceError> {
+        #[cfg(feature = "monitor-prototype")]
+        self.stop_monitor_prototype();
         self.invalidate_viewport_capture();
         self.session_fences_supported()?;
         self.session_fences.request(ticket)?;

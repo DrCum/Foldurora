@@ -13588,3 +13588,9 @@ workspaces-startup-selected = 選択したワークスペース
 workspaces-favorite = お気に入りに追加
 workspaces-unfavorite = お気に入りから削除
 workspaces-startup-named = 保存済み：{ $name }
+
+workspaces-remember-folders = メインインベントリのフォルダーを記憶（切り替え時に復元）
+workspaces-folder-unavailable = フォルダーを復元できませんでした。インベントリを開いて再試行してください。
+workspaces-capture-graphics = 現在のグラフィック設定を記憶
+workspaces-capture-camera = アバター基準のカメラ設定を記憶
+workspaces-camera-unavailable = カメラの復元には制限のないアバタービューが必要です。そのビューに戻って再試行してください。
