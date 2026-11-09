@@ -13,6 +13,8 @@ pub struct WorkerEffects {
     pub grant_input: bool,
     pub restore_window: bool,
     pub apply_viewport: bool,
+    pub translate: bool,
+    pub focus: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -29,6 +31,7 @@ pub struct WorkerTransition {
 
 #[derive(Clone, Copy)]
 enum Waiting {
+    Placement(u64),
     Quiescence(u64),
     Prepared(u64, Option<FrameProof>, Option<PrepareBoundary>),
 }
@@ -90,7 +93,7 @@ impl WorkerGuard {
         self.mode == WorkerMode::Active
     }
     pub fn input_owned(&self) -> bool {
-        self.mode == WorkerMode::Active
+        self.mode == WorkerMode::Active && self.waiting.is_none()
     }
     pub fn viewport(&self) -> Option<HostedViewport> {
         self.viewport
@@ -230,10 +233,13 @@ impl WorkerGuard {
                     ..Default::default()
                 };
             }
-            Command::Grant { activation } if self.mode == WorkerMode::Preparing && self.prepared && *activation == self.activation => {
+            Command::Grant { activation, focus }
+                if self.mode == WorkerMode::Preparing && self.prepared && *activation == self.activation =>
+            {
                 self.mode = WorkerMode::Active;
                 self.prepared = false;
                 result.effects.grant_input = true;
+                result.effects.focus = *focus;
                 result.reply = Some(Reply {
                     reply_to: envelope.sequence,
                     event: Event::Granted { activation: *activation },
@@ -244,6 +250,17 @@ impl WorkerGuard {
             {
                 // An unchanged policy is idempotent. Any geometry/surface
                 // change must revoke, fence and prepare a fresh frame first.
+            }
+            Command::Translate { activation, viewport }
+                if self.mode == WorkerMode::Active
+                    && self.waiting.is_none()
+                    && *activation == self.activation
+                    && self.viewport.is_some_and(|old| old.same_surface(*viewport)) =>
+            {
+                self.viewport = Some(*viewport);
+                self.waiting = Some(Waiting::Placement(envelope.sequence));
+                result.effects.release_input = true;
+                result.effects.translate = true;
             }
             _ => rejected = true,
         }
@@ -257,6 +274,25 @@ impl WorkerGuard {
             });
         }
         Ok(result)
+    }
+
+    /// Native owner calls this only after verifying the same-size placement.
+    /// Neither a queued move nor a heartbeat can restore input ownership.
+    pub fn placed(&mut self, sequence: u64, viewport: HostedViewport) -> Result<Reply, Error> {
+        if self.mode != WorkerMode::Active
+            || !matches!(self.waiting, Some(Waiting::Placement(at)) if at == sequence)
+            || self.viewport != Some(viewport)
+        {
+            return Err(Error::Stale);
+        }
+        self.waiting = None;
+        Ok(Reply {
+            reply_to: sequence,
+            event: Event::Placed {
+                activation: self.activation,
+                viewport,
+            },
+        })
     }
 
     /// Called after drawing has stopped and all prior submissions completed.

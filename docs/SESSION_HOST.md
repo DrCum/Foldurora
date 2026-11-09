@@ -232,3 +232,50 @@ Grid acceptance belongs to the human. Automated fixtures must use synthetic
 accounts and owned processes without contacting a real grid or reading login
 credentials. A passing state machine or software-rendered capture does not
 establish physical NVIDIA/Vulkan coexistence.
+
+## Host usability repair — 9 November 2026
+
+The f08 Windows automated suite passed, but Sodie found ignored hosted world
+margins, repeated docking-like movement, slow host tools and no visible Monitor.
+The `fix/host-usability-20261109` repair group changes these paths together:
+
+- Character world margins apply inside the host-provided client canvas, including
+  render/picking, mouselook, camera controls and workspace preview/cancel. The
+  restrict-controls switch and explicit capture/XR overrides retain their roles.
+- The CPU painter skips only an exactly acknowledged native world hole and
+  paints the disjoint union of popup islands. Transitions receive a cheap solid
+  cover; texture uploads/frees and the separate private-image borrow are retained.
+- Monitor startup drives its first guarded frame on the owning event loop. It
+  does not wait for a paint event on a hidden HWND, and never shows before the
+  same source/read/visibility/budget checks. Pending/failure notices are localized.
+- Host protocol v2 adds same-size Translate/Placed with exact binding, lease,
+  activation, command sequence and viewport validation. Native translation only
+  moves the worker's own window, without changing styles, surface size or focus.
+  Input stays gated during geometry drift. Resize completes its current GPU
+  fence, retains only the latest requested geometry, and never grants an obsolete
+  prepared target. Native show uses SHOWNOACTIVATE; explicit Grant focus is kept
+  for activation/rollback. Version 1 controllers/workers cannot interoperate.
+- Hidden preparation may finish at an older rectangle while the host moves.
+  Grant ownership and native visibility are separate: drift blocks show/input;
+  a newer exact placement receipt is required before exposing that worker.
+  Changed worker geometry, host process identity, surface/device proof or lease
+  still fails closed. No cross-process parenting or permissions changes are used.
+
+Folderstorm reference: `fssessionworker.cpp::fitSurface` and `embed` (preserved
+feature-contract-388 source, lines603/640) distinguish NOACTIVATE placement from
+initial styling and focus. Aurora keeps its own GPU fences and authority checks.
+
+For an owned offline Windows run, set `AURORA_HOST_DIAGNOSTICS=1` before launch.
+Host/worker logs contain bounded paint/input-to-present/geometry timings and
+fit/show/hide/focus/first-monitor counters, without chat, account or image data.
+Record timings at small, maximized and two-display sizes. Normal translation
+must not repeat fit/hide/show/focus; ordinary controls should respond under100ms
+in the test workload. These are acceptance targets, not measured native results.
+
+Retest sustained dragging/resizing, negative origins, mixed DPI, snap,
+minimize/restore, management-panel changes, exact sender/character retention,
+Monitor Open with no cached image and close/reopen, left/right/asymmetric world
+margins, toolbar/camera/mouselook alignment, switching and host close/detach.
+Native Windows/Vulkan/default-glass, driver-reset recovery, XR and real-grid
+restrictions remain open until actually tested. Use one frozen combined repair
+candidate for full Windows validation and package verification; preserve f08.

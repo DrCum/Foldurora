@@ -2,7 +2,8 @@ use crate::Binding;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt;
 
-pub const PROTOCOL_VERSION: u16 = 1;
+// v2 separates native translation from render ownership and makes focus explicit.
+pub const PROTOCOL_VERSION: u16 = 2;
 pub const MAX_MESSAGE_BYTES: usize = 4096;
 pub const MAX_WORKERS: usize = 5;
 
@@ -79,6 +80,9 @@ pub struct HostedViewport {
     pub rect: PhysicalRect,
 }
 impl HostedViewport {
+    pub fn same_surface(&self, other: Self) -> bool {
+        self.host_window == other.host_window && self.rect.width == other.rect.width && self.rect.height == other.rect.height
+    }
     pub fn validate(&self) -> Result<(), Error> {
         if self.host_window == 0 {
             return Err(Error::Invalid);
@@ -208,11 +212,30 @@ pub enum RejectReason {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
-    Heartbeat { workspace_foreground: bool },
-    Revoke { activation: u64 },
-    Prepare { activation: u64, viewport: Option<HostedViewport> },
-    Grant { activation: u64 },
-    SetViewport { activation: u64, viewport: Option<HostedViewport> },
+    Heartbeat {
+        workspace_foreground: bool,
+    },
+    Revoke {
+        activation: u64,
+    },
+    Prepare {
+        activation: u64,
+        viewport: Option<HostedViewport>,
+    },
+    Grant {
+        activation: u64,
+        focus: bool,
+    },
+    SetViewport {
+        activation: u64,
+        viewport: Option<HostedViewport>,
+    },
+    /// Position only. Envelope sequence is the monotonic placement revision;
+    /// the exact host, binding, lease and activation must survive the receipt.
+    Translate {
+        activation: u64,
+        viewport: HostedViewport,
+    },
     Detach,
 }
 impl Command {
@@ -220,7 +243,8 @@ impl Command {
         match self {
             Self::Revoke { activation }
             | Self::Prepare { activation, .. }
-            | Self::Grant { activation }
+            | Self::Grant { activation, .. }
+            | Self::Translate { activation, .. }
             | Self::SetViewport { activation, .. } => *activation,
             _ => 0,
         }
@@ -246,6 +270,10 @@ pub enum Event {
     Granted {
         activation: u64,
     },
+    Placed {
+        activation: u64,
+        viewport: HostedViewport,
+    },
     Detached,
     Rejected {
         activation: u64,
@@ -258,6 +286,7 @@ impl Event {
             Self::Quiesced { activation, .. }
             | Self::FrameReady { activation, .. }
             | Self::Granted { activation }
+            | Self::Placed { activation, .. }
             | Self::Rejected { activation, .. } => *activation,
             _ => 0,
         }
@@ -304,7 +333,8 @@ impl Envelope {
                 }
                 | Command::SetViewport {
                     viewport: Some(viewport), ..
-                } = command
+                }
+                | Command::Translate { viewport, .. } = command
                 {
                     viewport.validate()?;
                 }
@@ -325,6 +355,7 @@ impl Envelope {
                         }
                     }
                     Event::Quiesced { progress, .. } => progress.validate()?,
+                    Event::Placed { viewport, .. } => viewport.validate()?,
                     Event::FrameReady { boundary, frame, .. } => {
                         boundary.validate()?;
                         frame.validate()?;

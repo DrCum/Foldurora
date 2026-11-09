@@ -273,7 +273,7 @@ fn review_dtos_are_closed_body_free_and_maximum_full_id_serialization_is_bounded
 fn review_v3_codec_roundtrips_closed_variants_and_rejects_old_versions() {
     // Review retains its V3 payload inside the Contacts/Conference-capable V9 envelope.
     assert_eq!(VERSION, 9);
-    assert_eq!(PROTOCOL_VERSION, 1);
+    assert_eq!(PROTOCOL_VERSION, 2); // Host placement changed; the chat envelope did not.
     let operation = request(1);
     for message in [
         ChatMessage::Command(ChatCommand::ReviewConversation(operation)),

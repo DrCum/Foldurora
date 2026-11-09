@@ -102,10 +102,10 @@ impl Layout {
         }
         Ok(())
     }
-    pub(crate) fn settings(&self, settings: &mut crate::settings::Settings, hosted: bool) {
-        if !hosted {
-            settings.world_viewport = (&self.viewport).into();
-        }
+    pub(crate) fn settings(&self, settings: &mut crate::settings::Settings, _hosted: bool) {
+        // Relative world placement is independent of native host placement.
+        // Workspace preview and cancel must restore it while hosted too.
+        settings.world_viewport = (&self.viewport).into();
         settings.classic_bars = self.bars.classic;
         settings.place_bar_stretch = self.bars.stretch;
         settings.place_bar_rights_text = self.bars.rights_text;
@@ -283,11 +283,11 @@ mod tests {
         assert_eq!(s.world_viewport, (&candidate.viewport).into());
         let json = serde_json::to_value(saved).unwrap();
         assert!(json.get("workspace_held").is_none());
-        let viewport = s.world_viewport.clone();
         baseline.settings(&mut s, true);
         assert_eq!(
-            s.world_viewport, viewport,
-            "fitted host viewport remains under existing host policy"
+            s.world_viewport,
+            (&baseline.viewport).into(),
+            "cancel restores relative world placement inside the fitted host"
         );
     }
     #[test]

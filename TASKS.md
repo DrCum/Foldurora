@@ -1164,6 +1164,15 @@
   acceptance remains incomplete. See the
   current candidate section of [the test guide](docs/FOLDURORA.md).
 
+- 🔧 Host usability repair (user report, 2026-11-09): source implements
+  per-character world margins inside the fitted canvas, efficient CPU chrome
+  painting, guarded Monitor first presentation without a hidden-window paint
+  dependency, and versioned same-worker translation/resize coalescing with
+  explicit focus. Replaces the earlier full-fitted-canvas policy above.
+  Frozen f08's automated Windows pass remains historical; its human host gate
+  failed. Renewed Windows/native/package validation is pending. See
+  [the repair contract](docs/SESSION_HOST.md#host-usability-repair--9-november-2026).
+
 - 🔧 Foldurora session host (user request, 2026-11-06; no issue): opt-in CPU
   controller, isolated manual-login workers, typed lease/handoff state machine,
   private per-launch profiles, ordered GPU completion fences and Windows

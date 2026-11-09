@@ -18,6 +18,10 @@ pub(super) struct Overlays {
 }
 
 impl Overlays {
+    pub fn paint_regions(&self, size: [usize; 2], world: egui::Rect, scale: f32) -> Option<Vec<[usize; 4]>> {
+        super::paint_regions::visible_regions(size, world, scale, &self.rects, self.cover_all)
+    }
+
     pub fn collect(context: &egui::Context, world: egui::Rect) -> Self {
         let areas = context.memory(|memory| {
             memory

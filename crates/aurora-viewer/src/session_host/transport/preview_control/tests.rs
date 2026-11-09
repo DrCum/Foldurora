@@ -278,6 +278,7 @@ fn controller(capacity: usize) -> (HostController, Receiver<HostRequest>) {
             stop: Arc::new(AtomicBool::new(false)),
             stopped: Arc::new(AtomicBool::new(false)),
             foreground: Arc::new(AtomicBool::new(false)),
+            wake: None,
         },
         receiver,
     )

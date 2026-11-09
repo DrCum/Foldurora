@@ -356,11 +356,11 @@ mod tests {
             bottom: 20.0,
         };
         let native = (3200, 2000);
-        for (fitted, center) in [(false, (1840.0, 950.0)), (true, (1600.0, 1000.0)), (false, (1840.0, 950.0))] {
+        for fitted in [false, true, false] {
             let effective = settings.for_hosted_worker(fitted);
             let configured = effective.viewport(native);
             let rendered = effective.render_viewport(native, true, true, false, false);
-            assert_eq!(capture_center(configured, rendered, true, false), center);
+            assert_eq!(capture_center(configured, rendered, true, false), (1840.0, 950.0));
         }
     }
 

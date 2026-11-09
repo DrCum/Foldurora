@@ -22,11 +22,11 @@ pub struct ViewportSettings {
 }
 
 impl ViewportSettings {
-    /// A fitted worker's native window already is the host's world area.
-    /// Apply this same effective policy to rendering, controls and cursor
-    /// capture without overwriting the saved standalone arrangement.
-    pub fn for_hosted_worker(&self, fitted: bool) -> Self {
-        if fitted { Self::default() } else { self.clone() }
+    /// Hosting determines the outer client canvas, not the world inside it.
+    /// Render, controls and cursor capture share the character's margins in
+    /// both modes; fitting never rewrites the saved standalone arrangement.
+    pub fn for_hosted_worker(&self, _fitted: bool) -> Self {
+        self.clone()
     }
 
     pub fn render_viewport(
@@ -188,7 +188,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fitted_workers_share_full_render_and_toolbar_geometry_until_detached() {
+    fn fitted_workers_keep_character_world_and_toolbar_geometry_after_detach() {
         let settings = ViewportSettings {
             enabled: true,
             restrict_ui: true,
@@ -209,9 +209,9 @@ mod tests {
         for mouselook in [false, true] {
             assert_eq!(
                 hosted.render_viewport(size, mouselook, false, false, false),
-                aurora_render::WorldViewport::full(size)
+                standalone.viewport(size)
             );
-            assert!(hosted.toolbar_rect(size, screen).is_none());
+            assert_eq!(hosted.toolbar_rect(size, screen), standalone.toolbar_rect(size, screen));
         }
         let detached = settings.for_hosted_worker(false);
         assert_eq!(detached, standalone);
@@ -237,10 +237,10 @@ mod tests {
         settings.restrict_ui = true;
         assert_eq!(scene(&settings, false, false, false), bounded);
         assert_eq!(scene(&settings, true, true, false), bounded, "desktop mouselook retains the scene");
+        assert_eq!(scene(&settings.for_hosted_worker(true), false, false, false), bounded);
         for full in [
             scene(&settings, false, true, false),
             scene(&settings, false, false, true),
-            scene(&settings.for_hosted_worker(true), false, false, false),
             scene(&ViewportSettings::default(), false, false, false),
         ] {
             assert_eq!(full.view, aurora_render::WorldViewport::full(native));

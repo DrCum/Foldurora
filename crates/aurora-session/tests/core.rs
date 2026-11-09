@@ -149,8 +149,7 @@ fn initial_activate(host: &mut Coordinator, peer: &mut Peer) {
     );
 }
 
-#[test]
-fn native_geometry_refresh_requiesces_even_at_the_same_rect_and_rejects_superseded_proofs() {
+fn hosted_peer() -> (Coordinator, Peer, HostedViewport) {
     let viewport = HostedViewport {
         host_window: 17,
         rect: PhysicalRect {
@@ -160,69 +159,199 @@ fn native_geometry_refresh_requiesces_even_at_the_same_rect_and_rejects_supersed
             height: 700,
         },
     };
-    for delay_granted in [false, true] {
-        let mut peer = Peer::new(3);
-        let mut host = coordinator(&mut [&mut peer]);
-        let worker = peer.guard.binding().worker.worker;
-        let prepare = message(host.activate(worker, Some(viewport), 1).unwrap());
-        peer.accept(&prepare, 1);
-        let ready = peer.ready(&prepare, 11);
-        let grant = message(host.observe(&ready, 2).unwrap());
-        let reply = peer.accept(&grant, 2).reply.unwrap();
-        host.observe(&peer.envelope(reply), 3).unwrap();
-        assert!(host.activate(worker, Some(viewport), 4).unwrap().is_empty());
+    let mut peer = Peer::new(3);
+    let mut host = coordinator(&mut [&mut peer]);
+    let prepare = message(host.activate(peer.guard.binding().worker.worker, Some(viewport), 0).unwrap());
+    peer.accept(&prepare, 0);
+    let ready = peer.ready(&prepare, 11);
+    let grant = message(host.observe(&ready, 0).unwrap());
+    let accepted = peer.accept(&grant, 0);
+    assert!(accepted.effects.focus, "initial activation transfers focus");
+    host.observe(&peer.envelope(accepted.reply.unwrap()), 0).unwrap();
+    (host, peer, viewport)
+}
 
-        let revoke = message(host.refresh_viewport(worker, viewport, 5).unwrap());
-        assert!(matches!(revoke.message, Message::Command(Command::Revoke { .. })));
-        let effects = peer.accept(&revoke, 5).effects;
-        assert!(effects.release_input && effects.quiesce);
-        assert!(!peer.guard.render_owned());
-        assert!(peer.guard.quiesced(revoke.sequence, progress(12, 11)).unwrap().is_none());
-        assert!(host.tick(6).iter().all(|effect| !matches!(
-            effect,
-            Effect::Send(Envelope {
-                message: Message::Command(Command::Prepare { .. }),
-                ..
-            })
-        )));
-        let idle = peer.idle(&revoke, 12);
-        let prepare = message(host.observe(&idle, 7).unwrap());
-        assert!(matches!(prepare.message, Message::Command(Command::Prepare { viewport: Some(value), .. }) if value == viewport));
-        peer.accept(&prepare, 7);
-        let ready = peer.ready(&prepare, 12);
-        let (late, stale_grant) = if delay_granted {
-            let grant = message(host.observe(&ready, 8).unwrap());
-            let reply = peer.accept(&grant, 8).reply.unwrap();
-            (peer.envelope(reply), Some(grant))
-        } else {
-            (ready, None)
-        };
-
-        let moved = HostedViewport {
-            rect: PhysicalRect { x: -1600, ..viewport.rect },
+#[test]
+fn native_translation_keeps_render_grant_and_requires_exact_latest_placement_receipt() {
+    let (mut host, mut peer, viewport) = hosted_peer();
+    let worker = peer.guard.binding().worker.worker;
+    let moved = HostedViewport {
+        rect: PhysicalRect { x: -1500, ..viewport.rect },
+        ..viewport
+    };
+    let activation = peer.guard.activation();
+    let movement = message(host.refresh_viewport(worker, moved, 1).unwrap());
+    assert!(
+        matches!(movement.message, Message::Command(Command::Translate { activation: a, viewport: v }) if a == activation && v == moved)
+    );
+    let accepted = peer.accept(&movement, 1);
+    assert!(accepted.effects.translate && accepted.effects.release_input);
+    assert!(!accepted.effects.quiesce && !accepted.effects.prepare && !accepted.effects.focus);
+    assert!(peer.guard.render_owned());
+    assert!(!peer.guard.input_owned());
+    assert!(peer.guard.placed(movement.sequence, viewport).is_err());
+    assert!(peer.guard.placed(movement.sequence + 1, moved).is_err());
+    // A hundred WM_MOVE events occupy just the latest target slot. Returning
+    // to the original rectangle still requires its own exact placement receipt.
+    for x in 0..100 {
+        let next = HostedViewport {
+            rect: PhysicalRect { x, ..viewport.rect },
             ..viewport
         };
-        let revoke = message(host.refresh_viewport(worker, moved, 9).unwrap());
-        assert_eq!(host.observe(&late, 9), Err(Error::Stale));
-        peer.accept(&revoke, 9);
-        if let Some(grant) = stale_grant {
-            assert_eq!(peer.guard.on_command(&grant, 9), Err(Error::Stale));
-            assert!(!peer.guard.render_owned());
-        }
-        let idle = peer.idle(&revoke, 12);
-        let prepare = message(host.observe(&idle, 10).unwrap());
-        assert!(matches!(prepare.message, Message::Command(Command::Prepare { viewport: Some(value), .. }) if value == moved));
-        peer.accept(&prepare, 10);
-        // Continue through the ordinary exact proof using the real request
-        // sequence, rather than treating a geometry timeout as readiness.
-        let ready = peer.ready(&prepare, 13);
-        let grant = message(host.observe(&ready, 11).unwrap());
-        let reply = peer.accept(&grant, 11).reply.unwrap();
-        assert_eq!(
-            host.observe(&peer.envelope(reply), 12).unwrap(),
-            vec![Effect::Notice(HostNotice::Switched(worker))]
-        );
+        assert!(host.refresh_viewport(worker, next, 2).unwrap().is_empty());
     }
+    assert!(host.refresh_viewport(worker, viewport, 2).unwrap().is_empty());
+    let receipt = peer.guard.placed(movement.sequence, moved).unwrap();
+    let old_ack = peer.envelope(receipt);
+    let back = message(host.observe(&old_ack, 3).unwrap());
+    assert!(matches!(back.message, Message::Command(Command::Translate { viewport: v, .. }) if v == viewport));
+    assert_eq!(host.observe(&old_ack, 3), Err(Error::Stale));
+    peer.accept(&back, 3);
+    let receipt = peer.guard.placed(back.sequence, viewport).unwrap();
+    assert_eq!(
+        host.observe(&peer.envelope(receipt), 4).unwrap(),
+        vec![Effect::Notice(HostNotice::Switched(worker))]
+    );
+    assert_eq!(peer.guard.activation(), activation);
+    assert!(peer.guard.input_owned());
+    assert!(!host.busy());
+}
+
+#[test]
+fn native_resize_completes_each_fence_and_coalesces_without_granting_obsolete_geometry() {
+    let (mut host, mut peer, viewport) = hosted_peer();
+    let worker = peer.guard.binding().worker.worker;
+    let sized = |width| HostedViewport {
+        rect: PhysicalRect { width, ..viewport.rect },
+        ..viewport
+    };
+    let revoke = message(host.refresh_viewport(worker, sized(1100), 1).unwrap());
+    peer.accept(&revoke, 1);
+    assert!(!peer.guard.render_owned());
+    assert!(host.refresh_viewport(worker, sized(1200), 2).unwrap().is_empty());
+    let idle = peer.idle(&revoke, 11);
+    let prepare = message(host.observe(&idle, 3).unwrap());
+    assert!(matches!(prepare.message, Message::Command(Command::Prepare { viewport: Some(v), .. }) if v == sized(1200)));
+    peer.accept(&prepare, 3);
+    assert!(host.refresh_viewport(worker, sized(1300), 4).unwrap().is_empty());
+    assert!(host.refresh_viewport(worker, sized(1400), 4).unwrap().is_empty());
+    let ready = peer.ready(&prepare, 12);
+    let revoke = message(host.observe(&ready, 5).unwrap());
+    assert!(
+        matches!(revoke.message, Message::Command(Command::Revoke { .. })),
+        "obsolete frame cannot grant input or visibility"
+    );
+    assert_eq!(host.observe(&ready, 5), Err(Error::Stale));
+    peer.accept(&revoke, 5);
+    let idle = peer.idle(&revoke, 12);
+    let prepare = message(host.observe(&idle, 6).unwrap());
+    assert!(matches!(prepare.message, Message::Command(Command::Prepare { viewport: Some(v), .. }) if v == sized(1400)));
+    peer.accept(&prepare, 6);
+    let ready = peer.ready(&prepare, 13);
+    let grant = message(host.observe(&ready, 7).unwrap());
+    let accepted = peer.accept(&grant, 7);
+    assert!(!accepted.effects.focus, "resize must not steal focus from host tools");
+    host.observe(&peer.envelope(accepted.reply.unwrap()), 8).unwrap();
+    assert!(peer.guard.render_owned() && peer.guard.input_owned());
+    assert_eq!(peer.guard.viewport(), Some(sized(1400)));
+    assert!(!host.busy());
+}
+
+#[test]
+fn native_translation_refuses_surface_host_activation_and_lease_changes() {
+    for variant in 0..4 {
+        let (_, mut peer, viewport) = hosted_peer();
+        let activation = peer.guard.activation();
+        let next = match variant {
+            0 => HostedViewport {
+                rect: PhysicalRect {
+                    width: 999,
+                    ..viewport.rect
+                },
+                ..viewport
+            },
+            1 => HostedViewport {
+                host_window: 18,
+                ..viewport
+            },
+            _ => viewport,
+        };
+        let mut move_command = command(
+            peer.guard.binding(),
+            9,
+            Command::Translate {
+                activation: activation + u64::from(variant == 2),
+                viewport: next,
+            },
+        );
+        if variant == 3 {
+            move_command.lease_epoch += 1;
+        }
+        let result = peer.guard.on_command(&move_command, 1);
+        if variant == 3 {
+            assert_eq!(result, Err(Error::Binding));
+        } else {
+            let result = result.unwrap();
+            assert_eq!(result.effects, WorkerEffects::default());
+            assert!(matches!(result.reply.unwrap().event, Event::Rejected { .. }));
+        }
+        assert_eq!(peer.guard.viewport(), Some(viewport));
+        assert!(peer.guard.input_owned());
+    }
+}
+
+#[test]
+fn native_geometry_coalescing_does_not_renew_an_unacknowledged_placement_deadline() {
+    let (mut host, mut peer, viewport) = hosted_peer();
+    let worker = peer.guard.binding().worker.worker;
+    let movement = message(host.refresh_viewport(worker, viewport, 1).unwrap());
+    peer.accept(&movement, 1);
+    for now in 2..12 {
+        assert!(host.refresh_viewport(worker, viewport, now * 1000).unwrap().is_empty());
+    }
+    let effects = host.tick(12_001);
+    assert!(effects.iter().any(|effect| matches!(effect, Effect::Notice(HostNotice::Failed))));
+    let detach = message(effects);
+    assert!(peer.accept(&detach, 12_001).effects.restore_window);
+    assert!(!peer.guard.render_owned());
+    assert!(peer.guard.placed(movement.sequence, viewport).is_err());
+}
+
+#[test]
+fn native_geometry_queued_after_grant_waits_for_its_exact_receipt_before_the_next_placement() {
+    let (mut host, mut peer, viewport) = hosted_peer();
+    let worker = peer.guard.binding().worker.worker;
+    let resized = HostedViewport {
+        rect: PhysicalRect {
+            width: 1100,
+            ..viewport.rect
+        },
+        ..viewport
+    };
+    let revoke = message(host.refresh_viewport(worker, resized, 1).unwrap());
+    peer.accept(&revoke, 1);
+    let idle = peer.idle(&revoke, 11);
+    let prepare = message(host.observe(&idle, 2).unwrap());
+    peer.accept(&prepare, 2);
+    let ready = peer.ready(&prepare, 12);
+    let grant = message(host.observe(&ready, 3).unwrap());
+    let moved = HostedViewport {
+        rect: PhysicalRect { x: -1600, ..resized.rect },
+        ..resized
+    };
+    assert!(host.refresh_viewport(worker, moved, 4).unwrap().is_empty());
+    let accepted = peer.accept(&grant, 4);
+    assert!(!accepted.effects.focus);
+    let movement = message(host.observe(&peer.envelope(accepted.reply.unwrap()), 5).unwrap());
+    assert!(matches!(movement.message, Message::Command(Command::Translate { viewport: v, .. }) if v == moved));
+    assert!(host.busy(), "the intermediate grant must not expose the latest geometry");
+    peer.accept(&movement, 5);
+    let receipt = peer.guard.placed(movement.sequence, moved).unwrap();
+    assert_eq!(
+        host.observe(&peer.envelope(receipt), 6).unwrap(),
+        vec![Effect::Notice(HostNotice::Switched(worker))]
+    );
+    assert!(!host.busy());
 }
 
 #[test]
@@ -355,7 +484,17 @@ fn opaque_identity_domains_canonical_hex_and_labels_cannot_bypass_deserializatio
 fn worker_requires_captured_request_new_frame_and_gpu_quiescence_before_grant() {
     let mut peer = Peer::new(3);
     let binding = peer.guard.binding();
-    let premature = peer.accept(&command(binding, 1, Command::Grant { activation: 1 }), 0);
+    let premature = peer.accept(
+        &command(
+            binding,
+            1,
+            Command::Grant {
+                activation: 1,
+                focus: true,
+            },
+        ),
+        0,
+    );
     assert!(!premature.effects.grant_input);
     assert!(matches!(premature.reply.unwrap().event, Event::Rejected { .. }));
     let prepare = command(
@@ -386,9 +525,19 @@ fn worker_requires_captured_request_new_frame_and_gpu_quiescence_before_grant() 
     );
     assert!(peer.guard.frame_ready(2, frame(12)).unwrap().is_some());
     assert!(
-        peer.accept(&command(binding, 3, Command::Grant { activation: 1 }), 0)
-            .effects
-            .grant_input
+        peer.accept(
+            &command(
+                binding,
+                3,
+                Command::Grant {
+                    activation: 1,
+                    focus: true
+                }
+            ),
+            0
+        )
+        .effects
+        .grant_input
     );
     let revoke = command(binding, 4, Command::Revoke { activation: 2 });
     assert!(peer.accept(&revoke, 0).effects.release_input);
@@ -728,7 +877,14 @@ fn recreation_invalidates_prepared_grant_and_viewport_cannot_change_during_promo
     assert!(matches!(peer.accept(&change, 0).reply.unwrap().event, Event::Rejected { .. }));
     assert!(peer.guard.invalidate_display().release_input);
     assert_eq!(peer.guard.mode(), WorkerMode::Standby);
-    let grant = command(peer.guard.binding(), 3, Command::Grant { activation: 1 });
+    let grant = command(
+        peer.guard.binding(),
+        3,
+        Command::Grant {
+            activation: 1,
+            focus: true,
+        },
+    );
     assert!(matches!(peer.accept(&grant, 0).reply.unwrap().event, Event::Rejected { .. }));
     assert!(!peer.guard.input_owned());
 }

@@ -231,7 +231,7 @@ impl WorkerBridge {
                 if self.guard.mode() != WorkerMode::Detached {
                     self.last_receipt = Some(Instant::now());
                 }
-                if transition.effects.quiesce || transition.effects.prepare {
+                if transition.effects.quiesce || transition.effects.prepare || transition.effects.translate {
                     self.request_sequence = envelope.sequence;
                 }
                 merge_effects(&mut effects, transition.effects);
@@ -578,6 +578,30 @@ impl WorkerBridge {
                 reply_to: self.request_sequence,
             };
         }
+        if effects.translate {
+            let viewport = self
+                .guard
+                .viewport()
+                .ok_or_else(|| anyhow::anyhow!("placement lost its viewport"))?;
+            self.presentation.translate(window, viewport, self.config.host_pid)?;
+            anyhow::ensure!(
+                self.presentation.state(window, viewport, self.config.host_pid)? != NativeState::WorkerChanged,
+                "native placement changed before receipt"
+            );
+            let proof = self.last_frame.ok_or_else(|| anyhow::anyhow!("placement lost its render proof"))?;
+            anyhow::ensure!(
+                renderer.session_boundary()?.surface_epoch == proof.surface_epoch,
+                "placement replaced the render surface"
+            );
+            // Native receipt is separate from visibility: another host motion
+            // may already have happened. Input stays gated until current.
+            let reply = self.guard.placed(self.request_sequence, viewport)?;
+            self.gate = DisplayGate::Active;
+            anyhow::ensure!(
+                self.io.reply(self.guard.binding(), reply.reply_to, reply.event),
+                "host reply queue is full"
+            );
+        }
         if matches!(
             self.gate,
             DisplayGate::Settling { .. }
@@ -591,16 +615,18 @@ impl WorkerBridge {
                 match self.presentation.state(window, viewport, self.config.host_pid)? {
                     NativeState::WorkerChanged => anyhow::bail!("native worker viewport changed after preparation"),
                     NativeState::HostChanged => {
-                        self.cancel_fence(renderer);
-                        self.gate = DisplayGate::GeometryPending;
-                        self.presentation.hide(window);
+                        if matches!(self.gate, DisplayGate::Active | DisplayGate::GeometryPending) || effects.grant_input {
+                            self.gate = DisplayGate::GeometryPending;
+                        }
+                        // Hidden preparation may finish its real GPU fence.
+                        // The broker coalesces new geometry before granting it.
                     }
                     NativeState::Ready => {}
                 }
             }
-            if matches!(self.gate, DisplayGate::GeometryPending) {
-                // Even a drag back to the same rectangle needs a new broker
-                // revoke/fence/prepare. A late old Grant cannot show this frame.
+            if matches!(self.gate, DisplayGate::GeometryPending) && !effects.grant_input {
+                // A placement receipt, including move-away-and-back, is
+                // required before input resumes. Keep the old image visible.
                 return Ok(());
             }
         }
@@ -613,9 +639,14 @@ impl WorkerBridge {
             );
         }
         if effects.grant_input {
-            self.gate = DisplayGate::Active;
-            window.set_visible(true);
-            window.focus_window();
+            if !matches!(self.gate, DisplayGate::GeometryPending) {
+                self.gate = DisplayGate::Active;
+                self.presentation.show(window);
+                if effects.focus {
+                    super::diagnostics::record(super::diagnostics::Metric::Focus, std::time::Duration::ZERO);
+                    window.focus_window();
+                }
+            }
             if let Some(viewport) = self.guard.viewport() {
                 native_order(window, viewport)?;
             }
@@ -639,6 +670,7 @@ impl WorkerBridge {
         if matches!(self.gate, DisplayGate::Active)
             && let Some(viewport) = self.guard.viewport()
         {
+            self.presentation.show(window);
             native_order(window, viewport)?;
         }
         match self.gate {
@@ -890,6 +922,8 @@ fn final_display_effects(mut effects: WorkerEffects, mode: WorkerMode) -> Worker
     // Input release is cumulative; presentation authority is only final-state.
     effects.prepare &= mode == WorkerMode::Preparing;
     effects.grant_input &= mode == WorkerMode::Active;
+    effects.translate &= mode == WorkerMode::Active;
+    effects.focus &= effects.grant_input;
     effects.quiesce &= matches!(mode, WorkerMode::Standby | WorkerMode::Revoking);
     effects
 }
@@ -901,6 +935,8 @@ fn merge_effects(target: &mut WorkerEffects, next: WorkerEffects) {
     target.grant_input |= next.grant_input;
     target.restore_window |= next.restore_window;
     target.apply_viewport |= next.apply_viewport;
+    target.translate |= next.translate;
+    target.focus |= next.focus;
 }
 
 pub(crate) fn native_window(window: &winit::window::Window) -> u64 {
@@ -924,6 +960,7 @@ pub(crate) fn native_window(window: &winit::window::Window) -> u64 {
 #[derive(Default)]
 struct NativePresentation {
     hidden: bool,
+    viewport: Option<aurora_session::HostedViewport>,
     #[cfg(windows)]
     saved: Option<native::Saved>,
     #[cfg(windows)]
@@ -934,21 +971,52 @@ impl NativePresentation {
     fn fit(&mut self, window: &winit::window::Window, viewport: aurora_session::HostedViewport, host_pid: u32) -> anyhow::Result<bool> {
         #[cfg(windows)]
         {
-            if self.saved.is_none() {
+            let first = self.saved.is_none();
+            if first {
                 self.saved = Some(native::save(window)?);
             }
-            let Some(host_rect) = native::fit(window, viewport, host_pid)? else {
+            let Some(host_rect) = native::fit(window, viewport, host_pid, first)? else {
                 return Ok(false);
             };
             self.host_rect = Some(host_rect);
-            self.hidden = true;
-            window.set_visible(false);
+            self.viewport = Some(viewport);
+            self.hide(window);
+            super::diagnostics::record(super::diagnostics::Metric::Fit, std::time::Duration::ZERO);
             Ok(true)
         }
         #[cfg(not(windows))]
         {
             let _ = (window, viewport, host_pid);
             anyhow::bail!("native hosting is unsupported on this platform");
+        }
+    }
+
+    fn translate(&mut self, window: &winit::window::Window, viewport: aurora_session::HostedViewport, host_pid: u32) -> anyhow::Result<()> {
+        let old = self.viewport.ok_or_else(|| anyhow::anyhow!("worker has no fitted placement"))?;
+        anyhow::ensure!(old.same_surface(viewport), "translation would replace the render surface");
+        anyhow::ensure!(
+            self.state(window, old, host_pid)? != NativeState::WorkerChanged,
+            "native worker changed before translation"
+        );
+        #[cfg(windows)]
+        {
+            self.host_rect = Some(native::translate(window, viewport, host_pid)?);
+            self.viewport = Some(viewport);
+            super::diagnostics::record(super::diagnostics::Metric::Geometry, std::time::Duration::ZERO);
+            Ok(())
+        }
+        #[cfg(not(windows))]
+        anyhow::bail!("native hosting is unsupported on this platform")
+    }
+
+    fn show(&mut self, window: &winit::window::Window) {
+        if self.hidden {
+            #[cfg(windows)]
+            native::visibility(window, true);
+            #[cfg(not(windows))]
+            window.set_visible(true);
+            self.hidden = false;
+            super::diagnostics::record(super::diagnostics::Metric::Show, std::time::Duration::ZERO);
         }
     }
 
@@ -970,11 +1038,17 @@ impl NativePresentation {
     }
 
     fn hide(&mut self, window: &winit::window::Window) {
-        self.hidden = true;
-        window.set_visible(false);
+        if !self.hidden {
+            self.hidden = true;
+            window.set_visible(false);
+            #[cfg(windows)]
+            native::visibility(window, false);
+            super::diagnostics::record(super::diagnostics::Metric::Hide, std::time::Duration::ZERO);
+        }
     }
 
     fn restore(&mut self, window: &winit::window::Window) {
+        self.viewport = None;
         #[cfg(windows)]
         {
             self.host_rect = None;
@@ -1008,7 +1082,9 @@ fn native_state(
 ) -> NativeState {
     if worker_now != viewport.rect || client_size != [viewport.rect.width, viewport.rect.height] {
         NativeState::WorkerChanged
-    } else if host_before != Some(host_now) {
+    } else if host_before != Some(host_now)
+        || !contains_rect(host_now.x, host_now.y, host_now.width as i32, host_now.height as i32, viewport.rect)
+    {
         NativeState::HostChanged
     } else {
         NativeState::Ready
@@ -1061,6 +1137,18 @@ mod native {
         fullscreen: Option<winit::window::Fullscreen>,
     }
 
+    pub(super) fn visibility(window: &Window, visible: bool) {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{SW_HIDE, SW_SHOWNOACTIVATE, ShowWindow};
+        // SAFETY: show/hide only our worker. Winit's repeated set_visible(true)
+        // uses SW_SHOW and activates it; geometry must use SHOWNOACTIVATE.
+        unsafe {
+            ShowWindow(
+                super::native_window(window) as HWND,
+                if visible { SW_SHOWNOACTIVATE } else { SW_HIDE },
+            );
+        }
+    }
+
     pub(super) fn save(window: &Window) -> std::io::Result<Saved> {
         let hwnd = super::native_window(window) as HWND;
         if hwnd.is_null() {
@@ -1089,6 +1177,7 @@ mod native {
         window: &Window,
         viewport: aurora_session::HostedViewport,
         host_pid: u32,
+        first: bool,
     ) -> std::io::Result<Option<aurora_session::PhysicalRect>> {
         viewport.validate().map_err(std::io::Error::other)?;
         let hwnd = super::native_window(window) as HWND;
@@ -1103,33 +1192,37 @@ mod native {
             if !GetWindow(hwnd, GW_OWNER).is_null() {
                 return Err(std::io::Error::other("worker world window has a native owner"));
             }
-            if !super::contains_rect(
-                host_rect.x,
-                host_rect.y,
-                host_rect.width as i32,
-                host_rect.height as i32,
-                viewport.rect,
-            ) {
+            if IsWindowVisible(hwnd) != 0
+                && !super::contains_rect(
+                    host_rect.x,
+                    host_rect.y,
+                    host_rect.width as i32,
+                    host_rect.height as i32,
+                    viewport.rect,
+                )
+            {
                 return Ok(None);
             }
-            window.set_fullscreen(None);
-            window.set_maximized(false);
-            window.set_minimized(false);
-            window.set_min_inner_size(None::<LogicalSize<u32>>);
-            window.set_decorations(false);
-            window.set_skip_taskbar(true);
-            let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
-            let extended = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-            SetWindowLongPtrW(
-                hwnd,
-                GWL_STYLE,
-                (style & !((WS_OVERLAPPEDWINDOW | WS_CHILD) as isize)) | (WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS) as isize,
-            );
-            SetWindowLongPtrW(
-                hwnd,
-                GWL_EXSTYLE,
-                (extended & !(WS_EX_APPWINDOW as isize)) | WS_EX_TOOLWINDOW as isize,
-            );
+            if first {
+                window.set_fullscreen(None);
+                window.set_maximized(false);
+                window.set_minimized(false);
+                window.set_min_inner_size(None::<LogicalSize<u32>>);
+                window.set_decorations(false);
+                window.set_skip_taskbar(true);
+                let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+                let extended = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+                SetWindowLongPtrW(
+                    hwnd,
+                    GWL_STYLE,
+                    (style & !((WS_OVERLAPPEDWINDOW | WS_CHILD) as isize)) | (WS_POPUP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS) as isize,
+                );
+                SetWindowLongPtrW(
+                    hwnd,
+                    GWL_EXSTYLE,
+                    (extended & !(WS_EX_APPWINDOW as isize)) | WS_EX_TOOLWINDOW as isize,
+                );
+            }
             let rect = viewport.rect;
             // Immediately below the normal host, never globally topmost. The
             // host reveals only its acknowledged world region via its own HRGN.
@@ -1140,13 +1233,43 @@ mod native {
                 rect.y,
                 rect.width as i32,
                 rect.height as i32,
-                SWP_FRAMECHANGED | SWP_NOACTIVATE,
+                SWP_NOACTIVATE | if first { SWP_FRAMECHANGED } else { 0 },
             ) == 0
             {
                 return Err(std::io::Error::last_os_error());
             }
         }
         Ok(Some(host_rect))
+    }
+
+    pub(super) fn translate(
+        window: &Window,
+        viewport: aurora_session::HostedViewport,
+        host_pid: u32,
+    ) -> std::io::Result<aurora_session::PhysicalRect> {
+        viewport.validate().map_err(std::io::Error::other)?;
+        let host_rect = host_rect(viewport, host_pid)?;
+        let hwnd = super::native_window(window) as HWND;
+        // SAFETY: only move our already verified unowned worker, preserving
+        // styles, size, activation and Z-order. No foreign HWND is modified.
+        unsafe {
+            if hwnd.is_null() || hwnd == viewport.host_window as HWND || !GetWindow(hwnd, GW_OWNER).is_null() {
+                return Err(std::io::Error::other("worker is no longer an independent native window"));
+            }
+            if SetWindowPos(
+                hwnd,
+                std::ptr::null_mut(),
+                viewport.rect.x,
+                viewport.rect.y,
+                0,
+                0,
+                SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOZORDER,
+            ) == 0
+            {
+                return Err(std::io::Error::last_os_error());
+            }
+        }
+        Ok(host_rect)
     }
 
     fn host_rect(viewport: aurora_session::HostedViewport, host_pid: u32) -> std::io::Result<aurora_session::PhysicalRect> {
@@ -1357,7 +1480,10 @@ mod tests {
                     )
                     .unwrap();
                 command.sequence += 1;
-                command.message = Message::Command(Command::Grant { activation: 1 });
+                command.message = Message::Command(Command::Grant {
+                    activation: 1,
+                    focus: true,
+                });
                 effects = guard.on_command(&command, 2).unwrap().effects;
                 assert!(effects.grant_input);
             } else {

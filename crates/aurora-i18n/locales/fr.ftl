@@ -13461,6 +13461,8 @@ host-attention-review-cancel-failed = L’annulation n’a pas pu être mise en 
 
 # Compact monitor body; source-only CPU surface prerequisite.
 host-monitor-title = Moniteur de personnage
+host-monitor-starting = En attente du moniteur…
+host-monitor-open-failed = Le moniteur est indisponible. Rouvrez-le pour réessayer.
 host-monitor-open = Ouvrir le moniteur · { $profile }
 host-monitor-open-cycling = Ouvrir le moniteur cyclique
 host-monitor-window-title = Moniteur { $number } · { $profile }

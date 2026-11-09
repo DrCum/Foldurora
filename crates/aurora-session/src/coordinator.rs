@@ -56,10 +56,12 @@ impl Entry {
 struct Active {
     binding: Binding,
     viewport: Option<HostedViewport>,
+    activation: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Stage {
+    Translate,
     ParkOld,
     RevokeOld,
     PrepareTarget,
@@ -101,6 +103,7 @@ pub struct Coordinator {
     entries: BTreeMap<WorkerId, Entry>,
     active: Option<Active>,
     pending: Option<Pending>,
+    latest_viewport: Option<HostedViewport>,
     activation: u64,
     now: u64,
     foreground: bool,
@@ -114,6 +117,7 @@ impl Coordinator {
             entries: BTreeMap::new(),
             active: None,
             pending: None,
+            latest_viewport: None,
             activation: 0,
             now: 0,
             foreground: false,
@@ -257,41 +261,46 @@ impl Coordinator {
         Ok(vec![Effect::Send(message)])
     }
 
-    /// Native host movement invalidates placement even if it ends at the
-    /// original rectangle. Revoke and earn a new GPU proof instead of taking
-    /// activate's ordinary same-viewport shortcut. Repeated geometry changes
-    /// may supersede only a handoff involving this one binding, never a switch
-    /// between different characters or an explicit park/rollback.
+    /// One geometry transaction plus one latest target, never a handoff per
+    /// native event. Translation retains the render grant; resize earns a new
+    /// GPU proof. Even a move away and back needs a fresh placement receipt.
     pub fn refresh_viewport(&mut self, worker: WorkerId, viewport: HostedViewport, now_ms: u64) -> Result<Vec<Effect>, Error> {
         viewport.validate()?;
         self.now = self.now.max(now_ms);
         let target = self.entries.get(&worker).ok_or(Error::Unavailable)?.roster.binding;
-        let old = if let Some(pending) = self.pending {
+        if let Some(mut pending) = self.pending {
             if pending.target != target
                 || pending.old.is_some_and(|old| old.binding != target)
-                || !matches!(pending.stage, Stage::RevokeOld | Stage::PrepareTarget | Stage::GrantTarget)
+                || !matches!(
+                    pending.stage,
+                    Stage::Translate | Stage::RevokeOld | Stage::PrepareTarget | Stage::GrantTarget
+                )
             {
                 return Err(Error::Busy);
             }
-            Active {
-                binding: target,
-                viewport: pending.viewport,
+            if pending.stage == Stage::RevokeOld {
+                // The drain already in flight protects whichever size is next.
+                pending.viewport = Some(viewport);
+                self.pending = Some(pending);
+            } else {
+                self.latest_viewport = Some(viewport);
             }
-        } else {
-            self.active.filter(|active| active.binding == target).ok_or(Error::Unavailable)?
-        };
+            return Ok(Vec::new());
+        }
+        let old = self.active.filter(|active| active.binding == target).ok_or(Error::Unavailable)?;
         if !self.ready(target) {
             // A native modal/permission gap cannot leave a hidden Active
             // worker renewed by heartbeats while a UI error stops refreshes.
             return Ok(self.detach_all());
         }
-        let activation = self.next_activation()?;
+        let translation = old.viewport.is_some_and(|old| old.same_surface(viewport));
+        let activation = if translation { old.activation } else { self.next_activation()? };
         let mut pending = Pending {
             old: Some(old),
             target,
             viewport: Some(viewport),
             activation,
-            stage: Stage::RevokeOld,
+            stage: if translation { Stage::Translate } else { Stage::RevokeOld },
             sequence: 0,
             deadline: self.now.saturating_add(STEP_MILLIS),
             baseline: None,
@@ -349,6 +358,10 @@ impl Coordinator {
             return Err(Error::Unavailable);
         }
         let command = match pending.stage {
+            Stage::Translate => Command::Translate {
+                activation: pending.activation,
+                viewport: pending.viewport.ok_or(Error::Invalid)?,
+            },
             Stage::ParkOld | Stage::RevokeOld | Stage::RevokeTarget => Command::Revoke {
                 activation: pending.activation,
             },
@@ -369,6 +382,7 @@ impl Coordinator {
             }
             Stage::GrantTarget | Stage::GrantOld => Command::Grant {
                 activation: pending.activation,
+                focus: pending.stage == Stage::GrantOld || pending.old.is_none_or(|old| old.binding != pending.target),
             },
         };
         let message = self.send(receiver.worker.worker, command)?;
@@ -423,6 +437,7 @@ impl Coordinator {
                 return Err(Error::Stale);
             }
             let valid = match (pending.stage, event) {
+                (Stage::Translate, Event::Placed { viewport, .. }) => pending.viewport == Some(*viewport),
                 (_, Event::Rejected { .. }) => true,
                 (Stage::ParkOld | Stage::RevokeOld | Stage::RevokeTarget, Event::Quiesced { progress, .. }) => {
                     progress.quiescent()
@@ -483,6 +498,18 @@ impl Coordinator {
             return Ok(self.failed_step());
         }
         pending.stage = match (pending.stage, event) {
+            (Stage::Translate, Event::Placed { viewport, .. }) if pending.viewport == Some(*viewport) => {
+                self.active = Some(Active {
+                    binding: pending.target,
+                    viewport: Some(*viewport),
+                    activation: pending.activation,
+                });
+                self.pending = None;
+                if let Some(next) = self.latest_viewport.take() {
+                    return self.refresh_viewport(worker, next, self.now);
+                }
+                return Ok(vec![Effect::Notice(HostNotice::Switched(worker))]);
+            }
             (Stage::ParkOld, Event::Quiesced { progress, .. }) if progress.quiescent() => {
                 self.active = None;
                 self.pending = None;
@@ -496,7 +523,15 @@ impl Coordinator {
             (Stage::PrepareTarget, Event::FrameReady { boundary, frame, .. })
                 if boundary.accepts(*frame) && frame.newer_than(pending.baseline) =>
             {
-                Stage::GrantTarget
+                if let Some(next) = self.latest_viewport.take().filter(|next| Some(*next) != pending.viewport) {
+                    // Complete each in-flight fence, then prepare only the most
+                    // recent size. Never publish an obsolete prepared surface.
+                    pending.activation = self.next_activation()?;
+                    pending.viewport = Some(next);
+                    Stage::RevokeOld
+                } else {
+                    Stage::GrantTarget
+                }
             }
             (Stage::PrepareOld, Event::FrameReady { boundary, frame, .. })
                 if boundary.accepts(*frame) && frame.newer_than(pending.baseline) =>
@@ -511,8 +546,15 @@ impl Coordinator {
                 } else {
                     pending.viewport
                 };
-                self.active = Some(Active { binding, viewport });
+                self.active = Some(Active {
+                    binding,
+                    viewport,
+                    activation: pending.activation,
+                });
                 self.pending = None;
+                if !rollback && let Some(next) = self.latest_viewport.take() {
+                    return self.refresh_viewport(worker, next, self.now);
+                }
                 return Ok(vec![Effect::Notice(if rollback {
                     HostNotice::RolledBack(worker)
                 } else {
@@ -531,6 +573,7 @@ impl Coordinator {
     }
 
     fn failed_step(&mut self) -> Vec<Effect> {
+        self.latest_viewport = None;
         let Some(mut pending) = self.pending else { return Vec::new() };
         if !matches!(pending.stage, Stage::PrepareTarget | Stage::GrantTarget) || !pending.old.is_some_and(|old| self.ready(old.binding)) {
             return self.fail_closed();
@@ -558,6 +601,7 @@ impl Coordinator {
     }
 
     pub fn detach_all(&mut self) -> Vec<Effect> {
+        self.latest_viewport = None;
         self.active = None;
         self.pending = None;
         let workers: Vec<_> = self

@@ -31,7 +31,22 @@ pub(super) enum Action {
 #[derive(Clone, Copy)]
 pub(super) enum Notice {
     Queued,
+    #[cfg(windows)]
+    MonitorStarting,
+    #[cfg(windows)]
+    MonitorUnavailable,
     Error(HostError),
+}
+
+impl Notice {
+    fn is_error(self) -> bool {
+        match self {
+            Self::Error(_) => true,
+            #[cfg(windows)]
+            Self::MonitorUnavailable => true,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -255,7 +270,9 @@ impl HostUi {
                 });
         }
         let world = ui.available_rect_before_wrap();
-        egui::CentralPanel::default().frame(frame).show(ui, |ui| {
+        // SoftwareWindow already clears the DIB to the panel colour. Avoid a
+        // second full-canvas textured fill, including during geometry covers.
+        egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
             ui.vertical_centered(|ui| {
                 ui.add_space((ui.available_height() * 0.22).max(10.0));
                 widgets::glyph(ui, "device-desktop-filled", p.violet_pale, 40.0);
@@ -452,8 +469,7 @@ impl HostUi {
                 } else if let Some(error) = snapshot.error.as_ref().or(snapshot.registry_error.as_ref()) {
                     Some((error.clone(), true))
                 } else {
-                    self.notice
-                        .map(|notice| (notice_text(notice).to_owned(), matches!(notice, Notice::Error(_))))
+                    self.notice.map(|notice| (notice_text(notice).to_owned(), notice.is_error()))
                 };
                 if let Some((message, warning)) = status {
                     let response = compact_button(
@@ -503,7 +519,7 @@ impl HostUi {
                     }
                 }
             });
-            let attention = snapshot.registry_error.is_some() || snapshot.error.is_some() || matches!(self.notice, Some(Notice::Error(_)));
+            let attention = snapshot.registry_error.is_some() || snapshot.error.is_some() || self.notice.is_some_and(Notice::is_error);
             let manage = compact_button(
                 ui,
                 p,
@@ -1001,6 +1017,10 @@ fn status(worker: &WorkerSummary) -> &'static str {
 fn notice_text(notice: Notice) -> &'static str {
     match notice {
         Notice::Queued => aurora_i18n::tr!("host-request-queued"),
+        #[cfg(windows)]
+        Notice::MonitorStarting => aurora_i18n::tr!("host-monitor-starting"),
+        #[cfg(windows)]
+        Notice::MonitorUnavailable => aurora_i18n::tr!("host-monitor-open-failed"),
         Notice::Error(HostError::Busy) => aurora_i18n::tr!("host-busy"),
         Notice::Error(HostError::Unsupported) => aurora_i18n::tr!("host-unavailable-help"),
         Notice::Error(HostError::Stopped) => aurora_i18n::tr!("host-stopped"),

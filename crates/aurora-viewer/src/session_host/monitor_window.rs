@@ -26,6 +26,7 @@ const MIN_FRAME: Duration = Duration::from_millis(33);
 
 #[derive(Default)]
 pub(super) struct Outcome {
+    pub first_presented: bool,
     pub close: bool,
     pub minimized: bool,
     pub action: Option<Action>,
@@ -409,6 +410,41 @@ impl MonitorWindow {
         }
         self.staged.as_ref().is_none_or(|image| image.current())
     }
+    /// Hidden Win32 windows need not receive WM_PAINT. Drive the first frame
+    /// on the owning event loop; the sealed surface still shows only AFTER
+    /// painting and rechecking this same source/visibility/budget authority.
+    pub fn first_frame(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        manager: &MonitorManager,
+        read: &PreviewRead,
+        chat: &mut SharedChat,
+        host: &HostSnapshot,
+        blocked: bool,
+    ) -> Outcome {
+        let mut outcome = Outcome::default();
+        if self.last_frame.is_some() {
+            return outcome;
+        }
+        if !self.matches(manager) || !manager.current_read(self.view, read) {
+            self.retire(chat);
+            outcome.recreate = true;
+            return outcome;
+        }
+        self.blocked = blocked;
+        self.body.sync(self.view, manager.model(), manager.state(self.view));
+        let started = Instant::now();
+        let (action, failed) = self.render(event_loop, manager, read, chat, host, blocked);
+        super::diagnostics::record(super::diagnostics::Metric::MonitorFirst, started.elapsed());
+        outcome.action = action;
+        let current = read.view_current() && self.staged.as_ref().is_none_or(|image| image.current());
+        outcome.failed = failed && current;
+        outcome.recreate = failed && !current;
+        outcome.observed_pin = self.observed_pin.take();
+        outcome.first_presented = !failed;
+        outcome
+    }
+
     fn render(
         &mut self,
         event_loop: &ActiveEventLoop,

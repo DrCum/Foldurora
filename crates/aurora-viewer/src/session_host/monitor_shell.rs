@@ -1,6 +1,7 @@
 //! Actual Windows Shell routing; all image/proof IO remains in HostController's
 //! separately owned projection. No uncredited native backend is selected.
 
+use super::Shell;
 use super::monitor_manager::index;
 use super::monitor_model::{Binding, View};
 use super::monitor_ui::{Action as MonitorAction, Command, State};
@@ -9,7 +10,6 @@ use super::preview_projection::{PreviewError, PreviewRead};
 use super::shared_chat::SharedChat;
 use super::slots::SlotId;
 use super::ui::Notice;
-use super::{Shell, transport};
 use aurora_session::preview_image::PreviewSource;
 use std::time::{Duration, Instant};
 use winit::event::WindowEvent;
@@ -38,7 +38,7 @@ impl Shell {
             self.monitors.fail_closed();
         }
         log::debug!("session host: monitor operation unavailable: {error:?}");
-        self.ui.notice = Some(Notice::Error(transport::HostError::Unavailable));
+        self.ui.notice = Some(Notice::MonitorUnavailable);
         self.notice_at = Some(Instant::now());
         self.request_repaint();
     }
@@ -129,6 +129,9 @@ impl Shell {
         Ok(())
     }
     pub(super) fn open_monitor(&mut self, event_loop: &ActiveEventLoop, source: Option<PreviewSource>) {
+        self.ui.notice = Some(Notice::MonitorStarting);
+        self.notice_at = None;
+        self.request_repaint();
         let result = (|| {
             self.refresh_monitors(event_loop)?;
             let now = self.monitor_time();
@@ -153,6 +156,9 @@ impl Shell {
         }
     }
     pub(super) fn resume_monitor(&mut self, event_loop: &ActiveEventLoop, recovery: super::monitor_manager::Recovery) {
+        self.ui.notice = Some(Notice::MonitorStarting);
+        self.notice_at = None;
+        self.request_repaint();
         let result = (|| {
             self.refresh_monitors(event_loop)?;
             let now = self.monitor_time();
@@ -225,6 +231,11 @@ impl Shell {
             {
                 window.request_focus();
                 self.monitor_focus = None;
+            }
+            if let (Some(window), Some(read)) = (&mut self.monitor_windows[at], &read) {
+                let blocked = self.ui.modal_open() || self.closing.is_some() || self.snapshot.stopped;
+                let outcome = window.first_frame(event_loop, &self.monitors, read, &mut self.shared_chat, &self.snapshot, blocked);
+                self.monitor_outcome(event_loop, view, outcome);
             }
         }
         // Constructor/native failure leaves no visible subscriber. Stop its
@@ -307,6 +318,17 @@ impl Shell {
             &self.snapshot,
             blocked,
         );
+        self.monitor_outcome(event_loop, view, outcome);
+        true
+    }
+
+    fn monitor_outcome(&mut self, event_loop: &ActiveEventLoop, view: View, outcome: super::monitor_window::Outcome) {
+        let at = index(view);
+        if outcome.first_presented && matches!(self.ui.notice, Some(Notice::MonitorStarting)) {
+            self.ui.notice = None;
+            self.notice_at = None;
+            self.request_repaint();
+        }
         if outcome.close || outcome.minimized || outcome.failed {
             let windows = &mut self.monitor_windows;
             let chat = &mut self.shared_chat;
@@ -343,7 +365,6 @@ impl Shell {
         if let Err(error) = self.publish_monitors(event_loop) {
             self.monitor_error(error);
         }
-        true
     }
 
     fn monitor_action(&mut self, event_loop: &ActiveEventLoop, view: View, action: MonitorAction) {

@@ -13465,6 +13465,8 @@ host-attention-review-cancel-failed = Cancellation could not be queued. The revi
 
 # Compact monitor body; source-only CPU surface prerequisite.
 host-monitor-title = Character monitor
+host-monitor-starting = Waiting for the monitor…
+host-monitor-open-failed = The monitor is unavailable. Open it again to retry.
 host-monitor-open = Open monitor · { $profile }
 host-monitor-open-cycling = Open cycling monitor
 host-monitor-window-title = Monitor { $number } · { $profile }

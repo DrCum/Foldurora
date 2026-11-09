@@ -11,6 +11,7 @@ pub(crate) mod chat_io;
 pub(crate) mod chat_transport;
 mod chat_ui;
 mod chat_window;
+mod diagnostics;
 // Ordinary Inventory chooser observes the same native activation-key fence.
 pub(crate) use chat_window::enter_release::EnterRelease;
 // Real host/window front; Root promotes its existing prerequisite modules only
@@ -34,6 +35,7 @@ mod monitor_model;
 #[cfg(any(windows, test))]
 mod monitor_ui;
 mod native;
+mod paint_regions;
 mod preview_bootstrap;
 #[cfg(any(windows, test))]
 mod preview_projection;
@@ -65,7 +67,8 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::WindowId;
 
-const POLL: Duration = Duration::from_millis(100);
+// Only reads the broker's cached Arc; private filesystem IO stays off-thread.
+const POLL: Duration = Duration::from_millis(33);
 const MIN_FRAME: Duration = Duration::from_millis(33);
 const CLOSE_GRACE: Duration = Duration::from_secs(3);
 
@@ -135,6 +138,7 @@ pub fn run() -> anyhow::Result<()> {
         park_requested: false,
         layout_dirty: true,
         geometry_dirty: false,
+        geometry_at: None,
     };
     log::info!("session host: CPU controller starting; worker worlds remain independent");
     event_loop.run_app(&mut app)?;
@@ -188,6 +192,7 @@ struct Shell {
     park_requested: bool,
     layout_dirty: bool,
     geometry_dirty: bool,
+    geometry_at: Option<Instant>,
 }
 
 impl Shell {
@@ -467,7 +472,15 @@ impl Shell {
         self.overlays = overlays;
         self.layout_dirty = false;
         let viewport = surface.viewport(world, context.pixels_per_point());
-        let delay = surface.present(event_loop, &context, output, p.panel)?;
+        // Only omit CPU work where this exact frame can expose a confirmed
+        // native world. Modal/changed geometry still gets a complete cover.
+        let regions = (cfg!(windows) && hosted.is_some() && viewport == native_viewport && !self.ui.modal_open())
+            .then(|| {
+                self.overlays
+                    .paint_regions([size.width as usize, size.height as usize], world, context.pixels_per_point())
+            })
+            .flatten();
+        let delay = surface.present_regions(event_loop, &context, output, p.panel, regions.as_deref())?;
         let now = Instant::now();
         self.last_frame = Some(now);
         self.repaint = now.checked_add(delay);
@@ -482,7 +495,12 @@ impl Shell {
         if now < self.next_poll {
             return;
         }
-        self.next_poll = now + POLL;
+        self.next_poll = now
+            + if self.geometry_dirty || self.snapshot.pending.is_some() || self.transition.waiting() {
+                Duration::from_millis(16)
+            } else {
+                POLL
+            };
         let snapshot = self.controller.snapshot();
         let changed = !ui::same_snapshot(&snapshot, &self.snapshot);
         if changed {
@@ -561,6 +579,11 @@ impl Shell {
             self.context.pixels_per_point(),
             &self.overlays,
         )?;
+        if confirmed.is_some()
+            && let Some(at) = self.geometry_at.take()
+        {
+            diagnostics::record(diagnostics::Metric::Geometry, at.elapsed());
+        }
         if self.closing.is_some()
             || self.snapshot.stopped
             || self.snapshot.error.is_some()
@@ -772,8 +795,16 @@ impl ApplicationHandler for Shell {
             event,
             WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } | WindowEvent::Moved(_)
         ) {
+            // The modal Win32 move loop need not call about_to_wait. Pick up
+            // receipts here too, without touching private IO on the UI thread.
+            let now = Instant::now();
+            self.next_poll = now;
+            self.poll(now);
             self.close_region();
             self.geometry_dirty = true;
+            if diagnostics::enabled() {
+                self.geometry_at.get_or_insert_with(Instant::now);
+            }
             self.requested_viewport = None;
             if matches!(event, WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. }) {
                 self.layout_dirty = true;

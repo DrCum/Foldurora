@@ -213,6 +213,7 @@ pub(crate) struct HostController {
     stop: Arc<AtomicBool>,
     stopped: Arc<AtomicBool>,
     foreground: Arc<AtomicBool>,
+    wake: Option<std::thread::Thread>,
 }
 
 /// In-process synthetic data and an intent inbox, exclusively for the ignored
@@ -259,6 +260,7 @@ pub(super) mod native_fixture {
             stop: Arc::new(AtomicBool::new(false)),
             stopped: Arc::new(AtomicBool::new(false)),
             foreground: Arc::new(AtomicBool::new(false)),
+            wake: None,
         };
         (controller, Inbox { receiver, snapshot })
     }
@@ -381,7 +383,7 @@ impl HostController {
         let preview_reads = preview_reader.clone();
         #[cfg(any(windows, test))]
         let preview_fences = preview_frontdoor.clone();
-        std::thread::Builder::new().name("session-host-io".into()).spawn(move || {
+        let io = std::thread::Builder::new().name("session-host-io".into()).spawn(move || {
             if let Err(error) = host_loop(
                 &rx,
                 &shared,
@@ -410,6 +412,7 @@ impl HostController {
             stop,
             stopped,
             foreground,
+            wake: Some(io.thread().clone()),
         })
     }
 
@@ -625,13 +628,15 @@ impl HostController {
         // even if callers other than the shell enqueue an intent concurrently.
         let mut requests = self.requests.try_lock().map_err(|_| HostError::Busy)?;
         #[cfg(any(windows, test))]
-        {
-            requests.send_scoped(intent, slot)
-        }
+        let result = requests.send_scoped(intent, slot);
         #[cfg(not(any(windows, test)))]
+        let result = requests.send(intent);
+        if result.is_ok()
+            && let Some(wake) = &self.wake
         {
-            requests.send(intent)
+            wake.unpark();
         }
+        result
     }
 
     /// Nonblocking: the IO thread requests detach, then retires after its
@@ -640,6 +645,9 @@ impl HostController {
         #[cfg(any(windows, test))]
         self.preview_frontdoor.retire();
         self.stop.store(true, Ordering::Release);
+        if let Some(wake) = &self.wake {
+            wake.unpark();
+        }
     }
     pub fn stopped(&self) -> bool {
         self.stopped.load(Ordering::Acquire)
@@ -906,6 +914,8 @@ fn worker_loop(
     let mut received = 0;
     let mut sent = 0u64;
     let mut next_status = Instant::now();
+    let mut moving = false;
+    let mut responsive_until = Instant::now();
     loop {
         let ending = stop.load(Ordering::Acquire);
         if !ending
@@ -916,6 +926,12 @@ fn worker_loop(
             && matches!(envelope.message, Message::Command(_))
         {
             let sequence = envelope.sequence;
+            match &envelope.message {
+                Message::Command(Command::Grant { .. } | Command::Translate { .. }) => moving = true,
+                Message::Command(Command::Revoke { .. } | Command::Detach) => moving = false,
+                _ => {}
+            }
+            responsive_until = Instant::now() + Duration::from_secs(1);
             if commands.try_send(envelope).is_ok() {
                 received = sequence;
             }
@@ -955,7 +971,11 @@ fn worker_loop(
             }
             next_status = Instant::now() + HEARTBEAT;
         }
-        std::thread::sleep(PERIOD);
+        std::thread::sleep(if moving || Instant::now() < responsive_until {
+            Duration::from_millis(16)
+        } else {
+            PERIOD
+        });
     }
     Ok(())
 }
@@ -1084,7 +1104,14 @@ fn matches_acknowledgment(command: &Envelope, reply: &Envelope) -> bool {
                 activation: acknowledged, ..
             },
         )
-        | (Command::Grant { activation }, Event::Granted { activation: acknowledged }) => activation == acknowledged,
+        | (Command::Grant { activation, .. }, Event::Granted { activation: acknowledged }) => activation == acknowledged,
+        (
+            Command::Translate { activation, viewport },
+            Event::Placed {
+                activation: acknowledged,
+                viewport: placed,
+            },
+        ) => activation == acknowledged && viewport == placed,
         _ => false,
     }
 }
@@ -1413,7 +1440,7 @@ impl Broker {
             match effect {
                 Effect::Send(envelope) => {
                     if let Message::Command(
-                        Command::Revoke { activation } | Command::Prepare { activation, .. } | Command::Grant { activation },
+                        Command::Revoke { activation } | Command::Prepare { activation, .. } | Command::Grant { activation, .. },
                     ) = &envelope.message
                     {
                         #[cfg(any(windows, test))]
@@ -1442,6 +1469,11 @@ impl Broker {
                             child.prepared = Some((envelope.binding, *activation, *viewport));
                         }
                         Message::Command(Command::Grant { .. }) => self.pending = Some(worker),
+                        Message::Command(Command::Translate { activation, viewport }) => {
+                            self.active_viewport = None;
+                            self.pending = Some(worker);
+                            child.prepared = Some((envelope.binding, *activation, Some(*viewport)));
+                        }
                         Message::Command(Command::Detach) => {
                             #[cfg(any(windows, test))]
                             {
@@ -2182,7 +2214,11 @@ fn host_loop(
             }
             break;
         }
-        std::thread::sleep(PERIOD);
+        std::thread::park_timeout(if broker.coordinator.busy() {
+            Duration::from_millis(16)
+        } else {
+            PERIOD
+        });
     }
     Ok(())
 }
@@ -2654,7 +2690,14 @@ mod tests {
         ));
         outbox.published(3);
         outbox
-            .enqueue(command(&config, 4, Command::Grant { activation: 1 }))
+            .enqueue(command(
+                &config,
+                4,
+                Command::Grant {
+                    activation: 1,
+                    focus: true,
+                },
+            ))
             .expect("control supersedes heartbeat");
         assert_eq!(outbox.next().expect("grant").sequence, 4);
     }
@@ -2664,7 +2707,14 @@ mod tests {
         let config = config();
         let mut outbox = Outbox::default();
         outbox
-            .enqueue(command(&config, 1, Command::Grant { activation: 1 }))
+            .enqueue(command(
+                &config,
+                1,
+                Command::Grant {
+                    activation: 1,
+                    focus: true,
+                },
+            ))
             .expect("grant");
         assert_eq!(outbox.next().expect("grant").sequence, 1);
         outbox.published(1);
@@ -2708,7 +2758,18 @@ mod tests {
                 ))
                 .expect("bounded controls");
         }
-        assert!(outbox.enqueue(command(&config, 17, Command::Grant { activation: 1 })).is_err());
+        assert!(
+            outbox
+                .enqueue(command(
+                    &config,
+                    17,
+                    Command::Grant {
+                        activation: 1,
+                        focus: true
+                    }
+                ))
+                .is_err()
+        );
         let first = outbox.next().expect("first attempt");
         assert_eq!(
             outbox.next(),

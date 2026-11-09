@@ -13432,6 +13432,8 @@ host-attention-review-cancel-failed = キャンセルの要求を受け付けら
 
 # Compact monitor body; source-only CPU surface prerequisite.
 host-monitor-title = キャラクターモニター
+host-monitor-starting = モニターを準備しています…
+host-monitor-open-failed = モニターを利用できません。もう一度開いて再試行してください。
 host-monitor-open = モニターを開く · { $profile }
 host-monitor-open-cycling = 巡回モニターを開く
 host-monitor-window-title = モニター { $number } · { $profile }

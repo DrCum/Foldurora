@@ -423,8 +423,19 @@ are not supplied by this body. Twelve actual-egui tests and one ignored
 The opt-in session controller starts before the ordinary viewer App/EventLoop.
 `session_host/{mod,software,ui}.rs` uses egui and the existing softbuffer CPU
 painter; it never initializes `aurora-render::Renderer`. `session_host/transport.rs`
-owns child launches and bounded private-file IO on background threads. Typed V1
+owns child launches and bounded private-file IO on background threads. Typed V2
 identities and ownership transitions live in the pure `aurora-session` crate.
+Same-surface translation retains activation and GPU proof but withholds input
+until the worker verifies its own placement and returns the exact envelope
+sequence/viewport receipt. Resize retains one in-flight fence plus the latest
+desired rectangle; obsolete prepared frames cannot grant the next surface.
+Focus is explicit on Grant, not implied by geometry or visibility. The native
+host still opens only an exactly acknowledged world cutout. Hidden preparation
+can complete during host motion, with visibility and input separately gated.
+CPU host painting omits the confirmed cutout, retains disjoint popup islands
+and uses a cheap solid transition cover. Monitor first frames are driven by
+the owning loop before native show; no hidden-window WM_PAINT is required and
+the sealed private-image/current-read checks remain mandatory.
 See `docs/SESSION_HOST.md` for the checkpoint's explicit limitations.
 
 `session_host/startup.rs` initializes and syncs a distinct controller diagnostic

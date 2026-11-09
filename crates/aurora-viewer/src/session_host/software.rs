@@ -1,13 +1,14 @@
 //! The controller owns a CPU egui surface, never a world Renderer or adapter.
 //! Reuse the recovery painter without its crash/report workflow.
 
+use super::diagnostics::{self, Metric};
 use aurora_session::HostedViewport;
 #[cfg(any(windows, test))]
 use aurora_session::PhysicalRect;
 use egui::{Color32, Context, RawInput, Rect};
 use std::num::NonZeroU32;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, OwnedDisplayHandle};
 use winit::window::{Window, WindowAttributes};
@@ -18,6 +19,7 @@ pub(super) struct SoftwareWindow {
     surface: softbuffer::Surface<OwnedDisplayHandle, Arc<Window>>,
     painter: crate::crash::software::Painter,
     pending: egui::TexturesDelta,
+    input_at: Option<Instant>,
 }
 
 impl SoftwareWindow {
@@ -50,6 +52,7 @@ impl SoftwareWindow {
             surface,
             painter: Default::default(),
             pending: Default::default(),
+            input_at: None,
         })
     }
 
@@ -91,6 +94,17 @@ impl SoftwareWindow {
     }
 
     pub fn event(&mut self, event: &WindowEvent) -> egui_winit::EventResponse {
+        if diagnostics::enabled()
+            && matches!(
+                event,
+                WindowEvent::CursorMoved { .. }
+                    | WindowEvent::MouseInput { .. }
+                    | WindowEvent::MouseWheel { .. }
+                    | WindowEvent::KeyboardInput { .. }
+            )
+        {
+            self.input_at.get_or_insert_with(Instant::now);
+        }
         self.input.on_window_event(&self.window, event)
     }
 
@@ -103,9 +117,21 @@ impl SoftwareWindow {
         &mut self,
         event_loop: &ActiveEventLoop,
         context: &Context,
-        mut output: egui::FullOutput,
+        output: egui::FullOutput,
         background: Color32,
     ) -> anyhow::Result<Duration> {
+        self.present_regions(event_loop, context, output, background, None)
+    }
+
+    pub fn present_regions(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        context: &Context,
+        mut output: egui::FullOutput,
+        background: Color32,
+        regions: Option<&[[usize; 4]]>,
+    ) -> anyhow::Result<Duration> {
+        let paint_at = Instant::now();
         self.pending.append(std::mem::take(&mut output.textures_delta));
         let delay = output
             .viewport_output
@@ -120,16 +146,22 @@ impl SoftwareWindow {
         let primitives = context.tessellate(output.shapes, output.pixels_per_point);
         self.surface.resize(width, height).map_err(|error| anyhow::anyhow!("{error}"))?;
         let mut pixels = self.surface.buffer_mut().map_err(|error| anyhow::anyhow!("{error}"))?;
-        self.painter.paint(
+        self.painter.paint_regions(
             &mut pixels,
             [size.width as usize, size.height as usize],
             &primitives,
             &self.pending,
             output.pixels_per_point,
             background,
+            None,
+            regions,
         );
         self.pending.clear();
         pixels.present().map_err(|error| anyhow::anyhow!("{error}"))?;
+        diagnostics::record(Metric::Paint, paint_at.elapsed());
+        if let Some(at) = self.input_at.take() {
+            diagnostics::record(Metric::Input, at.elapsed());
+        }
         Ok(delay)
     }
 
