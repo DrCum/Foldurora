@@ -13615,3 +13615,6 @@ workspaces-huds-timeout = HUDの復元がタイムアウトしました。処理
 workspaces-huds-failed = ネイティブの外見操作を開始できませんでした。それ以前のHUDは追加されている場合があります。
 
 workspaces-expanded-unavailable = 展開状態を確認できません。メインインベントリのツリーで読み込みを待ち、展開するフォルダーを256個以下にしてください。
+
+workspaces-capture-additional = 追加インベントリウィンドウを記憶
+workspaces-additional-unavailable = 追加インベントリを復元できませんでした。ダイアログを閉じて編集を終え、再試行してください。

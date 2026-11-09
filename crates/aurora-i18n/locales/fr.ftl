@@ -13650,3 +13650,6 @@ workspaces-huds-timeout = Délai de restauration dépassé. Certains objets peuv
 workspaces-huds-failed = L’action native d’apparence n’a pas pu démarrer. Des HUD précédents ont peut-être été ajoutés.
 
 workspaces-expanded-unavailable = Dossiers développés indisponibles. Utilisez l’arborescence principale, attendez son chargement et ne développez pas plus de 256 dossiers.
+
+workspaces-capture-additional = Mémoriser la fenêtre d’inventaire supplémentaire
+workspaces-additional-unavailable = L’inventaire supplémentaire n’a pas pu être restauré. Fermez ses dialogues, terminez les modifications et réessayez.

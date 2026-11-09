@@ -107,6 +107,7 @@ impl WorkspaceUi {
                         Status::Ready => tr!("workspaces-ready"),
                         Status::FolderUnavailable => tr!("workspaces-folder-unavailable"),
                         Status::ExpandedUnavailable => tr!("workspaces-expanded-unavailable"),
+                        Status::InventoryWindowUnavailable => tr!("workspaces-additional-unavailable"),
                         Status::CameraUnavailable => tr!("workspaces-camera-unavailable"),
                         Status::HudUnavailable => tr!("workspaces-huds-unavailable"),
                     };
@@ -193,6 +194,16 @@ impl WorkspaceUi {
                                 command = Some(Command::ClearHuds);
                             }
                         });
+                        let mut additional = cat.capture_additional_inventory;
+                        if ui
+                            .add_enabled_ui(enabled && c.preview.is_none(), |ui| {
+                                super::widgets::checkbox(ui, p, &mut additional, tr!("workspaces-capture-additional"))
+                            })
+                            .inner
+                            .changed()
+                        {
+                            command = Some(Command::CaptureAdditionalInventory(additional));
+                        }
                         let mut background = cat.capture_background;
                         if ui
                             .add_enabled_ui(enabled && c.preview.is_none(), |ui| {
@@ -532,6 +543,7 @@ mod tests {
         let layout = Layout {
             inventory_folder: None,
             inventory_expanded: None,
+            additional_inventory: None,
             graphics: None,
             camera: None,
             background: None,
@@ -899,5 +911,21 @@ mod tests {
             c.catalogue.as_ref().unwrap().selected_huds.is_empty(),
             "paint only emits a typed request"
         );
+    }
+    #[test]
+    fn native_workspace_additional_capture_emits_only_a_current_typed_source_request() {
+        let (c, mut st) = fixture();
+        let mut frames = Frames::new();
+        assert!(!c.catalogue.as_ref().unwrap().capture_additional_inventory);
+        let action = click(&mut frames, &mut st, &c, aurora_i18n::tr!("workspaces-capture-additional")).unwrap();
+        assert!(matches!(action.command, Command::CaptureAdditionalInventory(true)));
+        assert!(c.accepts(&action.ticket));
+        assert!(
+            !c.catalogue.as_ref().unwrap().capture_additional_inventory,
+            "paint does not mutate private metadata"
+        );
+        let mut changed = c;
+        changed.bind(None);
+        assert!(draw(&mut frames, &mut st, &changed, vec![]).1.is_none());
     }
 }

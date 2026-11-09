@@ -13654,3 +13654,6 @@ workspaces-huds-timeout = HUD restore timed out. Some items may still be pending
 workspaces-huds-failed = The native appearance action could not start. Some earlier HUDs may have been added.
 
 workspaces-expanded-unavailable = Expanded folders are unavailable. Use the main Inventory tree, let it finish loading, and keep at most 256 folders expanded.
+
+workspaces-capture-additional = Remember the additional Inventory window
+workspaces-additional-unavailable = Additional Inventory could not be restored. Close its dialogs, finish edits, and try again.

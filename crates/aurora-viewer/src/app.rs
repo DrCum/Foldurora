@@ -147,6 +147,7 @@ mod texture_refresh;
 mod viewer_stats;
 mod viewfinder;
 mod wearable_editor;
+mod workspace_inventory;
 mod workspaces;
 mod world_click_demo;
 mod worn_demo;
@@ -20594,6 +20595,7 @@ impl ApplicationHandler for App {
         if folder_jump_window {
             if matches!(&event, WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. }) {
                 self.workspace_huds.retire();
+                self.workspaces.inventory_pending = None;
             }
             self.observe_inventory_archive();
             if self.inventory_archive_ui.native_event(&event) {
@@ -20605,6 +20607,7 @@ impl ApplicationHandler for App {
                 WindowEvent::Focused(false) | WindowEvent::Occluded(true) | WindowEvent::Destroyed
             ) {
                 self.workspace_huds.retire();
+                self.workspaces.inventory_pending = None;
                 self.inventory_ui.retire_archive_input(&self.egui_ctx);
                 self.inventory_archive_ui.begin();
             }
