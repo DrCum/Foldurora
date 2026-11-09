@@ -29,7 +29,7 @@ mod group_tests;
 /// V7 also admits explicit initialized-Group Review; older consumers fail closed.
 /// V8 admits source-qualified Conference read/close/review rows; native roster
 /// completeness and current participant permission stay with the owning worker.
-pub const VERSION: u16 = 8;
+pub const VERSION: u16 = 9;
 pub const MAX_PACKET_BYTES: usize = 4096;
 /// One native UDP chat/IM part (`aurora-net::message_split`), in UTF-8 bytes.
 pub const MAX_TEXT_BYTES: usize = 1023;
@@ -541,6 +541,9 @@ impl ChatDrafts {
 #[allow(clippy::large_enum_variant)] // one bounded DTO per private packet
 pub enum ChatCommand {
     Send(SendRequest),
+    ContactPage(ContactPageRequest),
+    OpenDirect(OpenDirectRequest),
+    QueryOpenDirect(OpenDirectRequest),
     CloseConversation(CloseRequest),
     QueryCloseReceipt(CloseRequest),
     MarkRead(MarkReadRequest),
@@ -554,6 +557,10 @@ pub enum ChatCommand {
 #[allow(clippy::large_enum_variant)] // one bounded DTO per private packet
 pub enum ChatEvent {
     Conversation(ConversationInfo),
+    ContactsPolicy(ContactsPolicy),
+    ContactPage(ContactPage),
+    ContactPageFailed(ContactKey),
+    OpenDirect(OpenDirectReply),
     Line(ChatLine),
     Receipt(SendReceipt),
     ReadBatch(Vec<ReadStateRow>),
@@ -591,8 +598,15 @@ impl fmt::Debug for ChatPacket {
             ChatMessage::Command(ChatCommand::QueryReadReceipt(_)) => "query_read_receipt",
             ChatMessage::Command(ChatCommand::ReviewConversation(_)) => "review_conversation",
             ChatMessage::Command(ChatCommand::QueryReviewReceipt(_)) => "query_review_receipt",
+            ChatMessage::Command(ChatCommand::ContactPage(_)) => "contact_page",
+            ChatMessage::Command(ChatCommand::OpenDirect(_)) => "open_direct",
+            ChatMessage::Command(ChatCommand::QueryOpenDirect(_)) => "query_open_direct",
             ChatMessage::Command(ChatCommand::Poll { .. }) => "poll",
             ChatMessage::Event(ChatEvent::Conversation(_)) => "conversation",
+            ChatMessage::Event(ChatEvent::ContactsPolicy(_)) => "contacts_policy",
+            ChatMessage::Event(ChatEvent::ContactPage(_)) => "contact_page",
+            ChatMessage::Event(ChatEvent::ContactPageFailed(_)) => "contact_page_failed",
+            ChatMessage::Event(ChatEvent::OpenDirect(_)) => "open_direct",
             ChatMessage::Event(ChatEvent::Line(_)) => "line",
             ChatMessage::Event(ChatEvent::Receipt(_)) => "receipt",
             ChatMessage::Event(ChatEvent::ReadBatch(_)) => "read_batch",
@@ -625,6 +639,14 @@ impl ChatPacket {
                 if self.reply_to != 0 {
                     return Err(ChatError::Sequence);
                 }
+                if let ChatCommand::ContactPage(request) = command {
+                    request.validate()?;
+                    source = request.key.source;
+                }
+                if let ChatCommand::OpenDirect(request) | ChatCommand::QueryOpenDirect(request) = command {
+                    request.validate()?;
+                    source = request.selection.source;
+                }
                 if let ChatCommand::CloseConversation(request) | ChatCommand::QueryCloseReceipt(request) = command {
                     request.validate()?;
                     source = request.key.source;
@@ -654,6 +676,31 @@ impl ChatPacket {
                 }
             }
             ChatMessage::Event(event) => match event {
+                ChatEvent::ContactsPolicy(policy) => {
+                    policy.validate()?;
+                    source = policy.source;
+                }
+                ChatEvent::ContactPage(page) => {
+                    page.validate()?;
+                    source = page.key.source;
+                    if self.reply_to == 0 {
+                        return Err(ChatError::Sequence);
+                    }
+                }
+                ChatEvent::ContactPageFailed(key) => {
+                    key.validate()?;
+                    source = key.source;
+                    if self.reply_to == 0 {
+                        return Err(ChatError::Sequence);
+                    }
+                }
+                ChatEvent::OpenDirect(reply) => {
+                    reply.validate()?;
+                    source = reply.receipt.request.selection.source;
+                    if self.reply_to == 0 {
+                        return Err(ChatError::Sequence);
+                    }
+                }
                 ChatEvent::CloseReceipt(reply) => {
                     reply.validate()?;
                     if self.reply_to == 0 {
@@ -739,4 +786,25 @@ pub fn decode(bytes: &[u8]) -> Result<ChatPacket, ChatError> {
     let packet: ChatPacket = serde_json::from_slice(bytes).map_err(|_| ChatError::Malformed)?;
     packet.validate()?;
     Ok(packet)
+}
+
+/// Fit actual escaped JSON, including the maximum-width source/sequence
+/// envelope. A row count alone is not a byte budget. Cursor and total remain
+/// unchanged; the receiver requests the next untransferred row.
+pub fn fit_contact_page(mut packet: ChatPacket) -> Result<ChatPacket, ChatError> {
+    loop {
+        match encode(&packet) {
+            Ok(_) => return Ok(packet),
+            Err(ChatError::Oversized) => {
+                let ChatMessage::Event(ChatEvent::ContactPage(page)) = &mut packet.message else {
+                    return Err(ChatError::Invalid);
+                };
+                if page.rows.len() <= 1 {
+                    return Err(ChatError::Oversized);
+                }
+                page.rows.pop();
+            }
+            Err(error) => return Err(error),
+        }
+    }
 }

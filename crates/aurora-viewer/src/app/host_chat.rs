@@ -13,6 +13,8 @@ use aurora_session::{AccountKey, ConversationId, Label};
 use std::time::Instant;
 use uuid::Uuid;
 
+mod contacts;
+
 impl App {
     pub(super) fn host_chat_sync(&mut self, backend: &mut WorkerChat, bridge: &WorkerBridge) -> Result<(), ChatError> {
         self.configure_host_chat_rules();
@@ -62,6 +64,22 @@ struct AppChat<'a> {
 impl NativeChat for AppChat<'_> {
     fn source(&self) -> Option<ChatSource> {
         source(self.app, self.bridge)
+    }
+    fn contacts_policy(&self) -> Option<crate::session_host::chat::NativeContactPolicy> {
+        Some(contacts::policy(
+            &self.app.world,
+            self.source().is_some() && !self.app.exit_prompt.open,
+        ))
+    }
+    fn friends(&self) -> Result<crate::session_host::chat::NativeContacts, ChatError> {
+        self.source().ok_or(ChatError::Binding)?;
+        contacts::friends(&self.app.world, !self.app.exit_prompt.open)
+    }
+    fn open_direct(&mut self, request: aurora_session::chat::OpenDirectRequest) -> aurora_session::chat::OpenDirectOutcome {
+        if self.source() != Some(request.selection.source) {
+            return aurora_session::chat::OpenDirectOutcome::RejectedNative;
+        }
+        contacts::open(&mut self.app.world, request, !self.app.exit_prompt.open)
     }
     fn catalogue(&self) -> Vec<Conversation> {
         catalogue(&self.app.world)

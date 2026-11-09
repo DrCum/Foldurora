@@ -666,6 +666,9 @@ impl Peer {
             return Err(ChatError::Invalid);
         };
         match event {
+            // Chooser consumption is added with the controller model. Ignore
+            // optional producer metadata until that model is installed.
+            ChatEvent::ContactsPolicy(_) | ChatEvent::ContactPage(_) | ChatEvent::ContactPageFailed(_) | ChatEvent::OpenDirect(_) => {}
             ChatEvent::Conversation(info) => {
                 self.conversation(info)?;
             }

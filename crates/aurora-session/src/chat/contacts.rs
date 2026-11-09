@@ -426,6 +426,23 @@ impl OpenDirectView {
     }
 }
 
+/// Immutable operation identity plus optional, freshly authorized presentation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpenDirectReply {
+    pub receipt: OpenDirectReceipt,
+    pub view: Option<OpenDirectView>,
+}
+impl OpenDirectReply {
+    pub fn validate(&self) -> Result<(), ChatError> {
+        self.receipt.validate()?;
+        if let Some(view) = &self.view {
+            view.validate(&self.receipt)?;
+        }
+        Ok(())
+    }
+}
+
 /// Reserve before native creation. Receipt queries never re-run an open, and
 /// eviction retains the high-water mark. Exactly one pending operation per source.
 pub struct OpenDirectLedger {

@@ -12,6 +12,10 @@ use aurora_session::chat::{ReviewConversationRequest, ReviewOutcome, ReviewRecei
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::time::{Duration, Instant};
 
+mod contacts;
+use contacts::WorkerContacts;
+pub(crate) use contacts::{NativeContactPolicy, NativeContacts};
+
 const SCAN_CONVERSATIONS: usize = 4;
 pub(crate) const SCAN_LINES: usize = 8;
 const POLL_LINES: usize = 3;
@@ -50,6 +54,17 @@ pub(crate) trait NativeChat {
     /// Called again at operation boundaries; must evaluate the current control
     /// lease/account, not return a cached source captured before a long pause.
     fn source(&self) -> Option<ChatSource>;
+    fn contacts_policy(&self) -> Option<NativeContactPolicy> {
+        None
+    }
+    fn friends(&self) -> Result<NativeContacts, ChatError> {
+        Err(ChatError::Unavailable)
+    }
+    /// Recheck native membership/permission before creating anything. No focus,
+    /// Read, unblocking, message, call or native-window activation is permitted.
+    fn open_direct(&mut self, _request: aurora_session::chat::OpenDirectRequest) -> aurora_session::chat::OpenDirectOutcome {
+        aurora_session::chat::OpenDirectOutcome::RejectedNative
+    }
     fn catalogue(&self) -> Vec<Conversation>;
     fn snapshot(&self, conversation: Conversation) -> Option<NativeSnapshot>;
     fn lines(&self, conversation: Conversation, cursor: NativeCursor, limit: usize) -> NativePage;
@@ -88,6 +103,7 @@ pub(crate) struct WorkerChat {
     reads: Option<ReadReceiptLedger>,
     closes: Option<CloseReceiptLedger>,
     reviews: Option<ReviewReceiptLedger>,
+    contacts: WorkerContacts,
     read_cache: BTreeMap<Conversation, Option<ReadMetadata>>,
     read_dirty: VecDeque<Conversation>,
     read_fair: usize,
@@ -122,6 +138,7 @@ impl WorkerChat {
         self.reads = None;
         self.closes = None;
         self.reviews = None;
+        self.contacts = WorkerContacts::default();
         self.read_cache.clear();
         self.read_dirty.clear();
         self.read_fair = 0;
@@ -228,6 +245,7 @@ impl WorkerChat {
     /// transcript and inventory servicing remain owned by the ordinary viewer.
     pub fn sync(&mut self, native: &impl NativeChat) -> Result<(), ChatError> {
         let source = self.context(native)?;
+        self.contacts.sync(source, native)?;
         let catalogue: Vec<_> = native.catalogue().into_iter().take(MAX_CONVERSATIONS).collect();
         let known: BTreeSet<_> = catalogue.iter().copied().collect();
         self.read_cache.retain(|key, _| known.contains(key));
@@ -409,6 +427,9 @@ impl WorkerChat {
         // constructing its reply afterward. The driver reserves queue space.
         self.outgoing.checked_add(MAX_REPLY as u64).ok_or(ChatError::Sequence)?;
         match command {
+            ChatCommand::ContactPage(request) => self.contact_page(native, packet, *request),
+            ChatCommand::OpenDirect(request) => self.open_direct(native, packet, *request, received_at, now, false),
+            ChatCommand::QueryOpenDirect(request) => self.open_direct(native, packet, *request, received_at, now, true),
             ChatCommand::CloseConversation(request) => {
                 self.require_read_authority(native, request.key)?;
                 let duplicate = self.closes.as_mut().ok_or(ChatError::Unavailable)?.reserve(*request)?;
@@ -625,6 +646,9 @@ impl WorkerChat {
                 // other data so old private caches are purged first.
                 let read_rows = self.read_batch(native)?;
                 let mut events = Vec::new();
+                if let Some(policy) = self.contacts.policy {
+                    events.push(ChatEvent::ContactsPolicy(policy));
+                }
                 let mut advertised = BTreeSet::new();
                 if *after_event < self.gap_through {
                     events.push(ChatEvent::Gap {

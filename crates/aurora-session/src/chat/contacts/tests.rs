@@ -324,3 +324,105 @@ fn contacts_open_receipt_has_no_retained_private_title_and_fresh_view_requires_r
     view.policy.key.source = source(2);
     assert_eq!(view.validate(&receipt), Err(ChatError::Binding));
 }
+
+#[test]
+fn contacts_wire_fits_actual_escaped_page_bytes_without_losing_cursor_or_membership() {
+    use crate::chat::{ChatEvent, ChatMessage, ChatPacket, MAX_PACKET_BYTES, VERSION, decode, encode, fit_contact_page};
+    let request = ContactPageRequest {
+        key: open(1).selection,
+        offset: 0,
+    };
+    let rows: Vec<_> = (1..=32)
+        .map(|id| ContactRow {
+            resident: peer(id),
+            display: ContactText::new(&"\\".repeat(255)).unwrap(),
+            username: ContactText::new(&"\"".repeat(127)).unwrap(),
+            online: id % 2 == 0,
+            can_open: true,
+        })
+        .collect();
+    let mut directory = directory();
+    assert_eq!(directory.begin(ContactChannel::Friends, 1).unwrap(), request);
+    let mut offset = 0;
+    let mut packets = 0;
+    while offset < rows.len() {
+        let packet = ChatPacket {
+            version: VERSION,
+            source: source(1),
+            sequence: u64::MAX,
+            reply_to: u64::MAX,
+            message: ChatMessage::Event(ChatEvent::ContactPage(ContactPage {
+                key: request.key,
+                policy_revision: 1,
+                offset: offset as u16,
+                total: rows.len() as u16,
+                limited: false,
+                pending: false,
+                rows: rows[offset..].to_vec(),
+            })),
+        };
+        if offset == 0 {
+            assert_eq!(encode(&packet), Err(ChatError::Oversized));
+        }
+        let fitted = fit_contact_page(packet).unwrap();
+        let bytes = encode(&fitted).unwrap();
+        assert!(bytes.len() <= MAX_PACKET_BYTES);
+        let decoded = decode(&bytes).unwrap();
+        let ChatMessage::Event(ChatEvent::ContactPage(page)) = decoded.message else {
+            panic!()
+        };
+        assert_eq!(page.offset as usize, offset);
+        assert_eq!(page.total as usize, rows.len());
+        assert!(!page.rows.is_empty());
+        offset += page.rows.len();
+        assert_eq!(directory.accept(&page).unwrap(), offset == rows.len());
+        packets += 1;
+    }
+    assert!(packets > 1);
+    let complete = directory.completed(ContactChannel::Friends).unwrap();
+    assert_eq!(complete.rows.len(), rows.len());
+    for row in rows {
+        assert!(complete.rows.contains(&row));
+    }
+}
+
+#[test]
+fn contacts_wire_rejects_cross_source_rows_and_unbound_or_forged_open_presentation() {
+    use crate::chat::{ChatCommand, ChatEvent, ChatMessage, ChatPacket, VERSION, decode, encode};
+    let request = open(1);
+    let receipt = OpenDirectReceipt {
+        request,
+        state: OpenDirectState::Terminal(opened(request)),
+    };
+    for message in [
+        ChatMessage::Command(ChatCommand::OpenDirect(request)),
+        ChatMessage::Command(ChatCommand::QueryOpenDirect(request)),
+        ChatMessage::Event(ChatEvent::OpenDirect(OpenDirectReply { receipt, view: None })),
+    ] {
+        let packet = ChatPacket {
+            version: VERSION,
+            source: source(1),
+            sequence: 1,
+            reply_to: if matches!(message, ChatMessage::Event(_)) { 1 } else { 0 },
+            message,
+        };
+        assert_eq!(decode(&encode(&packet).unwrap()).unwrap(), packet);
+        assert_eq!(
+            encode(&ChatPacket {
+                source: source(2),
+                ..packet.clone()
+            }),
+            Err(ChatError::Binding)
+        );
+        assert_eq!(
+            encode(&ChatPacket {
+                version: VERSION - 1,
+                ..packet.clone()
+            }),
+            Err(ChatError::Version)
+        );
+        if matches!(packet.message, ChatMessage::Event(_)) {
+            assert_eq!(encode(&ChatPacket { reply_to: 0, ..packet }), Err(ChatError::Sequence));
+        }
+    }
+}
