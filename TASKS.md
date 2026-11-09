@@ -1,3 +1,7 @@
+## Foldurora radio/upstream integration group (9 November 2026)
+
+- Reviewed PR42 frozen51379506: bounded same-origin radio playlist discovery and Aurora Team metadata. Applied after frozen fixture PR43/d836 and verified package98b, preserving PR13 buffering/starvation and native consent. Combined lint/format pass; Linux audio attempt resource blocked before tests, preserved without retry. One combined Windows1390-case gate plus the changed captures is next; no standalone fixture run.
+
 ## Foldurora CPU layout evidence review (9 November 2026)
 
 - Preserve verified98b package (9164/0/61,1366 audit). Correct hover capture icon setup and add test-only review action clip/bounds evidence; product layout/capability unchanged. Focused captures pending; no repeat full build/package. Native footer/short-window behavior remains human acceptance.
