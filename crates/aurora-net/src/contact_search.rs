@@ -87,7 +87,7 @@ fn parse(bytes: &[u8], owner: Uuid) -> Result<Results, Error> {
     // explicitly limited and can never enlarge captured selection authority.
     for row in agents.iter().take(MAX_RESULTS) {
         let id = row["id"].as_uuid();
-        if id.is_nil() || id == owner || !seen.insert(id) {
+        if id.is_nil() || id == owner || seen.contains(&id) {
             continue;
         }
         let Llsd::String(display) = &row["display_name"] else {
@@ -104,6 +104,7 @@ fn parse(bytes: &[u8], owner: Uuid) -> Result<Results, Error> {
         if display.is_empty() {
             continue;
         }
+        seen.insert(id);
         residents.push(Resident { id, display, username });
     }
     Ok(Results {
@@ -200,7 +201,7 @@ mod tests {
         let peer = Uuid::from_u128(2);
         let row = aurora_llsd::llsd_map! {"id"=>peer,"display_name"=>"界".repeat(200),"username"=>"u".repeat(200)};
         let data = aurora_llsd::llsd_map! {"agents"=>vec![row.clone(),row,aurora_llsd::llsd_map!{"id"=>owner,"display_name"=>"Self","username"=>"self"}]};
-        let result = parse(aurora_llsd::to_xml(&data).as_bytes(), owner).unwrap();
+        let result = parse(&aurora_llsd::to_xml(&data), owner).unwrap();
         assert_eq!(result.residents.len(), 1);
         assert_eq!(result.residents[0].id, peer);
         assert_eq!(result.residents[0].display.len(), 255);

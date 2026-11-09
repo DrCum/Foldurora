@@ -78,16 +78,10 @@ mod tests {
             &aurora_llsd::llsd_map! {"agents"=>vec![aurora_llsd::llsd_map!{"id"=>Uuid::from_u128(77),"display_name"=>"Synthetic peer","username"=>"synthetic.peer"}]},
         );
         stream
-            .write_all(
-                format!(
-                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                    body.len(),
-                    body
-                )
-                .as_bytes(),
-            )
+            .write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).as_bytes())
             .await
             .unwrap();
+        stream.write_all(&body).await.unwrap();
         drop(stream);
         let (_, result) = tokio::task::spawn_blocking(move || rx.recv_timeout(Duration::from_secs(2)).unwrap())
             .await
