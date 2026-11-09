@@ -60,6 +60,7 @@ pub(crate) enum Status {
     Invalid,
     Previewing,
     FolderUnavailable,
+    ExpandedUnavailable,
     CameraUnavailable,
     HudUnavailable,
 }
@@ -107,6 +108,8 @@ pub(crate) struct Controller {
     pub startup_waiting: bool,
     pub startup_source: Option<Source>,
     pub last_observed: Option<(Layout, std::time::Instant)>,
+    pub last_sample: Option<std::time::Instant>,
+    pub modified_sample: Option<(u64, std::time::Instant, bool)>,
 }
 impl Default for Controller {
     fn default() -> Self {
@@ -130,6 +133,8 @@ impl Default for Controller {
             startup_waiting: false,
             startup_source: None,
             last_observed: None,
+            last_sample: None,
+            modified_sample: None,
         }
     }
 }
@@ -153,6 +158,8 @@ impl Controller {
         }
         self.source = source;
         self.last_observed = None;
+        self.last_sample = None;
+        self.modified_sample = None;
         self.catalogue = None;
         self.persisted = false;
         self.active = None;
@@ -162,6 +169,19 @@ impl Controller {
         self.permit = false;
         self.status = Status::Unavailable;
         self.advance();
+    }
+    /// Sample expensive optional metadata at most four times per second; the
+    /// explicit logout capture remains immediate and freshly qualified.
+    pub(crate) fn sample_last(&mut self, now: std::time::Instant, force: bool) -> bool {
+        if !force
+            && self
+                .last_sample
+                .is_some_and(|at| now.saturating_duration_since(at) < std::time::Duration::from_millis(250))
+        {
+            return false;
+        }
+        self.last_sample = Some(now);
+        true
     }
     /// Persistent workspace presentation needs the private catalogue after a
     /// source gap too, even when startup was already consumed for this login.
@@ -205,6 +225,9 @@ impl Controller {
             .map_or_else(|| current.baseline_for(&layout), |p| p.baseline.clone());
         if baseline.inventory_folder.is_none() && layout.inventory_folder.is_some() {
             baseline.inventory_folder = current.inventory_folder;
+        }
+        if baseline.inventory_expanded.is_none() && layout.inventory_expanded.is_some() {
+            baseline.inventory_expanded = current.inventory_expanded;
         }
         if baseline.huds.is_none() && layout.huds.is_some() {
             baseline.huds = current.huds;
@@ -537,6 +560,7 @@ mod tests {
         let s = crate::settings::Settings::default();
         Layout {
             inventory_folder: None,
+            inventory_expanded: None,
             graphics: None,
             camera: None,
             background: None,
@@ -819,5 +843,20 @@ mod tests {
         assert_eq!(c.previous.as_ref().unwrap().0.huds, Some(original.clone()));
         c.begin_previous(layout(4.0));
         assert_eq!(c.placement.as_ref().unwrap().layout.huds, Some(original));
+    }
+    #[test]
+    fn workspace_last_capture_sampling_is_bounded_forceable_and_source_reset() {
+        use std::time::{Duration, Instant};
+        let mut c = Controller::default();
+        let now = Instant::now();
+        assert!(c.sample_last(now, false));
+        assert!(!c.sample_last(now + Duration::from_millis(249), false));
+        assert!(c.sample_last(now + Duration::from_millis(250), false));
+        assert!(c.sample_last(now + Duration::from_millis(251), true));
+        c.modified_sample = Some((c.revision, now, true));
+        c.bind(None);
+        assert!(c.last_sample.is_none());
+        assert!(c.modified_sample.is_none());
+        assert!(c.sample_last(now + Duration::from_millis(252), false));
     }
 }

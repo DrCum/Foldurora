@@ -13589,7 +13589,7 @@ workspaces-favorite = お気に入りに追加
 workspaces-unfavorite = お気に入りから削除
 workspaces-startup-named = 保存済み：{ $name }
 
-workspaces-remember-folders = メインインベントリのフォルダーを記憶（切り替え時に復元）
+workspaces-remember-folders = メインインベントリのフォルダーと展開状態を記憶
 workspaces-folder-unavailable = フォルダーを復元できませんでした。インベントリを開いて再試行してください。
 workspaces-capture-graphics = 現在のグラフィック設定を記憶
 workspaces-capture-camera = アバター基準のカメラ設定を記憶
@@ -13613,3 +13613,5 @@ workspaces-huds-declined = HUDの復元を辞退しました。
 workspaces-huds-interrupted = HUDの復元を中断しました。承認済みのネイティブ処理は完了する場合があります。
 workspaces-huds-timeout = HUDの復元がタイムアウトしました。処理中のアイテムがある可能性があります。再送していません。
 workspaces-huds-failed = ネイティブの外見操作を開始できませんでした。それ以前のHUDは追加されている場合があります。
+
+workspaces-expanded-unavailable = 展開状態を確認できません。メインインベントリのツリーで読み込みを待ち、展開するフォルダーを256個以下にしてください。

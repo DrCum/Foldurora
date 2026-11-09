@@ -13628,7 +13628,7 @@ workspaces-favorite = Favorite
 workspaces-unfavorite = Remove favorite
 workspaces-startup-named = Saved: { $name }
 
-workspaces-remember-folders = Remember the main Inventory folder (restore on Switch)
+workspaces-remember-folders = Remember main Inventory folder and expanded folders
 workspaces-folder-unavailable = Inventory folder was not restored. Open Inventory and try again.
 workspaces-capture-graphics = Remember current graphics settings
 workspaces-capture-camera = Remember avatar-relative camera settings
@@ -13652,3 +13652,5 @@ workspaces-huds-declined = HUD restore declined.
 workspaces-huds-interrupted = HUD restore interrupted. Previously accepted native work may still finish.
 workspaces-huds-timeout = HUD restore timed out. Some items may still be pending; no retry was sent.
 workspaces-huds-failed = The native appearance action could not start. Some earlier HUDs may have been added.
+
+workspaces-expanded-unavailable = Expanded folders are unavailable. Use the main Inventory tree, let it finish loading, and keep at most 256 folders expanded.

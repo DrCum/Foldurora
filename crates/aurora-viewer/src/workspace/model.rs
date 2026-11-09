@@ -5,6 +5,8 @@ mod background;
 pub(crate) use background::Background;
 mod camera;
 pub(crate) use camera::CameraContext;
+mod folders;
+pub(crate) use folders::{ExpandedFolders, MAX_EXPANDED};
 mod huds;
 pub(crate) use huds::{HudRef, HudSet, MAX_HUDS};
 mod graphics;
@@ -101,6 +103,8 @@ pub(crate) struct Layout {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inventory_folder: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inventory_expanded: Option<ExpandedFolders>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub graphics: Option<Graphics>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub camera: Option<CameraContext>,
@@ -158,6 +162,9 @@ impl Layout {
         if target.inventory_folder.is_none() {
             baseline.inventory_folder = None;
         }
+        if target.inventory_expanded.is_none() {
+            baseline.inventory_expanded = None;
+        }
         if target.huds.is_none() {
             baseline.huds = None;
         }
@@ -181,6 +188,11 @@ impl Layout {
                 .zip(current.inventory_folder)
                 .is_none_or(|(saved, live)| saved == live)
             && self
+                .inventory_expanded
+                .as_ref()
+                .zip(current.inventory_expanded.as_ref())
+                .is_none_or(|(saved, live)| saved == live)
+            && self
                 .huds
                 .as_ref()
                 .zip(current.huds.as_ref())
@@ -194,7 +206,7 @@ impl Layout {
     }
     pub(crate) fn groups(&self) -> CaptureGroups {
         CaptureGroups {
-            inventory: self.inventory_folder.is_some(),
+            inventory: self.inventory_folder.is_some() || self.inventory_expanded.is_some(),
             graphics: self.graphics.is_some(),
             camera: self.camera.is_some(),
             background: self.background.is_some(),
@@ -370,6 +382,7 @@ mod tests {
     fn layout() -> Layout {
         Layout {
             inventory_folder: None,
+            inventory_expanded: None,
             graphics: None,
             camera: None,
             background: None,
@@ -683,5 +696,21 @@ mod tests {
         value["selected_huds"] = serde_json::json!([reference, reference]);
         assert!(Catalogue::decode(&serde_json::to_vec(&value).unwrap(), c.account, &c.grid).is_err());
         assert!(Catalogue::decode(&c.encode().unwrap(), Uuid::new_v4(), &c.grid).is_err());
+    }
+    #[test]
+    fn workspace_expanded_scope_distinguishes_absent_and_empty_and_keeps_old_layouts_readable() {
+        let mut old = layout();
+        assert!(old.inventory_expanded.is_none());
+        let text = serde_json::to_string(&old).unwrap();
+        assert!(!text.contains("inventory_expanded"));
+        assert!(serde_json::from_str::<Layout>(&text).unwrap().inventory_expanded.is_none());
+        let mut scoped = old.clone();
+        scoped.inventory_expanded = Some(ExpandedFolders::default());
+        assert!(scoped.groups().inventory);
+        assert!(!old.groups().inventory);
+        assert_eq!(scoped.baseline_for(&old).inventory_expanded, None);
+        old.inventory_expanded = Some(ExpandedFolders::try_from(vec![Uuid::new_v4()]).unwrap());
+        assert!(!scoped.matches(&old));
+        assert_eq!(old.baseline_for(&scoped).inventory_expanded, old.inventory_expanded);
     }
 }

@@ -17845,7 +17845,7 @@ impl App {
             self.net.runtime(),
         );
         self.show_characters(&ctx, &p);
-        let modified = self.workspace_modified();
+        let modified = self.workspace_ui.open && self.workspace_modified();
         a.workspace = self
             .workspace_ui
             .show(&ctx, &p, &self.workspaces, modified, &self.workspace_huds.view);

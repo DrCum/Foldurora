@@ -106,6 +106,7 @@ impl WorkspaceUi {
                         Status::Previewing => tr!("workspaces-previewing"),
                         Status::Ready => tr!("workspaces-ready"),
                         Status::FolderUnavailable => tr!("workspaces-folder-unavailable"),
+                        Status::ExpandedUnavailable => tr!("workspaces-expanded-unavailable"),
                         Status::CameraUnavailable => tr!("workspaces-camera-unavailable"),
                         Status::HudUnavailable => tr!("workspaces-huds-unavailable"),
                     };
@@ -530,6 +531,7 @@ mod tests {
         let s = crate::settings::Settings::default();
         let layout = Layout {
             inventory_folder: None,
+            inventory_expanded: None,
             graphics: None,
             camera: None,
             background: None,
