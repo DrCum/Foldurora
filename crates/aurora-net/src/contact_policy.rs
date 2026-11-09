@@ -106,7 +106,7 @@ pub fn parse(bytes: &[u8]) -> Result<Patch, Error> {
 /// A grid's UUID namespace cannot borrow Second Life's public flags. The
 /// reference supplies no OpenSim agents URL; do not invent one from grid input.
 pub fn supported_grid(uri: &str) -> bool {
-    matches!(uri.trim(), crate::login::SL_MAIN_GRID | crate::login::SL_BETA_GRID)
+    crate::login::is_linden_login(uri)
 }
 
 /// Actual login hook only. These GETs contain no account, password or UUID;

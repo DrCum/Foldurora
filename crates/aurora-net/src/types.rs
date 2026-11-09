@@ -18,7 +18,7 @@ pub mod beacon {
 /// Region identifier: global origin in meters packed as `(x << 32) | y`.
 pub type RegionHandle = u64;
 
-/// Local routing identity of an asynchronous name/contact answer. Retaining the original login
+/// Local routing identity of asynchronous native account data. Retaining the original login
 /// prevents both delayed replies and identifier reuse from reaching another
 /// login. This never leaves the process and grants no IM/contact permission.
 #[derive(Clone)]
@@ -504,7 +504,9 @@ pub enum NetEvent {
     },
     /// The ReadOfflineMsgs capability failed: Firestorm then asks by
     /// message (`NetCommand::RequestOfflineMessagesLegacy`).
-    OfflineMessagesFailed,
+    OfflineMessagesFailed {
+        source: LoginSource,
+    },
     /// An offline group invitation was accepted by capability: the group
     /// list is to ask again.
     OfflineGroupInviteAccepted(Uuid),
@@ -705,7 +707,10 @@ pub enum NetEvent {
     InstantMessage(InstantMessage),
     /// Locally identified ReadOfflineMsgs delivery. Keep its native `offline`
     /// field unchanged; that field can explicitly be false in saved replies.
-    SavedInstantMessage(InstantMessage),
+    SavedInstantMessage {
+        source: LoginSource,
+        message: InstantMessage,
+    },
     Appearance(AvatarAppearance),
     Sun(SunInfo),
     CoarseLocations {

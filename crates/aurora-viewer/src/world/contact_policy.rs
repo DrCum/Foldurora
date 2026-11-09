@@ -11,8 +11,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 pub(crate) fn supported_grid(grid: GridDigest) -> bool {
-    Some(grid) == GridDigest::from_uri(aurora_net::login::SL_MAIN_GRID)
-        || Some(grid) == GridDigest::from_uri(aurora_net::login::SL_BETA_GRID)
+    grid.is_second_life()
 }
 
 const CACHE_SCHEMA: i32 = 2;

@@ -879,6 +879,7 @@ mod tests {
         // the demo's avatar object is the agent's
         let me = crate::demo::DEMO_AGENT;
         let mut w = world(&root, me);
+        w.bind_session_test_login(me);
         let asked = |w: &mut World| {
             w.tick_social();
             w.groups
@@ -911,7 +912,9 @@ mod tests {
         assert_eq!(asked(&mut w), 1);
         assert_eq!(asked(&mut w), 0);
         // the capability failed: the legacy message is asked for
-        w.apply(aurora_net::NetEvent::OfflineMessagesFailed);
+        w.apply(aurora_net::NetEvent::OfflineMessagesFailed {
+            source: aurora_net::LoginSource::from_login(w.login.as_ref().unwrap()),
+        });
         assert!(
             w.groups
                 .take_commands()

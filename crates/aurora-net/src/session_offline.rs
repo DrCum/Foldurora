@@ -8,7 +8,7 @@
 
 use super::Session;
 use crate::offline_im;
-use crate::types::{NetCommand, NetEvent};
+use crate::types::{LoginSource, NetCommand, NetEvent};
 use aurora_llsd::llsd_map;
 use aurora_msg::msgs::*;
 
@@ -44,6 +44,7 @@ impl Session<'_> {
         log::info!("requesting offline messages (capability)");
         let http = self.sh.caps_http.clone();
         let events = self.sh.events.clone();
+        let source = LoginSource::from_login(&self.login);
         tokio::spawn(async move {
             let contents = match http.get(&url).header("Accept", "application/llsd+xml").send().await {
                 Ok(resp) if resp.status().is_success() => match resp.bytes().await {
@@ -59,13 +60,16 @@ impl Session<'_> {
                 // Falling back to legacy method."
                 Err(e) => {
                     log::warn!("offline messages: capability failed ({e}); falling back to the legacy request");
-                    let _ = events.send(NetEvent::OfflineMessagesFailed);
+                    let _ = events.send(NetEvent::OfflineMessagesFailed { source });
                 }
                 Ok(contents) => match offline_im::parse(&contents) {
                     Ok(messages) => {
                         log::info!("offline messages: {}", messages.len());
                         for m in messages {
-                            let _ = events.send(NetEvent::SavedInstantMessage(m));
+                            let _ = events.send(NetEvent::SavedInstantMessage {
+                                source: source.clone(),
+                                message: m,
+                            });
                         }
                     }
                     // Firestorm stops there too, without the legacy request
@@ -169,7 +173,84 @@ impl Session<'_> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::caps::REQUESTED_CAPS;
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::UdpSocket;
+    use uuid::Uuid;
+
+    #[tokio::test]
+    async fn login_source_saved_http_success_and_failures_retain_the_original_login_after_session_end() {
+        for outcome in ["success", "invalid_xml", "http", "transport"] {
+            let main = "127.0.0.1:13001".parse().unwrap();
+            let sock = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+            let (events, rx) = crossbeam_channel::unbounded();
+            let sh = super::super::event_queue_tests::shared(crate::EventSender(events));
+            let mut session = super::super::event_queue_tests::two_regions(&sh, sock, main, "127.0.0.1:13002".parse().unwrap());
+            let server = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}/saved", server.local_addr().unwrap());
+            session.sims.get_mut(&main).unwrap().caps = Arc::new(
+                offline_im::REQUIRED_CAPS
+                    .iter()
+                    .map(|cap| ((*cap).to_owned(), url.clone()))
+                    .collect(),
+            );
+            let original = session.login.clone();
+            let replacement = Arc::new((*original).clone());
+            assert!(session.on_offline_command(&NetCommand::RequestOfflineMessages));
+            let (mut stream, _) = tokio::time::timeout(Duration::from_secs(5), server.accept())
+                .await
+                .unwrap()
+                .unwrap();
+            let mut request = [0; 4096];
+            let length = stream.read(&mut request).await.unwrap();
+            assert!(String::from_utf8_lossy(&request[..length]).starts_with("GET /saved "));
+            drop(session);
+            if outcome == "transport" {
+                drop(stream);
+            } else {
+                let body = if outcome == "invalid_xml" {
+                    b"invalid".to_vec()
+                } else {
+                    aurora_llsd::to_xml(&llsd_map! { "messages" => aurora_llsd::Llsd::Array(vec![llsd_map! {
+                        "from_agent_id" => Uuid::from_u128(9), "to_agent_id" => original.agent_id,
+                        "from_agent_name" => "Synthetic Resident", "message" => "Saved message",
+                        "dialog" => 0, "offline" => 0
+                    }]) })
+                };
+                let status = if outcome == "http" { "503 Unavailable" } else { "200 OK" };
+                stream
+                    .write_all(format!("HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).as_bytes())
+                    .await
+                    .unwrap();
+                stream.write_all(&body).await.unwrap();
+                crate::test_http::finish(stream);
+            }
+            let event = tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    if let Ok((_, event)) = rx.try_recv() {
+                        break event;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("original saved-message completion");
+            let source = match event {
+                NetEvent::SavedInstantMessage { source, message } if outcome == "success" => {
+                    assert_eq!(message.message, "Saved message");
+                    assert!(!message.offline, "delivery provenance never rewrites the server's offline flag");
+                    source
+                }
+                NetEvent::OfflineMessagesFailed { source } if outcome != "success" => source,
+                other => panic!("{outcome}: unexpected {other:?}"),
+            };
+            assert!(source.matches_login(&original, original.agent_id));
+            assert!(!source.matches_login(&replacement, original.agent_id));
+        }
+    }
 
     #[test]
     fn the_capabilities_of_offline_messages_are_requested() {

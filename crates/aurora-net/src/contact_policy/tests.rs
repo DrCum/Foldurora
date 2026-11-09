@@ -49,10 +49,14 @@ fn contact_policy_legacy_support_is_key_presence_and_cannot_supply_no_support() 
 fn contact_policy_feeds_are_fixed_sl_only_and_never_use_login_userinfo() {
     assert!(supported_grid(crate::login::SL_MAIN_GRID));
     assert!(supported_grid(crate::login::SL_BETA_GRID));
+    assert!(supported_grid(
+        "https://LOGIN.AGNI.LINDENLAB.COM/cgi-bin/login.cgi?source=custom-selector"
+    ));
+    assert!(supported_grid("https://login.aditi.lindenlab.com./cgi-bin/login.cgi#alias"));
     for uri in [
         "https://grid.example/login",
         "https://login.agni.lindenlab.com.attacker.invalid/login",
-        "http://login.agni.lindenlab.com/cgi-bin/login.cgi",
+        "https://login.agni.lindenlab.com@attacker.invalid/login",
     ] {
         assert!(!supported_grid(uri));
     }

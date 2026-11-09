@@ -2506,17 +2506,20 @@ impl World {
         self.events_this_frame += 1;
         // HTTP jobs can finish after logout/relogin. Stale failures are just as
         // important as successes: they must not queue a legacy lookup or change
-        // a replacement account's display-name dialog.
-        let name_source = match &ev {
+        // a replacement account's display-name dialog. Saved-message callbacks
+        // must not insert a previous account's sender names, bodies or fallback.
+        let login_source = match &ev {
             NetEvent::Names { source, .. }
             | NetEvent::DisplayNames { source, .. }
             | NetEvent::DisplayNamesFailed { source, .. }
             | NetEvent::DisplayNameUpdate { source, .. }
             | NetEvent::SetDisplayNameReply { source, .. }
-            | NetEvent::ContactPolicy { source, .. } => Some(source),
+            | NetEvent::ContactPolicy { source, .. }
+            | NetEvent::SavedInstantMessage { source, .. }
+            | NetEvent::OfflineMessagesFailed { source } => Some(source),
             _ => None,
         };
-        if name_source.is_some_and(|source| !self.login.as_ref().is_some_and(|login| source.matches_login(login, self.agent_id))) {
+        if login_source.is_some_and(|source| !self.login.as_ref().is_some_and(|login| source.matches_login(login, self.agent_id))) {
             return None;
         }
         let mut ev = self.hold_for_parked(ev)?;
@@ -3016,11 +3019,11 @@ impl World {
                 self.on_im(im);
                 None
             }
-            NetEvent::SavedInstantMessage(im) => {
-                self.on_im_delivery(im, false);
+            NetEvent::SavedInstantMessage { message, .. } => {
+                self.on_im_delivery(message, false);
                 None
             }
-            NetEvent::OfflineMessagesFailed => {
+            NetEvent::OfflineMessagesFailed { .. } => {
                 // requestOfflineMessagesCoro: "Falling back to legacy method."
                 self.groups.out.push(aurora_net::NetCommand::RequestOfflineMessagesLegacy);
                 None

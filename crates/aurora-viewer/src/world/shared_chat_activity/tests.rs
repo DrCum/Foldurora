@@ -132,7 +132,10 @@ fn conference_close_saved_direct_and_group_udp_keep_native_unread_without_live_a
         message.message = "Saved delivery".into();
         world.apply(aurora_net::NetEvent::InstantMessage(message.clone()));
         message.offline = false;
-        world.apply(aurora_net::NetEvent::SavedInstantMessage(message));
+        world.apply(aurora_net::NetEvent::SavedInstantMessage {
+            source: aurora_net::LoginSource::from_login(world.login.as_ref().unwrap()),
+            message,
+        });
         assert_eq!(world.shared_chat_close_fence(), fence);
         assert_eq!(
             world.social.ims.iter().find(|entry| entry.other == session).unwrap().unread,
@@ -168,7 +171,10 @@ fn conference_close_saved_auto_response_preserves_unread_without_reopening_live_
     assert_eq!(session.unread, before + 1);
     assert!(session.lines.back().unwrap().text.contains("Saved automatic response"));
     message.offline = false;
-    world.apply(aurora_net::NetEvent::SavedInstantMessage(message.clone()));
+    world.apply(aurora_net::NetEvent::SavedInstantMessage {
+        source: aurora_net::LoginSource::from_login(world.login.as_ref().unwrap()),
+        message: message.clone(),
+    });
     assert_eq!(world.shared_chat_close_fence(), fence);
     assert_eq!(
         world.social.ims.iter().find(|entry| entry.other == PEER).unwrap().unread,

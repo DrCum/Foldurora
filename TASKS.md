@@ -4,7 +4,8 @@
   name replies and grid-cache capture pass9 focused +36 neighboring cases at
   `9caf6761`. Shared FSData Direct-contact policy passes15 focused cases at
   `523d6d40` after an explicitly preserved compile failure; a subsequent legacy
-  precedence/cache-provenance correction adds four regressions, pending rerun.
+  precedence/cache-provenance correction passes14 viewer cases at51fc. Saved
+  message/fallback callback login isolation is the next necessary dependency.
   Chooser/Open/search are still unfinished. One combined full
   checkpoint follows the feature group. Source publication remains held.
 

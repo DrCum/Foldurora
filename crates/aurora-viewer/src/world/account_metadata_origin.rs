@@ -6,11 +6,21 @@
 use sha2::{Digest, Sha256};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub struct GridDigest([u8; 32]);
+pub struct GridDigest([u8; 32], bool);
 impl GridDigest {
     fn parse(uri: &str) -> Option<Self> {
         let uri = uri.trim();
-        (!uri.is_empty() && uri.len() <= 4096 && !uri.chars().any(char::is_control)).then(|| Self(Sha256::digest(uri.as_bytes()).into()))
+        (!uri.is_empty() && uri.len() <= 4096 && !uri.chars().any(char::is_control)).then(|| {
+            Self(
+                Sha256::digest(uri.as_bytes()).into(),
+                aurora_net::contact_policy::supported_grid(uri),
+            )
+        })
+    }
+    /// Classification comes from the same actual submitted URI, never a later
+    /// mutable grid selector. It does not change persisted namespace bytes.
+    pub(crate) fn is_second_life(self) -> bool {
+        self.1
     }
     /// Closed native stores use only this digest, never a mutable form value.
     pub(crate) fn namespace(self) -> String {
@@ -90,6 +100,25 @@ pub(crate) fn request(uri: &str) -> aurora_net::LoginRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn account_metadata_origin_classifies_actual_authority_without_changing_digest_or_trusting_grid_text() {
+        let uri = "https://LOGIN.AGNI.LINDENLAB.COM/cgi-bin/login.cgi?source=custom-selector";
+        let mut pending = Pending::default();
+        let mut original = request(uri);
+        pending.submitted(&original);
+        original.login_uri = "https://attacker.invalid/?grid=lindenlab.com".into();
+        let grid = pending.completed().unwrap();
+        assert!(grid.is_second_life());
+        assert_eq!(grid.bytes(), <[u8; 32]>::from(Sha256::digest(uri.as_bytes())));
+        for fake in [
+            original.login_uri.as_str(),
+            "https://login.agni.lindenlab.com@attacker.invalid/login",
+            "https://login.agni.lindenlab.com.attacker.invalid/login",
+        ] {
+            assert!(!GridDigest::from_uri(fake).unwrap().is_second_life());
+        }
+    }
 
     #[test]
     fn account_metadata_origin_copy_keeps_original_digest_and_no_mutable_form_fallback() {

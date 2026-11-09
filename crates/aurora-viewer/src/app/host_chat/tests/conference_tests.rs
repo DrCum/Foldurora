@@ -398,18 +398,21 @@ fn shared_conference_native_saved_udp_and_eq_delivery_keep_unread_but_cannot_min
         offline: true,
         timestamp: 1,
     }));
-    world.apply(aurora_net::NetEvent::SavedInstantMessage(aurora_net::InstantMessage {
-        from_agent_id: Uuid::from_u128(57),
-        from_name: "Previously present resident".into(),
-        to_agent_id: OWNER,
-        dialog: 17,
-        session_id: CONFERENCE,
-        message: "Saved capability delivery with legacy online flag".into(),
-        offline: false,
-        from_group: false,
-        binary_bucket: Vec::new(),
-        timestamp: 1,
-    }));
+    world.apply(aurora_net::NetEvent::SavedInstantMessage {
+        source: aurora_net::LoginSource::from_login(world.login.as_ref().unwrap()),
+        message: aurora_net::InstantMessage {
+            from_agent_id: Uuid::from_u128(57),
+            from_name: "Previously present resident".into(),
+            to_agent_id: OWNER,
+            dialog: 17,
+            session_id: CONFERENCE,
+            message: "Saved capability delivery with legacy online flag".into(),
+            offline: false,
+            from_group: false,
+            binary_bucket: Vec::new(),
+            timestamp: 1,
+        },
+    });
     assert_eq!(world.shared_chat_close_fence(), Some(before));
     assert_eq!(world.shared_chat_activity(CONFERENCE), Some(before));
     assert_eq!(

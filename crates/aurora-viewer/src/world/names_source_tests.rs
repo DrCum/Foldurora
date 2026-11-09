@@ -188,3 +188,73 @@ fn name_source_alternate_demo_captures_the_actual_login_before_producing_a_reply
     }
     assert!(!w.social.names.contains_key(&PEER));
 }
+
+fn saved_message(text: &str) -> aurora_net::InstantMessage {
+    aurora_net::InstantMessage {
+        from_agent_id: PEER,
+        from_name: "Current Resident".into(),
+        to_agent_id: ME,
+        dialog: 0,
+        session_id: PEER,
+        message: text.into(),
+        offline: false,
+        from_group: false,
+        binary_bucket: vec![],
+        timestamp: 0,
+    }
+}
+
+#[test]
+fn login_source_saved_old_body_name_unread_and_legacy_fallback_cannot_reach_a_replacement_login() {
+    let mut w = world();
+    w.mutes.state = crate::world::mutes::LoadState::Loaded;
+    let old = w.login.as_ref().unwrap().clone();
+    let source = LoginSource::from_login(&old);
+    w.login = Some(Arc::new((*old).clone())); // deliberately reused wire IDs
+    w.bind_shared_chat_activity(ME, old.session_id);
+    let fence = w.shared_chat_close_fence();
+    w.apply(NetEvent::SavedInstantMessage {
+        source: source.clone(),
+        message: saved_message("Previous account body"),
+    });
+    w.apply(NetEvent::OfflineMessagesFailed { source });
+    assert!(w.social.ims.is_empty());
+    assert!(w.social.names.is_empty());
+    assert!(w.take_social_commands().is_empty());
+    assert_eq!(w.shared_chat_close_fence(), fence);
+
+    let source = LoginSource::from_login(w.login.as_ref().unwrap());
+    w.apply(NetEvent::SavedInstantMessage {
+        source: source.clone(),
+        message: saved_message("Current saved body"),
+    });
+    assert_eq!(w.social.ims.len(), 1);
+    assert_eq!(w.social.ims[0].unread, 1);
+    assert_eq!(w.social.ims[0].lines.back().unwrap().text, "Current saved body");
+    assert_eq!(w.social.names[&PEER], "Current Resident");
+    assert_eq!(
+        w.shared_chat_close_fence(),
+        fence,
+        "a saved payload marked online still has no live activity credit"
+    );
+    w.apply(NetEvent::OfflineMessagesFailed { source });
+    assert!(matches!(
+        w.take_social_commands().as_slice(),
+        [aurora_net::NetCommand::RequestOfflineMessagesLegacy]
+    ));
+}
+
+#[test]
+fn login_source_saved_completion_after_reset_neither_repopulates_names_nor_requests_legacy_data() {
+    let mut w = world();
+    let source = LoginSource::from_login(w.login.as_ref().unwrap());
+    w.reset();
+    w.apply(NetEvent::SavedInstantMessage {
+        source: source.clone(),
+        message: saved_message("After logout"),
+    });
+    w.apply(NetEvent::OfflineMessagesFailed { source });
+    assert!(w.social.ims.is_empty());
+    assert!(w.social.names.is_empty());
+    assert!(w.take_social_commands().is_empty());
+}

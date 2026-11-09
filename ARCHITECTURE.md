@@ -2,15 +2,17 @@
 
 `LoginSource` retains the actual native `Arc<LoginResponse>` for asynchronous
 name and contact-policy answers. `World` rejects old-login successes/failures,
-including reused wire identifiers, before applying or forwarding them. Public
+including reused wire identifiers, before applying or forwarding them. Saved
+ReadOfflineMsgs bodies and legacy-fallback failures carry the same fence. Public
 avatar-name caches use the consumed submitted-grid receipt; custom grids use
 its digest instead of ambiguous punctuation folding. Missing/ambiguous receipts
-have no mutable-Preferences fallback. Generic IM sender-name fallbacks are not
-source-qualified contact-picker labels.
+have no mutable-Preferences fallback. Contact-picker labels use guarded canonical AvatarNames, rather than generic
+IM sender-name fallbacks.
 
 `aurora-net/contact_policy` and `world/contact_policy` port the narrow FSData
 SUPPORT/NO_SUPPORT Direct-contact rule (Folderstorm abbe3cb0, fsdata.cpp and
-fsimcontactpolicy.h, LGPL-2.1-or-later). Actual SL login requests enable fixed
+fsimcontactpolicy.h, LGPL-2.1-or-later). Actual Linden login authorities, classified with the captured grid receipt,
+enable fixed
 HTTPS public feeds, ordinary public TLS, no redirects and bounded requests.
 Grid/feed/schema-bound public caches retain known flags on ordinary failures.
 Dedicated modern agents entries override data entries deterministically;
