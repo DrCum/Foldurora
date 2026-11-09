@@ -160,7 +160,7 @@ impl ContactsUi {
         }
         if self.search_mode {
             ui.horizontal_wrapped(|ui| {
-                let input = ui.add(
+                let _input = ui.add(
                     TextEdit::singleline(&mut self.query)
                         .hint_text(aurora_i18n::tr!("host-contacts-query"))
                         .char_limit(127)
@@ -168,7 +168,7 @@ impl ContactsUi {
                 );
                 #[cfg(test)]
                 ui.ctx()
-                    .data_mut(|data| data.insert_temp(Id::unique("host_contacts_query_rect"), input.rect));
+                    .data_mut(|data| data.insert_temp(Id::unique("host_contacts_query_rect"), _input.rect));
                 let query = ContactText::new(&self.query).ok().filter(|query| query.as_str().len() >= 2);
                 let enabled = mode == InputMode::Live
                     && ui.input(|input| input.focused)

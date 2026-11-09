@@ -34,8 +34,22 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::{TcpListener, UdpSocket};
+    use tokio::net::{TcpListener, TcpStream, UdpSocket};
     use uuid::Uuid;
+    async fn request_head(stream: &mut TcpStream) -> String {
+        let mut buffer = [0; 4096];
+        let mut used = 0;
+        while !buffer[..used].ends_with(b"\r\n\r\n") {
+            assert!(used < buffer.len(), "owned fixture request exceeds header budget");
+            let count = tokio::time::timeout(Duration::from_secs(2), stream.read(&mut buffer[used..]))
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(count > 0, "request closed before its complete HTTP header");
+            used += count;
+        }
+        String::from_utf8(buffer[..used].to_vec()).unwrap()
+    }
     #[tokio::test]
     async fn contact_search_actual_http_retains_login_and_uuid_and_lease_after_session_drop() {
         let main = "127.0.0.1:13001".parse().unwrap();
@@ -59,9 +73,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        let mut buffer = [0; 4096];
-        let count = stream.read(&mut buffer).await.unwrap();
-        let request = std::str::from_utf8(&buffer[..count]).unwrap();
+        let request = request_head(&mut stream).await;
         assert!(request.starts_with("GET /picker/?auth=opaque%2Ftoken&page_size=100&names=Some+Name HTTP/1.1"));
         let second = Uuid::new_v4();
         assert!(session.on_contact_search_command(&NetCommand::ContactSearch {
@@ -133,7 +145,8 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        stream.read(&mut buffer).await.unwrap();
+        let request = request_head(&mut stream).await;
+        assert!(request.starts_with("GET /next/?page_size=100&names=Next+Name HTTP/1.1"));
         stream
             .write_all(b"HTTP/1.1 503 Busy\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
             .await

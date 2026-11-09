@@ -166,10 +166,10 @@ impl ContactsBook {
         Ok(())
     }
     fn open_status(&mut self, request: OpenDirectRequest, status: OpenStatus) {
-        if let Some(record) = self.opens.iter_mut().find(|record| record.operation.request == request) {
-            if !matches!(record.operation.status, OpenStatus::Completed(_)) || record.operation.status == status {
-                record.operation.status = status;
-            }
+        if let Some(record) = self.opens.iter_mut().find(|record| record.operation.request == request)
+            && (!matches!(record.operation.status, OpenStatus::Completed(_)) || record.operation.status == status)
+        {
+            record.operation.status = status;
         }
     }
     pub(super) fn presented(&mut self, request: OpenDirectRequest, policy: NativeChatPolicy) {
