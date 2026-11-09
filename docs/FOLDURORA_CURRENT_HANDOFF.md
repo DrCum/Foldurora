@@ -18,7 +18,7 @@ Current corrected frozen candidate:
   PR28, HUD PR27, Update PR25, background PR24 and themed contexts PR23.
 - Source/remote tree verified; no new Windows full/package/native result.
 - Source worktree `/workspace/work/workspace-folders-20261109` now continues on
-  separate `feat/workspace-additional-inventory-20261109`; all frozen heads remain.
+  separate `feat/workspace-display-backgrounds-20261109`; all frozen heads remain.
 
 Sanitized pinned Windows request (prepared only; delivery/ack/run UNCONFIRMED):
 https://github.com/DrCum/Foldurora/blob/f305efdc55dc0d6d8f71ea9849b1f9e748e8df7a/docs/FOLDURORA_ADVANCED_CONTEXT_WINDOWS_REQUEST_A903E16C.md
@@ -34,7 +34,9 @@ Do not duplicate a delivered/running request or rerun an unchanged failed source
 Automatic review rejected the first request upload because it contained private
 coverage-input metadata; known not executed. Those references were removed,
 destination absence checked, and the sanitized payload was published via the same
-supported tool and byte-verified. No private evidence/alternate-route fallback.
+supported tool and byte-verified. No private evidence/alternate-route fallback. Local progress-docs history retains
+the unsanitized draft as evidence: publish only reviewed sanitized file bytes,
+never push that branch/history wholesale.
 Direct app connection/PR attachments remain closed; no owner acknowledgment or
 new build start is claimed. The latest completed Builder was idle.
 
@@ -186,9 +188,46 @@ No functional MCP PR visible; direct app closed and owner acknowledgment pending
 The functional owner must retain this correction and earlier OVERLAPPED lint fixes.
 No competing enablement/privacy/tools implementation was started.
 
-Next source work continues additional Inventory window lifecycle/
-geometry/folder state, then image/per-display background or record concrete
-missing dependencies and take the next independent authorized feature.
+Additional native Inventory state is published/frozen at
+`8b211528a6db6516cf83d588b106201a5bce434d`, tree
+`7c9ebd64ba799b35159f24de78a14c0e1a46fc82`, branch
+`feat/workspace-additional-inventory-20261109`, draft PR30
+https://github.com/DrCum/Foldurora/pull/30. One existing standard additional
+window; opt-in life/minimize/normalized geometry, bounded loaded folder refs.
+Commit-only lifecycle, Preview never opens/closes/moves it. Native dependent
+editors/operations are preserved. One continuation, at most3 fresh passes and
+absolute2sec deadline; exact original source/grid/owner/privacy/RLVa/archive
+fences. No hidden fetch or new arbitrary window owner. Qualified viewer Clippy0,
+format0,13 localization,1 appearance scan and4 component cases pass (2 new,
+2 reused expanded-folder cases). Six further genuine cases compile UNRUN;
+8 new cases total, future gate1192. No new build/request/native claim.
+Source doc FOLDURORA_WORKSPACE_ADDITIONAL_INVENTORY_20261109.md and scratch
+/workspace/scratch/workspace-additional-inventory-20261109/ retain receipts.
+
+Per-display padding colors are published/frozen at
+`b8ab61831e104942f706f401f822cca3258871de`, tree
+`c984fd9163f51e1c8a03ec6d6c11d452a19ff59e`, branch
+`feat/workspace-display-backgrounds-20261109`, draft PR31
+https://github.com/DrCum/Foldurora/pull/31, stacked on PR30. Source and remote
+tree verified. Normalized geometry only, up to16 displays, common fallback
+on changed/unavailable geometry. Bounded4Hz read-only native projection, fresh
+post-click topology check and current-world paint clipping; no native move/
+focus/resize. Existing Black/Solid wire forms remain. Images/import/placement/
+brightness are unfinished and are the next dependency slice.
+
+Qualified viewer all-target ci Clippy0, format0,13 localization,1 unchanged
+appearance scan and8 focused actual-source codec/geometry/paint cases pass
+(4 new/4 reused). Two further genuine controller/UI cases compile UNRUN;
+6 new cases total, future combined gate1198. No full Linux link, new Windows
+package or native acceptance. Development harness linkage and test E0499
+negative logs remain; fixes retain assertions. Source doc
+FOLDURORA_WORKSPACE_DISPLAY_BACKGROUNDS_20261109.md and scratch
+/workspace/scratch/workspace-display-backgrounds-20261109/ retain receipts.
+
+A903 request/source stay frozen; delivery/ack/run remain unconfirmed. Direct
+Builder read and PR attachment both returned connection closed; no new dispatch
+or execution claimed. Slick must check/relay the already prepared request once.
+The feature-boundary open-PR collection still has no functional MCP PR.
 
 ## Roadmap and next actions
 
@@ -200,10 +239,12 @@ missing dependencies and take the next independent authorized feature.
    the preserved graph/old prototype as references, not a second renderer owner.
 2. **Advanced workspaces:** startup/favorites implemented; optional graphics and
    avatar-relative camera contexts implemented; folder restoration covers only
-   loaded visible ordinary main Inventory. Additional windows/expanded trees,
-   additional Inventory state and image/per-display backgrounds remain incomplete.
+   loaded visible ordinary main Inventory. Expanded main-tree and one native additional-window state are implemented as
+   source slices above. Image backgrounds remain incomplete; per-display colors
+   are implemented as the source slice above.
    HUD restore/review is implemented in the subsequent source slice, not yet native accepted. Solid padding colors are implemented in the
-   subsequent source slice above; bounded expanded-folder restoration is now published as above; additional windows remain. Named-preset lookup beyond current
+   subsequent source slice above; bounded expanded-folder and additional native
+   Inventory restoration are published as above. Named-preset lookup beyond current
    snapshots and free/world/object/photo camera anchors remain intentional
    differences, not silently full Folderstorm parity.
 3. Fixed-slot actions, aliases/accents/alerts, session sets, restart/recovery,
