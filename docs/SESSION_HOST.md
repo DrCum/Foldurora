@@ -279,3 +279,10 @@ margins, toolbar/camera/mouselook alignment, switching and host close/detach.
 Native Windows/Vulkan/default-glass, driver-reset recovery, XR and real-grid
 restrictions remain open until actually tested. Use one frozen combined repair
 candidate for full Windows validation and package verification; preserve f08.
+
+## Native frame investigation
+
+The hosted window's classic-looking caption and border are investigated in
+[the native frame implementation plan](SESSION_HOST_NATIVE_FRAME_PLAN.md), with
+an offline Windows region probe. That handoff proposes a replacement presentation
+path for the lead; it does not claim a production fix or native acceptance.
