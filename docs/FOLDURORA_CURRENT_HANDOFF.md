@@ -18,11 +18,13 @@ permission excludes private evidence and coverage-input metadata.
   `/workspace/work/workspace-folders-20261109`. All earlier frozen refs retained.
 - ONE corrected Windows request published and byte-verified:
   https://github.com/DrCum/Foldurora/blob/04725fb8b2c5420ba1292cf6910d72845ee18ad9/docs/FOLDURORA_CORRECTED_WINDOWS_REQUEST_98B30BE2.md
-  Prepared only; no delivery/acknowledgment/run/package claimed. Slick FIRST checks
-  current history then relays ONCE to existing Cumputer Builder, thread
-  01a1af77-a465-71c3-be08-cd9d1b927f83. Last verified state idle after completed ec0.
-  Do not duplicate/rerun unchanged ec0,1ba,da8 or EA63. Direct app status/PR attachment
-  remains connection closed; no replacement Builder.
+  Slick checked existing Cumputer Builder history: idle after ec0, no98b request.
+  Complete request delivered ONCE; Builder explicitly acknowledged and started
+  turn01a1c18c-0b76-7ee0-9808-62e64bcb2987, verifying source and preparing three
+  focused diagnostics before the full suite. Builder thread
+  01a1af77-a465-71c3-be08-cd9d1b927f83 is active per verified relay. No test result,
+  executable or new package claimed. Keep source frozen; no duplicate request or
+  unchanged failed ec0/1ba rerun. Direct app connection closed; no new Builder.
 
 ## Latest Windows failure and tests-only correction
 
