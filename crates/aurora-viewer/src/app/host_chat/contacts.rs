@@ -71,7 +71,7 @@ pub(super) fn friends(world: &World, ui_ready: bool) -> Result<NativeContacts, C
             },
             username: text(canonical.map_or("", |name| name.username.as_str())),
             online: friend.online,
-            can_open: eligible(world, friend.id) && exportable(world, friend.id),
+            can_open: exportable(world, friend.id) && eligible(world, friend.id),
         });
     }
     rows.sort_by(|a, b| {
@@ -111,7 +111,7 @@ pub(super) fn search(world: &World, key: aurora_session::chat::ContactKey, ui_re
                 .iter()
                 .take(MAX_FRIEND_CONTACTS)
                 .any(|friend| friend.id == resident.id && friend.online),
-            can_open: eligible(world, resident.id) && exportable(world, resident.id),
+            can_open: exportable(world, resident.id) && eligible(world, resident.id),
         })
         .collect();
     rows.sort_by(|a, b| {
@@ -151,6 +151,11 @@ pub(super) fn open(world: &mut World, request: OpenDirectRequest, ui_ready: bool
     }
     if !exportable(world, peer) {
         return OpenDirectOutcome::Capacity;
+    }
+    // Exportability bounds the existing-session exemption scan: either the
+    // peer is among the first63 entries, or the entire native list is shorter.
+    if !eligible(world, peer) {
+        return OpenDirectOutcome::RejectedNative;
     }
     // Crucially, startim was checked before session_mut: a new empty session
     // must not manufacture the existing-session exemption. No other effect.

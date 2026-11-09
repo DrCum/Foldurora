@@ -7,7 +7,33 @@ high-water marks. Offline friends remain selectable when native rules allow.
 Open reserves one operation before native creation, and duplicate/query paths
 never repeat it. Immutable receipts contain only the requested identity/outcome;
 fresh title/unread presentation separately requires current native Read policy.
-These pure types do not yet enable a contact wire command or host chooser UI.
+ChatV9 carries these pages/operations on the authenticated chat lane; ControlV1
+and native SL protocols stay unchanged. Worker and controller keep independent
+bounded source/token/policy state. Pages fit actual escaped JSON within4096bytes;
+complete staged transfers alone become selectable. Friends export/inspect a
+2048-entry subset and mark limitation explicitly, online-first within the subset.
+
+`aurora-net/contact_search` retains a process HTTP lease through20s completion or
+future disposal, even after the requesting Session disappears. The original
+login Arc and unique local UUID accompany each callback. Capability path/query
+authentication is preserved; bodies are capped at1MiB, inspected results at100,
+and display/username labels at255/127 UTF8 bytes. No UDP/query-only callback can
+establish hosted Search membership. World checks original login/request and
+complete result validity; worker additionally captures the exact host source/
+token. A new query immediately revokes previous Search selection while Friends
+stay independently usable. Pending pages are paced at250ms.
+
+`app/host_chat/contacts` verifies native friendship or completed captured Search
+membership, then current privacy/mutes/RLVa/FSData and catalogue capacity before
+`Social::session_mut`. RLVa is checked before creation and exportability bounds
+its existing-session exemption scan. This model-only Open changes no native
+focus, unread, draft, call or Send. Controller receipt recovery never resubmits
+Open. Only a request-bound accepted fresh view matching current policy can
+select/reopen; an older Open cannot undo a later Close. Source/surface navigation
+retires pending selection. Source Close admission highwater retires optimistic
+UI hiding after receipt-history eviction without generating incoming credit.
+Shared/Monitor Friends and New IM use these canonical source-owned states;
+explicit Search/Open cannot share a GUI dispatch with Send/Read/Close.
 
 
 `LoginSource` retains the actual native `Arc<LoginResponse>` for asynchronous
@@ -689,9 +715,9 @@ lookup without replacing its original policy/stream. Recovery has a bounded
 pending gate; an unresolved result stays visibly Uncertain and hidden without
 blocking every other conversation. Explicit rejection restores visibility.
 Source replacement retires all state, and ordinary authority loss still purges
-private drafts, Undo and metadata. Nearby cannot be closed. Friends/New IM and their explicit native-open
-acknowledgments remain separate features. Close retains its V4 payload in the
-current V8 Chat envelope; the
+private drafts, Undo and metadata. Nearby cannot be closed. Friends/New IM use
+the separately acknowledged model-only Direct-open path described above. Close
+retains its V4 payload in the current V9 Chat envelope; the
 control protocol stays V1.
 
 `app/host_chat_bridge.rs` drives `session_host/chat.rs` and `app/host_chat.rs` on

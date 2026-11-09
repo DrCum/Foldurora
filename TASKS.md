@@ -1,18 +1,19 @@
 # Aurora Viewer — task tracking
 
-- 🔧 Foldurora Host Friends/New IM dependencies (2026-11-08): original-login
-  name replies and grid-cache capture pass9 focused +36 neighboring cases at
-  `9caf6761`. Shared FSData Direct-contact policy passes15 focused cases at
-  `523d6d40` after an explicitly preserved compile failure; a subsequent legacy
-  precedence/cache-provenance correction passes14 viewer cases at51fc. Saved
-  message/fallback callback login isolation passes its focused actual HTTP and
-  viewer checks at3cdf, with alias/spoof-proof captured grid classification.
-  Contact-directory and Direct-open receipt models pass10 development cases;
-  native adapter, authenticated wire, Close reopening and chooser/search UI
-  integration remain unfinished.
-  Chooser/Open/search are still unfinished. One combined full
-  checkpoint follows the feature group. Source publication remains held.
-
+- 🔧 Foldurora Host Friends/New IM (2026-11-09 UTC): source now joins the
+  original-login Names/FSData/Saved prerequisites with bounded ChatV9 Friends,
+  captured single-flight Search, model-only once-only Open and Shared/Monitor
+  controls. Complete membership, fresh native permissions, policy/source/surface
+  retirement, fresh-view acknowledgments and later-Close protection are retained;
+  no focus/activation/Send/Read effect comes from Open/Search. At da673,104 unique
+  focused cases pass. Its explicit CPU capture failed on texture acknowledgment;
+  the applied-texture fix passes at5ce with two inspected CPU images, alongside7
+  affected UI cases including simultaneous Search/Send suppression. Negative
+  sources/logs/ELFs are preserved. A stronger actual HTTP test now proves Busy
+  after original Session disposal. Final combined lint/full checkpoint and
+  Windows/native/human acceptance remain pending. Newer source is unpublished;
+  exact BC20 approval does not cover this group. The17 deferred Linux Profile
+  Copy failures and separate terrain failure remain failed, never waived.
 
 - 🔧 Foldurora combined Glow/call/textbox integration (2026-11-08): joins
   reviewed open drafts [PR15](https://github.com/DrCum/Foldurora/pull/15) at
@@ -25,7 +26,9 @@
   review clears call shutdown/spatial guards and per-profile Glow restoration.
   Imported upstream human acceptance, green totals and merge annotations below
   are historical Aurora evidence, not Foldurora acceptance or authorization.
-  Combined focused/lint/full and Windows/native/package validation are pending.
+  Frozen BC20 combined format/qualified Linux lint and focused checks passed;
+  full8,888passed/18knownfailed/60ignored. Exact source was approved/published and
+  verified once; Windows request delivery/package acceptance remain pending.
   ChatV8/known-kind safeguards, the17 deferred Profile Copy failures, terrain,
   original24 Windows negatives and all source-publication holds remain intact.
 
