@@ -14,24 +14,65 @@ No merge, install, release or grid
 login; human acceptance belongs to Sodie. Standing source/build-handoff publication
 permission excludes private evidence and coverage-input metadata.
 
-- New frozen integration: DrCum/Foldurora, branch
-  `feat/upstream-radio-integration-20261109`, draft PR45
-  https://github.com/DrCum/Foldurora/pull/45
-- Commit `47955237fd40dd61e4fab8ca9a8a19078ef74e7d`
-- Tree `0a16570f3944a4f1e1e9e9391cb0ae009321c1fa`
-- Published remote SHA/tree verified; owned worktree
-  `/workspace/work/workspace-folders-20261109` clean/frozen on this branch.
-- ONE combined request published and byte-verified:
+- Current frozen Monitor candidate: DrCum/Foldurora, branch
+  `feat/live-inactive-monitors-20261109`, draft PR46
+  https://github.com/DrCum/Foldurora/pull/46
+- Commit `520782f2998150a26c74c51e18eccc7c4994c737`
+- Tree `bcded0890dbdb359d44db28c399956fa2fb1ccd5`
+- Remote source/tree and published request bytes verified. Owned source worktree
+  `/workspace/work/workspace-folders-20261109` is clean/frozen on this branch.
+- ONE Monitor request published; prepared only, delivery/ack/run PENDING:
+  https://github.com/DrCum/Foldurora/blob/9d880db77c9986bf412eacd1d39216b6a0629318/docs/FOLDURORA_LIVE_MONITORS_WINDOWS_REQUEST_520782F2.md
+  Queue AFTER radio finishes; do not interrupt/duplicate either source. Existing
+  Cumputer Builder thread01a1af77-a465-71c3-be08-cd9d1b927f83 only, through Slick.
+- Separate frozen radio source47955237fd40dd61e4fab8ca9a8a19078ef74e7d,
+  tree0a16570f3944a4f1e1e9e9391cb0ae009321c1fa, PR45. Slick delivered its request
+  ONCE; turn01a1c1f7-1aa6-7861-9ab5-ba94a573ddd0 active, written acknowledgment
+  still unobserved at last relay. No result/package yet received. Its request:
   https://github.com/DrCum/Foldurora/blob/50dc448fa139fd4c01a1c2058a1abfc72f285728/docs/FOLDURORA_RADIO_WINDOWS_REQUEST_47955237.md
-  Prepared only; delivery/ack/run pending. Slick first checks existing Cumputer
-  Builder history, then relays ONCE. Last verified idle after98b, thread
-  01a1af77-a465-71c3-be08-cd9d1b927f83. No replacement/duplicate/unchanged run.
-- Frozen fixture PR43 `d83654141777d4323182340aa862ef325f7a3c69`,
-  tree8fb9ca7efee7104b939aa67ddc3f875f6cecb466 is included. Its standalone request
-  stayed prepared/unpublished/undelivered and is superseded, not another run.
-- Verified product package98b and a903/all failed evidence stay preserved below.
-  Direct app/PR attachment connection closed (one stalled attachment sequence
-  terminated before any file upload; destination checked absent, no duplicate).
+- PR43/d83654141777d4323182340aa862ef325f7a3c69 is included in radio and Monitor;
+  its never-delivered standalone fixture request remains superseded.
+- Verified98b/a903 packages and all negative evidence preserved. App PR attachment
+  failed with connection closed; PR46 exists on GitHub, no attachment claimed.
+
+## Live inactive Monitor implementation and remaining gates
+
+Source joins explicit visible/native Standby demand to a fitted small Scene
+projection and the existing credited capture/IO owners, including activation0
+before a character was ever active. V5 kind is sealed through request, actual
+mapping and transport; ordinary frames refuse inactive claims. Native source/
+lease/physical/privacy/RLVa/mutes/locked-HUD/photo/XR/promotion fences remain.
+No active/input authority or unsupported MCP workspace mutation was added.
+
+Cold resources are reduced before allocation. A process-wide lease follows the
+small backend, GPU callback and borrowed Frame across renderer replacement;
+GPU handles drop before credit. Host128MiB/source,512MiB aggregate view credit
+(up to4 configured previews) is separate from existing pixel pools. Stop ACK waits
+for actual completion/borrow retirement/backend destruction. Unknown/low driver
+headroom refuses sampling. Saved settings and native window geometry stay separate.
+EN/FR/JA captions identify inactive samples and bounded ages. Full details/source
+reference: docs/FOLDURORA_LIVE_MONITORS_20261109.md in the pinned candidate.
+
+Format and qualified aggregate all-target Linux ci Clippy0; actual production
+components33 policy/wire +16 queue/cadence/lifetime pass (49 distinct; the earlier
+10 queue cases are included in16). App/World/IO/GPU tests compiled, not run here.
+No test definitions removed. Full Linux linking remains disk-blocked; no repeat.
+Receipts/logs/private1413-name declarations live under
+`/workspace/scratch/live-inactive-monitors-20261109/`. Current disk about22MiB.
+No Windows/full-suite/GPU/package/native pass exists yet for520782f2. Required:
+one unfiltered full run/all1413 exact passing outcomes, then the explicit new
+ignored small-texture GPU color/crop gate, ordinary viewer/sidecar package and
+standalone startup. Existing Monitor/render-thread cases now run by default;
+no repeated old nondefault prototype matrix or unrelated CPU capture matrix.
+
+Bounded behavior gap: uncertain source/metadata reservations remain charged until
+owned process exit. Privacy/teleport closure can require restarting that worker
+before sampling resumes. Automatic reservation recovery is not implemented.
+Native host movement/switch/viewport/response/Monitor, grid/RLVa, driver-reset and
+XR remain human/unrun gates. Do not mark the broader porting goal complete.
+PR21head42734a3da6b9f357198adb5c6f187a18aef7701a and
+PR33head674a1a73989b5319f955b7b2cf4b26e9e4e0c3a6 rechecked unchanged; no duplicate
+ports or competing MCP edits. Keep the closed mutation/consent boundary.
 
 ## New radio/upstream integration checkpoint
 
@@ -201,14 +242,11 @@ native effect, native HUD consent/archive/RLVa and observed completion. Current
 Runtime mutex cannot enclose IO/waits/reentry. Folderstorm prepared context proof
 was consulted. No competing functional MCP implementation started.
 
-Inactive Monitor prototype integrated disabled in d08b2438; no production App
-caller. Needed: host demand/account/TP/privacy/pending+draining admission, genuinely
-small independent ScenePrep, bounded sealed cross-process export and retire/drain
-completion. Cold backend requests ~96MiB across only shadow atlas and radiance
-probe payloads before packet disabling; arithmetic, not measured total VRAM. Need
-constructor inventory/headroom before enablement. Offscreen targets lack COPY_SRC;
-no full-frame/readback-per-frame fallback or silent live-enable. Exact dependency
-review in correction source doc. Native/GPU acceptance remains open.
+Inactive Monitor caller/export/admission/retirement are implemented in frozen
+520782f2/PR46 (see current section). Remaining gates are the1413-case combined
+Windows run, real GPU export/drain and package, hosted native/human acceptance,
+and conservative uncertain-reservation recovery. A privacy/teleport metadata
+closure can require worker restart. No full-frame or blocking readback fallback.
 
 ## Preserved earlier verified package — a903
 
