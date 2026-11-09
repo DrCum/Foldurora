@@ -20,6 +20,15 @@ impl Fixture {
         crate::theme::Theme::default().apply(&ctx, 1.0);
         let mut world = World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
         world.agent_id = crate::demo::DEMO_AGENT;
+        world.inventory.root = Uuid::from_u128(1);
+        world.inventory.owner = world.agent_id;
+        world.inventory.created_folders(vec![aurora_net::inventory::InvFolder {
+            id: world.inventory.root,
+            name: "Inventory".into(),
+            type_default: 8,
+            ..Default::default()
+        }]);
+        world.inventory.folders.get_mut(&world.inventory.root).unwrap().state = FetchState::Fetched;
         crate::world::appearance::seed_demo(&mut world.inventory, world.agent_id);
         crate::world::inventory::demo::seed(&mut world.inventory, world.agent_id);
         let mut f = Self {
@@ -291,6 +300,7 @@ fn inventory_multi_window_profile() {
             let expanded = crate::world::inventory::demo::seed_big(&mut f.world.inventory, f.world.agent_id, items);
             f.st.open_folders(expanded.iter().copied());
             f.settle();
+            assert!(f.st.plain.rows.len() > 1000, "the benchmark must draw a populated inventory");
             for count in [1, 3, 8, 16] {
                 let start = Instant::now();
                 while f.st.windows.len() + 1 < count {
@@ -300,6 +310,7 @@ fn inventory_multi_window_profile() {
                 f.frame(Vec::new());
                 let opening = start.elapsed().as_secs_f64() * 1000.0;
                 f.settle();
+                assert!(f.st.windows.iter().all(|w| w.state.plain.rows.len() > 1000));
                 let start = Instant::now();
                 for _ in 0..10 {
                     f.frame(Vec::new());
