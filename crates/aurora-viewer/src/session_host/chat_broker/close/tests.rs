@@ -293,7 +293,7 @@ fn contacts_explicit_open_retires_original_close_but_never_a_later_close_or_inco
     peer.closes.explicit_open(conversation(), captured);
     assert!(!peer.closes.hidden(conversation()));
     assert!(peer.closes.pending.is_none());
-    assert_eq!(peer.closes.snapshot().opened_through.get(&conversation()), Some(&10));
+    assert_eq!(peer.closes.snapshot().seen_through, 10);
     ack(&mut peer, 2, first, closed(1)).unwrap();
     assert!(!peer.closes.hidden(conversation()), "late old Close receipt cannot hide again");
     let later = request(11);

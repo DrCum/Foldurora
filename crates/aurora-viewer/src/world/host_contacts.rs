@@ -112,7 +112,7 @@ mod tests {
     use super::*;
     use aurora_net::{NetEvent, contact_search::Resident};
     use aurora_session::chat::ChatSource;
-    use aurora_session::*;
+    use aurora_session::{AccountKey, GridKey, HostId, InstallationId, SessionId, SessionIdentity, WorkerId, WorkerIdentity};
     fn key(token: u64) -> ContactKey {
         ContactKey {
             source: ChatSource {

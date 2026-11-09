@@ -23,7 +23,7 @@ pub(crate) struct CloseSnapshot {
     pub hidden: BTreeSet<Conversation>,
     pub targets: BTreeMap<Conversation, u64>,
     pub operations: Vec<CloseOperation>,
-    pub opened_through: BTreeMap<Conversation, u64>,
+    pub seen_through: u64,
 }
 struct Hidden {
     request: CloseRequest,
@@ -42,14 +42,17 @@ pub(super) struct CloseBook {
     operations: VecDeque<CloseOperation>,
     pending: Option<PendingClose>,
     highwater: u64,
-    opened_through: BTreeMap<Conversation, u64>,
 }
 impl CloseBook {
     pub(super) fn highwater(&self) -> u64 {
         self.highwater
     }
     pub(super) fn explicit_open(&mut self, conversation: Conversation, through: u64) -> bool {
-        if self.opened_through.len() == aurora_session::chat::MAX_CONVERSATIONS && !self.opened_through.contains_key(&conversation) {
+        if self
+            .hidden
+            .get(&conversation)
+            .is_some_and(|hidden| hidden.request.request > through)
+        {
             return false;
         }
         if self
@@ -142,7 +145,7 @@ impl CloseBook {
             hidden: self.hidden.keys().copied().collect(),
             targets: self.targets.clone(),
             operations: self.operations.iter().copied().collect(),
-            opened_through: self.opened_through.clone(),
+            seen_through: self.highwater,
         }
     }
     pub fn receipt(&mut self, reply: CloseReceiptReply) -> Result<(), ChatError> {

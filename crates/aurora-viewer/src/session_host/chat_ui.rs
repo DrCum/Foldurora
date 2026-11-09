@@ -326,11 +326,7 @@ impl ChatUi {
         if let Some(request) = self.pending_close {
             if current.is_none_or(|snapshot| {
                 snapshot.closes.operations.iter().any(|operation| operation.request == request)
-                    || snapshot
-                        .closes
-                        .opened_through
-                        .get(&request.key.conversation)
-                        .is_some_and(|through| *through >= request.request)
+                    || snapshot.closes.seen_through >= request.request
             }) {
                 self.pending_close = None;
             } else {
