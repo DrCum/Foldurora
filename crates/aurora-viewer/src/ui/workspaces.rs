@@ -1,6 +1,7 @@
 //! Native named geometry manager. Drawing never mutates the catalogue or World.
 use crate::theme::Palette;
 use crate::workspace::controller::{Action, Command, Controller, Status, Ticket};
+use crate::workspace::model::Startup;
 use uuid::Uuid;
 pub(crate) const WINDOW: &str = "named_workspaces";
 pub(crate) struct WorkspaceUi {
@@ -12,6 +13,7 @@ pub(crate) struct WorkspaceUi {
     selection_epoch: u64,
     selection_observed: Option<Uuid>,
     selection_exhausted: bool,
+    favorites_painted: Option<Ticket>,
 }
 impl Default for WorkspaceUi {
     fn default() -> Self {
@@ -24,6 +26,7 @@ impl Default for WorkspaceUi {
             selection_epoch: 1,
             selection_observed: None,
             selection_exhausted: false,
+            favorites_painted: None,
         }
     }
 }
@@ -71,7 +74,7 @@ impl WorkspaceUi {
             WINDOW,
             tr!("workspaces-title"),
             screen.min + egui::vec2(60.0, 80.0),
-            egui::vec2(540.0, 460.0),
+            egui::vec2(540.0, 540.0),
         )
         .help(tr!("workspaces-help"))
         .show(ctx, p, &mut open, |ui| {
@@ -101,13 +104,67 @@ impl WorkspaceUi {
                         marker = if modified { " *" } else { "" }
                     ));
                 }
+                if let Some(cat) = &c.catalogue {
+                    let mut show = cat.show_favorites;
+                    if ui
+                        .add_enabled(
+                            enabled && c.preview.is_none(),
+                            egui::Checkbox::new(&mut show, tr!("workspaces-show-favorites")),
+                        )
+                        .changed()
+                    {
+                        command = Some(Command::ShowFavorites(show));
+                    }
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(tr!("workspaces-startup"));
+                        if let Startup::Named { workspace } = cat.startup
+                            && let Some(record) = c.record(workspace)
+                        {
+                            ui.label(tr!("workspaces-startup-named", name = record.name.clone()));
+                        }
+                        if ui
+                            .add_enabled(
+                                enabled && c.preview.is_none(),
+                                egui::Button::new(tr!("workspaces-startup-none")).selected(cat.startup == Startup::Disabled),
+                            )
+                            .clicked()
+                        {
+                            command = Some(Command::Startup(Startup::Disabled));
+                        }
+                        if ui
+                            .add_enabled(
+                                enabled && c.preview.is_none(),
+                                egui::Button::new(tr!("workspaces-startup-last")).selected(cat.startup == Startup::LastArrangement),
+                            )
+                            .clicked()
+                        {
+                            command = Some(Command::Startup(Startup::LastArrangement));
+                        }
+                        if let Some(id) = self.selected.filter(|id| c.record(*id).is_some())
+                            && ui
+                                .add_enabled(
+                                    enabled && c.preview.is_none(),
+                                    egui::Button::new(tr!("workspaces-startup-selected"))
+                                        .selected(cat.startup == (Startup::Named { workspace: id })),
+                                )
+                                .clicked()
+                        {
+                            command = Some(Command::Startup(Startup::Named { workspace: id }));
+                        }
+                    });
+                }
                 egui::ScrollArea::vertical()
                     .id_salt("workspace_records")
                     .max_height(190.0)
                     .show(ui, |ui| {
                         if let Some(cat) = &c.catalogue {
                             for r in &cat.records {
-                                let row = ui.selectable_label(self.selected == Some(r.id), &r.name);
+                                let label = if cat.favorites.contains(&r.id) {
+                                    format!("★ {}", r.name)
+                                } else {
+                                    r.name.clone()
+                                };
+                                let row = ui.selectable_label(self.selected == Some(r.id), label);
                                 #[cfg(test)]
                                 ui.ctx()
                                     .data_mut(|d| d.insert_temp(egui::Id::unique(("workspace_test_row", r.id)), row.id));
@@ -134,6 +191,20 @@ impl WorkspaceUi {
                             command = Some(Command::Save(self.name.trim().to_owned()));
                         }
                         if let Some(id) = self.selected.filter(|id| c.record(*id).is_some()) {
+                            let favorite = c.catalogue.as_ref().is_some_and(|c| c.favorites.contains(&id));
+                            if ui
+                                .add_enabled(
+                                    enabled && c.preview.is_none(),
+                                    egui::Button::new(if favorite {
+                                        tr!("workspaces-unfavorite")
+                                    } else {
+                                        tr!("workspaces-favorite")
+                                    }),
+                                )
+                                .clicked()
+                            {
+                                command = Some(Command::Favorite(id));
+                            }
                             if ui
                                 .add_enabled(enabled && c.preview.is_none(), egui::Button::new(tr!("workspaces-rename")))
                                 .clicked()
@@ -214,13 +285,64 @@ impl WorkspaceUi {
         let ticket = ticket?;
         let command = command?;
         let target = match &command {
-            Command::Rename(id, _) | Command::Delete(id) | Command::Preview(id) | Command::Switch(id) => Some(*id),
+            Command::Rename(id, _)
+            | Command::Delete(id)
+            | Command::Preview(id)
+            | Command::Switch(id)
+            | Command::Favorite(id)
+            | Command::Startup(Startup::Named { workspace: id }) => Some(*id),
             _ => None,
         };
         if target.is_some() && target != ticket.record {
             return None;
         }
         Some(Action { ticket, command })
+    }
+
+    pub(crate) fn favorites(&mut self, ctx: &egui::Context, c: &Controller) -> Option<Action> {
+        let current = c.ticket();
+        let ticket = self
+            .favorites_painted
+            .take()
+            .filter(|t| Some(t) == current.as_ref() && c.accepts(t));
+        let cat = c
+            .catalogue
+            .as_ref()
+            .filter(|cat| cat.show_favorites && !cat.favorites.is_empty() && !self.open && c.ready() && c.preview.is_none())?;
+        let mut selected = None;
+        let bounds = super::layout::toolbar_rect(ctx);
+        let area = egui::Area::new(egui::Id::unique("workspace_favorites_strip"))
+            .pivot(egui::Align2::CENTER_TOP)
+            .fixed_pos(bounds.center_top() + egui::vec2(0.0, 72.0))
+            .show(ctx, |ui| {
+                ui.set_clip_rect(bounds.intersect(ctx.content_rect()));
+                ui.set_max_width((bounds.width() - 16.0).clamp(1.0, 800.0));
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        for id in &cat.favorites {
+                            if let Some(record) = c.record(*id) {
+                                ui.push_id((c.instance, c.binding, c.revision, id), |ui| {
+                                    if ui
+                                        .add_enabled(ticket.is_some(), egui::Button::new(&record.name).selected(c.active == Some(*id)))
+                                        .clicked()
+                                    {
+                                        selected = Some(*id);
+                                    }
+                                });
+                            }
+                        }
+                    });
+                });
+            });
+        super::layout::toolbar_layer(ctx, area.response.layer_id);
+        self.favorites_painted = current;
+        let id = selected?;
+        let mut ticket = ticket?;
+        ticket.record = Some(id);
+        Some(Action {
+            ticket,
+            command: Command::Switch(id),
+        })
     }
 }
 
@@ -328,6 +450,23 @@ mod tests {
             1,
             "drawing and clicking only emit typed requests"
         );
+    }
+    #[test]
+    fn native_workspace_favorite_and_startup_controls_emit_current_source_tickets() {
+        let (mut c, mut st) = fixture();
+        let id = st.selected.unwrap();
+        let mut frames = Frames::new();
+        let favorite = click(&mut frames, &mut st, &c, aurora_i18n::tr!("workspaces-favorite")).unwrap();
+        assert!(matches!(favorite.command, Command::Favorite(i) if i == id));
+        assert_eq!(favorite.ticket.record, Some(id));
+        assert_eq!(Some(favorite.ticket.source), c.source);
+        let startup = click(&mut frames, &mut st, &c, aurora_i18n::tr!("workspaces-startup-selected")).unwrap();
+        assert!(matches!(startup.command, Command::Startup(Startup::Named { workspace }) if workspace == id));
+        assert_eq!(startup.ticket.record, Some(id));
+        c.catalogue.as_mut().unwrap().favorites.push(id);
+        c.advance();
+        let favorite = click(&mut frames, &mut st, &c, aurora_i18n::tr!("workspaces-unfavorite")).unwrap();
+        assert!(matches!(favorite.command, Command::Favorite(i) if i == id));
     }
     #[test]
     fn native_workspace_actual_preview_cancel_switch_and_previous_keep_original_capture() {

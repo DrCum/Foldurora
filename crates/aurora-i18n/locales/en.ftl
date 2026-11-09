@@ -13617,3 +13617,13 @@ host-contacts-search = Search
 host-contacts-results = Results for: { $query }
 host-contacts-searching = Searching…
 host-contacts-search-failed = Search is unavailable or failed. Try again shortly. Friends remain available.
+
+# Workspace favorites and source-bound startup restore
+workspaces-show-favorites = Show workspace favorites strip
+workspaces-startup = At login:
+workspaces-startup-none = Do not restore
+workspaces-startup-last = Last arrangement
+workspaces-startup-selected = Selected workspace
+workspaces-favorite = Favorite
+workspaces-unfavorite = Remove favorite
+workspaces-startup-named = Saved: { $name }

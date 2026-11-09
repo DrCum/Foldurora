@@ -343,8 +343,10 @@ impl Stream {
             return Err(io::Error::last_os_error());
         }
         let event = Handle(event);
-        let mut overlap = OVERLAPPED::default();
-        overlap.hEvent = event.0;
+        let mut overlap = OVERLAPPED {
+            hEvent: event.0,
+            ..Default::default()
+        };
         let mut transferred = 0;
         // SAFETY: caller's slice and stack OVERLAPPED outlive completion/cancellation;
         // this stream admits only one sequential operation at a time.
@@ -469,8 +471,10 @@ impl Listener {
             Ok(Arc::new(Handle(pipe)))
         })?;
         self.first = false;
-        self.overlap = Box::default();
-        self.overlap.hEvent = self.event.0;
+        *self.overlap = OVERLAPPED {
+            hEvent: self.event.0,
+            ..Default::default()
+        };
         // SAFETY: event and heap-pinned OVERLAPPED live until completion or Drop drain.
         unsafe {
             ResetEvent(self.event.0);
