@@ -1,5 +1,31 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Independent Foldurora controls/keyboard catch-up (human request,
+  2026-11-09): port Aurora `a8a8750e` (Mac Delete), `c13a11b0` (font popup
+  width), `29382731` (layout-aware shortcut tests), and `bac78517` (toolbar
+  style-row IDs). Stack on PR #14 head `5dc8f3e6` because the width fix uses
+  its font popup; PR #14 is already in inspected integration `8b211528`.
+  Source audit: published handoff `94d82038`, policy `f78d2814`, 114 published
+  branches and current PRs. No matching implementations/provenance found.
+  PR #11 and PR #26 remain separate; no duplicate reset or contents port.
+  Preserve the shared Delete request, selected-item checks, worn/system/
+  protected/Library refusals and confirmation; the Mac alias changes only
+  key recognition. Folderstorm reference `LLInventoryPanel::handleKeyHere`,
+  `indra/newview/llinventorypanel.cpp` at `abbe3cb0ca66`. Other fixes address
+  Aurora's own UI/tests. Toolbar regression clicks all rows in both looks;
+  font width regression measures 120 frames at nine font/DPI combinations.
+  No App, renderer, locale, host, Shared Chat or Attention changes. Reconcile
+  this TASKS entry and additive shared test edits during Dev Agent integration.
+  Slick is unavailable; no relay/build delivery claimed. Exact checks and
+  screenshots belong to the PR. Full combined validation/package stays at
+  the feature-group checkpoint; native Mac key, Windows/default-glass and
+  final-font acceptance remain pending until actually executed.
+  - Deferred before edits: `4566ec65` Classic favorites and `46ee546e` Photo
+    selection overlap host/photo geometry; `b8b390c5` prompt close registration
+    and `9d6fdaa2` teleport controls overlap Attention/Shared Chat ownership;
+    `8f0b6894` face lights and `b817c574` worn-layer depth overlap protected
+    scene/renderer/Monitor work.
+
 - 🔧 Foldurora System fonts search (human request, 2026-11-08; no fork issue;
   [PR #14](https://github.com/DrCum/Foldurora/pull/14); upstream `bd9509fedc20`,
   Aurora-Viewer/Aurora-Viewer#2177 / #2136): preserve search focus, filtering,

@@ -17,6 +17,213 @@ fn layout() -> Layout {
     }
 }
 
+fn editor_text_rects(shapes: &[egui::epaint::ClippedShape], label: &str) -> Vec<Rect> {
+    fn collect(shape: &egui::Shape, label: &str, rects: &mut Vec<Rect>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| collect(s, label, rects)),
+            egui::Shape::Text(text) if text.galley.text() == label => rects.push(shape.visual_bounding_rect()),
+            _ => {}
+        }
+    }
+    let mut rects = Vec::new();
+    for shape in shapes {
+        collect(&shape.shape, label, &mut rects);
+    }
+    rects
+}
+
+fn style_editor_frame(bench: &mut Bench, events: Vec<egui::Event>) -> egui::FullOutput {
+    let p = crate::theme::Theme::default().palette();
+    let layout = layout();
+    let mut output = bench.ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 900.0))),
+            time: Some(bench.ctx.cumulative_frame_nr() as f64 / 60.0),
+            events,
+            ..Default::default()
+        },
+        |ui| {
+            bench.state.show(ui.ctx(), &p, &layout, &bench.settings);
+            bench.state.commit(&layout, &mut bench.settings);
+        },
+    );
+    output.textures_delta.clear();
+    output
+}
+
+/// Click the real editor's segment in the named row, at its painted glyphs.
+fn editor_style_click(bench: &mut Bench, bar: Bar, label: &str) {
+    let output = style_editor_frame(bench, vec![]);
+    let name = match bar {
+        Bar::Bottom if bench.islands => aurora_i18n::tr!("toolbar-bar-dock"),
+        Bar::Bottom => aurora_i18n::tr!("toolbar-bar-bottom"),
+        Bar::Left => aurora_i18n::tr!("toolbar-bar-left"),
+        Bar::Right => aurora_i18n::tr!("toolbar-bar-right"),
+    };
+    let row = editor_text_rects(&output.shapes, name)
+        .into_iter()
+        .next()
+        .expect("toolbar row is painted");
+    let at = editor_text_rects(&output.shapes, label)
+        .into_iter()
+        .find(|r| (r.center().y - row.center().y).abs() < 4.0)
+        .expect("segment in this row")
+        .center();
+    assert!(
+        bench.ctx.viewport(|v| v
+            .this_pass
+            .widgets
+            .layers()
+            .flat_map(|(_, ws)| ws)
+            .any(|w| w.enabled && w.sense.senses_click() && w.interact_rect.contains(at) && w.rect.height() <= 40.0)),
+        "the pointer is inside an interactive segment"
+    );
+    style_editor_frame(bench, vec![egui::Event::PointerMoved(at)]);
+    for pressed in [true, false] {
+        style_editor_frame(
+            bench,
+            vec![egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            }],
+        );
+    }
+    style_editor_frame(bench, vec![]);
+}
+
+#[test]
+fn toolbar_style_rows_respond_at_their_visible_positions_in_both_looks() {
+    for islands in [false, true] {
+        let mut bench = Bench {
+            islands,
+            ..Default::default()
+        };
+        crate::theme::Theme::default().apply(&bench.ctx, 1.0);
+        bench.state.open = true;
+        bench.state.islands = islands;
+        bench.settings.left = vec![button("radar")];
+        bench.settings.right = vec![button("search")];
+        for _ in 0..6 {
+            style_editor_frame(&mut bench, vec![]);
+        }
+        for bar in Bar::ALL {
+            for (label, mode) in [
+                (aurora_i18n::tr!("toolbar-seg-icons"), ButtonMode::IconsOnly),
+                (aurora_i18n::tr!("toolbar-seg-icons-text"), ButtonMode::IconsWithText),
+                (aurora_i18n::tr!("toolbar-seg-text"), ButtonMode::TextOnly),
+            ] {
+                let before = Bar::ALL.map(|b| bench.settings.style(b));
+                let old = bench.settings.style(bar).resolve(bar, islands);
+                editor_style_click(&mut bench, bar, label);
+                let next = bench.settings.style(bar).resolve(bar, islands);
+                assert_eq!(next.mode, mode, "{bar:?}, islands={islands}, {label}");
+                assert_eq!((next.align, next.sizing), (old.align, old.sizing));
+                for (i, other) in Bar::ALL.into_iter().enumerate().filter(|(_, b)| *b != bar) {
+                    assert_eq!(bench.settings.style(other), before[i], "other toolbar unchanged");
+                }
+            }
+            let labels = if bar.vertical() {
+                [
+                    aurora_i18n::tr!("toolbar-seg-top"),
+                    aurora_i18n::tr!("toolbar-seg-middle"),
+                    aurora_i18n::tr!("toolbar-seg-bottom"),
+                ]
+            } else {
+                [
+                    aurora_i18n::tr!("toolbar-seg-start"),
+                    aurora_i18n::tr!("toolbar-seg-middle"),
+                    aurora_i18n::tr!("toolbar-seg-end"),
+                ]
+            };
+            for (label, align) in labels.into_iter().zip([Align::Start, Align::Center, Align::End]) {
+                let before = Bar::ALL.map(|b| bench.settings.style(b));
+                let old = bench.settings.style(bar).resolve(bar, islands);
+                editor_style_click(&mut bench, bar, label);
+                let next = bench.settings.style(bar).resolve(bar, islands);
+                assert_eq!(next.align, align);
+                assert_eq!((next.mode, next.sizing), (old.mode, old.sizing));
+                for (i, other) in Bar::ALL.into_iter().enumerate().filter(|(_, b)| *b != bar) {
+                    assert_eq!(bench.settings.style(other), before[i]);
+                }
+            }
+        }
+        for (label, sizing) in [
+            (aurora_i18n::tr!("toolbar-seg-auto"), Sizing::Auto),
+            (aurora_i18n::tr!("toolbar-seg-fixed"), Sizing::Fixed),
+            (aurora_i18n::tr!("toolbar-seg-fill"), Sizing::Fill),
+        ] {
+            let before = [bench.settings.style(Bar::Left), bench.settings.style(Bar::Right)];
+            editor_style_click(&mut bench, Bar::Bottom, label);
+            assert_eq!(bench.settings.style(Bar::Bottom).resolve(Bar::Bottom, islands).sizing, sizing);
+            assert_eq!([bench.settings.style(Bar::Left), bench.settings.style(Bar::Right)], before);
+        }
+        if let Some(path) = std::env::var_os("AURORA_CAPTURE") {
+            editor_style_capture(&bench, std::path::Path::new(&path));
+        }
+    }
+}
+
+/// Representative opaque CPU images; native glass/final fonts stay separate.
+fn editor_style_capture(bench: &Bench, path: &std::path::Path) {
+    let ctx = egui::Context::default();
+    let theme = crate::theme::Theme {
+        panel_alpha: 255,
+        ..Default::default()
+    };
+    theme.apply(&ctx, 1.0);
+    let p = theme.palette();
+    let mut state = ToolbarUi {
+        open: true,
+        islands: bench.islands,
+        ..Default::default()
+    };
+    let layout = layout();
+    let mut painter = crate::crash::software::Painter::default();
+    let mut pixels = vec![0; 1280 * 900];
+    for frame in 0..12 {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 900.0))),
+                time: Some(frame as f64 / 60.0),
+                ..Default::default()
+            },
+            |ui| state.show(ui.ctx(), &p, &layout, &bench.settings),
+        );
+        // Upload every texture update, but paint the settled frame only.
+        let primitives = if frame == 11 {
+            ctx.tessellate(output.shapes.clone(), output.pixels_per_point)
+        } else {
+            Vec::new()
+        };
+        assert!(primitives.iter().all(|p| matches!(p.primitive, egui::epaint::Primitive::Mesh(_))));
+        painter.paint(
+            &mut pixels,
+            [1280, 900],
+            &primitives,
+            &output.textures_delta,
+            output.pixels_per_point,
+            p.panel,
+        );
+        output.textures_delta.clear();
+    }
+    let stem = path.file_stem().unwrap().to_string_lossy();
+    let style = if bench.islands { "aurora" } else { "classic" };
+    let rgba: Vec<u8> = pixels
+        .iter()
+        .flat_map(|p| [(*p >> 16) as u8, (*p >> 8) as u8, *p as u8, 255])
+        .collect();
+    image::save_buffer(
+        path.with_file_name(format!("{stem}-{style}.png")),
+        &rgba,
+        1280,
+        900,
+        image::ColorType::Rgba8,
+    )
+    .unwrap();
+}
+
 #[test]
 fn toolbar_moves_in_both_directions_without_duplicates_or_noop_saves() {
     let layout = layout();
