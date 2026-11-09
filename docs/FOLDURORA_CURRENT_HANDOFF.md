@@ -18,7 +18,7 @@ Current frozen combined candidate:
   startup/favorites PR20 and integrated disabled renderer PR21.
 - Source/remote tree verified. No package/version/full runtime result yet.
 - Source worktree `/workspace/work/workspace-folders-20261109` is now on the
-  separate `feat/workspace-background-20261109` branch for the next slice;
+  separate `feat/workspace-hud-restore-20261109` branch for the next slice;
   all frozen branch heads and Git objects remain preserved.
 
 Full Windows request, byte-verified,12791bytes, SHA256
@@ -78,6 +78,31 @@ receipts/logs are under `/workspace/scratch/workspace-{folders,graphics,camera,
 monitor-integration,theme-correction}-20261109/` and earlier advanced-workspaces.
 Do not rerun full suites merely to chase deferred/historical cases.
 
+## Subsequent source slice, outside the frozen build
+
+Solid-color padding and catalogue reload are published at
+`975250266db7eaf93f8f9af9cd4e9d8ffd4126c6`, tree
+`316805c23e6b333c5b340ca00edcb0afd232144b`, branch
+`feat/workspace-background-20261109`, draft PR24. Qualified real-viewer all-target
+Clippy0; actual DTO/geometry4/0/0, unchanged appearance scan1/0/0, localization13/0/0.
+Four additional real controller/source cases compile, not run locally. No new
+full suite/package/Windows request for this slice. Future default requirements
+are1158, separately retained in its scratch directory; current5f990 request stays1150.
+
+Background choices are private account/grid metadata, opt-in per record and
+paint only outside the actual world. Captured Preview target avoids borrowing
+an old record's excluded context during Previous. Source gaps reload private
+presentation without replaying consumed startup or polling failed IO. The first
+DTO run3/1 failed because a unit variant accepted an extra field; the unchanged
+refusal test passes with an empty struct variant. Negative evidence is retained.
+
+Active next work is HUD restoration source audit; no HUD implementation yet.
+Plan: `/workspace/scratch/workspace-hud-restore-20261109/PLAN.md`. Reuse native
+additive appearance transactions (one pending transaction, serial bounded lane),
+own ordinary archive visibility, source/lock/capacity rechecks and one explicit
+workspace review. No direct rez commands, replacement/detach or automatic wear
+from Preview/startup. Inspect item completeness/native limits before coding.
+
 ## Roadmap and next actions
 
 1. **Live inactive Monitor:** PR21 small same-device view foundation integrated
@@ -89,9 +114,9 @@ Do not rerun full suites merely to chase deferred/historical cases.
 2. **Advanced workspaces:** startup/favorites implemented; optional graphics and
    avatar-relative camera contexts implemented; folder restoration covers only
    loaded visible ordinary main Inventory. Additional windows/expanded trees,
-   HUD restore/review and padding backgrounds remain incomplete. Active next
-   slice is background support, starting from the pinned Folderstorm background
-   source and native viewport/layout helpers. Named-preset lookup beyond current
+   HUD restore/review, additional Inventory state and image/per-display
+   backgrounds remain incomplete. Solid padding colors are implemented in the
+   subsequent source slice above; active next work is guarded HUD restoration. Named-preset lookup beyond current
    snapshots and free/world/object/photo camera anchors remain intentional
    differences, not silently full Folderstorm parity.
 3. Fixed-slot actions, aliases/accents/alerts, session sets, restart/recovery,
