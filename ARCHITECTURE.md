@@ -427,6 +427,12 @@ owns child launches and bounded private-file IO on background threads. Typed V1
 identities and ownership transitions live in the pure `aurora-session` crate.
 See `docs/SESSION_HOST.md` for the checkpoint's explicit limitations.
 
+`aurora-mcp` supplies a separately authorized, disabled host MCP foundation:
+official SDK stdio, private current-user controller IPC, bounded read projections
+and source-bound approvals. Its viewer adapter is unregistered; host startup,
+native permission publication and approval UI remain lead integration work.
+Character Local Assistant authority is independent. See `docs/FOLDURORA_MCP.md`.
+
 `session_host/startup.rs` initializes and syncs a distinct controller diagnostic
 log before detaching only its own Windows console. Help/version output exits
 before that route. Controller-launched Windows workers use `CREATE_NO_WINDOW`;
