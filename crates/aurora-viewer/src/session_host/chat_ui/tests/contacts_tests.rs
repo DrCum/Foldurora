@@ -118,6 +118,8 @@ fn contacts_ui_actual_friend_row_selects_locally_then_explicit_open_captures_off
     let snapshot = contacts_snapshot();
     let mut frames = Frames::new();
     assert!(frames.click(&snapshot, Id::unique("host_contacts_friends_rect")).is_none());
+    assert_eq!(frames.ui.take_contact_action(), Some(ContactAction::Refresh(source())),
+        "opening Friends requests one original-source metadata refresh, never an IM");
     let resident = snapshot.contacts.friends.as_ref().unwrap().rows[0].resident;
     assert!(frames.click(&snapshot, Id::unique(("host_contact_row_rect", resident))).is_none());
     assert_eq!(frames.ui.key().conversation, Conversation::Nearby);
