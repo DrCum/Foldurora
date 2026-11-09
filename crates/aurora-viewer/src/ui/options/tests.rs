@@ -23,6 +23,33 @@ fn reset_button(texts: &[crate::ui::widgets::elide_tests::Text], label: &str) ->
     crate::ui::widgets::elide_tests::painted(texts, label).rect.center()
 }
 
+fn reset_undo(frames: &mut Frames, s: &mut Settings, st: &mut OptionsUi, open: &mut bool, texts: &[crate::ui::widgets::elide_tests::Text]) {
+    let at = reset_button(texts, aurora_i18n::tr!("money-tracker-undo"));
+    let mut trace = Vec::new();
+    for events in click(at) {
+        let texts = reset_frame(frames, s, st, open, events).0;
+        let widgets = frames.ctx.viewport(|v| {
+            v.this_pass
+                .widgets
+                .layers()
+                .flat_map(|(_, ws)| ws)
+                .filter(|w| w.rect.contains(at) && w.sense.senses_click())
+                .copied()
+                .collect::<Vec<_>>()
+        });
+        trace.push(format!(
+            "at {at:?}, Undo {:?}, modal {:?}, layer {:?}, widgets {widgets:?}",
+            texts
+                .iter()
+                .find(|t| t.source == aurora_i18n::tr!("money-tracker-undo"))
+                .map(|t| t.rect),
+            frames.ctx.memory(|m| m.top_modal_layer()),
+            frames.ctx.layer_id_at(at)
+        ));
+    }
+    assert!(st.undo.is_none(), "Undo click: {}", trace.join("\n"));
+}
+
 #[test]
 fn preferences_reset_footer_only_opens_the_requested_confirmation() {
     for ask in [ResetAsk::Page(Page::Graphics), ResetAsk::All] {
@@ -103,6 +130,7 @@ fn preferences_reset_cancel_escape_outside_and_window_close_leave_settings_alone
                 }
             }
             assert!(st.confirm_reset.is_none(), "{ask:?}, cancellation {cancel}");
+            assert_eq!(open, cancel != 3, "only closing the window dismisses Preferences");
             assert!(st.reset_confirmed.is_none() && st.undo.is_none());
             reset_frame(&mut frames, &mut s, &mut st, &mut open, vec![]);
             assert_eq!(serde_json::to_value(&s).unwrap(), before);
@@ -173,12 +201,27 @@ fn preferences_reset_confirmation_keeps_the_requested_page_and_runs_once_with_un
             texts = reset_frame(&mut frames, &mut s, &mut st, &mut open, vec![]).0;
             assert_eq!(st.undo.as_ref().unwrap().shown, shown, "the reset runs once");
         }
-        for events in click(reset_button(&texts, aurora_i18n::tr!("money-tracker-undo"))) {
-            reset_frame(&mut frames, &mut s, &mut st, &mut open, events);
-        }
-        assert!(st.undo.is_none());
+        reset_undo(&mut frames, &mut s, &mut st, &mut open, &texts);
         assert_eq!(serde_json::to_value(&s).unwrap(), before, "Undo restores the snapshot");
     }
+}
+
+#[test]
+fn preferences_reset_existing_demo_undo_still_responds() {
+    let mut frames = Frames::new();
+    let mut s = Settings::default();
+    let mut st = OptionsUi {
+        demo_reset: true,
+        ..Default::default()
+    };
+    st.open(Page::Sound, 0);
+    let mut open = true;
+    let mut texts = Vec::new();
+    for _ in 0..8 {
+        texts = reset_frame(&mut frames, &mut s, &mut st, &mut open, vec![]).0;
+    }
+    assert!(st.undo.is_some());
+    reset_undo(&mut frames, &mut s, &mut st, &mut open, &texts);
 }
 
 #[test]
