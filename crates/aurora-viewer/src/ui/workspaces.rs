@@ -113,37 +113,37 @@ impl WorkspaceUi {
                         let mut graphics = cat.capture_graphics;
                         let mut camera = cat.capture_camera;
                         if ui
-                            .add_enabled(
-                                enabled && c.preview.is_none(),
-                                egui::Checkbox::new(&mut camera, tr!("workspaces-capture-camera")),
-                            )
+                            .add_enabled_ui(enabled && c.preview.is_none(), |ui| {
+                                super::widgets::checkbox(ui, p, &mut camera, tr!("workspaces-capture-camera"))
+                            })
+                            .inner
                             .changed()
                         {
                             command = Some(Command::CaptureCamera(camera));
                         }
                         if ui
-                            .add_enabled(
-                                enabled && c.preview.is_none(),
-                                egui::Checkbox::new(&mut graphics, tr!("workspaces-capture-graphics")),
-                            )
+                            .add_enabled_ui(enabled && c.preview.is_none(), |ui| {
+                                super::widgets::checkbox(ui, p, &mut graphics, tr!("workspaces-capture-graphics"))
+                            })
+                            .inner
                             .changed()
                         {
                             command = Some(Command::CaptureGraphics(graphics));
                         }
                         if ui
-                            .add_enabled(
-                                enabled && c.preview.is_none(),
-                                egui::Checkbox::new(&mut folders, tr!("workspaces-remember-folders")),
-                            )
+                            .add_enabled_ui(enabled && c.preview.is_none(), |ui| {
+                                super::widgets::checkbox(ui, p, &mut folders, tr!("workspaces-remember-folders"))
+                            })
+                            .inner
                             .changed()
                         {
                             command = Some(Command::RememberFolders(folders));
                         }
                         if ui
-                            .add_enabled(
-                                enabled && c.preview.is_none(),
-                                egui::Checkbox::new(&mut show, tr!("workspaces-show-favorites")),
-                            )
+                            .add_enabled_ui(enabled && c.preview.is_none(), |ui| {
+                                super::widgets::checkbox(ui, p, &mut show, tr!("workspaces-show-favorites"))
+                            })
+                            .inner
                             .changed()
                         {
                             command = Some(Command::ShowFavorites(show));
