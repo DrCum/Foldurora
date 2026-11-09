@@ -14,7 +14,7 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: '0'
   CARGO_BUILD_JOBS: '2'
-  SOURCE_SHA: 6dd16edd62246ded143b86f8ccba0fc1ef541b74
+  SOURCE_SHA: 16071c7d9f53d65214b34a8f18e6f0453e0313e3
 jobs:
   preferences:
     runs-on: ubuntu-24.04
@@ -23,7 +23,7 @@ jobs:
       - name: Checkout pinned public port source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: 6dd16edd62246ded143b86f8ccba0fc1ef541b74
+          ref: 16071c7d9f53d65214b34a8f18e6f0453e0313e3
           fetch-depth: 0
           filter: blob:none
       - name: Source and runner
@@ -54,6 +54,11 @@ jobs:
         continue-on-error: true
         run: |
           cargo test --profile ci --workspace --locked ui::options:: -- --nocapture 2>&1 | tee .scratch/validation/options.log
+      - name: Repeat six reset regressions three times
+        run: |
+          for pass in 1 2 3; do
+            cargo test --profile ci --workspace --locked preferences_reset_ -- --nocapture 2>&1 | tee ".scratch/validation/repeat-$pass.log"
+          done
       - name: Shared theme guard
         run: |
           cargo test --profile ci --workspace --locked theme_guard -- --nocapture 2>&1 | tee .scratch/validation/theme.log
@@ -62,10 +67,8 @@ jobs:
           cargo test --profile ci --workspace --locked every_language_has_english_keys_and_variables -- --nocapture 2>&1 | tee .scratch/validation/translation-keys.log
           cargo test --profile ci --workspace --locked every_bundled_message_formats_with_its_declared_variables -- --nocapture 2>&1 | tee .scratch/validation/translation-format.log
       - name: Representative synthetic opaque CPU captures
-        env:
-          AURORA_CAPTURE: .scratch/validation/preferences-reset.png
         run: |
-          cargo test --profile ci --workspace --locked preferences_reset_dialogs_keep_the_footer_and_actions_visible -- --nocapture 2>&1 | tee .scratch/validation/capture.log
+          AURORA_CAPTURE="$GITHUB_WORKSPACE/.scratch/validation/preferences-reset.png" cargo test --profile ci --workspace --locked preferences_reset_dialogs_keep_the_footer_and_actions_visible -- --nocapture 2>&1 | tee .scratch/validation/capture.log
       - name: Verify all six reset regressions executed
         run: |
           python3 - <<'PYCODE'
@@ -95,7 +98,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: preferences-reset-6dd16edd6224
+          name: preferences-reset-16071c7d9f53
           path: .scratch/validation/
           include-hidden-files: true
           if-no-files-found: error
