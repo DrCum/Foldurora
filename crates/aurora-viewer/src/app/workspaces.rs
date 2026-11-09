@@ -629,10 +629,29 @@ impl App {
                 }
                 self.workspace_save_definitions(next);
             }
-            Command::Background(background) => {
+            Command::BackgroundCommon(rgb) => {
                 if self.workspaces.preview.is_some() {
                     return;
                 }
+                let background = rgb.map_or(Background::Black {}, |rgb| self.workspaces.background().with_common(rgb));
+                let mut next = self.workspaces.catalogue.clone().expect("ready workspace catalogue");
+                next.background = background;
+                self.workspace_save_definitions(next);
+            }
+            Command::BackgroundDisplay(arrangement, index, rgb) => {
+                if self.workspaces.preview.is_some() {
+                    return;
+                }
+                // Recheck after the click, without using the advisory cached
+                // topology that painted it. No monitor identity is persisted.
+                self.workspace_displays.refresh(window, self.egui_ctx.pixels_per_point());
+                if self.workspace_displays.arrangement() != Some(&arrangement) {
+                    self.workspaces.status = Status::Invalid;
+                    return;
+                }
+                let Some(background) = self.workspaces.background().with_display(&arrangement, index, rgb) else {
+                    return;
+                };
                 let mut next = self.workspaces.catalogue.clone().expect("ready workspace catalogue");
                 next.background = background;
                 self.workspace_save_definitions(next);
@@ -773,7 +792,7 @@ impl App {
         } else if p.commit {
             let extra = p.layout.additional_inventory.clone();
             let huds = p.layout.huds.clone();
-            let background = p.layout.background;
+            let background = p.layout.background.clone();
             let folder_restored = self.workspace_restore_folder(p.layout.inventory_folder);
             let expanded_restored = self.workspace_restore_expanded(p.layout.inventory_expanded.as_ref());
             self.workspaces.finish_placement(p);

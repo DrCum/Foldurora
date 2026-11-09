@@ -13618,3 +13618,8 @@ workspaces-expanded-unavailable = 展開状態を確認できません。メイ�
 
 workspaces-capture-additional = 追加インベントリウィンドウを記憶
 workspaces-additional-unavailable = 追加インベントリを復元できませんでした。ダイアログを閉じて編集を終え、再試行してください。
+
+workspaces-background-common = 共通の色
+workspaces-background-display = ディスプレイ { $number }
+workspaces-background-display-fallback = ディスプレイの配置が変わったため、共通の色を使用します。
+workspaces-background-inherit = 共通の色を使用

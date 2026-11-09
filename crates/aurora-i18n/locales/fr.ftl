@@ -13653,3 +13653,8 @@ workspaces-expanded-unavailable = Dossiers développés indisponibles. Utilisez 
 
 workspaces-capture-additional = Mémoriser la fenêtre d’inventaire supplémentaire
 workspaces-additional-unavailable = L’inventaire supplémentaire n’a pas pu être restauré. Fermez ses dialogues, terminez les modifications et réessayez.
+
+workspaces-background-common = Couleur commune
+workspaces-background-display = Écran { $number }
+workspaces-background-display-fallback = La disposition des écrans a changé. La couleur commune est utilisée.
+workspaces-background-inherit = Utiliser la couleur commune

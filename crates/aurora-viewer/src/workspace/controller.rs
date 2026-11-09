@@ -1,5 +1,5 @@
 use super::{
-    model::{Background, Catalogue, HudRef, InventoryWindow, Layout, Startup},
+    model::{Arrangement, Background, Catalogue, HudRef, InventoryWindow, Layout, Startup},
     store::Lane,
 };
 use uuid::Uuid;
@@ -37,7 +37,8 @@ pub(crate) enum Command {
     CaptureGraphics(bool),
     CaptureCamera(bool),
     CaptureBackground(bool),
-    Background(Background),
+    BackgroundCommon(Option<[u8; 3]>),
+    BackgroundDisplay(Arrangement, usize, Option<[u8; 3]>),
     CaptureHuds(bool),
     CaptureAdditionalInventory(bool),
     SelectHud(HudRef, bool),
@@ -244,9 +245,9 @@ impl Controller {
             .filter(|p| p.binding == self.binding && &p.source == source && p.writing)
             .and_then(|p| p.expected.as_ref())
             .filter(|c| c.account == source.agent && c.grid == source.grid)
-            .map_or(catalogue.background, |c| c.background);
+            .map_or_else(|| catalogue.background.clone(), |c| c.background.clone());
         if let Some(preview) = &self.preview {
-            return preview.background.unwrap_or(committed);
+            return preview.background.clone().unwrap_or(committed);
         }
         committed
     }
@@ -284,7 +285,7 @@ impl Controller {
             baseline.huds = current.huds;
         }
         if baseline.background.is_none() && layout.background.is_some() {
-            baseline.background = current.background;
+            baseline.background = current.background.clone();
         }
         if baseline.camera.is_none() && layout.camera.is_some() {
             baseline.camera = current.camera;
@@ -303,7 +304,7 @@ impl Controller {
             baseline: baseline.clone(),
             active,
             candidate: id,
-            background: layout.background,
+            background: layout.background.clone(),
         });
         self.placement = Some(Placement {
             layout,
@@ -327,7 +328,7 @@ impl Controller {
             baseline: current.clone(),
             active: self.active,
             candidate: active.unwrap_or(Uuid::nil()),
-            background: layout.background,
+            background: layout.background.clone(),
         });
         self.placement = Some(Placement {
             layout,
@@ -781,16 +782,16 @@ mod tests {
         let mut catalogue = Catalogue::empty(source.agent, source.grid.clone());
         let committed = Background::Solid { rgb: [10, 20, 30] };
         let candidate = Background::Solid { rgb: [40, 50, 60] };
-        catalogue.background = committed;
+        catalogue.background = committed.clone();
         let mut c = Controller {
             source: Some(source),
             catalogue: Some(catalogue),
             ..Default::default()
         };
         let mut live = layout(0.0);
-        live.background = Some(committed);
+        live.background = Some(committed.clone());
         let mut target = layout(10.0);
-        target.background = Some(candidate);
+        target.background = Some(candidate.clone());
         c.begin_preview(target, Uuid::new_v4(), live, false);
         assert_eq!(c.background(), candidate);
         assert_eq!(c.catalogue.as_ref().unwrap().background, committed);
@@ -857,7 +858,7 @@ mod tests {
             name: "Old".into(),
             layout: record_layout,
         });
-        let expected = catalogue.background;
+        let expected = catalogue.background.clone();
         let mut c = Controller {
             source: Some(source),
             catalogue: Some(catalogue),
@@ -870,6 +871,37 @@ mod tests {
             expected,
             "geometry-only Previous must not borrow that record's old context"
         );
+    }
+    #[test]
+    fn workspace_display_background_preview_and_previous_keep_full_original_rules_and_source_fence() {
+        let s = source();
+        let topology = Arrangement::from_physical(&[[0, 0, 100, 100], [100, 0, 200, 100]]).unwrap();
+        let original = Background::Solid { rgb: [1, 2, 3] }
+            .with_display(&topology, 1, Some([4, 5, 6]))
+            .unwrap();
+        let candidate = original.with_display(&topology, 0, Some([7, 8, 9])).unwrap();
+        let mut catalogue = Catalogue::empty(s.agent, s.grid.clone());
+        catalogue.background = original.clone();
+        let mut c = Controller {
+            source: Some(s),
+            catalogue: Some(catalogue),
+            ..Default::default()
+        };
+        let mut live = layout(0.0);
+        live.background = Some(original.clone());
+        let mut target = layout(5.0);
+        target.background = Some(candidate.clone());
+        let baseline = c.begin_preview(target, Uuid::new_v4(), live.clone(), true);
+        assert_eq!(baseline.background, Some(original.clone()));
+        assert_eq!(c.background(), candidate);
+        assert_eq!(c.catalogue.as_ref().unwrap().background, original);
+        let placement = c.placement.take().unwrap();
+        c.finish_placement(placement);
+        assert_eq!(c.previous.as_ref().unwrap().0.background, Some(original.clone()));
+        c.begin_previous(live);
+        assert_eq!(c.background(), original);
+        c.bind(None);
+        assert_eq!(c.background(), Background::Black {});
     }
     #[test]
     fn workspace_hud_preview_baseline_and_previous_preserve_only_the_scoped_additive_set() {
