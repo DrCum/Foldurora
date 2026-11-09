@@ -80,9 +80,14 @@ pub(crate) struct Layout {
     pub geometry: [Option<Geometry>; 4],
     pub viewport: Viewport,
     pub bars: Bars,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inventory_folder: Option<Uuid>,
 }
 impl Layout {
     pub(crate) fn validate(&self) -> Result<(), &'static str> {
+        if self.inventory_folder.is_some_and(|id| id.is_nil()) {
+            return Err("inventory folder");
+        }
         for g in self.geometry.iter().flatten() {
             if g.point >= 8
                 || g.offset.iter().any(|v| !v.is_finite() || v.abs() > 32768.0)
@@ -110,6 +115,22 @@ impl Layout {
         settings.place_bar_stretch = self.bars.stretch;
         settings.place_bar_rights_text = self.bars.rights_text;
     }
+    pub(crate) fn baseline_for(&self, target: &Self) -> Self {
+        let mut baseline = self.clone();
+        if target.inventory_folder.is_none() {
+            baseline.inventory_folder = None;
+        }
+        baseline
+    }
+    pub(crate) fn matches(&self, current: &Self) -> bool {
+        self.geometry == current.geometry
+            && self.viewport == current.viewport
+            && self.bars == current.bars
+            && self
+                .inventory_folder
+                .zip(current.inventory_folder)
+                .is_none_or(|(saved, live)| saved == live)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -136,6 +157,8 @@ pub(crate) struct Catalogue {
     pub last_layout: Option<Layout>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub show_favorites: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub remember_folders: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -175,6 +198,7 @@ impl Catalogue {
             startup: Startup::Disabled,
             last_layout: None,
             show_favorites: false,
+            remember_folders: false,
         }
     }
     pub(crate) fn validate(&self) -> Result<(), &'static str> {
@@ -249,6 +273,7 @@ mod tests {
     use super::*;
     fn layout() -> Layout {
         Layout {
+            inventory_folder: None,
             geometry: [Some(Geometry {
                 point: 7,
                 offset: [-32768.0, 32768.0],
@@ -424,5 +449,44 @@ mod tests {
         c.last_layout = Some(layout());
         c.last_layout.as_mut().unwrap().viewport.left = f32::NAN;
         assert!(c.validate().is_err());
+    }
+    #[test]
+    fn workspace_folder_restore_is_optional_validated_and_scoped_to_its_record() {
+        let mut live = layout();
+        let folder = Uuid::new_v4();
+        live.inventory_folder = Some(folder);
+        let saved = layout();
+        assert!(saved.matches(&live));
+        assert!(live.baseline_for(&saved).inventory_folder.is_none());
+        let mut target = saved.clone();
+        target.inventory_folder = Some(Uuid::new_v4());
+        assert!(!target.matches(&live));
+        let mut unknown = live.clone();
+        unknown.inventory_folder = None;
+        assert!(
+            target.matches(&unknown),
+            "an unobserved folder does not establish a layout difference"
+        );
+        assert_eq!(live.baseline_for(&target).inventory_folder, Some(folder));
+        target.inventory_folder = Some(Uuid::nil());
+        assert!(target.validate().is_err());
+    }
+    #[test]
+    fn workspace_folder_references_roundtrip_inside_account_scoped_catalogue() {
+        let mut c = Catalogue::empty(Uuid::new_v4(), "a".repeat(64));
+        let mut saved = layout();
+        let folder = Uuid::new_v4();
+        saved.inventory_folder = Some(folder);
+        c.remember_folders = true;
+        c.records.push(Record {
+            id: Uuid::new_v4(),
+            name: "Folder desk".into(),
+            layout: saved,
+        });
+        let b = c.encode().unwrap();
+        let loaded = Catalogue::decode(&b, c.account, &c.grid).unwrap();
+        assert_eq!(loaded.records[0].layout.inventory_folder, Some(folder));
+        assert!(loaded.remember_folders);
+        assert!(Catalogue::decode(&b, Uuid::new_v4(), &c.grid).is_err());
     }
 }

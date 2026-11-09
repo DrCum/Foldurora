@@ -84,8 +84,13 @@ impl App {
             None => true,
         }
     }
-    fn workspace_capture(&self) -> Layout {
+    fn workspace_capture(&mut self, include_folder: bool) -> Layout {
+        let folder = include_folder
+            .then(|| self.inventory_ui.workspace_folder(&self.world.inventory))
+            .flatten();
+        let inventory_folder = folder.filter(|id| self.workspace_folder_allowed(*id));
         Layout {
+            inventory_folder,
             geometry: ui::layout::workspace_capture(&self.egui_ctx),
             viewport: Viewport::from(&self.settings.world_viewport),
             bars: Bars {
@@ -94,6 +99,10 @@ impl App {
                 rights_text: self.settings.place_bar_rights_text,
             },
         }
+    }
+    fn workspace_capture_for_save(&mut self) -> Layout {
+        let include = self.workspaces.catalogue.as_ref().is_some_and(|c| c.remember_folders);
+        self.workspace_capture(include)
     }
     pub(super) fn workspace_cancel_preview(&mut self, restore_geometry: bool) {
         let Some(p) = self.workspaces.preview.take() else { return };
@@ -301,7 +310,7 @@ impl App {
                 if layout.validate().is_err() {
                     return;
                 }
-                let current = self.workspace_capture();
+                let current = self.workspace_capture(layout.inventory_folder.is_some());
                 if self.workspaces.preview.is_some() {
                     ui::layout::workspace_restore(&self.egui_ctx);
                 }
@@ -318,7 +327,12 @@ impl App {
                 self.egui_ctx.input_mut(|i| i.pointer = Default::default());
             }
             Command::Previous => {
-                let current = self.workspace_capture();
+                let include = self
+                    .workspaces
+                    .previous
+                    .as_ref()
+                    .is_some_and(|(layout, _)| layout.inventory_folder.is_some());
+                let current = self.workspace_capture(include);
                 let Some(baseline) = self.workspaces.begin_previous(current) else {
                     return;
                 };
@@ -350,7 +364,7 @@ impl App {
                             self.workspaces.status = Status::Invalid;
                             return;
                         }
-                        let layout = self.workspace_capture();
+                        let layout = self.workspace_capture_for_save();
                         if layout.validate().is_err() {
                             self.workspaces.status = Status::Invalid;
                             return;
@@ -418,7 +432,7 @@ impl App {
                 let mut next = self.workspaces.catalogue.clone().expect("ready workspace catalogue");
                 next.startup = startup;
                 if startup == Startup::LastArrangement {
-                    next.last_layout = Some(self.workspace_capture());
+                    next.last_layout = Some(self.workspace_capture_for_save());
                 }
                 self.workspace_save_definitions(next);
             }
@@ -428,6 +442,17 @@ impl App {
                 }
                 let mut next = self.workspaces.catalogue.clone().expect("ready workspace catalogue");
                 next.show_favorites = show;
+                self.workspace_save_definitions(next);
+            }
+            Command::RememberFolders(remember) => {
+                if self.workspaces.preview.is_some() {
+                    return;
+                }
+                let mut next = self.workspaces.catalogue.clone().expect("ready workspace catalogue");
+                next.remember_folders = remember;
+                if !remember && let Some(last) = &mut next.last_layout {
+                    last.inventory_folder = None;
+                }
                 self.workspace_save_definitions(next);
             }
             Command::Cancel | Command::Retry => {}
@@ -462,7 +487,11 @@ impl App {
             p.room = Some(room);
             self.workspaces.placement = Some(p);
         } else if p.commit {
+            let folder_restored = self.workspace_restore_folder(p.layout.inventory_folder);
             self.workspaces.finish_placement(p);
+            if !folder_restored {
+                self.workspaces.status = Status::FolderUnavailable;
+            }
             self.settings.workspace_held = None;
             ui::layout::workspace_preview(&self.egui_ctx, None);
             self.layout_autosave.request(std::time::Instant::now());
@@ -485,11 +514,42 @@ impl App {
             }
         }
     }
-    pub(super) fn workspace_modified(&self) -> bool {
-        self.workspaces
+    pub(super) fn workspace_modified(&mut self) -> bool {
+        let saved = self
+            .workspaces
             .active
             .and_then(|id| self.workspaces.record(id))
-            .is_some_and(|r| self.workspace_capture() != r.layout)
+            .map(|r| r.layout.clone());
+        let Some(saved) = saved else {
+            return false;
+        };
+        !saved.matches(&self.workspace_capture(saved.inventory_folder.is_some()))
+    }
+
+    fn workspace_restore_folder(&mut self, folder: Option<Uuid>) -> bool {
+        let Some(folder) = folder else {
+            return true;
+        };
+        let allowed = self.workspace_folder_allowed(folder);
+        if allowed {
+            self.inventory_ui.restore_workspace_folder(&self.world.inventory, folder);
+        }
+        allowed
+    }
+    fn workspace_folder_allowed(&mut self, folder: Uuid) -> bool {
+        let owner = Uuid::nil(); // The exact main Inventory owner, never a current extra window.
+        if self.world.inventory.owner != self.world.agent_id
+            || self.world.rlva.has("showinv")
+            || !self.inventory_ui.jump_owner_visible(&self.egui_ctx, self.panels.inventory, owner)
+        {
+            return false;
+        }
+        {
+            let (instance, read) = super::folder_jump::archive_read(&mut self.inventory_ui, &self.world, owner);
+            let gate = ui::inventory::archive::State::ordinary(instance, read.as_ref(), self.world.inventory_archive_instance);
+            read.as_ref().is_some_and(|read| read.passes(folder))
+                && ui::inventory::folder_jump::current_folder(&self.world.inventory, folder, gate.mask())
+        }
     }
 
     fn workspace_save_definitions(&mut self, mut next: Catalogue) {
@@ -536,7 +596,7 @@ impl App {
         if layout.validate().is_err() {
             return;
         }
-        let current = self.workspace_capture();
+        let current = self.workspace_capture(layout.inventory_folder.is_some());
         let baseline = self.workspaces.begin_preview(layout, id.unwrap_or(Uuid::nil()), current, true);
         if id.is_none() {
             self.workspaces.placement.as_mut().expect("startup placement").active = None;
@@ -567,7 +627,17 @@ impl App {
         {
             return;
         }
-        let layout = self.workspace_capture();
+        let mut layout = self.workspace_capture_for_save();
+        if layout.inventory_folder.is_none() && self.workspaces.catalogue.as_ref().is_some_and(|c| c.remember_folders) {
+            // An unobserved/closed owner must not erase an earlier authorized
+            // folder reference in this same account/grid's saved arrangement.
+            layout.inventory_folder = self
+                .workspaces
+                .catalogue
+                .as_ref()
+                .and_then(|c| c.last_layout.as_ref())
+                .and_then(|l| l.inventory_folder);
+        }
         let now = std::time::Instant::now();
         let stable = self
             .workspaces

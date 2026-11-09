@@ -32,6 +32,7 @@ pub(crate) enum Command {
     Favorite(Uuid),
     Startup(Startup),
     ShowFavorites(bool),
+    RememberFolders(bool),
 }
 #[derive(Clone, Debug)]
 pub(crate) struct Action {
@@ -48,6 +49,7 @@ pub(crate) enum Status {
     Error,
     Invalid,
     Previewing,
+    FolderUnavailable,
 }
 pub(crate) struct Preview {
     pub baseline: Layout,
@@ -149,7 +151,19 @@ impl Controller {
         self.advance();
     }
     pub(crate) fn begin_preview(&mut self, layout: Layout, id: Uuid, current: Layout, commit: bool) -> Layout {
-        let baseline = self.preview.as_ref().map_or(current, |p| p.baseline.clone());
+        let mut baseline = self
+            .preview
+            .as_ref()
+            .map_or_else(|| current.baseline_for(&layout), |p| p.baseline.clone());
+        if baseline.inventory_folder.is_none() && layout.inventory_folder.is_some() {
+            baseline.inventory_folder = current.inventory_folder;
+        }
+        let previous = commit.then(|| {
+            (
+                baseline.baseline_for(&layout),
+                self.preview.as_ref().map_or(self.active, |p| p.active),
+            )
+        });
         let active = self.preview.as_ref().map_or(self.active, |p| p.active);
         self.preview = Some(Preview {
             baseline: baseline.clone(),
@@ -162,7 +176,7 @@ impl Controller {
             commit,
             active: Some(id),
             room: None,
-            previous: commit.then(|| (baseline.clone(), active)),
+            previous,
             restore_absence: false,
         });
         self.status = Status::Previewing;
@@ -173,6 +187,7 @@ impl Controller {
             return None;
         }
         let (layout, active) = self.previous.clone()?;
+        let current = current.baseline_for(&layout);
         self.preview = Some(Preview {
             baseline: current.clone(),
             active: self.active,
@@ -459,6 +474,7 @@ mod tests {
     fn layout(left: f32) -> Layout {
         let s = crate::settings::Settings::default();
         Layout {
+            inventory_folder: None,
             geometry: [Some(super::super::model::Geometry {
                 point: 0,
                 offset: [left, 0.0],
@@ -567,5 +583,22 @@ mod tests {
         c.bind(Some(next));
         assert!(c.startup_waiting);
         assert!(!c.accepts(&ticket));
+    }
+    #[test]
+    fn workspace_previous_only_restores_folder_when_the_switch_included_it() {
+        let mut c = Controller::default();
+        let mut live = layout(0.0);
+        live.inventory_folder = Some(Uuid::new_v4());
+        let target = layout(12.0);
+        c.begin_preview(target.clone(), Uuid::new_v4(), live.clone(), true);
+        let placement = c.placement.take().unwrap();
+        c.finish_placement(placement);
+        assert!(c.previous.as_ref().unwrap().0.inventory_folder.is_none());
+        let mut target = target;
+        target.inventory_folder = Some(Uuid::new_v4());
+        c.begin_preview(target, Uuid::new_v4(), live.clone(), true);
+        let placement = c.placement.take().unwrap();
+        c.finish_placement(placement);
+        assert_eq!(c.previous.as_ref().unwrap().0.inventory_folder, live.inventory_folder);
     }
 }

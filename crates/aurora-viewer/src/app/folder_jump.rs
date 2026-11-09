@@ -10,7 +10,7 @@ use crate::world::{World, inventory_archive::visibility::VisibilityRead};
 use winit::event::{ElementState, WindowEvent};
 use winit::keyboard::{Key, PhysicalKey};
 
-fn archive_read<'a>(ui: &'a mut InventoryUi, world: &'a World, owner: uuid::Uuid) -> (Option<u64>, Option<VisibilityRead<'a>>) {
+pub(super) fn archive_read<'a>(ui: &'a mut InventoryUi, world: &'a World, owner: uuid::Uuid) -> (Option<u64>, Option<VisibilityRead<'a>>) {
     let Some(state) = ui.archive_owner_mut(owner) else {
         return (None, None);
     };

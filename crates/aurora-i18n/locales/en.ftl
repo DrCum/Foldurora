@@ -13627,3 +13627,6 @@ workspaces-startup-selected = Selected workspace
 workspaces-favorite = Favorite
 workspaces-unfavorite = Remove favorite
 workspaces-startup-named = Saved: { $name }
+
+workspaces-remember-folders = Remember the main Inventory folder (restore on Switch)
+workspaces-folder-unavailable = Inventory folder was not restored. Open Inventory and try again.

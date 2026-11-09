@@ -837,6 +837,24 @@ impl InventoryUi {
         self.show_original(inv, id);
         self.reveal_path.insert(id);
     }
+    /// Capture only a loaded folder reference, never an asset, label or path.
+    pub(crate) fn workspace_folder(&self, inv: &Inventory) -> Option<Uuid> {
+        let selected = self.selected?;
+        let folder = if inv.folders.contains_key(&selected) {
+            selected
+        } else {
+            rules::parent(inv, selected)?
+        };
+        inv.folders
+            .get(&folder)
+            .filter(|folder| !folder.library && folder.info.type_default != 14)
+            .map(|_| folder)
+    }
+    /// The App revalidates native owner/RLVa/archive visibility before this call.
+    pub(crate) fn restore_workspace_folder(&mut self, inv: &Inventory, id: Uuid) {
+        self.show_notified(inv, id);
+        self.reveal_path.insert(id);
+    }
 
     pub fn selected_ids(&self, id: Uuid) -> Vec<Uuid> {
         let mut ids: Vec<_> = if self.selection.contains(&id) {

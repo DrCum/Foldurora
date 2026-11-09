@@ -13623,3 +13623,6 @@ workspaces-startup-selected = Espace sélectionné
 workspaces-favorite = Favori
 workspaces-unfavorite = Retirer des favoris
 workspaces-startup-named = Enregistré : { $name }
+
+workspaces-remember-folders = Mémoriser le dossier principal de l’inventaire (restauré à l’application)
+workspaces-folder-unavailable = Le dossier n’a pas été restauré. Ouvrez l’inventaire et réessayez.

@@ -95,6 +95,7 @@ impl WorkspaceUi {
                     Status::Invalid => tr!("workspaces-invalid"),
                     Status::Previewing => tr!("workspaces-previewing"),
                     Status::Ready => tr!("workspaces-ready"),
+                    Status::FolderUnavailable => tr!("workspaces-folder-unavailable"),
                 };
                 ui.label(status);
                 if let Some(r) = c.preview.as_ref().map(|p| p.candidate).or(c.active).and_then(|id| c.record(id)) {
@@ -106,6 +107,16 @@ impl WorkspaceUi {
                 }
                 if let Some(cat) = &c.catalogue {
                     let mut show = cat.show_favorites;
+                    let mut folders = cat.remember_folders;
+                    if ui
+                        .add_enabled(
+                            enabled && c.preview.is_none(),
+                            egui::Checkbox::new(&mut folders, tr!("workspaces-remember-folders")),
+                        )
+                        .changed()
+                    {
+                        command = Some(Command::RememberFolders(folders));
+                    }
                     if ui
                         .add_enabled(
                             enabled && c.preview.is_none(),
@@ -363,6 +374,7 @@ mod tests {
         };
         let s = crate::settings::Settings::default();
         let layout = Layout {
+            inventory_folder: None,
             geometry: [None; 4],
             viewport: (&s.world_viewport).into(),
             bars: Bars {
