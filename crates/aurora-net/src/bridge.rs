@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 pub mod portal;
 pub mod query;
+pub mod shared_pose;
 
 #[derive(Clone)]
 pub struct Endpoint {

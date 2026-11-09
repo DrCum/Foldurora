@@ -13,6 +13,8 @@ const MAX_REPLY: usize = 4096;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Query {
+    SharedPoseEnable(bool),
+    SharedPosePacket { target: Uuid, packet: super::shared_pose::Packet },
     Portal { target: Uuid, message: super::portal::Message },
     Pose { request: Uuid, kind: PoseKind, target: Uuid },
     Altitudes(Vec<Uuid>),
@@ -97,6 +99,7 @@ pub struct ObjectInfo {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Reply {
+    SharedPose,
     Portal,
     Pose,
     Altitudes(Vec<Altitude>),
@@ -107,6 +110,7 @@ pub enum Reply {
 impl Query {
     pub fn valid(&self) -> bool {
         match self {
+            Self::SharedPoseEnable(_) | Self::SharedPosePacket { .. } => true,
             Self::Portal { target, message } => {
                 message.encode().is_some()
                     && (!matches!(
@@ -126,6 +130,8 @@ impl Query {
     }
     fn body(&self, token: Uuid) -> String {
         match self {
+            Self::SharedPoseEnable(enabled) => format!("query|{token}|sharedenable|{}", u8::from(*enabled)),
+            Self::SharedPosePacket { target, packet } => format!("query|{token}|shared|{target},{}", packet.as_str()),
             Self::Portal { target, message } => format!("query|{token}|portal|{target},{}", message.encode().unwrap_or_default()),
             Self::Pose { request, kind, target } => format!("query|{token}|pose|{},{request},{target}", kind.wire()),
             Self::Altitudes(ids) => format!(
@@ -143,6 +149,7 @@ impl Query {
         let value: Value = serde_json::from_slice(bytes).ok()?;
         let values = value.as_array()?;
         match self {
+            Self::SharedPoseEnable(_) | Self::SharedPosePacket { .. } => values.is_empty().then_some(Reply::SharedPose),
             Self::Portal { .. } => values.is_empty().then_some(Reply::Portal),
             Self::Pose { .. } => values.is_empty().then_some(Reply::Pose),
             Self::Altitudes(requested) => {
@@ -244,8 +251,17 @@ fn components<const N: usize>(value: &Value) -> Option<[f64; N]> {
 }
 
 pub async fn send(endpoint: Endpoint, query: Query) -> Result<Reply, String> {
+    send_guarded(endpoint, query, || true).await
+}
+
+/// Admission immediately before the single POST. The caller supplies captured
+/// native/assistant authority; rejection never retries or changes endpoints.
+pub async fn send_guarded(endpoint: Endpoint, query: Query, allowed: impl FnOnce() -> bool) -> Result<Reply, String> {
     if !valid_url(&endpoint.url) || endpoint.token.is_nil() || !query.valid() {
         return Err(aurora_i18n::tr!("bridge-request-failed").into());
+    }
+    if !allowed() {
+        return Err("Native shared-pose authority expired before submission".into());
     }
     let mut response = http()?
         .post(&endpoint.url)

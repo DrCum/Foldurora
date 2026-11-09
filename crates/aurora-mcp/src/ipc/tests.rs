@@ -148,6 +148,7 @@ fn synthetic_wire(discovery: &Discovery) -> DescriptorWire {
         installation: discovery.installation,
         instance: HostId::from_bytes(*Uuid::new_v4().as_bytes()).unwrap(),
         secret: "1".repeat(64),
+        domain: discovery.domain,
     }
 }
 fn publish_fixture_file(discovery: &Discovery, wire: &DescriptorWire) -> platform::FileIdentity {

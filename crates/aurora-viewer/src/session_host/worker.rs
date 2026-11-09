@@ -8,6 +8,7 @@ use std::sync::OnceLock;
 use std::time::Instant;
 
 pub(crate) mod action;
+mod native_control;
 mod preview;
 pub(crate) use preview::AcceptedNativePreviewSource;
 /// Fixed reservation inside the worker image lane's 1 MiB metadata headroom.
@@ -94,6 +95,7 @@ impl DisplayGate {
 }
 
 pub(crate) struct WorkerBridge {
+    native: native_control::Control,
     config: WorkerConfig,
     io: WorkerIo,
     guard: WorkerGuard,
@@ -138,6 +140,7 @@ impl WorkerBridge {
         });
         let preview = preview::Runtime::from_config(&startup.config);
         Ok(Some(Self {
+            native: native_control::Control::start(&startup.config, &startup.directory)?,
             config: startup.config.clone(),
             io: WorkerIo::start(startup.config.clone(), startup.directory.clone())?,
             guard: WorkerGuard::new(startup.config.identity, startup.config.lease_epoch, 0)?,
@@ -166,9 +169,7 @@ impl WorkerBridge {
     /// before pump_display may publish any completed handoff acknowledgment.
     pub fn tick(&mut self, status: WorkerStatus, account: Option<(AccountKey, GridKey)>) -> WorkerEffects {
         self.status = status;
-        if self.detached {
-            return WorkerEffects::default();
-        }
+        self.native.expire(Instant::now());
         if account != self.previous_account {
             if account.is_some() {
                 let Some(next) = self.generation.checked_add(1) else {
@@ -177,6 +178,13 @@ impl WorkerBridge {
                 self.generation = next;
             }
             self.previous_account = account;
+        }
+        if !native_session_current(self.guard.binding(), account, self.generation, self.status.phase) {
+            self.native.source_changed();
+        }
+        if self.detached {
+            self.finish_detached_native();
+            return WorkerEffects::default();
         }
         if account.is_some_and(|(account, grid)| {
             self.config.expected_account.is_some_and(|key| key != account) || self.config.expected_grid.is_some_and(|key| key != grid)
@@ -205,7 +213,24 @@ impl WorkerBridge {
             let Message::Command(command) = &envelope.message else {
                 continue;
             };
+            if let Command::Native(request) = command
+                && request.action == aurora_session::native::NativeAction::RestoreExit
+                && !self.native.can_restore(envelope.binding, *request)
+            {
+                self.io.reply(
+                    self.guard.binding(),
+                    envelope.sequence,
+                    Event::Rejected {
+                        activation: request.id,
+                        reason: RejectReason::Blocked,
+                    },
+                );
+                continue;
+            }
+            let cancellation =
+                matches!(command, Command::Native(request) if request.action == aurora_session::native::NativeAction::CancelExit);
             if command.session_bound()
+                && !cancellation
                 && (!self.supported || !self.admitted || (self.status.blocked && !matches!(command, Command::Revoke { .. })))
             {
                 if envelope.binding == self.guard.binding() && envelope.lease_epoch == self.config.lease_epoch {
@@ -225,6 +250,20 @@ impl WorkerBridge {
                 continue;
             }
             if let Ok(transition) = self.guard.on_command(&envelope, now) {
+                if let Command::Native(request) = command {
+                    match request.action {
+                        aurora_session::native::NativeAction::RestoreExit => self.native.restore_requested(),
+                        aurora_session::native::NativeAction::CommitExit | aurora_session::native::NativeAction::CancelExit => {
+                            self.native.finalize(self.guard.binding(), *request, false);
+                        }
+                        _ => {
+                            self.native
+                                .accept(self.guard.binding(), *request, self.guard.mode() == WorkerMode::Standby);
+                        }
+                    }
+                } else if matches!(command, Command::Detach) {
+                    self.native.cancel_prepared();
+                }
                 // The same Arc is held by App policy and in-flight image IO.
                 // Revoke before any native effect or accepted-control reply.
                 self.preview_accepted_command(command);
@@ -258,6 +297,81 @@ impl WorkerBridge {
         self.sync_chat_source();
         self.refresh_preview_source();
         final_display_effects(effects, self.guard.mode())
+    }
+
+    /// Detached workers accept only exact finalization for their still-live
+    /// preparation, or a worker-scoped ordinary detach which cancels it. This
+    /// never updates the managed guard to a replacement login or revives input.
+    fn finish_detached_native(&mut self) {
+        if self.io.failed() {
+            self.native.cancel_prepared();
+        }
+        if self.native.requires_io() {
+            let now = session_clock(&mut self.since, Instant::now());
+            let commands: Vec<_> = self.io.commands().collect();
+            for envelope in commands {
+                let Message::Command(command) = &envelope.message else {
+                    continue;
+                };
+                if !matches!(command, Command::Detach) && !matches!(command, Command::Native(request) if request.action.finalization()) {
+                    continue;
+                }
+                let Ok(transition) = self.guard.on_command(&envelope, now) else {
+                    continue;
+                };
+                let accepted = match command {
+                    Command::Detach => {
+                        self.native.cancel_prepared();
+                        true
+                    }
+                    Command::Native(request) => {
+                        let restored = matches!(self.gate, DisplayGate::Detached)
+                            && self.status.phase == aurora_session::Phase::Online
+                            && !self.status.blocked;
+                        self.native.finalize(self.guard.binding(), *request, restored)
+                    }
+                    _ => false,
+                };
+                if let Some(reply) = transition.reply {
+                    let event = if accepted {
+                        reply.event
+                    } else {
+                        Event::Rejected {
+                            activation: command.activation(),
+                            reason: RejectReason::Blocked,
+                        }
+                    };
+                    self.io.reply(self.guard.binding(), envelope.sequence, event);
+                }
+            }
+        }
+        if !self.native.requires_io() {
+            self.io.stop();
+        }
+    }
+
+    pub(crate) fn native_logged_out(&mut self) {
+        self.native.logged_out();
+    }
+    pub(crate) fn observe_native(&mut self, display: Option<aurora_session::native::PermittedDisplay>) {
+        // The detached guard retains its old Binding solely to correlate final
+        // receipts. A later ordinary login must never label that old identity.
+        let display = if self.detached { None } else { display };
+        self.native.observe(
+            self.guard.binding(),
+            self.config.lease_epoch,
+            self.supported && self.admitted && !self.detached,
+            display,
+        );
+    }
+    pub(crate) fn take_native_exit(&mut self) -> bool {
+        self.native.take_exit(self.detached && matches!(self.gate, DisplayGate::Detached))
+    }
+    pub(crate) fn native_exit_choice(&mut self, outcome: aurora_session::native::NativeOutcome) {
+        self.native.outcome(outcome);
+    }
+    pub(crate) fn native_exit_prompt(&self) -> bool {
+        self.native.prompt_open()
     }
 
     pub fn input_allowed(&self) -> bool {
@@ -374,6 +488,9 @@ impl WorkerBridge {
     /// Retention authority has no ordinary-viewer/unsupported fallback and
     /// survives a normal managed park. It does not authorize new images.
     pub(crate) fn preview_scope(&self) -> Option<PreviewScope> {
+        if self.native.trimming() {
+            return None;
+        }
         let facts = self.native_authority(self.window != 0 && self.status.native_window == self.window);
         facts.scope(Instant::now())
     }
@@ -455,6 +572,9 @@ impl WorkerBridge {
     }
 
     fn fail_closed(&mut self) -> WorkerEffects {
+        if !self.native.restoring() {
+            self.native.cancel_prepared();
+        }
         self.retire_preview_source();
         self.preview_grant = None;
         self.detached = true;
@@ -491,8 +611,16 @@ impl WorkerBridge {
     /// thread. No device poll, file operation or GPU wait occurs on this path.
     pub fn pump_display(&mut self, effects: WorkerEffects, window: &winit::window::Window, renderer: &mut aurora_render::Renderer) -> bool {
         let previously_supported = self.supported;
-        self.supported = cfg!(windows) && renderer.session_boundary().is_ok()
-            || (cfg!(windows) && matches!(self.gate, DisplayGate::Draining { .. } | DisplayGate::FrameFence { .. }));
+        let boundary = renderer.session_boundary();
+        self.supported = cfg!(windows)
+            && (boundary.is_ok()
+                || matches!(self.gate, DisplayGate::Draining { .. } | DisplayGate::FrameFence { .. })
+                || (self.native.trimming() && matches!(boundary, Err(aurora_render::SessionFenceError::Busy))));
+        self.native.pump_background(
+            renderer,
+            &mut self.next_ticket,
+            self.guard.mode() == WorkerMode::Standby && matches!(self.gate, DisplayGate::Standby),
+        );
         let current = native_window(window);
         let changed = self.window != 0 && current != self.window;
         self.window = current;
@@ -502,13 +630,19 @@ impl WorkerBridge {
         }
         if self.detached {
             if matches!(self.gate, DisplayGate::Detached) {
+                if !self.native.requires_io() {
+                    self.io.stop();
+                }
                 return false;
             }
             self.cancel_fence(renderer);
             self.presentation.restore(window);
             self.gate = DisplayGate::Detached;
+            self.native.restored();
             self.io.reply(self.guard.binding(), self.request_sequence, Event::Detached);
-            self.io.stop();
+            if !self.native.requires_io() {
+                self.io.stop();
+            }
             return false;
         }
         if previously_supported && !self.supported && self.guard.binding().session.is_some() {
@@ -799,6 +933,18 @@ fn prepared_proof(
     };
     anyhow::ensure!(boundary.accepts(proof), "prepared frame belongs to an old surface or submission");
     Ok(proof)
+}
+
+fn native_session_current(
+    binding: aurora_session::Binding,
+    account: Option<(AccountKey, GridKey)>,
+    generation: u64,
+    phase: aurora_session::Phase,
+) -> bool {
+    phase == aurora_session::Phase::Online
+        && binding
+            .session
+            .is_some_and(|session| account == Some((session.account, session.grid)) && generation == session.generation)
 }
 
 fn session_clock(since: &mut Option<Instant>, now: Instant) -> u64 {
@@ -1852,5 +1998,39 @@ mod tests {
                 }));
             }
         }
+    }
+    #[test]
+    fn detached_native_preparation_cannot_follow_same_account_relogin_or_phase_change() {
+        use aurora_session::{
+            AccountKey, Binding, GridKey, HostId, InstallationId, Phase, SessionId, SessionIdentity, WorkerId, WorkerIdentity,
+        };
+        let binding = Binding {
+            worker: WorkerIdentity {
+                installation: InstallationId::from_bytes([1; 32]).unwrap(),
+                host: HostId::from_bytes([2; 16]).unwrap(),
+                worker: WorkerId::from_bytes([3; 16]).unwrap(),
+            },
+            session: Some(SessionIdentity {
+                session: SessionId::from_bytes([4; 16]).unwrap(),
+                account: AccountKey::from_bytes([5; 32]).unwrap(),
+                grid: GridKey::from_bytes([6; 32]).unwrap(),
+                generation: 1,
+            }),
+        };
+        let session = binding.session.unwrap();
+        let account = Some((session.account, session.grid));
+        assert!(native_session_current(binding, account, 1, Phase::Online));
+        assert!(
+            !native_session_current(binding, account, 2, Phase::Online),
+            "same account, new actual login epoch"
+        );
+        assert!(!native_session_current(binding, account, 1, Phase::Connecting));
+        assert!(!native_session_current(binding, None, 1, Phase::Login));
+        assert!(!native_session_current(
+            binding,
+            Some((AccountKey::from_bytes([7; 32]).unwrap(), session.grid)),
+            1,
+            Phase::Online
+        ));
     }
 }

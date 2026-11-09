@@ -450,6 +450,23 @@ impl OpenSimExtras {
 
 #[derive(Debug, Clone)]
 pub enum NetEvent {
+    AssistantTake {
+        source: LoginSource,
+        request: Uuid,
+        progress: NativeTakeProgress,
+    },
+    AssistantDialogObserved {
+        source: LoginSource,
+        circuit: Uuid,
+        region: RegionHandle,
+        sender: std::net::SocketAddr,
+        dialog: NativeDialog,
+    },
+    AssistantDialogSubmitted {
+        source: LoginSource,
+        request: Uuid,
+        accepted: bool,
+    },
     /// The mute list (LLMuteList): downloaded file, or keep the cached copy.
     MuteList(crate::social::MuteListSource),
     /// Groups the agent belongs to (AgentGroupDataUpdate; added or updated).
@@ -610,6 +627,16 @@ pub enum NetEvent {
         target: Uuid,
         offset: [f64; 3],
         kind: u8,
+        duration: f32,
+    },
+    /// Typed LLHUDEffectSpiral beam (ViewerEffect type 7), never a generic
+    /// native event payload. Position is global when target is nil.
+    SelectionBeam {
+        effect: Uuid,
+        source: Uuid,
+        target: Uuid,
+        position: [f64; 3],
+        color: [u8; 4],
         duration: f32,
     },
     /// An avatar asks the others to reset its skeleton (ViewerEffect,
@@ -1233,6 +1260,32 @@ pub enum NetEvent {
         request: Uuid,
         result: Result<crate::inventory::upload::Receipt, crate::inventory::upload::Error>,
     },
+    AssistantUploadReady {
+        request: Uuid,
+        result: Result<i32, crate::inventory::upload::Error>,
+    },
+    AssistantUploadCommitted {
+        request: Uuid,
+        result: Result<crate::inventory::upload::assistant::Committed, crate::inventory::upload::Error>,
+    },
+    AssistantUploadVerified {
+        source: LoginSource,
+        request: Uuid,
+        result: Result<crate::inventory::upload::Receipt, crate::inventory::upload::Error>,
+    },
+    AssistantUploadFolderCreated {
+        request: Uuid,
+        result: Result<crate::inventory::InvFolder, String>,
+    },
+    AssistantThumbnailPatched {
+        request: Uuid,
+        result: Result<(), String>,
+    },
+    AssistantThumbnailVerified {
+        source: LoginSource,
+        request: Uuid,
+        result: Result<crate::inventory::upload::assistant::ThumbnailReceipt, String>,
+    },
     UploadCost(i32),
     MeshQuoted {
         request: Uuid,
@@ -1337,6 +1390,26 @@ pub enum NetEvent {
     },
     /// Reply to `NetCommand::FetchInventoryTree`: the folder snapshots it
     /// brought, parents first, or why the read failed.
+    /// Dedicated namespace for source-bound assistant metadata preparation.
+    AssistantInventoryLinkCreated {
+        request: Uuid,
+        result: Result<Uuid, String>,
+    },
+    AssistantLandmark {
+        request: Uuid,
+        item: Uuid,
+        asset: Uuid,
+        result: Result<Vec<u8>, String>,
+    },
+    AssistantInventoryFolder {
+        request: Uuid,
+        parent: Uuid,
+        result: Result<Vec<crate::inventory::FolderContents>, String>,
+    },
+    AssistantInventoryItems {
+        request: Uuid,
+        result: Result<crate::inventory::ais::ItemReads, String>,
+    },
     InventoryTreeFetched {
         request: u64,
         result: Result<Vec<crate::inventory::FolderContents>, String>,
@@ -1356,6 +1429,15 @@ pub enum NetEvent {
     },
     /// A locally requested creation, confirmed by its UDP callback.
     InventoryCreated(crate::inventory::InvItem),
+    /// Correlated native creation without opening an inventory editor.
+    /// An uploaded wearable is held until the native owner revalidates authority.
+    AssistantInventoryAssetReady {
+        request: Uuid,
+    },
+    AssistantInventoryCreated {
+        request: Uuid,
+        result: Result<crate::inventory::InvItem, String>,
+    },
     InventoryItemsFailed {
         items: Vec<Uuid>,
     },
@@ -1439,6 +1521,25 @@ pub enum NetEvent {
     },
 }
 
+#[derive(Debug, Clone)]
+pub struct NativeDialog {
+    pub object: Uuid,
+    pub name: String,
+    pub owner_name: String,
+    pub owner: Uuid,
+    pub message: String,
+    pub channel: i32,
+    pub buttons: Vec<String>,
+}
+#[derive(Debug, Clone)]
+pub enum NativeTakeProgress {
+    Submitted { circuit: Uuid },
+    Ack(bool),
+    Items(Vec<crate::inventory::InvItem>),
+    Removed,
+    Rejected,
+}
+
 /// One avatar record of the People API (GetDisplayNames "agents" entries,
 /// DisplayNameUpdate "agent"), as read by LLAvatarName::fromLLSD.
 #[derive(Debug, Clone, Default)]
@@ -1519,6 +1620,26 @@ impl Default for TouchSurface {
 }
 #[derive(Debug, Clone)]
 pub enum NetCommand {
+    AssistantTakeObject {
+        source: LoginSource,
+        request: Uuid,
+        handle: RegionHandle,
+        object: Uuid,
+        local_id: u32,
+        destination: Uuid,
+        copy: bool,
+    },
+    AssistantDialogReply {
+        source: LoginSource,
+        request: Uuid,
+        circuit: Uuid,
+        region: RegionHandle,
+        sender: std::net::SocketAddr,
+        object: Uuid,
+        channel: i32,
+        index: i32,
+        label: String,
+    },
     /// Send the current language and visibility through its capability.
     UpdateAgentLanguage,
     /// LLVOAvatarSelf::sendHoverHeight: final value, scoped to its region.
@@ -1706,6 +1827,18 @@ pub enum NetCommand {
         position: Vec3,
         look_at: Vec3,
     },
+    /// Native marker applied only after the ordinary teleport permission and
+    /// routing boundary. The request UUID never enters the simulator packet.
+    TrackedTeleport {
+        request: Uuid,
+        handle: RegionHandle,
+        position: Vec3,
+        look_at: Vec3,
+    },
+    /// Cancel only the matching tracked teleport on its original live circuit.
+    TeleportCancel {
+        request: Uuid,
+    },
     /// Change the draw distance used in AgentUpdate (`Far`).
     SetDrawDistance(f32),
     /// No connection to the neighbouring regions while true
@@ -1730,6 +1863,13 @@ pub enum NetCommand {
         duration: f32,
     },
     /// Our selection/grab target (LLHUDEffectPointAt::packData).
+    SelectionBeam {
+        effect: Uuid,
+        target: Uuid,
+        position: [f64; 3],
+        color: [u8; 4],
+        duration: f32,
+    },
     PointAt {
         effect: Uuid,
         target: Uuid,
@@ -2110,6 +2250,26 @@ pub enum NetCommand {
     /// The background inventory fetch (LLInventoryModelBackgroundFetch):
     /// `parent` with its whole subtree, or with `children` only those of its
     /// folders, `depth` levels down (AIS). Without AIS, the folders alone.
+    CreateAssistantInventoryLink {
+        request: Uuid,
+        parent: Uuid,
+        link: crate::outfits::OutfitLink,
+    },
+    ReadAssistantLandmark {
+        request: Uuid,
+        item: Box<crate::inventory::InvItem>,
+    },
+    FetchAssistantInventoryFolder {
+        request: Uuid,
+        parent: Uuid,
+        owner: Uuid,
+        library: bool,
+    },
+    FetchAssistantInventoryItems {
+        request: Uuid,
+        items: Vec<Uuid>,
+        owner: Uuid,
+    },
     FetchInventoryTree {
         request: u64,
         parent: Uuid,
@@ -2155,6 +2315,21 @@ pub enum NetCommand {
     FinishInventoryCopies {
         request: Uuid,
         reply: crate::inventory::operations::Reply,
+    },
+    /// Finish or cancel a native asset-to-item continuation after revalidation.
+    FinishAssistantInventoryItem {
+        request: Uuid,
+        approved: bool,
+    },
+    /// Closed native item creation with an exact callback origin.
+    CreateAssistantInventoryItem {
+        request: Uuid,
+        parent: Uuid,
+        kind: crate::inventory::operations::NewItem,
+        name: String,
+        description: String,
+        wearable_data: Option<Vec<u8>>,
+        permissions: Option<crate::inventory::upload::Permissions>,
     },
     CreateInventoryItem {
         parent: Uuid,
@@ -2218,6 +2393,57 @@ pub enum NetCommand {
     UploadAsset {
         request: Uuid,
         upload: crate::inventory::upload::Request,
+    },
+    PrepareAssistantUpload {
+        source: LoginSource,
+        request: Uuid,
+        upload: crate::inventory::upload::Request,
+    },
+    PrepareAssistantThumbnail {
+        source: LoginSource,
+        request: Uuid,
+        item: Uuid,
+        folder: bool,
+        parent: Uuid,
+        data: Vec<u8>,
+    },
+    VerifyAssistantSnapshotTexture {
+        source: LoginSource,
+        request: Uuid,
+        approved: bool,
+    },
+    AssignAssistantUploadThumbnail {
+        source: LoginSource,
+        request: Uuid,
+        item: Uuid,
+        folder: bool,
+        parent: Uuid,
+        approved: bool,
+    },
+    PatchAssistantThumbnail {
+        source: LoginSource,
+        request: Uuid,
+        approved: bool,
+    },
+    VerifyAssistantThumbnail {
+        source: LoginSource,
+        request: Uuid,
+        approved: bool,
+    },
+    FinishAssistantUpload {
+        source: LoginSource,
+        request: Uuid,
+        approved: bool,
+    },
+    VerifyAssistantUpload {
+        source: LoginSource,
+        request: Uuid,
+        approved: bool,
+    },
+    CreateAssistantUploadFolder {
+        source: LoginSource,
+        request: Uuid,
+        folder: crate::inventory::InvFolder,
     },
     QuoteMesh {
         request: Uuid,

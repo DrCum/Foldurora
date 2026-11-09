@@ -4,6 +4,9 @@
 //! Script grids follow LLToastNotifyPanel::updateButtonsLayout
 //! (indra/newview/lltoastnotifypanel.cpp, originally LGPL 2.1).
 
+#[cfg(test)]
+mod mcp_visual;
+
 use super::icons::Icons;
 use super::presence::Status;
 use crate::theme::Palette;
@@ -29,6 +32,8 @@ const MESSAGE_CHARS: usize = 160;
 
 #[derive(Default)]
 pub struct NotifUi {
+    /// Exact show-only native review. Opening it never answers or marks cards.
+    pub review: Option<u64>,
     pub privacy: crate::world::rlva::privacy::TextFilter,
     pub open: bool,
     /// Bottom-left of the bell (where the list opens).
@@ -913,6 +918,9 @@ pub fn show(
     env: &mut ToastEnv<'_>,
     dnd: bool,
 ) -> (Vec<(u64, Response)>, Vec<super::notification_center::Ask>) {
+    if !nui.open {
+        nui.review = None;
+    }
     let mut answers = Vec::new();
     let mut asks = Vec::new();
     let now = ctx.input(|i| i.time);
@@ -924,7 +932,9 @@ pub fn show(
     let anchor = nui.anchor.unwrap_or(egui::pos2(8.0, 60.0));
     if nui.open {
         nui.toasts.clear();
-        list.mark_all_read();
+        if nui.review.is_none() {
+            list.mark_all_read();
+        }
         let area = egui::Area::new(egui::Id::unique("notification_list"))
             .fade_in(false)
             .order(egui::Order::Foreground)
@@ -998,7 +1008,12 @@ pub fn show(
                             .show(ui, |ui| {
                                 ui.spacing_mut().item_spacing.y = 4.0;
                                 // newest first
-                                for n in list.list.iter_mut().rev().filter(|n| !n.transient) {
+                                for n in list
+                                    .list
+                                    .iter_mut()
+                                    .rev()
+                                    .filter(|n| !n.transient && nui.review.is_none_or(|id| id == n.id))
+                                {
                                     let r = if matches!(n.data, Data::Message { .. }) {
                                         person_card(ui, p, icons, world, env, &mut nui.wanted_pics, n, false)
                                     } else {

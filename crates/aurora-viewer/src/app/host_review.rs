@@ -81,7 +81,7 @@ pub(super) struct ReviewInput {
 }
 
 impl ReviewInput {
-    fn begin(&mut self) {
+    pub(super) fn begin(&mut self) {
         self.ime_enter_quarantined |= self.ime_composing || self.ime_quarantined;
         self.blocked = self.held || self.ime_enter_quarantined;
         self.first_pass = true;

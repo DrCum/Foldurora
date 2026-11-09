@@ -59,27 +59,64 @@ struct DescriptorWire {
     installation: InstallationId,
     instance: HostId,
     secret: String,
+    #[serde(default, skip_serializing_if = "Domain::is_host")]
+    domain: Domain,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum Domain {
+    #[default]
+    Host,
+    Assistant,
+}
+impl Domain {
+    fn is_host(&self) -> bool {
+        *self == Self::Host
+    }
+    fn request_limit(self) -> usize {
+        match self {
+            Self::Host => REQUEST_LIMIT,
+            Self::Assistant => 65_536,
+        }
+    }
 }
 
 #[derive(Clone)]
 pub struct Discovery {
     root: PathBuf,
     installation: InstallationId,
+    domain: Domain,
 }
 impl Discovery {
     /// Derives the viewer installation's namespace; the sidecar binary is never hashed.
     pub fn production(installation: InstallationId) -> io::Result<Self> {
+        Self::production_domain(installation, Domain::Host)
+    }
+
+    /// Separate discovery, credentials and lifetime for enabled character logins.
+    pub fn character(installation: InstallationId) -> io::Result<Self> {
+        Self::production_domain(installation, Domain::Assistant)
+    }
+    fn production_domain(installation: InstallationId, domain: Domain) -> io::Result<Self> {
         let dirs = directories::ProjectDirs::from("org", "Aurora", "AuroraViewer")
             .ok_or_else(|| invalid("current-user host directory unavailable"))?;
         let data = dirs.data_local_dir();
         ordinary_directories(data)?;
         let host = data.join("session-host");
         platform::private_directory(&host)?;
-        let mcp = host.join("mcp");
+        let mcp = host.join(match domain {
+            Domain::Host => "mcp",
+            Domain::Assistant => "assistant",
+        });
         platform::private_directory(&mcp)?;
         let root = mcp.join(installation.to_string());
         platform::private_directory(&root)?;
-        Ok(Self { root, installation })
+        Ok(Self {
+            root,
+            installation,
+            domain,
+        })
     }
 
     /// Trusted synthetic harness only. No production CLI accepts this root.
@@ -92,7 +129,18 @@ impl Discovery {
         platform::private_directory(root)?;
         let root = root.join(installation.to_string());
         platform::private_directory(&root)?;
-        Ok(Self { root, installation })
+        Ok(Self {
+            root,
+            installation,
+            domain: Domain::Host,
+        })
+    }
+
+    /// Synthetic character fixtures use the exact security checks of production.
+    pub fn character_fixture(root: &Path, installation: InstallationId) -> io::Result<Self> {
+        let mut value = Self::fixture(root, installation)?;
+        value.domain = Domain::Assistant;
+        Ok(value)
     }
 
     fn checked(&self) -> io::Result<()> {
@@ -102,7 +150,7 @@ impl Discovery {
         // parent is private; the ordinary root above it may be the system TEMP.
         let parent = self.root.parent().ok_or_else(|| invalid("missing namespace parent"))?;
         platform::validate_directory(parent)?;
-        if parent.file_name().is_some_and(|n| n == "mcp") {
+        if parent.file_name().is_some_and(|n| n == "mcp" || n == "assistant") {
             platform::validate_directory(parent.parent().ok_or_else(|| invalid("missing host root"))?)?;
         }
         Ok(())
@@ -133,7 +181,12 @@ impl Discovery {
             return Err(invalid("host descriptor changed"));
         }
         let wire: DescriptorWire = serde_json::from_slice(&data).map_err(|_| invalid("invalid host descriptor"))?;
-        if wire.version != 1 || wire.installation != self.installation || wire.instance != instance || !valid_secret(&wire.secret) {
+        if wire.version != 1
+            || wire.installation != self.installation
+            || wire.instance != instance
+            || wire.domain != self.domain
+            || !valid_secret(&wire.secret)
+        {
             return Err(invalid("invalid host descriptor identity"));
         }
         Ok(wire)
@@ -216,7 +269,7 @@ impl Client {
             secret: self.wire.secret.clone(),
             request,
         };
-        write_frame_until(&mut self.stream, &envelope, REQUEST_LIMIT, deadline)?;
+        write_frame_until(&mut self.stream, &envelope, self.wire.domain.request_limit(), deadline)?;
         let bytes = read_frame_until(&mut self.stream, RESPONSE_LIMIT, deadline)?;
         let response: ResponseEnvelope = serde_json::from_slice(&bytes).map_err(|_| invalid("invalid private host response"))?;
         if response.version != 1 || response.instance != self.wire.instance || self.discovery.read(self.wire.instance)? != self.wire {
@@ -267,6 +320,7 @@ impl Server {
             installation: discovery.installation,
             instance,
             secret,
+            domain: discovery.domain,
         };
         let listener = platform::Listener::bind(&discovery.root, instance)?;
         let path = discovery.path(instance);
@@ -375,7 +429,7 @@ fn connection(
     handler: &dyn HostHandler,
 ) -> io::Result<()> {
     loop {
-        let raw = read_request(&mut stream)?;
+        let raw = read_request(&mut stream, wire.domain.request_limit())?;
         let request: RequestEnvelope = serde_json::from_slice(&raw).map_err(|_| invalid("invalid private host request"))?;
         if request.version != 1
             || request.installation != wire.installation
@@ -439,12 +493,12 @@ fn read_frame_until(stream: &mut impl TimedStream, limit: usize, deadline: Insta
     read_exact(stream, &mut length, deadline)?;
     read_body(stream, length, limit, deadline)
 }
-fn read_request(stream: &mut impl TimedStream) -> io::Result<Vec<u8>> {
+fn read_request(stream: &mut impl TimedStream, limit: usize) -> io::Result<Vec<u8>> {
     let mut length = [0; 4];
     read_exact(stream, &mut length[..1], Instant::now() + IDLE_TIMEOUT)?;
     let deadline = Instant::now() + DEADLINE;
     read_exact(stream, &mut length[1..], deadline)?;
-    read_body(stream, length, REQUEST_LIMIT, deadline)
+    read_body(stream, length, limit, deadline)
 }
 fn read_body(stream: &mut impl TimedStream, length: [u8; 4], limit: usize, deadline: Instant) -> io::Result<Vec<u8>> {
     let length = u32::from_le_bytes(length) as usize;

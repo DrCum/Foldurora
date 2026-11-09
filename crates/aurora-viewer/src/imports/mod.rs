@@ -5,6 +5,7 @@
 
 pub mod animation;
 pub mod animation_model;
+pub(crate) mod assistant;
 mod automatic;
 pub mod demo;
 pub mod files;
@@ -317,6 +318,7 @@ impl Source {
 }
 
 pub struct Entry {
+    pub(crate) assistant_destination: Option<assistant::Destination>,
     pub load_choice: Option<Choice>,
     pub id: Uuid,
     pub path: PathBuf,
@@ -399,6 +401,7 @@ impl Entry {
             Err(error) => (None, Status::Error(error)),
         };
         Self {
+            assistant_destination: None,
             id: Uuid::new_v4(),
             load_choice: None,
             name: crate::text_validation::generated_name(&path.file_stem().unwrap_or_default().to_string_lossy(), 63),

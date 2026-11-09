@@ -584,6 +584,7 @@ name = "aurora-mcp"
 version = "0.1.0"
 dependencies = [
  "aurora-session",
+ "base64 0.22.1",
  "directories",
  "libc",
  "rmcp",

@@ -4,6 +4,7 @@ pub(crate) mod account_metadata_origin;
 pub mod animation_log;
 pub mod anti_spam;
 pub mod appearance;
+pub(crate) mod assistant_observations;
 pub mod attachment_inventory;
 pub mod attention;
 pub mod blocking;
@@ -97,8 +98,10 @@ pub mod rig_targets;
 pub mod rlva;
 pub mod script_debug;
 pub mod search;
+pub(crate) mod selection_beams;
 mod session_roster;
 mod shared_chat_activity;
+pub(crate) mod shared_pose;
 pub mod sim_console;
 pub mod social;
 pub mod sound_parcels;
@@ -343,6 +346,7 @@ pub enum LocalAssetRequest {
 }
 
 pub struct World {
+    pub(crate) assistant_observations: assistant_observations::Observations,
     /// mScreen's Y scale (LLVOAvatarSelf::updateCharacter).
     pub hud_aspect: f32,
     /// Where the HUDs are laid out in the window (left, top, right, bottom
@@ -457,6 +461,7 @@ pub struct World {
     /// Where avatars look (ours and the ones others send).
     pub look_at: lookat::LookAts,
     pub point_at: pointat::PointAts,
+    pub(crate) selection_beams: selection_beams::Store,
     /// Object messages from elsewhere (Preferences › Privacy, issue #623).
     pub object_im_filter: object_im_filter::Settings,
     pub anti_spam: anti_spam::Registry,
@@ -527,6 +532,7 @@ pub struct World {
     pub(crate) contact_policy: contact_policy::State,
     pub(crate) host_contact_search: Option<host_contacts::Search>,
     pub poser_consent: poser_consent::State,
+    pub(crate) shared_pose: shared_pose::Service,
     pub portals: portals::State,
     /// Firestorm LSL bridge messages kept out of nearby chat.
     pub lsl_bridge: lslbridge::LslBridge,
@@ -756,6 +762,7 @@ impl World {
 
     pub fn new(avatar_lib: Arc<AvatarLibrary>) -> World {
         World {
+            assistant_observations: Default::default(),
             hud_aspect: 1.0,
             hud_area: None,
             hud_zoom: 1.0,
@@ -810,6 +817,7 @@ impl World {
             bodies: HashMap::new(),
             look_at: lookat::LookAts::default(),
             point_at: pointat::PointAts::default(),
+            selection_beams: selection_beams::Store::default(),
             object_im_filter: object_im_filter::Settings::default(),
             anti_spam: Default::default(),
             appearance_counter: 1,
@@ -851,6 +859,7 @@ impl World {
             contact_policy: Default::default(),
             host_contact_search: None,
             poser_consent: poser_consent::State::default(),
+            shared_pose: shared_pose::Service::default(),
             portals: portals::State::default(),
             lsl_bridge: lslbridge::LslBridge::default(),
             hand_contacts: hand_ik::Contacts::default(),
@@ -2594,6 +2603,7 @@ impl World {
                 Some(NetEvent::LoggedIn(l))
             }
             NetEvent::MainRegionChanged { handle } => {
+                self.assistant_observations.dialogs.clear();
                 if self.set_main_region(handle) {
                     // no agent update before the new region completes the move
                     self.movement_complete = false;
@@ -3124,6 +3134,7 @@ impl World {
                 None
             }
             NetEvent::RegionRemoved { handle } => {
+                self.assistant_observations.dialogs.retain(|_, d| d.region != handle);
                 self.parked.remove(&handle);
                 self.remove_region_objects(handle);
                 self.dirty_terrain_dependents(handle);
@@ -3239,6 +3250,44 @@ impl World {
                 let notice = self.notice_of(id, attention::Open::Notifications);
                 self.ask_attention(attention::Cause::Notice, notice);
                 self.alerts.push_back(message);
+                None
+            }
+            NetEvent::AssistantDialogObserved {
+                source,
+                circuit,
+                region,
+                sender,
+                dialog,
+            } => {
+                if !self.login.as_ref().is_some_and(|l| source.matches_login(l, self.agent_id)) {
+                    return None;
+                }
+                let before = self.notifications.last_id();
+                self.apply(NetEvent::ScriptDialog {
+                    sender,
+                    object_id: dialog.object,
+                    object_name: dialog.name,
+                    owner_name: dialog.owner_name,
+                    owner_id: dialog.owner,
+                    message: dialog.message,
+                    channel: dialog.channel,
+                    buttons: dialog.buttons,
+                });
+                let after = self.notifications.last_id();
+                if after > before {
+                    self.assistant_observations.dialogs.insert(
+                        after,
+                        assistant_observations::DialogSource {
+                            source,
+                            circuit,
+                            region,
+                            sender,
+                        },
+                    );
+                }
+                self.assistant_observations
+                    .dialogs
+                    .retain(|id, _| self.notifications.list.iter().any(|n| n.id == *id));
                 None
             }
             NetEvent::ScriptDialog {
@@ -4211,6 +4260,23 @@ impl World {
                 }
                 None
             }
+            NetEvent::SelectionBeam {
+                effect,
+                source,
+                target,
+                position,
+                color,
+                duration,
+            } => {
+                let known =
+                    self.objects.index_of_uuid(&source).is_some() && (target.is_nil() || self.objects.index_of_uuid(&target).is_some());
+                if known {
+                    self.selection_beams
+                        .bind((self.agent_id, self.login.as_ref().map(|l| l.session_id).unwrap_or_default()));
+                    self.selection_beams.receive(effect, source, target, position, color, duration);
+                }
+                None
+            }
             NetEvent::ResetSkeleton {
                 source,
                 target,
@@ -4277,6 +4343,9 @@ impl World {
         }
         if self.receive_hand_contacts(&c, Instant::now()) {
             return;
+        }
+        if self.assistant_diagnostic_allowed(c.source_id, &c.message) {
+            self.assistant_observations.record(&c, self.agent_id);
         }
         if self.script_debug.route(&c, self.agent_id, Instant::now()) || self.anti_spam_chat(&c) {
             return;

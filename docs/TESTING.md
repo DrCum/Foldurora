@@ -424,6 +424,24 @@ through the CPU painter without opening native windows, workers, profiles,
 sockets, a world renderer or a grid. Native embedding, focus and hit testing
 remain separate Windows checks. Native DPI and UI zoom are distinct settings.
 
+**MCP permission and approval CPU captures.**
+
+| Variable | Effect |
+|---|---|
+| `AURORA_MCP_VISUAL_DIR=<directory>` | Fresh output root for the explicit MCP permission, approval and notification-review fixtures |
+| `AURORA_MCP_VISUAL_LANGUAGE=en\|fr\|ja` | Locale of that isolated test process |
+
+Run `cargo test --profile ci -p aurora-viewer --locked --offline
+mcp_cpu_visual_fixture -- --ignored --test-threads=1 --nocapture` with both
+variables set. The three fixtures use production controls and the CPU painter
+with synthetic in-memory host/character authority and inert character IO. They
+capture default-off controls, pending host discovery, complete frozen-argument
+review, actual pointer Deny/Allow once and both notification styles. Exact-card
+review preserves unrelated unread notifications. Host, character and
+notification-review captures use separate subdirectories. Use a fresh root for
+each run and inspect the PNGs. These fixtures open no native window, profile,
+socket or grid and do not establish Windows or GPU acceptance.
+
 **To add a variable**: one short line in the table of its topic (the name
 alone in the first column, one sentence in the second); if it takes more
 than one sentence, or if there are several modes, a "Details" paragraph

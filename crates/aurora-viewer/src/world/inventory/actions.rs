@@ -964,3 +964,26 @@ pub fn request_tree(inv: &mut Inventory, root: Uuid) -> bool {
     }
     complete
 }
+
+/// Native next-owner change shared by typed alternate entrypoints. Mirrors
+/// LLSidepanelItemInfo and the bulk Properties controls, including object slam.
+pub fn next_owner_change(inv: &Inventory, id: Uuid, agent: Uuid, copy: bool, modify: bool, transfer: bool) -> Result<Mutation, String> {
+    let item = inv.items.get(&id).ok_or_else(|| "item unavailable".to_owned())?;
+    if item.owner != agent || !mutable(inv, id) || in_type(inv, id, 14) || !next_owner_editable(item) || matches!(item.asset_type, 24 | 25)
+    {
+        return Err("next-owner permissions unavailable".into());
+    }
+    if !copy && !transfer || item.asset_type == 56 && !copy {
+        return Err("invalid next-owner permissions".into());
+    }
+    let requested = if copy { COPY } else { 0 } | if modify { MODIFY } else { 0 } | if transfer { TRANSFER } else { 0 };
+    if requested & !item.base_mask != 0 {
+        return Err("requested rights exceed base permissions".into());
+    }
+    let next = (item.next_owner_mask & !FULL) | requested;
+    let mut body = llsd_map! {"permissions"=>llsd_map!{"next_owner_mask"=>next as i32,"group_mask"=>item.group_mask as i32,"everyone_mask"=>item.everyone_mask as i32}};
+    if item.asset_type == 6 && next != item.next_owner_mask {
+        body.insert("flags", (item.flags | 0x100) as i32);
+    }
+    patch(inv, id, body)
+}
