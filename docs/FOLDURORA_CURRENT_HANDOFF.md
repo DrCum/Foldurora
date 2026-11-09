@@ -1,299 +1,152 @@
 # Foldurora current handoff — 9 November 2026 UTC
 
-## Goal, policy and current source
+## Current goal and source
 
-Latest priority: finish Advanced Workspaces, then address Builder feedback and
-review/integrate open upstream, functional MCP and Inactive Monitor PRs. The
-user has SHELVED quick-action extensions, aliases/accents/custom alerts, session
-sets, host restart/recovery, background audio/voice policies, remaining conference
-gaps and automatic-read/Attention extensions. Do not resume those as the next
-phase. Preserve their existing checkpoints. Loaded-folder and graphics restore
-must not block this scope if difficult; retain implemented work and describe
-bounded limitations. No removal/disablement is authorized by shelving.
+Finish Advanced Workspaces, then Builder feedback and open upstream/MCP/Inactive
+Monitor PR review/integration. Quick-action extensions, aliases/accents/alerts,
+session sets, restart/recovery, background audio/voice, remaining conference gaps
+and automatic-read/notification Attention are SHELVED; preserve existing work.
+Loaded-folder/graphics limits must not block this scope. Human/grid acceptance
+belongs to Sodie. No merge, install or release. Standing publication permission
+covers source/build handoffs, never private evidence or coverage-input metadata.
 
-At most two implementation tasks and one heavy cloud check; no Astra, no new
-subagents. Same32GB environment and compatible ci graph. Standing permission
-covers source/build handoff publication, not private evidence, merge, installation,
-release, credentials or grid login. Human acceptance remains Sodie's. Source
-slices, compiled tests and native acceptance are distinct.
+New combined Advanced Workspace candidate, published and remotely verified:
+- Branch `feat/workspace-local-backgrounds-20261109`, draft PR35
+  https://github.com/DrCum/Foldurora/pull/35
+- Commit `da8ee12fd417ecb62eac22d40cb4b91d8da94e86`
+- Tree `497c1f4f63314fd68630d1e81204fafae981b802`
+- Owned worktree `/workspace/work/workspace-folders-20261109`, clean/frozen.
+- Stacks on Inventory images PR34 `ccccf418a4d1e4061324d29eb397493fc9e2e012`,
+  per-display colors PR31 `b8ab61831e104942f706f401f822cca3258871de`, additional
+  Inventory PR30 `8b211528a6db6516cf83d588b106201a5bce434d` and a903 below.
+- New pinned request: `FOLDURORA_ADVANCED_IMAGES_WINDOWS_REQUEST_DA8EE12F.md`
+  https://github.com/DrCum/Foldurora/blob/96c2a498ccfe4b8e1de0dd2aaabcfac48a53586e/docs/FOLDURORA_ADVANCED_IMAGES_WINDOWS_REQUEST_DA8EE12F.md
+  Prepared only; no delivery,
+  acknowledgment or run claimed. Slick must check existing Builder history and
+  relay ONCE. Direct Builder read and PR-attachment tools return connection closed.
+  Last verified Builder state: idle after successful a903; not live status.
 
-Current corrected frozen candidate:
-- `fix/mcp-descriptor-regression-20261109`
-- Commit `a903e16c01db412b0a7fd77886851be3145e1852`
-- Tree `a338a4b88a8a4e660efa59ad71d18878dc603e91`
-- PR29 https://github.com/DrCum/Foldurora/pull/29, stacked after expanded-folder
-  PR28, HUD PR27, Update PR25, background PR24 and themed contexts PR23.
-- Source/remote tree verified; no new Windows full/package/native result.
-- Source worktree `/workspace/work/workspace-folders-20261109` now continues on
-  separate `feat/workspace-local-backgrounds-20261109` on frozen ccccf418;
-  all frozen heads remain.
+## Advanced Workspace implementation and limits
 
-Sanitized pinned Windows request (Slick verified delivery ONCE and active acknowledgment):
-https://github.com/DrCum/Foldurora/blob/f305efdc55dc0d6d8f71ea9849b1f9e748e8df7a/docs/FOLDURORA_ADVANCED_CONTEXT_WINDOWS_REQUEST_A903E16C.md
-15475bytes; SHA256 `85e45ec4ae4798294f3c6665cd34814fd2d59ef7c36d7bc743d863add8464f64`.
-Source target is a903, not the documentation commit. Default full-run gate1184;
-early small MCP package gate then ONE full workspace run and separate nondefault
-renderer gates, ordinary xr-static-loader viewer/sidecar package. Reuses Builder's
-existing dev cache. Source-visible additions are public; private coverage inputs
-and identifying metadata are not in this request. Slick now verifies the existing
-Cumputer Builder01a1af77-a465-71c3-be08-cd9d1b927f83 is active at the early MCP
-package gate. No test/build/package result or native acceptance is claimed.
-Do not duplicate a delivered/running request or rerun an unchanged failed source.
+Source includes named Save/Rename/Delete/Update, Preview/Cancel/Switch/Previous,
+startup restore and favorites; scoped geometry, graphics/avatar-relative camera,
+solid/per-display/image backgrounds; loaded main-tree expansion and one existing
+additional native Inventory window; explicitly reviewed additive HUD restoration.
+All native source/account/grid/creator/archive/RLVa gates remain. Preview does not
+wear HUDs or open/close/move the extra native Inventory window. Loaded folders
+are fetched/ordinary-only, bounded256, no hidden fetch. Additional Inventory uses
+one bounded3-pass/2sec continuation and preserves editors/dependent windows.
+Graphics restoration is opt-in; bounded capabilities/restrictions win. These
+implemented limits are intentional, not removal/disablement requests.
 
-Automatic review rejected the first request upload because it contained private
-coverage-input metadata; known not executed. Those references were removed,
-destination absence checked, and the sanitized payload was published via the same
-supported tool and byte-verified. No private evidence/alternate-route fallback. Local progress-docs history retains
-the unsanitized draft as evidence: publish only reviewed sanitized file bytes,
-never push that branch/history wholesale.
-Direct app connection/PR attachments remain closed. Delivery/active acknowledgment
-comes from Slick; no direct-tool execution or owner acknowledgment is claimed.
+Backgrounds: up to16 geometry-only display targets with common fallback on changed
+or unknown topology. Fill/Fit/Stretch/Center/Tile/Span and explicit brightness
+Apply. Inventory pictures require fresh ordinary owned full-permission proof,
+use separate bounded shared preview interests and an independent native picker.
+Managed local PNG/JPEG/BMP/TGA imports never store a live path or upload to grid.
+One reusable worker normalizes <=32MiB/8192-side/32MP inputs; copies <=256px,
+immutable128-image/32MiB private library with no automatic GC. Source/intent/
+window/target/background and fresh native authority checked before publication
+and catalogue application; expected dialog focus change does not bypass authority.
+Cancelled late publication can leave an unreferenced image only in original
+profile. Corrupt/full stores fail unchanged. Native store ACL/ownership/no-reparse/
+hardlink/CAS/long-path protections and all prior kind limits stay intact. Paint
+clips outside actual world and respects photo/XR/privacy; no full-resolution
+wallpaper parity is claimed. Details in the four source docs for additional
+Inventory, display backgrounds, Inventory images and local images.
 
-Slick delivered the pinned5f990 request ONCE. Builder has completed and is
-IDLE. The candidate FAILED its full suite:8935passed/1failed/58ignored, zero
-filtered,37 summaries.1149/1150 required names pass once; the theme guard passes.
-The sole failed requirement `ipc::tests::wrong_secret_and_stale_incarnation_are_refused`
-failed at synthetic descriptor std::fs::write, Windows sharing violation32,
-ipc/tests.rs122. Wrong-secret assertion and pipe connection precede it; stale-
-incarnation and replacement-preservation assertions did NOT run. Reader sharing
-(read/delete, no write) is consistent with this race, but the conflicting original
-handle is unidentified. Do not claim a proven cause or weaken production sharing.
-Monitor feature gates, viewer/sidecar builds, versions, packages, CPU/native smoke
-were NOT RUN; no new binary/package identity. Source clean;2001 artifact records
-and37 saved cache hashes matched. Original logs/private checklist remain local.
-Sanitized report:
-https://github.com/DrCum/Foldurora/blob/2cbeca99372f6ab1c8127b21399cd8479e8e0584/docs/FOLDURORA_WINDOWS_VALIDATION_5F99030.md
+Latest source checks: format0, qualified viewer all-target ci Clippy0 (existing
+Linux dead-code allowance), localization13/0/0, unchanged theme scan1/0/0,
+actual background/placement component15/0/0 (2 new), structural library2/0/0.
+Local image slice13 new tests:4 executed in components,9 genuine compiled/unrun.
+Two real codec cases cannot execute in isolated linking due existing image/moxcms
+E0460; no new dependencies/cache/fake decoder. Earlier PR30/31/34 genuine cases
+also await Windows. Combined default requirements1221 (a903's1184 +37 public
+source cases). Private inputs/raw audit remain local. No new full Linux run,
+Windows package or native acceptance is claimed for da8ee12f.
 
-No duplicate/unchanged build or diagnostic. Next combined request must include
-a reviewed MCP regression correction without weakening any security assertion;
-coordinate with the independent owner before functional overlap. Direct app
-connection/PR attachments are closed; no owner acknowledgment or new dispatch is
-claimed. Continue source-side advanced workspaces in the meantime.
+## Verified packaged Windows checkpoint — a903
 
-## Measured evidence and failures
+Source `a903e16c01db412b0a7fd77886851be3145e1852`, tree
+`a338a4b88a8a4e660efa59ad71d18878dc603e91`, branch
+`fix/mcp-descriptor-regression-20261109`, PR29. Keep it frozen.
+Slick verified ONE completed run; no duplicate requested. Sanitized result:
+https://github.com/DrCum/Foldurora/blob/03a6024fb0b96827c8eb277168b0e3e84e52ff7f/docs/FOLDURORA_WINDOWS_VALIDATION_A903E16C.md
 
-- a6119664d9f576925c66e4bac20bbf049d0fdca9/tree70c1a3d0 remains FAILED.
-  Windows parser/format/strict Clippy0; full suite101:8920passed/1failed/58ignored,
-  zero filtered,37 summaries. All1134 required cases passed once, including all
-  seven startup/UI/IO cases and33 Windows-enabled MCP/adapters. The sole failure
-  was `ui::theme_guard::windows_take_their_appearance_from_the_theme` (direct
-  checkbox). Builds/versions/package/CPU/native smoke NOT RUN. Preservation
-  matched1945 artifact records and19 cache-output hashes. Exact sanitized report:
-  https://github.com/DrCum/Foldurora/blob/f901066de67e40a59caf518a8e411405bf796708/docs/FOLDURORA_WINDOWS_VALIDATION_A6119664.md
-- 5f990 replaces all four context/favorites checkboxes with existing shared
-  themed controls. No guard, exception, cfg, test or permission rule changes.
-  Its unchanged full-tree appearance scan passes as a std-only exact-source
-  component (1/0/0; no filtering). Separate egui scrollbar test remains in full
-  suite. Real viewer all-target ci Clippy0 with existingLinux `-A dead_code`.
-- Source slices: folder8ea8e412 (treeccd8b157), graphics e9830d5e (tree5ef9c321),
-  camera17b6337b (treeccc6aa4d). Focused actual-source component cases passed3 each
-  and localization13 in each slice. Camera uses real CameraSettings helpers,
-  with unused photo DTO fixtures. Graphics codec has no Settings fixtures.
-  These do not establish App/RLVa/store/native acceptance; additional real
-  Settings/controller/UI/IO cases compile and remain Windows gates. The UI
-  missing-field development error was fixed and its negative log retained.
-- Disabled renderer integration d08b2438/treeb8817f68 contains exact author
-  commits504ef73c/42734a3d; feature-on renderer all-target Clippy0. Author's10
-  Monitor,19 rendezvous,4 fence and30 preview scoped passes are inherited
-  software-Vulkan evidence, with overlaps; not new lead GPU execution or a full
-  suite. PR21 review https://github.com/DrCum/Foldurora/pull/21#issuecomment-6735782050
-- d0d8f8f5 remains failed at old Windows MCP Clippy; later stages were NOT RUN.
-  a611 cleared those two OVERLAPPED diagnostics without authority/ACL changes.
-  The wrongly classified Unix-only connection-capacity case remains mandatory
-  Linux coverage; its source guard is unchanged, not waived on Windows.
-- Previous packaged f08c22e2 passed8875/0/58 and1087-name audit, but failed human
-  host usability. Its package and every old failed candidate/evidence remain.
-  Profile Copy's exclusive tests were retired with the approved removal, not
-  passed. The old Linux terrain/software-GPU failure remains unresolved.
+Parser/format/strict MCP/workspace/prototype Clippy pass. Early MCP30/0/0.
+Single unfiltered full suite8970passed/0failed/58ignored, zero filtered,
+37 summaries;1184 requirements pass exactly once from full run alone. Original
+stale-incarnation and both descriptor regressions pass, including held-reader
+Windows error32. Separate prototype filters10/19/4/30 pass,62 distinct names
+(one overlap); their adapter/driver was unobserved, never borrow smoke identity.
+Ordinary viewer/sidecar xr-static-loader build/package excludes monitor-prototype.
+Built/staged/ZIP executable hashes match, manifests/MCP/licensing docs included.
 
-Cloud has32GB fixed disk, about157MiB free. Full viewer test linking is resource-
-blocked; no new full Linux run is claimed. Only idle reproducible caches have
-been reclaimed; source, binaries, profiles and needed evidence remain. Current
-receipts/logs are under `/workspace/scratch/workspace-{folders,graphics,camera,
-monitor-integration,theme-correction}-20261109/` and earlier advanced-workspaces.
-Do not rerun full suites merely to chase deferred/historical cases.
+- Viewer `0.9.3-beta.20261106.1+511.ga903e16c0`,171362816bytes,
+  SHA256 `083df4a8c97cd9b385e3c76f4ef4b7a4b8f6eb6c38ffce7d1b75248b3af175d7`.
+- Sidecar `0.1.0`,3039232bytes,
+  SHA256 `f925d6c0ecea78b1b46780366f51904d984b89bbfa522292699d00a21c46d90b`.
+- ZIP `Foldurora-a903e16c01db-windows-x64.zip`,72634257bytes,
+  SHA256 `fc3e5c27669a455ef2aab8ac022d3f5ae0910855a09c3df1b6fd919a532363e7`.
+- Package/logs local under `Builds/Foldurora-a903e16c01db`; raw evidence private.
 
-## Subsequent source slice, outside the frozen build
+Isolated standalone default-theme Vulkan startup captured frame650/exited0;
+24 passive samples no new matching MCP pipe, no fixture descriptor. Startup only.
+Login-bound workspace manager/source contexts, hosted movement/switch/response,
+Monitor, camera/viewport, grid/RLVa, reset and XR NOT RUN. No production live
+inactive or functional MCP enablement acceptance. Source clean;2074 prior artifact
+metadata records and129 cache hashes/worktrees/heads preserved. Git-LF lock and
+normalized checkout matched without modifying checkout/settings.
 
-Solid-color padding and catalogue reload are published at
-`975250266db7eaf93f8f9af9cd4e9d8ffd4126c6`, tree
-`316805c23e6b333c5b340ca00edcb0afd232144b`, branch
-`feat/workspace-background-20261109`, draft PR24. Qualified real-viewer all-target
-Clippy0; actual DTO/geometry4/0/0, unchanged appearance scan1/0/0, localization13/0/0.
-Four additional real controller/source cases compile, not run locally. No new
-full suite/package/Windows request for this slice. Future default requirements
-are1158, separately retained in its scratch directory; current5f990 request stays1150.
+## Next source work
 
-Background choices are private account/grid metadata, opt-in per record and
-paint only outside the actual world. Captured Preview target avoids borrowing
-an old record's excluded context during Previous. Source gaps reload private
-presentation without replaying consumed startup or polling failed IO. The first
-DTO run3/1 failed because a unit variant accepted an extra field; the unchanged
-refusal test passes with an empty struct variant. Negative evidence is retained.
+Review/integrate open upstream PR18 media `475df44eee0525696151840ecf063540555a8bf1`,
+PR19 audio `65da1dfbcecfda273c5f1cb0650746374499732a`, PR26 confirmation
+`16071c7d9f53d65214b34a8f18e6f0453e0313e3`, PR32 controls/keyboard
+`0d2d1ae9f09d1cfe0f090f06eebf4f832f693d6c`; recheck heads/base/presence.
+PR11–16 already integrated; never repeat. Functional MCP PR33 head
+`674a1a73989b5319f955b7b2cf4b26e9e4e0c3a6` on d0d8,153 changed files; reviewed
+implementation `16b3f9895b2843d85dbf7d1573e73306e707f2bd` has author-focused tests,
+not lead full/native acceptance. Substantive source review required, especially
+new sensitive workspace refs in MCP serialization. Retain lead OVERLAPPED fixes
+and a903 descriptor assertions. No competing enablement implementation.
 
-An additional authoring dependency is published at
-`bd6e631d4f78591286abf9e181c24c9de8873e96`, tree
-`b5f984bbd6a4c78ada24d55875e74c6720419afa`, branch
-`feat/workspace-update-20261109`, PR25. Explicit Update selected preserves record
-ID/name/favorite/startup, uses current capture choices and the existing native
-selected-record/CAS/receipt gates, changes no physical layout or Previous.
-Qualified viewer Clippy0, actual theme scan1/0/0 and localization13/0/0; two real
-model/UI cases compile, not run locally. Future requirements1160, no new full
-build request. Earlier Save/Update wording did not establish an Update action;
-the missing action was found and implemented in this slice.
+Inactive Monitor PR21 author head42734a3d integrated disabled in d08b2438; no
+production caller/aggregate admission/native transport/drain claimed. Recheck
+owner head before overlap. Do not mistake validated prototype for live monitors.
+Check working agents' PRs at feature boundaries. Keep new source separate from
+frozen validation candidates; do not wait idle on human tests when permitted
+integration review remains. No whole-Folderstorm/Aurora completion is claimed.
 
-Reviewed additive HUD restoration is published/frozen at
-`48d6b4099aa143956ae62321525dcd16a26dccb6`, tree
-`9a84502cc549cf047e697746b5dacb7248db401a`, branch
-`feat/workspace-hud-restore-v2-20261109`, draft PR27
-https://github.com/DrCum/Foldurora/pull/27. Actual source/remote tree verified.
-Formatting, qualified real-viewer all-target Clippy0, six exact-source DTO/lane
-cases,13 localization and unchanged full-tree appearance scan1/0/0 pass. Eight
-additional genuine World/model/controller/UI cases compile but are UNRUN.
-The first5/1 lane run, three development type/borrow errors and format diff remain
-preserved. No full Linux link, new Windows package or native/human pass is claimed.
-Future combined Windows requirements1174 (14 new cases), private scratch only.
-Historical5f990 request stays1150; its failed result above is preserved. No competing request.
+## Preservation, historical failures and acceptance
 
-HUDs are opt-in private item/point references, freshly ordinary/archive/RLVa-
-qualified, no assets/names persisted. Preview never wears. Committed switches,
-Previous and startup require explicit one-shot review; native additive batches
-serialize by point and finish only on observed wear under one30-second deadline.
-Source/focus/resize/recovery/policy loss or manager close retires future work.
-Existing worn items stay; unavailable references conservatively refuse the whole
-request. Native COF/capacity/final send checks remain. Documentation:
-`docs/FOLDURORA_WORKSPACE_HUDS_20261109.md`. Receipts and development negatives:
-`/workspace/scratch/workspace-hud-restore-v2-20261109/`.
+Same32GB environment, about138MiB free. One heavy cloud check; no new subagents/
+Astra. Reuse compatible ci graph. Full Linux viewer linking resource blocked;
+no rerun to chase deferred failures or software-GPU terrain. Source/check logs
+under `/workspace/scratch/workspace-*-20261109/` and descriptor scratch. Previous
+long current notes preserved in workspace-local-backgrounds scratch; source,
+unfinished checkpoints, profiles, binaries and failed evidence retained.
 
-Expanded Inventory-folder state is published/frozen at
-`e2fc23ea2c38f93840a16bbb8b3e96b40bbb9998`, tree
-`b15062df5f7c408c576d7ac6666ea86db42f3704`, branch
-`feat/workspace-expanded-folders-20261109`, PR28
-https://github.com/DrCum/Foldurora/pull/28. Formatting, qualified viewer Clippy0,
-2 actual DTO cases,13 localization and unchanged appearance scan1/0/0 pass.
-Six further genuine native/archive/UI/controller/model/source cases compile
-UNRUN. Future default gate1182. Fetched ordinary visible main-tree capture is
-bounded256 references; commit-only restore initiates no hidden opens/fetches.
-Advisory modified/last-arrangement capture is sampled at fourHz. New expanded and
-HUD contexts also compare the original native login grid namespace. Original
-geometry-source selection behavior is unchanged. Source doc and scratch receipts:
-`docs/FOLDURORA_WORKSPACE_EXPANDED_FOLDERS_20261109.md`,
-`/workspace/scratch/workspace-expanded-folders-20261109/`.
+- 5f990 FAILED8935/1/58: synthetic descriptor std::fs::write sharing32 AFTER
+  wrong-secret refusal/pipe connection; stale/preservation assertions unrun.
+  Conflicting handle unidentified. A903 changes test mutation only; production
+  sharing/ACL/security unchanged, no waivers. Exact failed report:
+  https://github.com/DrCum/Foldurora/blob/2cbeca99372f6ab1c8127b21399cd8479e8e0584/docs/FOLDURORA_WINDOWS_VALIDATION_5F99030.md
+- a611 FAILED8920/1/58 appearance guard, fixed by existing themed controls;
+  d0d8 failed old MCP lint; downstream stages NOT RUN. Preserve both reports.
+- f08 Windows8875/0/58 package remains, but human host usability FAILED. A903
+  automation does not resolve that native acceptance. Original48042 failed
+  8703/24/57; different-token diagnosis never established original context.
+  Later f08 long-path gates passed; approved Profile Copy exclusive tests retired,
+  not passed. Linux software-GPU terrain remains separately unresolved.
+- Prior denied request upload was known not executed; private metadata removed
+  and same supported tool's sanitized retry succeeded. Never publish private
+  inputs/raw logs or push progress-docs history wholesale (old draft retained).
 
-MCP correction a903 is published/frozen as above; only tests and its explanation
-change from e2fc. Live replacement now uses a fully written private atomic
-successor, retaining all original wrong-secret/stale/ref-preservation/no-dispatch
-assertions. Separate deterministic cases retain SAME-identity changed-content
-cleanup and original-reader/atomic-successor coverage; Windows also checks
-in-place write refusal32. No production sharing/ACL/transport changes, retry,
-assertion removal or security waiver. Linux MCP package34/0/0, zero filtered
-(32unit+2 Linux-only stdio); strict MCP all-target Clippy0 and format0. This is a
-package-selected graph, not full workspace/Windows/native proof. Windows held-
-reader/rename checks remain UNRUN. Parent real viewer code/compile is unchanged.
-Receipts: `/workspace/scratch/mcp-descriptor-regression-20261109/`.
-Coordination notice before edits:
-https://github.com/DrCum/Foldurora/pull/28#issuecomment-6739054196
-No functional MCP PR visible; direct app closed and owner acknowledgment pending.
-The functional owner must retain this correction and earlier OVERLAPPED lint fixes.
-No competing enablement/privacy/tools implementation was started.
-
-Additional native Inventory state is published/frozen at
-`8b211528a6db6516cf83d588b106201a5bce434d`, tree
-`7c9ebd64ba799b35159f24de78a14c0e1a46fc82`, branch
-`feat/workspace-additional-inventory-20261109`, draft PR30
-https://github.com/DrCum/Foldurora/pull/30. One existing standard additional
-window; opt-in life/minimize/normalized geometry, bounded loaded folder refs.
-Commit-only lifecycle, Preview never opens/closes/moves it. Native dependent
-editors/operations are preserved. One continuation, at most3 fresh passes and
-absolute2sec deadline; exact original source/grid/owner/privacy/RLVa/archive
-fences. No hidden fetch or new arbitrary window owner. Qualified viewer Clippy0,
-format0,13 localization,1 appearance scan and4 component cases pass (2 new,
-2 reused expanded-folder cases). Six further genuine cases compile UNRUN;
-8 new cases total, future gate1192. No new build/request/native claim.
-Source doc FOLDURORA_WORKSPACE_ADDITIONAL_INVENTORY_20261109.md and scratch
-/workspace/scratch/workspace-additional-inventory-20261109/ retain receipts.
-
-Per-display padding colors are published/frozen at
-`b8ab61831e104942f706f401f822cca3258871de`, tree
-`c984fd9163f51e1c8a03ec6d6c11d452a19ff59e`, branch
-`feat/workspace-display-backgrounds-20261109`, draft PR31
-https://github.com/DrCum/Foldurora/pull/31, stacked on PR30. Source and remote
-tree verified. Normalized geometry only, up to16 displays, common fallback
-on changed/unavailable geometry. Bounded4Hz read-only native projection, fresh
-post-click topology check and current-world paint clipping; no native move/
-focus/resize. Existing Black/Solid wire forms remain. Images/import/placement/
-brightness are unfinished and are the next dependency slice.
-
-Qualified viewer all-target ci Clippy0, format0,13 localization,1 unchanged
-appearance scan and8 focused actual-source codec/geometry/paint cases pass
-(4 new/4 reused). Two further genuine controller/UI cases compile UNRUN;
-6 new cases total, future combined gate1198. No full Linux link, new Windows
-package or native acceptance. Development harness linkage and test E0499
-negative logs remain; fixes retain assertions. Source doc
-FOLDURORA_WORKSPACE_DISPLAY_BACKGROUNDS_20261109.md and scratch
-/workspace/scratch/workspace-display-backgrounds-20261109/ retain receipts.
-
-A903 request/source stay frozen. Slick verified the request delivered once and
-the Builder active/acknowledging its early MCP gate. Do not dispatch a duplicate.
-Direct Builder read and PR attachment both returned connection closed; no direct
-tool delivery or new validation outcome is claimed.
-The feature-boundary open-PR collection still has no functional MCP PR.
-
-## Current work and next actions
-
-1. **Finish Advanced Workspaces:** source slices above preserve startup/favorites,
-   optional graphics/avatar-relative camera, loaded folders, HUD review, one native
-   additional Inventory window and per-display colors. Inventory image background
-   slice is published/frozen at ccccf418a4d1e4061324d29eb397493fc9e2e012,
-   tree ea59e8ac44e56881fe8cb9440cc1bceb202a7566, branch
-   feat/workspace-image-backgrounds-20261109, draft PR34
-   https://github.com/DrCum/Foldurora/pull/34. It adds six modes/brightness, private original
-   item/asset/grid references, fresh ordinary/archive/full-permission/RLVa proofs,
-   bounded shared256px previews, separate releasable hover/background ownership,
-   fixed independent native chooser and current-world image clipping.13 focused
-   cases pass (5 new/8 reused); qualified viewer all-target Clippy0, format0,13
-   localization and1 unchanged theme scan pass. Five more genuine native/UI/cache/
-   streamer cases compile UNRUN. Ten new cases, future combined gate1208. The final
-   fresh chooser-proof correction is included. Local managed-file import and
-   high-resolution wallpaper admission remain unfinished. Current local-image
-   branch is clean at ccccf418; its implementation has not begun. Source and negatives
-   are preserved under /workspace/scratch/workspace-image-backgrounds-20261109/.
-   Loaded-folder/graphics limitations are optional and do not block other work.
-2. **Builder fixes and combined validation:** await a903 result while completing
-   this same workspace goal; preserve frozen heads and all failed evidence. Then
-   integrate concrete corrections and freeze the next coherent combined group.
-   Do not relabel old full suites or component evidence as new Windows/native proof.
-3. **Review/integrate open PRs:** PR18media475df44e, PR19audio65da1dfb and PR26
-   Preferences confirmation16071c7d are queued; verify actual heads/dependencies and
-   already-present source first. PR11–16 are already integrated. PR21's disabled
-   Monitor prototype is integrated, but production caller/admission/transport/
-   memory/drain work remains; review any new owner head before overlapping work.
-   Newly visible functional MCP PR33 head674a1a73989b5319f955b7b2cf4b26e9e4e0c3a6
-   is based on d0d8 and changes153 files; queue substantive review/integration
-   after the workspace finish, preserving native permissions/approvals and all
-   lead fixes. Its NativeStoreKind catalogue still has the original three kinds.
-   New upstream controls/keyboard PR32 head0d2d1ae9f09d1cfe0f090f06eebf4f832f693d6c
-   is also queued. Retain the MCP owner boundary, OVERLAPPED lint corrections
-   and a903 security regressions. No functional merge or new acceptance is claimed.
-   Check working agents' PRs at feature boundaries; no competing functional MCP.
-
-Shelved groups above remain documented backlog, not next implementation work.
-No whole-Folderstorm/Aurora completion is claimed.
-
-User exclusions: custom Inventory tabs, Previous Look, extra wear confirmations,
-Fade/Birdseye, Folderstorm assistant/controller integration and Squirty notices.
-The independent functional MCP assignment remains expected.
-
-## Acceptance and targeted human checklist
-
-Native default-glass/Vulkan, host movement/resize/responsiveness, switching,
-first Open Monitor, world viewport/picking/mouselook/camera, driver-reset recovery,
-XR, grid chat/restrictions and Japanese glyph acceptance remain open. A build or
-CPU image does not prove them. No GPU loss should be induced by automation.
-
-At the next verified package: move/resize/snap host and use chat/chooser; open/
-reopen Monitor; test left/right/asymmetric world margins; save opposite workspace
-contexts and exercise Preview/Cancel/Previous/restart and source changes. Verify
-closed/restricted Inventory is not revealed and new camera locks win during
-Preview. Native scripted restrictions/grid login remain Sodie's tests. Detailed
-offline expectations and required NOT RUN reporting are in the pinned request.
+Human checklist on next verified package: move/resize/snap host while using chat/
+chooser; open/reopen Monitor; left/right/asymmetric viewport/picking/mouselook;
+save opposite workspace contexts, Preview/Cancel/Previous/startup/favorites,
+decline/approve eligible missing HUDs while keeping worn items; extra Inventory
+window, per-display images and import/cancel/source changes. Restrictions and
+creator rights remain authoritative. Driver-reset recovery, XR and Japanese glyphs
+remain explicit until tested. Do not induce GPU loss or log into a grid by agent.
