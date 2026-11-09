@@ -1,5 +1,11 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Independent Aurora hover/control ports (2026-11-09): 686a125d, ea14f217
+  and 1f02818d on owned fix/upstream-hover-controls-20261109, base388b299c.
+  See docs/FOLDURORA_UPSTREAM_HOVER_CONTROLS_20261109.md for migration,
+  dependencies, deferred overlap and required validation/native acceptance.
+  PR11/26/32 and protected Monitor/Chat/Attention/host work are not repeated.
+
 - 🔧 Selective upstream catch-up (human request, 2026-11-07; no issue): apply
   sixteen reviewed upstream commits individually with `-x` to frozen photo/
   branding base `f5ae21d5`, from upstream snapshot `576dd54a`. Production

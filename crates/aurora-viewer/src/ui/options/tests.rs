@@ -3,6 +3,9 @@ use crate::keybinds::{Action, Input};
 use crate::ui::widgets::elide_tests::Frames;
 use winit::keyboard::KeyCode;
 
+#[path = "hover_controls_tests.rs"]
+mod hover_controls;
+
 #[test]
 fn opening_preferences_focuses_search_without_taking_it_back() {
     let mut frames = Frames::new();
@@ -1724,4 +1727,3 @@ fn show_friends_only_switches_from_controls_once_logged_in() {
         assert_eq!(r.friends_only_keep, None, "the keep row is left alone");
     }
 }
-
