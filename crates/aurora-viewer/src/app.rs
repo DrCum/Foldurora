@@ -4697,7 +4697,11 @@ impl App {
                 ui::widgets::toggle_floater(&self.egui_ctx, "inventory", &mut self.panels.inventory);
                 self.observe_folder_jump();
             }
-            Action::NewInventoryWindow => self.inventory_ui.open_additional_window(&self.egui_ctx),
+            Action::NewInventoryWindow => {
+                if !self.world.rlva.has("showinv") {
+                    self.inventory_ui.open_additional_window(&self.egui_ctx);
+                }
+            }
             Action::Appearance => ui::widgets::toggle_floater(&self.egui_ctx, "appearance", &mut self.panels.appearance),
             Action::Quit => self.request_exit(),
             Action::TextureLibrary => ui::widgets::toggle_floater(
@@ -19837,7 +19841,7 @@ impl ApplicationHandler for App {
                         | "aurora-folder-colors-behind"
                         | "aurora-folder-colors-follow"
                 );
-                if configured_view {
+                if configured_view || view.starts_with("windows:") || view.starts_with("aurora-windows:") {
                     crate::world::inventory::demo::seed_view(
                         &mut self.world.inventory,
                         self.world.agent_id,
@@ -19887,7 +19891,14 @@ impl ApplicationHandler for App {
                         // the main window on a folder, the additional one
                         // opened by its button beside it
                         self.inventory_ui.show_original(&self.world.inventory, uuid::Uuid::from_u128(8100));
-                        self.inventory_ui.toggle_additional_window(&self.egui_ctx);
+                        self.inventory_ui.open_additional_window(&self.egui_ctx);
+                    }
+                    if let Some(count) = view.strip_prefix("windows:").or_else(|| view.strip_prefix("aurora-windows:"))
+                        && let Ok(count) = count.parse::<usize>()
+                    {
+                        for _ in 1..count {
+                            self.inventory_ui.open_additional_window(&self.egui_ctx);
+                        }
                     }
                     if view.starts_with("aurora") {
                         if view.starts_with("aurora-sidebar-") {

@@ -1050,6 +1050,16 @@ the ordinary login form without submitting credentials. Saved-account catalogue
 refresh runs on the worker and leaves the current login draft untouched. The
 existing instance GPU-budget sharing and background frame cap remain shared by
 the independently running worlds.
+Full inventory instances share `world::inventory::Inventory` and the main
+`InventoryUi.windows` collection with folder/document windows. Each creation
+allocates a unique runtime UUID and independent search/selection/view caches;
+the main-window button and `NewInventoryWindow` shortcut use the same action.
+The `FullInventory` floater cascade keeps the first extra beside the primary
+and offsets later instances. Extra windows are session-only; closed owners
+remain only while their auxiliary documents or confirmations need them.
+This follows Folderstorm `LLPanelMainInventory::newWindow` (reference commit
+`abbe3cb0ca66ee2484f277219f6a27706fab7fc6`); using that action for the primary
+button intentionally replaces the singleton `secondary_inventory` toggle.
 
 `ui/inventory.rs::TabFilters` keeps each window's finder state per tab, including
 advanced searches and the temporary filters of Find links / Find similar.

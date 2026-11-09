@@ -610,7 +610,7 @@ inventory-move-selection-name = 「{ $name }」を移動
 inventory-move-selection-count = { $count }個のアイテムを移動
 inventory-move-no-folders = このフィルタで利用できるフォルダはありません。
 inventory-widen = ウィンドウを広げる
-inventory-additional-window = 追加のインベントリウィンドウ
+inventory-additional-window = 新しいインベントリウィンドウ
 inventory-items-count = { $count ->
     [one] { $number }個のアイテム
    *[other] { $number }個のアイテム

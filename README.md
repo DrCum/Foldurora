@@ -498,8 +498,10 @@ are planned or in progress: they are not in the viewer yet.
   widen it and it becomes an explorer with a folder column, details and
   filter chips, with columns you resize and choose. Coloured icons by item
   type, and a CMT button that shows your rights, the next owner's, or both.
-  A second inventory window opens beside the first to sort between faraway
-  folders, and folders opened in their own window get the same layout. The
+  Open any number of inventory windows to sort between faraway folders: each
+  click on New inventory window (or Ctrl+Shift+I) opens another independent
+  view. The first opens beside the main window and later ones cascade. Extra
+  windows are temporary across restarts; folder windows get the same layout. The
   Recent tab can cover a set period, such as the last week. Hover an item to
   preview its picture, and build an advanced search from visual rules
   ("objects or scripts, but not no-copy ones"), saved for later, or ask for
@@ -728,7 +730,7 @@ The texture memory budget is set automatically from the detected VRAM.
   environments, experience permission prompts and region restart alerts.
 - **Inventory and commerce** — Aurora's inventory window (tree, explorer and
   details) or the Legacy one, fetched whole in the background at login, a
-  second inventory window, resizable columns, advanced searches from visual
+  unlimited inventory windows, resizable columns, advanced searches from visual
   rules and saved searches, picture previews on hover, giving by dropping on a
   profile or an avatar, copying or wearing an object's contents, inventory
   tools, folder colours, outfit backups to JSON, dedicated Marketplace and

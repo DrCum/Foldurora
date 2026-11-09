@@ -460,6 +460,32 @@ Contents: [Automated windows](#automated-test-windows-on-windows) ·
 [Forced settings and diagnostics](#forced-settings-and-diagnostics) ·
 [Profiling](#profiling) · [Fuzzing](#fuzzing)
 
+## Multiple inventory windows
+
+`AURORA_DEMO_INVENTORY=windows:3` or `aurora-windows:3` opens three full
+inventory windows in the Legacy or Aurora presentation. Use 8 or 16 for
+placement and lifecycle checks. The main window's New inventory window
+button and Ctrl+Shift+I create a new independent view every time, including
+when another is minimized. The first extra opens beside the main inventory;
+later ones cascade by 32 points and stay inside the work area. Only the main
+window has Received Items and the creation button. Extra windows do not
+reopen after logout or restart.
+
+Check independent searches, selection, scrolling, minimize/restore and close;
+move or copy items between nonadjacent windows. Closing an inventory must
+keep its open documents and confirmations alive, and closing another window
+must not redirect their results. RLVa `@showinv` must close all full inventory
+windows and prevent creating another with the shortcut. Grid acceptance is
+performed by the human with normal permissions.
+
+The ignored `inventory_multi_window_profile` diagnostic reports opening,
+steady-frame and update-frame CPU time plus process RSS for 1, 3, 8 and 16
+windows over 30,000 and 200,000 synthetic items in both styles. Run it alone:
+`cargo test --profile ci --workspace --locked inventory_multi_window_profile -- --ignored --nocapture --test-threads=1`.
+Record the source SHA and profile with the results: the unoptimized `ci`
+profile is for correctness and scaling diagnostics, not shipped frame rates.
+RSS includes pages retained by the allocator after caches have been freed.
+
 ## Automated test windows on Windows
 
 For a test without human intervention, add

@@ -18,6 +18,8 @@ pub(crate) enum Group {
     /// A conversation in its own window (floater_fs_im_session.xml).
     Conversation,
     Inventory(i32),
+    /// Full inventory instances; the first opens beside the main inventory.
+    FullInventory,
 }
 
 impl Group {

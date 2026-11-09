@@ -328,23 +328,15 @@ fn filters_tip(st: &InventoryUi) -> &'static str {
     }
 }
 
-/// The main window's button for the additional inventory window, lit while
-/// that window is open (the Legacy Viewer's `new_inv_btn`); the other
-/// windows have none.
+/// The main window's create-new-inventory action, shared with Ctrl+Shift+I.
 fn additional_button(ui: &mut egui::Ui, p: &Palette, st: &mut InventoryUi) {
     if !st.is_main() {
         return;
     }
-    let button = tool_button(
-        ui,
-        p,
-        ADDITIONAL_ICON,
-        aurora_i18n::tr!("inventory-additional-window"),
-        st.additional_open(),
-    );
+    let button = tool_button(ui, p, ADDITIONAL_ICON, aurora_i18n::tr!("inventory-additional-window"), false);
     additional_button_drawn(ui, button.rect);
     if button.clicked() {
-        st.toggle_additional_window(ui.ctx());
+        st.open_additional_window(ui.ctx());
     }
 }
 

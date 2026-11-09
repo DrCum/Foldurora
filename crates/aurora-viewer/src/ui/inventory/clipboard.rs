@@ -1378,6 +1378,102 @@ mod tests {
         assert!(h.st.cut);
     }
 
+    fn full_windows(classic: bool) -> Harness {
+        let mut h = Harness::new();
+        h.classic = classic;
+        for _ in 0..3 {
+            h.st.open_additional_window(&h.ctx);
+        }
+        for _ in 0..4 {
+            h.frame(Vec::new());
+        }
+        let source = h.st.windows[0].id;
+        let middle = h.st.windows[1].id;
+        let dest = h.st.windows[2].id;
+        super::super::super::widgets::minimize_floater(&h.ctx, "inventory");
+        super::super::super::widgets::minimize_floater(&h.ctx, &floater_id(middle));
+        super::super::super::widgets::place_floater(&h.ctx, &floater_id(source), egui::pos2(20.0, 50.0), egui::vec2(440.0, 850.0));
+        super::super::super::widgets::place_floater(&h.ctx, &floater_id(dest), egui::pos2(550.0, 50.0), egui::vec2(440.0, 850.0));
+        for w in &mut h.st.windows {
+            w.state.show_folder(&h.world.inventory, id(8000));
+            w.state.expand_all = Some(true);
+        }
+        for _ in 0..4 {
+            h.frame(Vec::new());
+        }
+        h
+    }
+
+    #[test]
+    fn full_inventory_windows_share_clipboard_with_nonadjacent_focused_destinations() {
+        for classic in [false, true] {
+            for cut in [false, true] {
+                let mut h = full_windows(classic);
+                let source = floater_id(h.st.windows[0].id);
+                let dest = floater_id(h.st.windows[2].id);
+                h.click(h.row_in(id(8100), &source), Default::default());
+                h.frame(vec![if cut { Event::Cut } else { Event::Copy }]);
+                assert_eq!(h.st.clipboard, vec![id(8100)]);
+                assert_eq!(h.st.cut, cut);
+                h.click(h.row_in(id(8001), &dest), Default::default());
+                assert!(h.ctx.memory(|m| m.has_focus(focus_id(&h.st.windows[2].state))));
+                let actions = h.paste();
+                let [InvAction::Edit(change)] = actions.as_slice() else {
+                    panic!("one paste, classic={classic}, cut={cut}");
+                };
+                if cut {
+                    assert!(
+                        matches!(&change.operations[..], [aurora_net::inventory::operations::Operation::Patch { id: item, body, .. }]
+                        if *item == id(8100) && body["parent_id"].as_uuid() == id(8001))
+                    );
+                } else {
+                    assert_eq!(change.copies.len(), 1);
+                    assert_eq!(change.copies[0].parent, id(8001));
+                }
+                h.st.pending = Some(Uuid::new_v4());
+                assert!(h.paste().is_empty(), "pending mutations block every view");
+                h.st.pending = None;
+                h.ctx.memory_mut(|m| m.request_focus(egui::Id::unique("unrelated_widget")));
+                assert!(h.paste().is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn full_inventory_windows_drag_between_nonadjacent_instances() {
+        for classic in [false, true] {
+            let mut h = full_windows(classic);
+            let source = floater_id(h.st.windows[0].id);
+            let dest = floater_id(h.st.windows[2].id);
+            h.click(h.row_in(id(8100), &source), Default::default());
+            let from = h.row_in(id(8100), &source);
+            h.frame(vec![
+                Event::PointerMoved(from),
+                Event::PointerButton {
+                    pos: from,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: Default::default(),
+                },
+            ]);
+            h.frame(vec![Event::PointerMoved(from + egui::vec2(50.0, 0.0))]);
+            let to = h.row_in(id(8001), &dest);
+            h.frame(vec![Event::PointerMoved(to)]);
+            let actions = h.frame(vec![Event::PointerButton {
+                pos: to,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: Default::default(),
+            }]);
+            assert!(
+                matches!(&actions[..], [InvAction::Drop(change)]
+                if matches!(&change.operations[..], [aurora_net::inventory::operations::Operation::Patch { id: item, body, .. }]
+                    if *item == id(8100) && body["parent_id"].as_uuid() == id(8001))),
+                "classic={classic}"
+            );
+        }
+    }
+
     #[test]
     fn folder_windows_share_clipboard_and_only_the_focused_list_handles_paste() {
         let mut h = Harness::new();

@@ -616,7 +616,7 @@ inventory-move-selection-name = Déplacer « { $name } »
 inventory-move-selection-count = Déplacer { $count } éléments
 inventory-move-no-folders = Aucun dossier disponible pour ce filtre.
 inventory-widen = Élargir la fenêtre
-inventory-additional-window = Fenêtre d’inventaire supplémentaire
+inventory-additional-window = Nouvelle fenêtre d’inventaire
 inventory-items-count = { $count ->
     [one] { $number } élément
    *[other] { $number } éléments

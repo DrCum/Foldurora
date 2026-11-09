@@ -143,7 +143,7 @@ impl App {
         }
         if self.world.rlva.has("showinv") {
             self.panels.inventory = false;
-            self.inventory_ui.close_additional_window();
+            self.inventory_ui.close_additional_windows();
         }
         if self.world.rlva.has("showminimap") {
             self.panels.minimap = false;

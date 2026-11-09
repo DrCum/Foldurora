@@ -410,7 +410,7 @@ pub enum Action {
     ContactSets,
     Inventory,
     /// Me › New Inventory Window (Inventory.NewWindow, Ctrl+Shift+I): the
-    /// additional inventory window.
+    /// creation of another independent inventory window.
     NewInventoryWindow,
     /// Me › Outfits (CustomizeAvatar, Ctrl+O): the Appearance window.
     Appearance,
