@@ -10,31 +10,54 @@ heavy cloud check. Standing permission covers source/build handoff publication;
 no merge, installation, release, credentials or grid login. Human acceptance is
 Sodie's. Overall Folderstorm/Aurora work remains unfinished.
 
-Current frozen combined candidate:
-- `fix/workspace-theme-integration-20261109`
-- Commit `5f99030a7daabb2879563c998828a2beb2f7099d`
-- Tree `36cb2e1e0e0bec083d19ed993c90810b1be52dd2`
-- PR23 https://github.com/DrCum/Foldurora/pull/23, stacked after context PR22,
-  startup/favorites PR20 and integrated disabled renderer PR21.
-- Source/remote tree verified. No package/version/full runtime result yet.
-- Source worktree `/workspace/work/workspace-folders-20261109` is now on the
-  separate `feat/workspace-expanded-folders-20261109` branch for the next slice;
-  all frozen branch heads and Git objects remain preserved.
+Current corrected frozen candidate:
+- `fix/mcp-descriptor-regression-20261109`
+- Commit `a903e16c01db412b0a7fd77886851be3145e1852`
+- Tree `a338a4b88a8a4e660efa59ad71d18878dc603e91`
+- PR29 https://github.com/DrCum/Foldurora/pull/29, stacked after expanded-folder
+  PR28, HUD PR27, Update PR25, background PR24 and themed contexts PR23.
+- Source/remote tree verified; no new Windows full/package/native result.
+- Source worktree `/workspace/work/workspace-folders-20261109` now continues on
+  separate `feat/workspace-additional-inventory-20261109`; all frozen heads remain.
 
-Full Windows request, byte-verified,12791bytes, SHA256
-`bf2eac7143c7294718da5370c26af949a0743861daee0bf8290033ae111f6f07`:
-https://github.com/DrCum/Foldurora/blob/54ca46d1c778ce0aa236a6ea101506acf8e38814/docs/FOLDURORA_CONTEXT_WINDOWS_REQUEST_20261109.md
-Build source is5f990, not the documentation commit. Uses the retained private
-1134-name a611 list plus15 new workspace cases and the theme guard:1150 default
-requirements, with separate nondefault Monitor gates. Preserve all unrelated
-security/slot/private store tests. No checklist/raw evidence publication.
+Sanitized pinned Windows request (prepared only; delivery/ack/run UNCONFIRMED):
+https://github.com/DrCum/Foldurora/blob/f305efdc55dc0d6d8f71ea9849b1f9e748e8df7a/docs/FOLDURORA_ADVANCED_CONTEXT_WINDOWS_REQUEST_A903E16C.md
+15475bytes; SHA256 `85e45ec4ae4798294f3c6665cd34814fd2d59ef7c36d7bc743d863add8464f64`.
+Source target is a903, not the documentation commit. Default full-run gate1184;
+early small MCP package gate then ONE full workspace run and separate nondefault
+renderer gates, ordinary xr-static-loader viewer/sidecar package. Reuses Builder's
+existing dev cache. Source-visible additions are public; private coverage inputs
+and identifying metadata are not in this request. Slick must check history and
+relay ONCE to the existing Cumputer Builder01a1af77-a465-71c3-be08-cd9d1b927f83.
+Do not duplicate a delivered/running request or rerun an unchanged failed source.
 
-Slick confirmed delivery of the complete pinned5f990 request ONCE to the
-EXISTING Cumputer Windows Builder, thread01a1af77-a465-71c3-be08-cd9d1b927f83,
-and verified its new turn active. Validation is RUNNING; no result, package or
-native acceptance is claimed yet. Do not dispatch a duplicate request. App PR
-attachments returned connection closed and are not claimed attached. No old
-candidate rerun.
+Automatic review rejected the first request upload because it contained private
+coverage-input metadata; known not executed. Those references were removed,
+destination absence checked, and the sanitized payload was published via the same
+supported tool and byte-verified. No private evidence/alternate-route fallback.
+Direct app connection/PR attachments remain closed; no owner acknowledgment or
+new build start is claimed. The latest completed Builder was idle.
+
+Slick delivered the pinned5f990 request ONCE. Builder has completed and is
+IDLE. The candidate FAILED its full suite:8935passed/1failed/58ignored, zero
+filtered,37 summaries.1149/1150 required names pass once; the theme guard passes.
+The sole failed requirement `ipc::tests::wrong_secret_and_stale_incarnation_are_refused`
+failed at synthetic descriptor std::fs::write, Windows sharing violation32,
+ipc/tests.rs122. Wrong-secret assertion and pipe connection precede it; stale-
+incarnation and replacement-preservation assertions did NOT run. Reader sharing
+(read/delete, no write) is consistent with this race, but the conflicting original
+handle is unidentified. Do not claim a proven cause or weaken production sharing.
+Monitor feature gates, viewer/sidecar builds, versions, packages, CPU/native smoke
+were NOT RUN; no new binary/package identity. Source clean;2001 artifact records
+and37 saved cache hashes matched. Original logs/private checklist remain local.
+Sanitized report:
+https://github.com/DrCum/Foldurora/blob/2cbeca99372f6ab1c8127b21399cd8479e8e0584/docs/FOLDURORA_WINDOWS_VALIDATION_5F99030.md
+
+No duplicate/unchanged build or diagnostic. Next combined request must include
+a reviewed MCP regression correction without weakening any security assertion;
+coordinate with the independent owner before functional overlap. Direct app
+connection/PR attachments are closed; no owner acknowledgment or new dispatch is
+claimed. Continue source-side advanced workspaces in the meantime.
 
 ## Measured evidence and failures
 
@@ -72,7 +95,7 @@ candidate rerun.
   Profile Copy's exclusive tests were retired with the approved removal, not
   passed. The old Linux terrain/software-GPU failure remains unresolved.
 
-Cloud has32GB fixed disk, about260MiB free. Full viewer test linking is resource-
+Cloud has32GB fixed disk, about184MiB free. Full viewer test linking is resource-
 blocked; no new full Linux run is claimed. Only idle reproducible caches have
 been reclaimed; source, binaries, profiles and needed evidence remain. Current
 receipts/logs are under `/workspace/scratch/workspace-{folders,graphics,camera,
@@ -119,7 +142,7 @@ additional genuine World/model/controller/UI cases compile but are UNRUN.
 The first5/1 lane run, three development type/borrow errors and format diff remain
 preserved. No full Linux link, new Windows package or native/human pass is claimed.
 Future combined Windows requirements1174 (14 new cases), private scratch only.
-Current5f990 request stays1150 and is already running; no competing request.
+Historical5f990 request stays1150; its failed result above is preserved. No competing request.
 
 HUDs are opt-in private item/point references, freshly ordinary/archive/RLVa-
 qualified, no assets/names persisted. Preview never wears. Committed switches,
@@ -131,12 +154,41 @@ request. Native COF/capacity/final send checks remain. Documentation:
 `docs/FOLDURORA_WORKSPACE_HUDS_20261109.md`. Receipts and development negatives:
 `/workspace/scratch/workspace-hud-restore-v2-20261109/`.
 
-The next source slice is bounded expanded Inventory-folder restoration, on the
-separate branch above, not a change to any frozen build. Inspection/plan is in
-`/workspace/scratch/workspace-expanded-folders-20261109/PLAN.md`. Reuse actual
-owner-local main plain-tree state, a single borrowed ordinary Ready mask and
-loaded/Fetched folders; avoid hidden windows, fetches and recurring tree scans.
-Extra Inventory windows and image/per-display backgrounds remain unfinished.
+Expanded Inventory-folder state is published/frozen at
+`e2fc23ea2c38f93840a16bbb8b3e96b40bbb9998`, tree
+`b15062df5f7c408c576d7ac6666ea86db42f3704`, branch
+`feat/workspace-expanded-folders-20261109`, PR28
+https://github.com/DrCum/Foldurora/pull/28. Formatting, qualified viewer Clippy0,
+2 actual DTO cases,13 localization and unchanged appearance scan1/0/0 pass.
+Six further genuine native/archive/UI/controller/model/source cases compile
+UNRUN. Future default gate1182. Fetched ordinary visible main-tree capture is
+bounded256 references; commit-only restore initiates no hidden opens/fetches.
+Advisory modified/last-arrangement capture is sampled at fourHz. New expanded and
+HUD contexts also compare the original native login grid namespace. Original
+geometry-source selection behavior is unchanged. Source doc and scratch receipts:
+`docs/FOLDURORA_WORKSPACE_EXPANDED_FOLDERS_20261109.md`,
+`/workspace/scratch/workspace-expanded-folders-20261109/`.
+
+MCP correction a903 is published/frozen as above; only tests and its explanation
+change from e2fc. Live replacement now uses a fully written private atomic
+successor, retaining all original wrong-secret/stale/ref-preservation/no-dispatch
+assertions. Separate deterministic cases retain SAME-identity changed-content
+cleanup and original-reader/atomic-successor coverage; Windows also checks
+in-place write refusal32. No production sharing/ACL/transport changes, retry,
+assertion removal or security waiver. Linux MCP package34/0/0, zero filtered
+(32unit+2 Linux-only stdio); strict MCP all-target Clippy0 and format0. This is a
+package-selected graph, not full workspace/Windows/native proof. Windows held-
+reader/rename checks remain UNRUN. Parent real viewer code/compile is unchanged.
+Receipts: `/workspace/scratch/mcp-descriptor-regression-20261109/`.
+Coordination notice before edits:
+https://github.com/DrCum/Foldurora/pull/28#issuecomment-6739054196
+No functional MCP PR visible; direct app closed and owner acknowledgment pending.
+The functional owner must retain this correction and earlier OVERLAPPED lint fixes.
+No competing enablement/privacy/tools implementation was started.
+
+Next source work continues additional Inventory window lifecycle/
+geometry/folder state, then image/per-display background or record concrete
+missing dependencies and take the next independent authorized feature.
 
 ## Roadmap and next actions
 
@@ -151,7 +203,7 @@ Extra Inventory windows and image/per-display backgrounds remain unfinished.
    loaded visible ordinary main Inventory. Additional windows/expanded trees,
    additional Inventory state and image/per-display backgrounds remain incomplete.
    HUD restore/review is implemented in the subsequent source slice, not yet native accepted. Solid padding colors are implemented in the
-   subsequent source slice above; active next work is bounded expanded-folder restoration. Named-preset lookup beyond current
+   subsequent source slice above; bounded expanded-folder restoration is now published as above; additional windows remain. Named-preset lookup beyond current
    snapshots and free/world/object/photo camera anchors remain intentional
    differences, not silently full Folderstorm parity.
 3. Fixed-slot actions, aliases/accents/alerts, session sets, restart/recovery,
@@ -166,8 +218,7 @@ integrated. No functional MCP PR was in the latest actual open-PR collection.
 
 Latest feature-boundary PR search found no functional MCP PR; PR20/21 references
 MCP but does not implement that independently assigned work. Retain the two
-Windows OVERLAPPED style corrections when integrating it. Do not change frozen
-5f990 during Windows validation. Continue independent source work meanwhile.
+Windows OVERLAPPED style corrections when integrating it. Do not change frozen5f990 or rerun it unchanged. Continue independent source work meanwhile.
 
 User exclusions: custom Inventory tabs, Previous Look, extra wear confirmations,
 Fade/Birdseye, Folderstorm assistant/controller integration and Squirty notices.
