@@ -171,7 +171,7 @@ impl Frames {
         raw.viewports.entry(raw.viewport_id).or_default().native_pixels_per_point = Some(self.scale);
         let palette = self.theme.palette();
         let mut action = None;
-        let output = self.context.run_ui(raw, |ui| {
+        let mut output = self.context.run_ui(raw, |ui| {
             let shown = self.chat.show(ui, &palette, Some(snapshot), ACCOUNT, GRID);
             action = action.take().or(shown);
         });
@@ -196,6 +196,9 @@ impl Frames {
             output.pixels_per_point,
             palette.panel,
         );
+        // Painter has applied every upload/free; acknowledge that ownership
+        // before dropping the tracking delta. Nothing unapplied is discarded.
+        output.textures_delta.clear();
         action
     }
 

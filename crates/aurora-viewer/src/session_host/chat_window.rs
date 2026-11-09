@@ -216,6 +216,8 @@ impl ChatWindow {
                 }
                 super::chat_ui::ContactAction::Search { source, revision, query } => {
                     let _ = controller.search_contacts(source, revision, query);
+                    self.repaint = Some(Instant::now());
+                    return Ok(());
                 }
                 super::chat_ui::ContactAction::Open(draft) => {
                     match controller.open_direct(draft.request) {

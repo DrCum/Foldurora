@@ -225,3 +225,61 @@ fn contacts_ui_retired_close_stays_retired_after_bounded_operation_history_evict
         "an evicted receipt cannot resurrect optimistic hiding after acknowledged Open"
     );
 }
+
+#[test]
+fn contact_search_ui_explicit_search_cannot_share_a_frame_with_composer_shortcut() {
+    let snapshot = contacts_snapshot();
+    let mut frames = Frames::new();
+    assert!(frames.click(&snapshot, Id::unique("host_contacts_new_rect")).is_none());
+    assert!(frames.click(&snapshot, Id::unique("host_contacts_query_rect")).is_none());
+    assert!(frames.show(Some(&snapshot), vec![Event::Text("Synthetic.Name".into())]).is_none());
+    frames.type_text(&snapshot, "Retained literal composer draft");
+    let key = |pressed| Event::Key {
+        key: egui::Key::Enter,
+        physical_key: Some(egui::Key::Enter),
+        pressed,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let control = frames
+        .show(Some(&snapshot), vec![key(true)])
+        .expect("without Search, the focused shortcut captures a normal Send");
+    assert_eq!(control.text.as_str(), "Retained literal composer draft");
+    assert!(frames.show(Some(&snapshot), vec![key(false)]).is_none());
+    let at = frames.rect(&snapshot, Id::unique("host_contacts_search_rect")).center();
+    assert!(
+        frames
+            .show(
+                Some(&snapshot),
+                vec![
+                    Event::PointerMoved(at),
+                    Event::PointerButton {
+                        pos: at,
+                        button: PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE
+                    }
+                ]
+            )
+            .is_none()
+    );
+    let editor = frames.ui.editor_id();
+    frames.context.memory_mut(|memory| memory.request_focus(editor));
+    assert_eq!(frames.context.memory(|memory| memory.focused()), Some(editor));
+    let mixed = frames.show(
+        Some(&snapshot),
+        vec![
+            key(true),
+            Event::PointerButton {
+                pos: at,
+                button: PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ],
+    );
+    assert!(mixed.is_none(), "Search never piggybacks a composer Send");
+    assert!(matches!(frames.ui.take_contact_action(), Some(ContactAction::Search { .. })));
+    assert!(frames.ui.take_read_action().is_none() && frames.ui.take_close_action().is_none());
+    assert_eq!(frames.ui.draft(), "Retained literal composer draft");
+}

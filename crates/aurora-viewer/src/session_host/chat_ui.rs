@@ -1214,7 +1214,10 @@ impl ChatUi {
         });
         // Open is an operation intent, not navigation until an authorized ack.
         // Do not discard its release and then lose it during egui's repaint.
-        if matches!(self.view.contacts.action, Some(ContactAction::Open(_))) {
+        if matches!(
+            self.view.contacts.action,
+            Some(ContactAction::Open(_) | ContactAction::Search { .. })
+        ) {
             action = None;
             self.view.read_action = None;
             self.view.close_action = None;
