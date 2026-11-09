@@ -655,6 +655,7 @@ pub struct App {
     layout_autosave: ui::layout::Autosave,
     workspaces: crate::workspace::controller::Controller,
     workspace_ui: ui::workspaces::WorkspaceUi,
+    workspace_huds: crate::workspace::huds::Runtime,
     loading_stage: String,
     move_complete_at: Option<Instant>,
     /// Teleport diagnostics still to log (seconds after the arrival).
@@ -1642,6 +1643,7 @@ impl App {
             layout_autosave: Default::default(),
             workspaces: Default::default(),
             workspace_ui: Default::default(),
+            workspace_huds: Default::default(),
             loading_stage: String::new(),
             move_complete_at: None,
             tp_checks: Vec::new(),
@@ -10988,6 +10990,7 @@ impl App {
         self.tick_boards_presented(Some(gesture_board::Presentation::new(&gfx.renderer, &gfx.window)));
         self.pump_inventory_archive();
         self.inventory_archive_ui.begin();
+        self.workspace_huds_prepare(&gfx.renderer, &gfx.window);
         self.inventory_ui.archive_input(self.inventory_archive_ui.input());
         let mut full = ctx.run_ui(raw, |ui| {
             self.observe_inventory_archive();
@@ -17843,7 +17846,9 @@ impl App {
         );
         self.show_characters(&ctx, &p);
         let modified = self.workspace_modified();
-        a.workspace = self.workspace_ui.show(&ctx, &p, &self.workspaces, modified);
+        a.workspace = self
+            .workspace_ui
+            .show(&ctx, &p, &self.workspaces, modified, &self.workspace_huds.view);
         let favorite = self.workspace_ui.favorites(&ctx, &self.workspaces);
         if a.workspace.is_none() {
             a.workspace = favorite;
@@ -20587,6 +20592,9 @@ impl ApplicationHandler for App {
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
         let folder_jump_window = self.gfx.as_ref().is_some_and(|gfx| gfx.window.id() == id);
         if folder_jump_window {
+            if matches!(&event, WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. }) {
+                self.workspace_huds.retire();
+            }
             self.observe_inventory_archive();
             if self.inventory_archive_ui.native_event(&event) {
                 self.inventory_ui.revoke_archive_gestures();
@@ -20596,6 +20604,7 @@ impl ApplicationHandler for App {
                 &event,
                 WindowEvent::Focused(false) | WindowEvent::Occluded(true) | WindowEvent::Destroyed
             ) {
+                self.workspace_huds.retire();
                 self.inventory_ui.retire_archive_input(&self.egui_ctx);
                 self.inventory_archive_ui.begin();
             }

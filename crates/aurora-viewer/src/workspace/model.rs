@@ -5,6 +5,8 @@ mod background;
 pub(crate) use background::Background;
 mod camera;
 pub(crate) use camera::CameraContext;
+mod huds;
+pub(crate) use huds::{HudRef, HudSet, MAX_HUDS};
 mod graphics;
 pub(crate) use graphics::Graphics;
 
@@ -14,6 +16,7 @@ pub(crate) struct CaptureGroups {
     pub graphics: bool,
     pub camera: bool,
     pub background: bool,
+    pub huds: bool,
 }
 
 pub(crate) const LIMIT: usize = 32;
@@ -103,6 +106,8 @@ pub(crate) struct Layout {
     pub camera: Option<CameraContext>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub background: Option<Background>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub huds: Option<HudSet>,
 }
 impl Layout {
     pub(crate) fn validate(&self) -> Result<(), &'static str> {
@@ -153,6 +158,9 @@ impl Layout {
         if target.inventory_folder.is_none() {
             baseline.inventory_folder = None;
         }
+        if target.huds.is_none() {
+            baseline.huds = None;
+        }
         if target.background.is_none() {
             baseline.background = None;
         }
@@ -172,6 +180,11 @@ impl Layout {
                 .inventory_folder
                 .zip(current.inventory_folder)
                 .is_none_or(|(saved, live)| saved == live)
+            && self
+                .huds
+                .as_ref()
+                .zip(current.huds.as_ref())
+                .is_none_or(|(wanted, live)| wanted.is_subset_of(live))
             && self.background.is_none_or(|saved| current.background == Some(saved))
             && self.graphics.as_ref().is_none_or(|saved| current.graphics.as_ref() == Some(saved))
             && self
@@ -185,6 +198,7 @@ impl Layout {
             graphics: self.graphics.is_some(),
             camera: self.camera.is_some(),
             background: self.background.is_some(),
+            huds: self.huds.is_some(),
         }
     }
 }
@@ -221,6 +235,10 @@ pub(crate) struct Catalogue {
     pub capture_camera: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub capture_background: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub capture_huds: bool,
+    #[serde(default, skip_serializing_if = "HudSet::is_empty")]
+    pub selected_huds: HudSet,
     #[serde(default, skip_serializing_if = "Background::is_black")]
     pub background: Background,
 }
@@ -266,6 +284,8 @@ impl Catalogue {
             capture_graphics: false,
             capture_camera: false,
             capture_background: false,
+            capture_huds: false,
+            selected_huds: HudSet::default(),
             background: Background::Black {},
         }
     }
@@ -353,6 +373,7 @@ mod tests {
             graphics: None,
             camera: None,
             background: None,
+            huds: None,
             geometry: [Some(Geometry {
                 point: 7,
                 offset: [-32768.0, 32768.0],
@@ -638,5 +659,29 @@ mod tests {
         assert_eq!(catalogue.encode().unwrap(), original);
         assert!(catalogue.update_layout(Uuid::new_v4(), layout()).is_err());
         assert_eq!(catalogue.encode().unwrap(), original);
+    }
+    #[test]
+    fn workspace_hud_catalogue_is_opt_in_private_and_rejects_duplicate_item_references() {
+        let mut c = Catalogue::empty(Uuid::new_v4(), "a".repeat(64));
+        assert!(!c.capture_huds);
+        assert!(c.selected_huds.is_empty());
+        let reference = HudRef {
+            item: Uuid::new_v4(),
+            point: 31,
+        };
+        c.selected_huds = HudSet::try_from(vec![reference]).unwrap();
+        c.capture_huds = true;
+        let mut l = layout();
+        l.huds = Some(c.selected_huds.clone());
+        c.records.push(Record {
+            id: Uuid::new_v4(),
+            name: "HUDs".into(),
+            layout: l,
+        });
+        assert_eq!(Catalogue::decode(&c.encode().unwrap(), c.account, &c.grid).unwrap(), c);
+        let mut value = serde_json::to_value(&c).unwrap();
+        value["selected_huds"] = serde_json::json!([reference, reference]);
+        assert!(Catalogue::decode(&serde_json::to_vec(&value).unwrap(), c.account, &c.grid).is_err());
+        assert!(Catalogue::decode(&c.encode().unwrap(), Uuid::new_v4(), &c.grid).is_err());
     }
 }

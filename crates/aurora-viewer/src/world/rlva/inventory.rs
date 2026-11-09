@@ -1129,7 +1129,7 @@ impl World {
 
     /// getattach/getoutfit optionally hide locked slots, exempting the query's
     /// issuer as the reference does. Forced removals still obey every lock.
-    fn rlva_query_removable(&self, item: Uuid, except: Uuid, worn: &std::collections::HashMap<Uuid, u8>) -> bool {
+    pub(crate) fn rlva_query_removable(&self, item: Uuid, except: Uuid, worn: &std::collections::HashMap<Uuid, u8>) -> bool {
         if !super::collection::strippable(&self.inventory, item, self.rlva.preferences.legacy_naming) {
             return false;
         }

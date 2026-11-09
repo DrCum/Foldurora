@@ -301,6 +301,16 @@ impl Controller {
             self.projection.pump(world, model, turn);
         }
     }
+    /// Native publication identity only, for retiring reviewed workspace HUD
+    /// work. Does not grant visibility or mutation; callers still borrow their
+    /// own ordinary read for every displayed/actionable item. Inventory changes
+    /// need not invalidate consent to the unchanged publication.
+    pub(crate) fn metadata_revision(&self, world: &World) -> Option<super::Revision> {
+        if self.memory_only() || self.profile != crate::session_host::profile::root() {
+            return None;
+        }
+        Some(self.model.as_ref()?.read(world)?.revision())
+    }
     pub(crate) fn read<'a>(&'a self, world: &'a World, policy: &'a mut OwnerPolicy) -> Option<VisibilityRead<'a>> {
         if let Mode::MemoryOnly(scope) = &self.mode {
             return Some(self.projection.offline_read(world, scope, policy));
