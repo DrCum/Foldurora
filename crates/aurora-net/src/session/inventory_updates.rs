@@ -2,11 +2,13 @@
 //! indra/newview/llinventorymodel.cpp, llviewergenericmessage.cpp, LGPL 2.1).
 //! Modern simulators send copy callbacks as notation in the HTTP event queue.
 
+use super::assistant_take::{InventoryKind, InventoryObservation};
 use super::*;
 use crate::inventory::{InvFolder, InvItem, folder_from_llsd, item_from_llsd};
 
 struct Update {
     transaction: Uuid,
+    take: InventoryObservation,
     items: Vec<(u32, InvItem)>,
     folders: Vec<InvFolder>,
 }
@@ -45,6 +47,10 @@ fn parse(agent: Uuid, method: &[u8], parameter: &[u8], expected: Uuid) -> Option
             .collect();
         Ok(Update {
             transaction: document["transaction_id"].as_uuid(),
+            take: InventoryObservation {
+                transaction: document["transaction_id"].as_uuid(),
+                kind: InventoryKind::Bulk,
+            },
             items,
             folders,
         })
@@ -123,6 +129,22 @@ fn parse_template(event: &EqEvent, expected: Uuid) -> Result<Update, ()> {
         })
         .collect();
     Ok(Update {
+        // Private native Take evidence is independent from the ordinary
+        // delivery transaction. Direct Create keeps its existing no-delivery
+        // behavior, including RLVa inventory offer processing.
+        take: InventoryObservation {
+            transaction: b["AgentData"].at(0)["TransactionID"].as_uuid(),
+            kind: if event.message == "BulkUpdateInventory" {
+                InventoryKind::Bulk
+            } else {
+                InventoryKind::Create {
+                    sim_approved: match &b["AgentData"].at(0)["SimApproved"] {
+                        Llsd::Boolean(value) => Some(*value),
+                        _ => None,
+                    },
+                }
+            },
+        },
         transaction: if event.message == "BulkUpdateInventory" {
             b["AgentData"].at(0)["TransactionID"].as_uuid()
         } else {
@@ -138,17 +160,17 @@ impl Session<'_> {
         let Some(update) = parse_eq(event, self.agent_id()) else {
             return false;
         };
-        self.apply_generic_inventory_update(update);
+        self.apply_generic_inventory_update(event.sim, update);
         true
     }
 
-    pub(super) fn on_inventory_generic(&mut self, agent: Uuid, method: &[u8], parameter: &[u8]) {
+    pub(super) fn on_inventory_generic(&mut self, address: SocketAddr, agent: Uuid, method: &[u8], parameter: &[u8]) {
         if let Some(update) = parse(agent, method, parameter, self.agent_id()) {
-            self.apply_generic_inventory_update(update);
+            self.apply_generic_inventory_update(address, update);
         }
     }
 
-    fn apply_generic_inventory_update(&mut self, update: Result<Update, ()>) {
+    fn apply_generic_inventory_update(&mut self, address: SocketAddr, update: Result<Update, ()>) {
         let Ok(update) = update else {
             log::warn!("inventory generic update rejected: malformed or foreign recipient");
             return;
@@ -192,9 +214,10 @@ impl Session<'_> {
             self.sh,
             NetEvent::InventoryUpdated {
                 folders: update.folders,
-                items,
+                items: items.clone(),
             },
         );
+        self.assistant_take_inventory(address, update.take, &items);
         if !update.transaction.is_nil() {
             emit(
                 self.sh,
@@ -283,6 +306,23 @@ mod tests {
         }
     }
 
+    #[test]
+    fn private_create_take_evidence_keeps_raw_transaction_and_exact_boolean_approval_separate_from_delivery() {
+        let agent = Uuid::from_u128(2);
+        for approval in [Llsd::Undef, Llsd::Boolean(false), Llsd::Boolean(true), Llsd::Integer(1)] {
+            let mut event = template_event(agent, "UpdateCreateInventoryItem");
+            let mut agent_data = event.body["AgentData"].at(0).clone();
+            agent_data.insert("SimApproved", approval.clone());
+            event.body.insert("AgentData", Llsd::Array(vec![agent_data]));
+            let update = parse_eq(&event, agent).unwrap().unwrap();
+            assert!(update.transaction.is_nil());
+            assert_eq!(update.take.transaction, Uuid::from_u128(202));
+            let InventoryKind::Create { sim_approved } = update.take.kind else {
+                panic!("Create retains native kind")
+            };
+            assert_eq!(sim_approved, if let Llsd::Boolean(value) = approval { Some(value) } else { None });
+        }
+    }
     #[test]
     fn event_queue_copy_confirmation_keeps_callback_parent_and_permissions() {
         let agent = Uuid::from_u128(2);
@@ -400,6 +440,8 @@ mod tests {
             login_arrival: false,
             agent_parcel: None,
             pending_named_tp: None,
+            teleport_cancel: Default::default(),
+            assistant_takes: Default::default(),
             object_cache: super::object_cache::ObjectCaches::new(None).0,
             throttle: crate::throttle::Throttle::new(crate::throttle::DEFAULT_KBPS, Instant::now()),
             social: Default::default(),
@@ -412,6 +454,7 @@ mod tests {
             inventory_previews: Default::default(),
             script_transfers: Default::default(),
             inventory_callbacks: HashMap::new(),
+            assistant_creates: HashMap::new(),
             inventory_copies: Default::default(),
             attach_queue: Default::default(),
             inventory_merchant_pending: false,

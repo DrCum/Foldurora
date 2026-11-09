@@ -12,6 +12,24 @@ use crate::workspace::{
 use uuid::Uuid;
 
 impl App {
+    /// Passive MCP demand uses the original native profile and the shared IO lane.
+    /// It never opens the manager, applies a layout or creates action authority.
+    pub(super) fn workspace_ensure_catalogue(&mut self) -> Result<bool, &'static str> {
+        let source = self.workspace_source().ok_or("native_workspace_source_unavailable")?;
+        if self.workspaces.source.as_ref() != Some(&source) || !crate::workspace::images::source_current(&self.world, &source) {
+            return Err("native_workspace_source_or_privacy_unavailable");
+        }
+        if self.workspaces.catalogue.is_some() {
+            return Ok(true);
+        }
+        if matches!(self.workspaces.status, Status::Error | Status::Invalid) {
+            return Err("native_workspace_catalogue_unavailable");
+        }
+        if self.workspaces.pending.is_none() {
+            self.workspace_io(None, None);
+        }
+        Ok(false)
+    }
     pub(super) fn workspace_source(&self) -> Option<Source> {
         if matches!(self.screen, Screen::Login) || self.world.agent_id.is_nil() {
             return None;
@@ -76,6 +94,7 @@ impl App {
             || self.login_form.busy
             || self.options_ui.capture.is_some()
             || self.options_ui.restore.is_some()
+            || self.settings.curated_held.is_some()
         {
             return false;
         }

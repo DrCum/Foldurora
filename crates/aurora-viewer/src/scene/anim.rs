@@ -464,6 +464,10 @@ impl Motion {
 #[derive(Default)]
 pub struct Controller {
     pub(super) poser: Option<(Arc<crate::ik_edit::poser::SubjectPose>, Mat4)>,
+    /// A private assistant motion owns rotations only. Removing this map lets
+    /// the live animation blend supply every channel again; no manual pose,
+    /// animation, position or scale snapshot is restored over another owner.
+    pub(super) assistant_rotations: Option<Arc<std::collections::BTreeMap<usize, Quat>>>,
     pub(super) ik: super::ik::Pose,
     /// LLControlAvatar disables default head / eye motions.
     pub control: bool,
@@ -1597,6 +1601,16 @@ impl Controller {
         let (rotations, positions) = edited.as_ref().map_or((rotations, local_pos.as_slice()), |p| {
             (p.rotations.as_slice(), p.positions.as_slice())
         });
+        let assistant_rotations = self.assistant_rotations.as_ref().filter(|_| self.poser.is_none()).map(|overlay| {
+            let mut current = rotations.to_vec();
+            for (bone, q) in overlay.iter() {
+                if let Some(channel) = current.get_mut(*bone) {
+                    *channel = *q;
+                }
+            }
+            current
+        });
+        let rotations = assistant_rotations.as_deref().unwrap_or(rotations);
         let world = self.poser.as_ref().map_or_else(
             || rig.world_with(rotations, pelvis, positions, scale),
             |(pose, model)| pose.matrices(rig, *model),

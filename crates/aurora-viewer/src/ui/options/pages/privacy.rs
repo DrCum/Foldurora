@@ -152,6 +152,11 @@ pub(super) fn page(cx: &mut Cx) {
     use aurora_i18n::tr;
     account_group(cx);
     login_favorites_row(cx);
+    cx.toggle(
+        tr!("shared-pose-enable"),
+        tr!("shared-pose-consent-body"),
+        &field!(pose_requests.sharing_enabled),
+    );
     cx.choice(
         tr!("poser-privacy"),
         tr!("poser-privacy-hint"),

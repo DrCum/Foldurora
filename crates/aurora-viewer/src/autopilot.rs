@@ -350,6 +350,16 @@ impl AutoPilot {
         }
     }
 
+    /// Native bounded movement without an arrival action. Callers retain the
+    /// exact run's `started` identity; stopping it never stops a newer pilot.
+    pub(crate) fn start_bounded(from: Vec3, target: Vec3, stop_distance: f32, flying: bool, now: Instant) -> AutoPilot {
+        AutoPilot {
+            stop_distance,
+            flying,
+            ..Self::start(from, target, false, now)
+        }
+    }
+
     /// Avatar approach, using LLAgent::startFollowPilot's target identity.
     /// Unlike the Legacy Viewer, arrival rests at 2 m and following resumes
     /// only beyond 3 m. Ground travel compares XY, so different pelvis heights

@@ -97,10 +97,13 @@ impl Demo {
                     cpu_seconds: 0.00125,
                     character_seconds: 0.0002,
                 };
-                let result = if std::env::var("AURORA_DEMO_BRIDGE_QUERY").is_ok_and(|m| m == "error") {
+                let result = if matches!(query, Query::SharedPoseEnable(_) | Query::SharedPosePacket { .. }) {
+                    Err("Native shared posing is unavailable in the offline bridge demo".into())
+                } else if std::env::var("AURORA_DEMO_BRIDGE_QUERY").is_ok_and(|m| m == "error") {
                     Err(aurora_i18n::tr!("bridge-script-info-missing").into())
                 } else {
                     Ok(match query {
+                        Query::SharedPoseEnable(_) | Query::SharedPosePacket { .. } => unreachable!("shared posing is refused above"),
                         Query::Pose { .. } => Reply::Pose,
                         Query::Portal { .. } => Reply::Portal,
                         Query::Altitudes(ids) => Reply::Altitudes(

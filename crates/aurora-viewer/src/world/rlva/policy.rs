@@ -200,7 +200,13 @@ impl World {
             NetCommand::SendImDialog { to, dialog: 4, .. } => r.allows("share", &to.to_string()),
             // A dialog shown before @sendchat (process_script_dialog_response,
             // llviewermessage.cpp): its public-chat answer is not sent.
-            NetCommand::ScriptDialogReply { channel: 0, .. } => !r.has("sendchat"),
+            NetCommand::ScriptDialogReply { channel, .. } | NetCommand::AssistantDialogReply { channel, .. } => {
+                if *channel == 0 {
+                    !r.has("sendchat")
+                } else {
+                    r.allows_channel(*channel)
+                }
+            }
             NetCommand::ActivateGroup(group) => {
                 !blocked("setgroup") || (actor == super::groups::ACTOR && r.has("setgroup") && r.groups.restore_allowed(*group))
             }
@@ -278,6 +284,13 @@ impl World {
                 | aurora_net::build::BuildCmd::RezInventory(_)
                 | aurora_net::build::BuildCmd::Duplicate { .. },
             ) => !blocked("rez"),
+            NetCommand::AssistantTakeObject { handle, local_id, .. } => self.rlva_allows_build(&aurora_net::build::BuildCmd::DeRez {
+                handle: *handle,
+                local_ids: vec![*local_id],
+                destination: aurora_net::build::derez::TAKE_INTO_AGENT_INVENTORY,
+                destination_id: uuid::Uuid::nil(),
+                group_id: uuid::Uuid::nil(),
+            }),
             NetCommand::Build(command) => self.rlva_allows_build(command),
             NetCommand::ScriptAnswer { task_id, questions, .. } => self.rlva_script_permissions(*task_id, *questions).0 == *questions,
             NetCommand::AcceptLure { lure_id, godlike } => {

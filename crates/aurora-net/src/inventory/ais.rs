@@ -53,7 +53,7 @@ fn category(record: &Llsd) -> Result<InvFolder, &'static str> {
     Ok(folder)
 }
 
-fn parse_folder(doc: &Llsd, id: Uuid, owner: Uuid) -> Result<FolderContents, &'static str> {
+pub(crate) fn parse_folder(doc: &Llsd, id: Uuid, owner: Uuid) -> Result<FolderContents, &'static str> {
     if doc["category_id"].as_uuid() != id
         || !doc.has("version")
         || doc["version"].as_i32() < 0
@@ -224,7 +224,7 @@ pub async fn fetch_folders(http: &reqwest::Client, cap: &str, owner: Uuid, ids: 
     Ok(contents)
 }
 
-fn parse_item_reply(doc: &Llsd, id: Uuid, owner: Uuid) -> Result<InvItem, &'static str> {
+pub(crate) fn parse_item_reply(doc: &Llsd, id: Uuid, owner: Uuid) -> Result<InvItem, &'static str> {
     let record = if doc.has("item_id") {
         doc
     } else if doc["_embedded"]["item"]["item_id"].as_uuid() == id {
@@ -253,7 +253,7 @@ pub async fn fetch_items(http: &reqwest::Client, cap: &str, owner: Uuid, ids: &[
 
 /// Each item's own outcome: one item gone from the server must not hide
 /// the others read with it.
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ItemReads {
     pub items: Vec<InvItem>,
     /// Answered 404 or 410: the item does not exist (a broken link's original).

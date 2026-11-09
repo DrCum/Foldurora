@@ -12,6 +12,7 @@ use glam::Vec3;
 use std::collections::HashMap;
 use std::time::Instant;
 use uuid::Uuid;
+mod selection_beams;
 
 struct Source {
     ps: ParticleSource,
@@ -104,6 +105,9 @@ fn cloud_data(avatar: Uuid) -> ps::PartSysData {
 
 #[derive(Default)]
 pub struct ParticleManager {
+    pub selection_beam: bool,
+    beam_texture: Uuid,
+    beam_slot: u32,
     sources: HashMap<Uuid, Source>,
     property_owners: HashMap<Uuid, Uuid>,
     seed: u64,
@@ -517,6 +521,48 @@ impl ParticleManager {
                 self.inst_tmp.push(inst);
             }
         }
+        if self.selection_beam {
+            let texture = world.rlva.camera_texture().unwrap_or_default();
+            if texture != self.beam_texture {
+                if !self.beam_texture.is_nil() {
+                    textures.release(&self.beam_texture);
+                }
+                self.beam_texture = texture;
+                self.beam_slot = if texture.is_nil() {
+                    0
+                } else {
+                    textures.acquire(renderer, texture, TexSource::Asset)
+                };
+            }
+            let slot = if texture.is_nil() || !textures.is_loaded(&texture) {
+                0
+            } else {
+                self.beam_slot
+            };
+            let mut beams = std::mem::take(&mut world.selection_beams);
+            selection_beams::append(
+                &mut beams,
+                world,
+                dt,
+                frozen,
+                eye,
+                draw_distance,
+                filters,
+                max_particles,
+                slot,
+                &mut self.inst_tmp,
+            );
+            world.selection_beams = beams;
+        } else {
+            world.selection_beams.effects.clear();
+        }
+        self.order_tmp.clear();
+        self.order_tmp.extend(
+            self.inst_tmp
+                .iter()
+                .enumerate()
+                .map(|(i, p)| far_first_key(Vec3::from_array(p.pos).distance_squared(eye), i)),
+        );
         self.live = self.inst_tmp.len();
         // the order is sorted as plain integers (8 bytes each, not the
         // 48-byte instances), then the instances are gathered

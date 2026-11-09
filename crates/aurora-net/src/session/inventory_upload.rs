@@ -8,10 +8,12 @@ use uuid::Uuid;
 #[derive(Default)]
 pub(super) struct Uploads {
     assets: HashMap<Uuid, Upload>,
+    assistant_ready: HashMap<Uuid, (Upload, Uuid)>,
     pub(super) wearable_copies: HashMap<u32, super::wearable_save::Pending>,
 }
 
 struct Upload {
+    assistant: Option<(Uuid, String)>,
     permissions: Option<crate::inventory::upload::Permissions>,
     transaction: Uuid,
     parent: Uuid,
@@ -84,6 +86,7 @@ impl Session<'_> {
         self.inventory_uploads.assets.insert(
             asset,
             Upload {
+                assistant: None,
                 transaction,
                 parent: pending.item.parent,
                 kind: 0,
@@ -128,6 +131,7 @@ impl Session<'_> {
         self.inventory_uploads.assets.insert(
             asset,
             Upload {
+                assistant: None,
                 transaction,
                 parent: upload.folder,
                 kind: 255,
@@ -151,7 +155,50 @@ impl Session<'_> {
         data: Vec<u8>,
         permissions: Option<crate::inventory::upload::Permissions>,
     ) {
+        self.create_wearable_inner(parent, kind, name, data, permissions, None);
+    }
+    pub(super) fn create_assistant_wearable(
+        &mut self,
+        request: Uuid,
+        parent: Uuid,
+        kind: u8,
+        name: String,
+        description: String,
+        data: Vec<u8>,
+        permissions: Option<crate::inventory::upload::Permissions>,
+    ) {
+        if self.inventory_uploads.assistant_ready.len() >= 8 || description.len() > 1024 || parent.is_nil() || name.len() > 255 {
+            emit(
+                self.sh,
+                NetEvent::AssistantInventoryCreated {
+                    request,
+                    result: Err("Native creation unavailable".into()),
+                },
+            );
+            return;
+        }
+        self.create_wearable_inner(parent, kind, name, data, permissions, Some((request, description)));
+    }
+    fn create_wearable_inner(
+        &mut self,
+        parent: Uuid,
+        kind: u8,
+        name: String,
+        data: Vec<u8>,
+        permissions: Option<crate::inventory::upload::Permissions>,
+        assistant: Option<(Uuid, String)>,
+    ) {
         if kind >= 17 || data.is_empty() || data.len() > 64 * 1024 || self.inventory_uploads.assets.len() >= 8 {
+            if let Some((request, _)) = assistant {
+                emit(
+                    self.sh,
+                    NetEvent::AssistantInventoryCreated {
+                        request,
+                        result: Err("Invalid native wearable creation".into()),
+                    },
+                );
+                return;
+            }
             emit(
                 self.sh,
                 NetEvent::InventoryOperationFailed(
@@ -175,6 +222,7 @@ impl Session<'_> {
         self.inventory_uploads.assets.insert(
             asset,
             Upload {
+                assistant,
                 transaction,
                 parent,
                 kind,
@@ -210,6 +258,7 @@ impl Session<'_> {
         self.inventory_uploads.assets.insert(
             asset,
             Upload {
+                assistant: None,
                 transaction,
                 parent: Uuid::nil(),
                 kind: 255,
@@ -226,6 +275,52 @@ impl Session<'_> {
         self.send_main(&m, true);
     }
 
+    pub(super) fn finish_assistant_inventory_item(&mut self, request: Uuid, approved: bool) {
+        let Some((upload, asset)) = self.inventory_uploads.assistant_ready.remove(&request) else {
+            return;
+        };
+        let Some((origin, description)) = upload.assistant else { return };
+        if origin != request || !approved || upload.started.elapsed() > Duration::from_secs(60) || self.assistant_creates.len() >= 128 {
+            emit(
+                self.sh,
+                NetEvent::AssistantInventoryCreated {
+                    request,
+                    result: Err("Native creation continuation cancelled or expired".into()),
+                },
+            );
+            return;
+        }
+        let callback = self.inventory_callback(false);
+        let asset_type = if upload.kind < 4 { 13 } else { 5 };
+        self.assistant_creates.insert(
+            callback,
+            super::asset_imports::AssistantCreate {
+                request,
+                started: Instant::now(),
+                parent: upload.parent,
+                asset_type,
+                asset: Some(asset),
+                subtype: Some(upload.kind),
+                link: false,
+            },
+        );
+        let mut message = CreateInventoryItem::default();
+        message.agent_data.agent_id = self.agent_id();
+        message.agent_data.session_id = self.session_id();
+        message.inventory_block.folder_id = upload.parent;
+        message.inventory_block.callback_id = callback;
+        message.inventory_block.transaction_id = upload.transaction;
+        message.inventory_block.next_owner_mask = upload.permissions.map_or(0x7fff_ffff, |p| p.next_owner);
+        message.inventory_block.type_ = asset_type as i8;
+        message.inventory_block.inv_type = 18;
+        message.inventory_block.wearable_type = upload.kind;
+        message.inventory_block.name = str_field(&upload.name);
+        message.inventory_block.description = str_field(&description);
+        if let Some(rights) = upload.permissions {
+            self.remember_creation_permissions(callback, upload.parent, asset_type, rights);
+        }
+        self.send_main(&message, true);
+    }
     fn send_inventory_packet(&mut self, asset: Uuid) {
         let Some(upload) = self.inventory_uploads.assets.get(&asset) else {
             return;
@@ -336,6 +431,30 @@ impl Session<'_> {
                 }
                 return Ok(true);
             }
+            if let Some((request, _)) = &upload.assistant {
+                let request = *request;
+                if !m.asset_block.success || m.asset_block.type_ != upload.asset_type() {
+                    emit(
+                        self.sh,
+                        NetEvent::AssistantInventoryCreated {
+                            request,
+                            result: Err("Native wearable upload rejected".into()),
+                        },
+                    );
+                } else if self.inventory_uploads.assistant_ready.len() >= 8 {
+                    emit(
+                        self.sh,
+                        NetEvent::AssistantInventoryCreated {
+                            request,
+                            result: Err("Native continuation unavailable".into()),
+                        },
+                    );
+                } else {
+                    self.inventory_uploads.assistant_ready.insert(request, (upload, m.asset_block.uuid));
+                    emit(self.sh, NetEvent::AssistantInventoryAssetReady { request });
+                }
+                return Ok(true);
+            }
             if !m.asset_block.success {
                 emit(
                     self.sh,
@@ -424,6 +543,15 @@ impl Session<'_> {
         let mut imports = Vec::new();
         let mut wearables = Vec::new();
         let mut reports = 0;
+        let mut assistant_failed = Vec::new();
+        self.inventory_uploads.assistant_ready.retain(|request, (upload, _)| {
+            if upload.started.elapsed() > Duration::from_secs(60) {
+                assistant_failed.push(*request);
+                false
+            } else {
+                true
+            }
+        });
         self.inventory_uploads.assets.retain(|id, u| {
             if u.started.elapsed() > Duration::from_secs(60) {
                 if let Some(pending) = &u.wearable {
@@ -432,7 +560,9 @@ impl Session<'_> {
                         super::wearable_save::failure(&pending.item, super::wearable_save::Failure::Interrupted),
                     ));
                 }
-                if u.report.is_some() {
+                if let Some((request, _)) = u.assistant.as_ref() {
+                    assistant_failed.push(*request);
+                } else if u.report.is_some() {
                     reports += 1;
                 } else if let Some((request, _)) = &u.import {
                     imports.push(*request);
@@ -452,7 +582,9 @@ impl Session<'_> {
                             super::wearable_save::failure(&pending.item, super::wearable_save::Failure::Interrupted),
                         ));
                     }
-                    if u.report.is_some() {
+                    if let Some((request, _)) = u.assistant.as_ref() {
+                        assistant_failed.push(*request);
+                    } else if u.report.is_some() {
                         reports += 1;
                     } else if let Some((request, _)) = &u.import {
                         imports.push(*request);
@@ -467,6 +599,15 @@ impl Session<'_> {
             }
             true
         });
+        for request in assistant_failed {
+            emit(
+                self.sh,
+                NetEvent::AssistantInventoryCreated {
+                    request,
+                    result: Err("Native wearable creation outcome unknown".into()),
+                },
+            );
+        }
         for asset in retry {
             self.send_inventory_packet(asset);
         }
@@ -638,5 +779,117 @@ mod tests {
         assert_eq!(i, 0x80000002);
         assert_eq!(last, bytes[2000..]);
         assert!(packet(&bytes, 1000, 3).is_none());
+    }
+}
+
+#[cfg(test)]
+mod assistant_upload_tests {
+    use super::*;
+    #[tokio::test]
+    async fn assistant_wearable_requires_revalidated_continuation_before_item_creation() {
+        let sock = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        sock.writable().await.unwrap();
+        let simulator = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let main = simulator.local_addr().unwrap();
+        let (events, received) = crossbeam_channel::unbounded();
+        let sh = super::super::event_queue_tests::shared(crate::EventSender(events));
+        let mut session = super::super::event_queue_tests::two_regions(&sh, sock, main, "127.0.0.1:9".parse().unwrap());
+        let request = Uuid::from_u128(700);
+        let parent = Uuid::from_u128(701);
+        session.create_assistant_wearable(
+            request,
+            parent,
+            4,
+            "Synthetic shirt".into(),
+            "Synthetic description".into(),
+            b"synthetic wearable asset".to_vec(),
+            None,
+        );
+        let mut bytes = [0; 4096];
+        let (size, _) = tokio::time::timeout(Duration::from_secs(2), simulator.recv_from(&mut bytes))
+            .await
+            .unwrap()
+            .unwrap();
+        let upload: AssetUploadRequest = parse_packet(&bytes[..size]).unwrap().decode().unwrap();
+        assert_eq!(upload.asset_block.type_, 5);
+        let asset = *session.inventory_uploads.assets.keys().next().unwrap();
+        let mut complete = AssetUploadComplete::default();
+        complete.asset_block.uuid = asset;
+        complete.asset_block.type_ = 5;
+        complete.asset_block.success = true;
+        let mut packet = Vec::new();
+        aurora_msg::build_packet(&complete, 1, false, false, &[], &mut packet);
+        assert!(session.dispatch_inventory_upload(main, &parse_packet(&packet).unwrap()).unwrap());
+        assert!(matches!(received.try_recv().unwrap().1,NetEvent::AssistantInventoryAssetReady{request:id}if id==request));
+        assert!(
+            simulator.try_recv_from(&mut bytes).is_err(),
+            "asset completion alone must not create an inventory item"
+        );
+        session.finish_assistant_inventory_item(request, false);
+        assert!(matches!(received.try_recv().unwrap().1,NetEvent::AssistantInventoryCreated{request:id,result:Err(_)}if id==request));
+        assert!(
+            simulator.try_recv_from(&mut bytes).is_err(),
+            "revocation must cancel the unsent second write"
+        );
+        assert!(session.assistant_creates.is_empty());
+        assert!(session.inventory_uploads.assistant_ready.is_empty());
+    }
+    #[tokio::test]
+    async fn assistant_wearable_confirmation_tracks_native_asset_and_never_opens_an_editor() {
+        let sock = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        sock.writable().await.unwrap();
+        let simulator = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let main = simulator.local_addr().unwrap();
+        let (events, received) = crossbeam_channel::unbounded();
+        let sh = super::super::event_queue_tests::shared(crate::EventSender(events));
+        let mut session = super::super::event_queue_tests::two_regions(&sh, sock, main, "127.0.0.1:9".parse().unwrap());
+        let request = Uuid::from_u128(710);
+        let parent = Uuid::from_u128(711);
+        session.create_assistant_wearable(
+            request,
+            parent,
+            4,
+            "Synthetic shirt".into(),
+            "Synthetic description".into(),
+            b"synthetic wearable asset".to_vec(),
+            None,
+        );
+        let mut bytes = [0; 4096];
+        let _ = simulator.recv_from(&mut bytes).await.unwrap();
+        let asset = *session.inventory_uploads.assets.keys().next().unwrap();
+        let mut complete = AssetUploadComplete::default();
+        complete.asset_block.uuid = asset;
+        complete.asset_block.type_ = 5;
+        complete.asset_block.success = true;
+        let mut packet = Vec::new();
+        aurora_msg::build_packet(&complete, 1, false, false, &[], &mut packet);
+        session.dispatch_inventory_upload(main, &parse_packet(&packet).unwrap()).unwrap();
+        let _ = received.try_recv().unwrap();
+        session.finish_assistant_inventory_item(request, true);
+        let (size, _) = tokio::time::timeout(Duration::from_secs(2), simulator.recv_from(&mut bytes))
+            .await
+            .unwrap()
+            .unwrap();
+        let create: CreateInventoryItem = parse_packet(&bytes[..size]).unwrap().decode().unwrap();
+        let callback = create.inventory_block.callback_id;
+        assert_eq!(field_str(&create.inventory_block.description), "Synthetic description");
+        assert_eq!(create.inventory_block.wearable_type, 4);
+        assert!(
+            !session.inventory_callbacks[&callback].1,
+            "assistant creation cannot trigger editor-opening InventoryCreated"
+        );
+        let item = crate::inventory::InvItem {
+            id: Uuid::from_u128(712),
+            parent,
+            owner: session.agent_id(),
+            asset_id: asset,
+            asset_type: 5,
+            flags: 4,
+            ..Default::default()
+        };
+        session.assistant_inventory_created(callback, &item);
+        assert!(
+            matches!(received.try_recv().unwrap().1,NetEvent::AssistantInventoryCreated{request:id,result:Ok(it)}if id==request&&it.id==item.id)
+        );
     }
 }

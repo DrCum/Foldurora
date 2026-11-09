@@ -91,6 +91,7 @@ mod host_chat_bridge;
 mod host_preview;
 mod host_review;
 mod host_session;
+mod mcp;
 pub(crate) use host_session::grid_label as host_grid_label;
 mod hover_height;
 mod hover_tips;
@@ -899,6 +900,7 @@ pub struct App {
     busy_pause: busy_pause::BusyPause,
     /// Optional exact-process host bridge; standalone viewers have none.
     host_session: Option<crate::session_host::worker::WorkerBridge>,
+    character_mcp: Option<mcp::Assistant>,
     host_chat: Option<Box<host_chat_bridge::Driver>>,
     board_state: Option<Box<gesture_board::State>>,
     board_store: Option<crate::gesture_board::store::Lane>,
@@ -1809,6 +1811,7 @@ impl App {
             gpu_stall: Default::default(),
             busy_pause: Default::default(),
             host_session,
+            character_mcp: Some(Default::default()),
             board_managed,
             board_epoch: 1,
             board_actions: 1,
@@ -1981,6 +1984,7 @@ impl App {
     }
 
     fn send_from(&mut self, mut cmd: NetCommand, actor: uuid::Uuid) {
+        mcp::world_native_command(self, &cmd);
         // A separate hard refusal: RLVa being disabled or replacing text must
         // never authorize support contact. No typing or placeholder is sent.
         if !self.world.contact_command_allowed(&cmd) {
@@ -2819,6 +2823,20 @@ impl App {
         }
         let mut cmd = cmd;
         self.world.prepare_inventory_command(&mut cmd);
+        mcp::inventory_native_command(self, &cmd);
+        let cmd = if let Some(request) = self.named_teleport.wire_owner(&cmd) {
+            match cmd {
+                NetCommand::TeleportTo { handle, position, look_at } => NetCommand::TrackedTeleport {
+                    request,
+                    handle,
+                    position,
+                    look_at,
+                },
+                _ => cmd,
+            }
+        } else {
+            cmd
+        };
         self.net.send(cmd);
     }
 
@@ -3185,6 +3203,11 @@ impl App {
     }
 
     fn on_app_event(&mut self, ev: NetEvent) {
+        self.named_teleport.native_event(&ev);
+        if mcp::inventory_native_event(self, &ev) {
+            self.observe_inventory_archive();
+            return;
+        }
         self.apply_app_event(ev);
         self.observe_inventory_archive();
     }
@@ -4502,6 +4525,10 @@ impl App {
     /// runs while held (agent_handle_doubletap_run). The right button of
     /// mouse steering counts as a forward key, so a double right click runs.
     fn walk_tap(&mut self, group: u8, pressed: bool) {
+        if pressed && !self.settings.tap_hold_run {
+            self.last_tap = None;
+            return;
+        }
         if pressed && self.in_world() {
             if self.temp_run.is_none()
                 && let Some((last, at)) = self.last_tap
@@ -6027,12 +6054,21 @@ impl App {
         if action != ui::exit::Action::Cancel
             && (!self.close_wearable_editor() || !self.script_editors.prepare_exit() || !self.texture_library.prepare_exit(&self.egui_ctx))
         {
+            self.native_host_exit_choice(aurora_session::native::NativeOutcome::Cancelled);
             self.exit_prompt.open = false;
             return;
+        }
+        if action == ui::exit::Action::Cancel {
+            self.native_host_exit_choice(aurora_session::native::NativeOutcome::Cancelled);
         }
         if !self.exit_prompt.confirm(action, Instant::now()) {
             return;
         }
+        self.native_host_exit_choice(if action == ui::exit::Action::Quit {
+            aurora_session::native::NativeOutcome::QuitChosen
+        } else {
+            aurora_session::native::NativeOutcome::LogoutChosen
+        });
         if self.in_world() {
             self.world.save_open_ims();
         }
@@ -8991,6 +9027,9 @@ impl App {
         }
         self.sync_chat_log();
         while !still && let Ok((sent, ev)) = self.net.events.try_recv() {
+            if mcp::world_native_event(self, &ev) {
+                continue;
+            }
             let workspace_boundary = matches!(&ev, NetEvent::LoggedIn(_) | NetEvent::Disconnected { .. });
             if workspace_boundary {
                 self.workspace_source_boundary();
@@ -9805,6 +9844,7 @@ impl App {
                 self.settings.save();
             }
             self.scene.poser = self.ik_editor.pose_layers(&self.world);
+            self.sync_creative_pose_layers();
             self.ik_editor.tick_pose_storage(&self.scene.jobs, &self.egui_ctx, &self.world);
             if !self.scene.poser.is_empty() {
                 self.scene.ik_edit = Default::default();
@@ -10505,6 +10545,7 @@ impl App {
             let mut out = std::mem::take(&mut self.scene.lists.particles);
             let scene = &mut self.scene;
             scene.particles.set_preview(self.particle_editor.preview());
+            scene.particles.selection_beam = self.settings.selection_beam;
             scene.particles.update(
                 &mut gfx.renderer,
                 &mut scene.textures,
@@ -14989,6 +15030,7 @@ impl App {
     /// its group says so until one is logged in (`chat_log_dir` stays empty).
     fn draw_options(&mut self, ctx: &egui::Context, p: &Palette, a: &mut UiActions) {
         if self.panels.settings {
+            mcp::preferences_native_opening(self);
             self.workspace_ui.open = false;
             if self.workspaces.preview.is_some() {
                 self.workspace_cancel_preview(true);
@@ -15077,6 +15119,11 @@ impl App {
         self.options_ui.flycam_active = self.joystick.active;
         let before_camera = self.settings.camera.clone();
         let mut res = ui::options::show(ctx, p, &self.skin.icons, &mut self.settings, &mut self.options_ui, &mut open);
+        if res.open_assistant
+            && let Some(assistant) = &mut self.character_mcp
+        {
+            assistant.open = true;
+        }
         if res.open_workspaces {
             a.bar = BarAction::Workspaces;
             open = false;
@@ -15258,6 +15305,7 @@ impl App {
         let mut a = UiActions::default();
         let p = self.palette;
         let ctx = ui.ctx().clone();
+        self.show_character_mcp(&ctx, &p);
         ui::inventory::view::set_picker_sort(&ctx, self.settings.inventory.sort);
         ui::widgets::local_texture::sync(
             &ctx,
@@ -20679,6 +20727,13 @@ impl ApplicationHandler for App {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        self.begin_character_update();
+        if matches!(
+            &event,
+            WindowEvent::Focused(false) | WindowEvent::Occluded(true) | WindowEvent::Destroyed
+        ) {
+            self.revoke_character_actions();
+        }
         let folder_jump_window = self.gfx.as_ref().is_some_and(|gfx| gfx.window.id() == id);
         if folder_jump_window {
             if matches!(&event, WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. }) {
@@ -21289,6 +21344,7 @@ impl ApplicationHandler for App {
     }
 
     fn device_event(&mut self, _el: &ActiveEventLoop, _id: winit::event::DeviceId, event: DeviceEvent) {
+        self.begin_character_update();
         if !self.host_input_allowed() {
             return;
         }
@@ -21312,7 +21368,9 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.begin_character_update();
         self.tick_host_session();
+        self.tick_character_mcp();
         crate::crash::pumped();
         self.sync_minimized_mute();
         if self.settings.window_fullscreen != self.fullscreen_applied {
@@ -21342,6 +21400,10 @@ impl ApplicationHandler for App {
             event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
             g.window.request_redraw();
         }
+        // Publish cached private replies only after this native turn's world,
+        // input, preferences and RLVa changes have been observed.
+        self.tick_character_mcp();
+        self.end_character_update();
     }
 }
 

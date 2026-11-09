@@ -5,6 +5,7 @@
 use aurora_llsd::{Llsd, llsd_map};
 use std::time::Duration;
 use uuid::Uuid;
+pub mod assistant;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Kind {

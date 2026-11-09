@@ -357,6 +357,8 @@ pub(crate) enum Job {
     /// Ordered after preceding frame packets. Every poll stays on the queue's
     /// owning render thread, including when ordinary frame pacing is disabled.
     SessionFence(u64),
+    /// Only an actual consumed GPU completion proof may release disposable targets.
+    DisposableTrim(crate::session_fence::SessionCompletion),
     /// Poll/map retirement only: produces no frame or presentation proof.
     MaintainViewportCapture(crate::viewport_capture_retirement::Probe),
     /// Depth under a pixel of the last frame drawn, waiting for the GPU
@@ -375,6 +377,10 @@ pub(crate) enum Done {
     #[cfg(feature = "monitor-prototype")]
     MonitorPolled,
     SessionFence(crate::session_fence::Reply),
+    DisposableTrim {
+        ticket: u64,
+        applied: bool,
+    },
     ViewportCaptureMaintenance {
         probe: crate::viewport_capture_retirement::Probe,
         pending: bool,
@@ -529,6 +535,10 @@ fn run(mut backend: Backend, worker: Worker<Job, Done>) -> Backend {
             }
             Job::Pick { x, y } => Done::Pick(backend.pick_world(x, y)),
             Job::SessionFence(ticket) => Done::SessionFence(backend.session_fence(ticket)),
+            Job::DisposableTrim(proof) => Done::DisposableTrim {
+                ticket: proof.ticket,
+                applied: backend.trim_disposable(proof),
+            },
             Job::MaintainViewportCapture(probe) => crate::viewport_capture_retirement::owner_result(probe, || {
                 match probe.purpose() {
                     crate::viewport_capture_retirement::Purpose::Complete => backend.maintain_viewport_capture(),

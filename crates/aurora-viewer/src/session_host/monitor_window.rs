@@ -232,6 +232,22 @@ impl MonitorWindow {
             .ok()
     }
 
+    pub(super) fn arrange(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        position: [i32; 2],
+        chat: &mut SharedChat,
+    ) -> Result<(), super::private_image::Error> {
+        let view = self.view;
+        let binding = self.binding;
+        let palette = self.theme.palette();
+        let mut flush = |ctx: &egui::Context, raw| close_edits(ctx, raw, view, binding, &palette, chat);
+        let mut placement = self.surface.placement(event_loop, &mut flush)?;
+        placement.outer_position = position;
+        placement.maximized = false;
+        self.surface.request_placement(event_loop, placement, &mut flush)
+    }
+
     /// The parent obtains a fresh read before EVERY event and validates against
     /// the latest manager. Final presentation rechecks the SAME read, not a new
     /// guard wrapped around already-built private output.

@@ -8,6 +8,14 @@ use egui::{RichText, Vec2};
 
 pub fn page(cx: &mut Cx) {
     use aurora_i18n::tr;
+    cx.group(tr!("assistant-title"), |cx| {
+        cx.row_with(tr!("assistant-title"), tr!("assistant-help"), &Nothing, |ui, _, _, result| {
+            if ui.button(tr!("assistant-open")).clicked() {
+                result.open_assistant = true;
+            }
+            false
+        });
+    });
     cx.group(tr!("language-choice"), |cx| {
         let languages: Vec<&str> = aurora_i18n::available_languages().map(|(_, name)| name).collect();
         cx.keywords(&languages.join(" "))

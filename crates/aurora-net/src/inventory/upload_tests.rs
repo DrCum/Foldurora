@@ -66,6 +66,48 @@ fn request() -> Request {
     }
 }
 
+#[tokio::test]
+async fn assistant_upload_stops_between_offer_payment_and_private_verification() {
+    let asset = Uuid::from_u128(6300);
+    let item = Uuid::from_u128(6301);
+    let (base, task) = server(|base| {
+        vec![
+            (
+                200,
+                llsd_map! {"state"=>"upload","uploader"=>format!("{base}/paid"),"upload_price"=>10},
+            ),
+            (
+                200,
+                llsd_map! {"state"=>"complete","new_inventory_item"=>item,"new_asset"=>asset,"upload_price"=>10},
+            ),
+        ]
+    })
+    .await;
+    let http = reqwest::Client::new();
+    let offer = assistant::prepare(&http, &base, request()).await.unwrap();
+    assert_eq!(offer.cost(), 10);
+    assert!(!task.is_finished(), "preparation submitted the paid phase");
+    let committed = assistant::commit(&http, offer).await.unwrap();
+    assert_eq!((committed.item, committed.asset), (item, asset));
+    let requests = task.await.unwrap();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[1].1, [1, 2, 3, 4]);
+    // No FetchInventory2 request is made until a separate native Read permit.
+}
+#[tokio::test]
+async fn assistant_upload_rejects_increased_offer_before_any_binary_payment() {
+    let (base, task) = server(|base| {
+        vec![(
+            200,
+            llsd_map! {"state"=>"upload","uploader"=>format!("{base}/paid"),"upload_price"=>11},
+        )]
+    })
+    .await;
+    let result = assistant::prepare(&reqwest::Client::new(), &base, request()).await;
+    assert!(matches!(result, Err(Error::PriceChanged(Some(11)))));
+    assert_eq!(task.await.unwrap().len(), 1);
+}
+
 fn mesh_request() -> crate::inventory::mesh_upload::Request {
     crate::inventory::mesh_upload::Request {
         folder: Uuid::from_u128(1),
@@ -413,5 +455,63 @@ async fn incomplete_mesh_acknowledgements_stay_uncertain_without_reuploading() {
             .expect_err("unconfirmed creation");
         assert!(matches!(error, Error::Uncertain(_)));
         assert_eq!(task.await.expect("server").len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn assistant_free_thumbnail_requires_independent_binary_assignment_and_read_releases() {
+    let item = Uuid::from_u128(6501);
+    let parent = Uuid::from_u128(6502);
+    let owner = Uuid::from_u128(6503);
+    let asset = Uuid::from_u128(6504);
+    let (base,task)=server(|base|vec![
+        (200,llsd_map!{"uploader"=>format!("{base}/binary"),"upload_price"=>0}),
+        (200,llsd_map!{"state"=>"complete","new_asset"=>asset,"upload_price"=>0}),
+        (200,Llsd::new_map()),
+        (200,llsd_map!{"category_id"=>item,"parent_id"=>parent,"agent_id"=>owner,"name"=>"Synthetic outfit","version"=>2,"type_default"=>47,"thumbnail"=>llsd_map!{"asset_id"=>asset.to_string()}}),
+    ]).await;
+    let http = reqwest::Client::new();
+    let offer = assistant::prepare_thumbnail(&http, &base, item, true, vec![255, 79, 1, 2])
+        .await
+        .unwrap();
+    assert_eq!(offer.cost(), 0);
+    assert!(!task.is_finished());
+    let committed = assistant::commit(&http, offer).await.unwrap();
+    assert!(committed.thumbnail && committed.cost_known);
+    assert_eq!(committed.item, item);
+    assert_eq!(committed.asset, asset);
+    assert!(!task.is_finished());
+    assistant::patch_thumbnail(&http, &base, item, true, asset).await.unwrap();
+    assert!(!task.is_finished());
+    let verified = assistant::verify_thumbnail(&http, &base, owner, item, true, parent, asset)
+        .await
+        .unwrap();
+    assert!(matches!(verified,assistant::ThumbnailReceipt::Folder(f)if f.id==item&&f.thumbnail==asset));
+    let calls = task.await.unwrap();
+    assert_eq!(calls.len(), 4);
+    assert!(calls[1].0.to_ascii_lowercase().contains("content-type: application/jp2"));
+    assert!(calls[2].0.starts_with(&format!("PATCH /category/{item} ")));
+    assert!(calls[3].0.starts_with(&format!("GET /category/{item} ")));
+}
+#[tokio::test]
+async fn assistant_thumbnail_refuses_spending_and_wrong_or_oversized_readback() {
+    let item = Uuid::from_u128(6511);
+    let parent = Uuid::from_u128(6512);
+    let owner = Uuid::from_u128(6513);
+    let asset = Uuid::from_u128(6514);
+    let (base, task) = server(|base| vec![(200, llsd_map! {"uploader"=>format!("{base}/must-not-upload"),"upload_price"=>1})]).await;
+    assert!(matches!(
+        assistant::prepare_thumbnail(&reqwest::Client::new(), &base, item, false, vec![1]).await,
+        Err(Error::PriceChanged(Some(1)))
+    ));
+    assert_eq!(task.await.unwrap().len(), 1);
+    for wrong in 0..3 {
+        let (base,task)=server(|_|vec![(200,llsd_map!{"category_id"=>item,"parent_id"=>parent,"agent_id"=>if wrong==0{Uuid::new_v4()}else{owner},"name"=>if wrong==2{"x".repeat(65536)}else{"Synthetic".into()},"version"=>2,"thumbnail"=>llsd_map!{"asset_id"=>if wrong==1{Uuid::new_v4().to_string()}else{asset.to_string()}}})]).await;
+        assert!(
+            assistant::verify_thumbnail(&reqwest::Client::new(), &base, owner, item, true, parent, asset)
+                .await
+                .is_err()
+        );
+        assert_eq!(task.await.unwrap().len(), 1);
     }
 }

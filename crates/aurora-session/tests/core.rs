@@ -1101,3 +1101,172 @@ fn preview_admission_reserves_pending_rates_and_never_renders_a_promoted_or_stal
     assert!(admit_previews(&[demand; 5], 20).is_err());
     assert_eq!(admit_previews(&[demand], 0).unwrap(), vec![None]);
 }
+
+#[test]
+fn exact_native_restore_keeps_unrelated_parked_worker_managed() {
+    let mut alpha = Peer::new(3);
+    let mut beta = Peer::new(4);
+    let mut host = coordinator(&mut [&mut alpha, &mut beta]);
+    initial_activate(&mut host, &mut alpha);
+    let effects = host.restore_for_exit(worker_id(3)).unwrap();
+    let sent: Vec<_> = effects
+        .iter()
+        .filter_map(|effect| {
+            if let Effect::Send(envelope) = effect {
+                Some(envelope)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].binding.worker, alpha.guard.binding().worker);
+    assert!(sent[0].binding.session.is_none(), "ordinary Detach remains worker-scoped");
+    assert!(matches!(sent[0].message, Message::Command(Command::Detach)));
+    assert_eq!(host.active(), None);
+    assert!(host.workers().find(|entry| entry.binding == beta.guard.binding()).unwrap().live);
+    assert_eq!(beta.guard.mode(), WorkerMode::Standby);
+    assert!(host.busy());
+    assert_eq!(
+        host.activate(worker_id(4), None, 1),
+        Err(Error::Busy),
+        "canonical coordinator cannot promote before actual restore ack"
+    );
+    assert_eq!(host.park_active(1), Err(Error::Busy));
+    let transition = alpha.accept(sent[0], 1);
+    assert!(transition.effects.release_input && transition.effects.restore_window);
+    assert!(!alpha.guard.input_owned());
+    let ack = alpha.envelope(transition.reply.unwrap());
+    let mut wrong = ack.clone();
+    wrong.reply_to += 1;
+    assert!(host.observe(&wrong, 1).is_err());
+    assert!(host.busy());
+    host.observe(&ack, 1).unwrap();
+    assert!(!host.busy());
+    assert!(matches!(
+        message(host.activate(worker_id(4), None, 1).unwrap()).message,
+        Message::Command(Command::Prepare { .. })
+    ));
+}
+
+#[test]
+fn native_extension_is_session_bound_and_receipt_never_proves_effect_completion() {
+    let mut alpha = Peer::new(3);
+    let mut host = coordinator(&mut [&mut alpha]);
+    let request = native::NativeRequest {
+        id: 17,
+        action: native::NativeAction::RequestExit,
+    };
+    let sent = message(vec![host.native_request(worker_id(3), request, 1).unwrap()]);
+    let accepted = alpha.accept(&sent, 1).reply.unwrap();
+    assert_eq!(accepted.event, Event::NativeAccepted { request: 17 });
+    assert!(alpha.guard.binding().session.is_some());
+    assert_eq!(
+        alpha.guard.mode(),
+        WorkerMode::Standby,
+        "accepted native request is not a detach, logout or process exit"
+    );
+    let mut stale = sent.clone();
+    stale.binding.session.as_mut().unwrap().generation += 1;
+    assert!(alpha.guard.on_command(&stale, 2).is_err());
+    let mut invalid = sent;
+    invalid.message = Message::Command(Command::Native(native::NativeRequest { id: 0, ..request }));
+    assert!(invalid.validate().is_err());
+}
+
+#[test]
+fn staged_exit_restores_exact_source_and_finalization_never_rehosts_detached_worker() {
+    let mut alpha = Peer::new(3);
+    let mut beta = Peer::new(4);
+    let mut host = coordinator(&mut [&mut alpha, &mut beta]);
+    initial_activate(&mut host, &mut alpha);
+    let binding = alpha.guard.binding();
+    let restore = message(
+        host.restore_native_exit(
+            binding,
+            native::NativeRequest {
+                id: 17,
+                action: native::NativeAction::RestoreExit,
+            },
+        )
+        .unwrap(),
+    );
+    assert_eq!(restore.binding, binding, "native restoration remains full-session bound");
+    let transition = alpha.accept(&restore, 1);
+    assert!(transition.effects.restore_window && transition.effects.release_input);
+    assert_eq!(alpha.guard.mode(), WorkerMode::Detached);
+    assert!(host.workers().find(|entry| entry.binding == beta.guard.binding()).unwrap().live);
+    assert!(host.busy());
+    assert_eq!(host.activate(worker_id(4), None, 1), Err(Error::Busy));
+    host.observe(&alpha.envelope(transition.reply.unwrap()), 1).unwrap();
+    assert!(!host.busy());
+    let commit = message(vec![
+        host.native_finalize(
+            binding,
+            native::NativeRequest {
+                id: 17,
+                action: native::NativeAction::CommitExit,
+            },
+        )
+        .unwrap(),
+    ]);
+    let mut stale = commit.clone();
+    stale.binding.session.as_mut().unwrap().generation += 1;
+    assert!(alpha.guard.on_command(&stale, 2).is_err());
+    let mut wrong_lease = commit.clone();
+    wrong_lease.lease_epoch += 1;
+    assert!(alpha.guard.on_command(&wrong_lease, 2).is_err());
+    let accepted = alpha.accept(&commit, 2);
+    assert_eq!(accepted.reply.unwrap().event, Event::NativeAccepted { request: 17 });
+    assert!(!accepted.effects.restore_window && !accepted.effects.grant_input && !accepted.effects.prepare);
+    assert_eq!(alpha.guard.mode(), WorkerMode::Detached);
+    assert!(!alpha.guard.input_owned() && !alpha.guard.render_owned());
+    assert!(alpha.guard.on_command(&commit, 3).is_err(), "replayed finalization sequence");
+    let mut arbitrary = commit;
+    arbitrary.sequence += 1;
+    arbitrary.message = Message::Command(Command::Native(native::NativeRequest {
+        id: 18,
+        action: native::NativeAction::RequestExit,
+    }));
+    assert!(
+        alpha.guard.on_command(&arbitrary, 3).is_err(),
+        "detached native lane cannot begin another action"
+    );
+}
+
+#[test]
+fn refused_native_restore_fallback_keeps_core_barrier_until_exact_final_ack_or_real_exit() {
+    let mut alpha = Peer::new(3);
+    let mut beta = Peer::new(4);
+    let mut host = coordinator(&mut [&mut alpha, &mut beta]);
+    initial_activate(&mut host, &mut alpha);
+    let binding = alpha.guard.binding();
+    let first = message(
+        host.restore_native_exit(
+            binding,
+            native::NativeRequest {
+                id: 17,
+                action: native::NativeAction::RestoreExit,
+            },
+        )
+        .unwrap(),
+    );
+    let fallback = message(vec![host.finish_native_restore(binding).unwrap()]);
+    let old = event(binding, alpha.sequence + 1, first.sequence, Event::Detached);
+    assert!(host.observe(&old, 1).is_err());
+    assert!(host.busy());
+    assert_eq!(host.activate(worker_id(4), None, 1), Err(Error::Busy));
+    let transition = alpha.accept(&fallback, 1);
+    assert!(transition.effects.restore_window);
+    host.observe(&alpha.envelope(transition.reply.unwrap()), 1).unwrap();
+    assert!(!host.busy());
+    let mut alpha = Peer::new(3);
+    let mut beta = Peer::new(4);
+    let mut host = coordinator(&mut [&mut alpha, &mut beta]);
+    initial_activate(&mut host, &mut alpha);
+    host.restore_for_exit(worker_id(3)).unwrap();
+    assert!(host.busy());
+    host.remove(worker_id(3)); // trusted process-handle exit observation
+    assert!(!host.busy());
+    assert!(host.activate(worker_id(4), None, 1).is_ok());
+}

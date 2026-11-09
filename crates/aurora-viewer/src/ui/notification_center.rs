@@ -355,6 +355,9 @@ pub fn show(
     env: &mut ToastEnv<'_>,
     dnd: bool,
 ) -> (Vec<(u64, Response)>, Vec<Ask>) {
+    if !nui.open {
+        nui.review = None;
+    }
     let mut answers = Vec::new();
     let mut asks = Vec::new();
     let now = ctx.input(|i| i.time);
@@ -659,7 +662,12 @@ fn full_list(
                     // the region restart pinned at the top, then newest first
                     let pinned = |n: &Notification| matches!(n.data, Data::RegionRestart);
                     for first in [true, false] {
-                        for n in list.list.iter_mut().rev().filter(|n| !n.transient && pinned(n) == first) {
+                        for n in list
+                            .list
+                            .iter_mut()
+                            .rev()
+                            .filter(|n| !n.transient && pinned(n) == first && nui.review.is_none_or(|id| id == n.id))
+                        {
                             if let Some(r) = center_card(ui, p, icons, world, env, &mut nui.wanted_pics, &mut nui.wanted_images, n) {
                                 answers.push((n.id, r));
                             }
