@@ -13662,3 +13662,15 @@ workspaces-background-common = Common color
 workspaces-background-display = Display { $number }
 workspaces-background-display-fallback = Display arrangement changed. Using the common color.
 workspaces-background-inherit = Use common color
+
+workspaces-picture-choose = Choose Inventory image…
+workspaces-picture-unavailable = Image unavailable. Use a loaded full-permission texture from your Inventory.
+workspaces-picture-rights = Uses full-permission textures from your Inventory.
+workspaces-picture-fill = Fill
+workspaces-picture-fit = Fit
+workspaces-picture-stretch = Stretch
+workspaces-picture-center = Center
+workspaces-picture-tile = Tile
+workspaces-picture-span = Span all displays
+workspaces-picture-brightness = Brightness
+workspaces-picture-apply-brightness = Apply brightness

@@ -73,6 +73,7 @@ fn can_preview(inv: &Inventory, id: Uuid) -> bool {
 
 #[derive(Default)]
 pub struct TexturePicker {
+    workspace: bool,
     drop_target: Option<super::resource_drop::Target>,
     drop_slot: usize,
     /// The registered drop takes only copy and transfer textures.
@@ -123,6 +124,20 @@ pub struct TexturePicker {
 }
 
 impl TexturePicker {
+    /// A fixed native tool role, separate from other editors' picker windows.
+    pub(crate) fn workspace() -> Self {
+        Self {
+            workspace: true,
+            ..Default::default()
+        }
+    }
+    fn floater_id(&self) -> &'static str {
+        if self.workspace {
+            "workspace_texture_picker"
+        } else {
+            "texture_picker"
+        }
+    }
     /// Register an editable thumbnail for the same choice path as this picker.
     pub(crate) fn drop_target(&mut self, ui: &egui::Ui, rect: egui::Rect, materials: bool, enabled: bool) {
         self.drop_target_slot(ui, rect, materials, enabled, 0);
@@ -415,16 +430,16 @@ impl TexturePicker {
         let size = Vec2::new(320.0, 720.0);
         // Adopt the portrait default once for layouts saved by the wider picker.
         // Later manual resizing remains part of the user's persisted layout.
-        let layout_id = egui::Id::unique("texture_picker").with("portrait_default");
+        let layout_id = egui::Id::unique(self.floater_id()).with("portrait_default");
         let adopt_default = ctx.data_mut(|data| {
             let adopted = data.get_persisted::<bool>(layout_id).unwrap_or(false);
             data.insert_persisted(layout_id, true);
             !adopted
         });
         if adopt_default {
-            widgets::size_floater(ctx, "texture_picker", size);
+            widgets::size_floater(ctx, self.floater_id(), size);
         }
-        let mut floater = Floater::new("texture_picker", self.title.clone(), screen.center() - size * 0.5, size);
+        let mut floater = Floater::new(self.floater_id(), self.title.clone(), screen.center() - size * 0.5, size);
         floater.min_size = Vec2::new(320.0, 480.0);
         let preview_texture = self.preview_texture();
         floater.show(ctx, p, &mut open, |ui| {
@@ -966,6 +981,45 @@ fn wearable_demo_input() -> bool {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[test]
+    fn workspace_picture_picker_keeps_native_editor_selection_and_geometry_independent() {
+        let mut world = World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));
+        let mut normal = TexturePicker::default();
+        let mut workspace = TexturePicker::workspace();
+        normal.open("Native editor picture", Uuid::nil());
+        workspace.open("Workspace picture", Uuid::nil());
+        let mut ui = PickerUi::new();
+        for _ in 0..3 {
+            ui.frame(vec![], |ctx, p| {
+                normal.show(ctx, p, &mut world, &HashMap::new());
+                workspace.show(ctx, p, &mut world, &HashMap::new());
+            });
+        }
+        let before = ui.ctx.memory(|m| m.area_rect(egui::Id::unique("texture_picker"))).unwrap();
+        assert!(
+            ui.ctx
+                .memory(|m| m.area_rect(egui::Id::unique("workspace_texture_picker")))
+                .is_some()
+        );
+        widgets::size_floater(&ui.ctx, "workspace_texture_picker", Vec2::new(600.0, 700.0));
+        for _ in 0..3 {
+            ui.frame(vec![], |ctx, p| {
+                normal.show(ctx, p, &mut world, &HashMap::new());
+                workspace.show(ctx, p, &mut world, &HashMap::new());
+            });
+        }
+        assert_eq!(
+            ui.ctx.memory(|m| m.area_rect(egui::Id::unique("texture_picker"))).unwrap().size(),
+            before.size()
+        );
+        workspace.open = false;
+        ui.frame(vec![], |ctx, p| {
+            normal.show(ctx, p, &mut world, &HashMap::new());
+            workspace.show(ctx, p, &mut world, &HashMap::new());
+        });
+        assert!(normal.open);
+        assert_eq!(normal.shown(), None);
+    }
     #[test]
     fn direct_thumbnail_drops_apply_the_same_asset_to_each_slot_without_opening_a_picker() {
         let mut world = World::new(std::sync::Arc::new(crate::scene::avatar::AvatarLibrary::load()));

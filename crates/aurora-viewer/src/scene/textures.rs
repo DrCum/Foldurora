@@ -1022,6 +1022,9 @@ pub struct TextureStreamer {
     ui_wanted: std::collections::HashSet<Uuid>,
     /// Session-long UI users, independent from the bounded hover cache.
     ui_permanent: std::collections::HashSet<Uuid>,
+    /// Independent bounded users share one streamer reference, without one
+    /// consumer retiring another consumer's still-visible image.
+    ui_transient: HashMap<Uuid, u8>,
     ui_ready: HashMap<Uuid, (u32, u32, Vec<u8>)>,
     ui_previews: super::texture_ui::Images,
     pub stats: TextureStats,
@@ -1321,6 +1324,7 @@ impl TextureStreamer {
             demo_source: None,
             ui_wanted: Default::default(),
             ui_permanent: Default::default(),
+            ui_transient: Default::default(),
             ui_ready: HashMap::new(),
             ui_previews: Default::default(),
             stats: TextureStats::default(),
@@ -1887,13 +1891,29 @@ impl TextureStreamer {
         if !id.is_nil() {
             self.ui_permanent.insert(id);
         }
-        self.want_transient_ui_image(renderer, id, jobs);
+        self.want_shared_ui_image(renderer, id, jobs);
     }
 
     /// The inventory hover cache owns one bounded, releasable UI interest.
     /// All UI users share one streamer reference per asset; a permanent
     /// consumer can adopt an asset first requested by the hover cache.
     pub fn want_transient_ui_image(&mut self, renderer: &mut Renderer, id: Uuid, jobs: &Jobs) {
+        if !id.is_nil() {
+            *self.ui_transient.entry(id).or_default() |= 1;
+        }
+        self.want_shared_ui_image(renderer, id, jobs);
+    }
+
+    /// Workspace backgrounds are bounded separately from the pointer-hover
+    /// cache. Repeated demand is idempotent, not a reference per frame.
+    pub(crate) fn want_background_ui_image(&mut self, renderer: &mut Renderer, id: Uuid, jobs: &Jobs) {
+        if !id.is_nil() {
+            *self.ui_transient.entry(id).or_default() |= 2;
+        }
+        self.want_shared_ui_image(renderer, id, jobs);
+    }
+
+    fn want_shared_ui_image(&mut self, renderer: &mut Renderer, id: Uuid, jobs: &Jobs) {
         if id.is_nil() {
             return;
         }
@@ -1923,7 +1943,21 @@ impl TextureStreamer {
     }
 
     pub fn release_transient_ui_image(&mut self, id: &Uuid) {
-        if !self.ui_permanent.contains(id) && self.ui_wanted.remove(id) {
+        self.release_ui_owner(id, 1);
+    }
+
+    pub(crate) fn release_background_ui_image(&mut self, id: &Uuid) {
+        self.release_ui_owner(id, 2);
+    }
+
+    fn release_ui_owner(&mut self, id: &Uuid, owner: u8) {
+        if let Some(bits) = self.ui_transient.get_mut(id) {
+            *bits &= !owner;
+            if *bits == 0 {
+                self.ui_transient.remove(id);
+            }
+        }
+        if !self.ui_permanent.contains(id) && !self.ui_transient.contains_key(id) && self.ui_wanted.remove(id) {
             self.ui_ready.remove(id);
             self.release(id);
             if let Some(entry) = self.entries.get_mut(id)
@@ -3859,6 +3893,40 @@ mod tests {
             }
             streamer.release_transient_ui_image(&image);
             assert_eq!(streamer.entries[&image].refs, refs, "release is idempotent");
+        }
+    }
+    #[test]
+    fn workspace_background_texture_interest_preserves_hover_permanent_and_world_references() {
+        for (first, permanent, world_refs) in [(1, false, 0), (2, false, 1), (1, true, 0), (2, true, 1)] {
+            let image = Uuid::from_u128(0xbac6);
+            let mut e = entry(Some(2), 256.0);
+            e.refs = 1 + world_refs;
+            let mut streamer = pressed(0, vec![(image.as_u128(), e)]);
+            streamer.ui_wanted.insert(image);
+            streamer.ui_transient.insert(image, 3);
+            if permanent {
+                streamer.ui_permanent.insert(image);
+            }
+            streamer.ui_ready.insert(image, (1, 1, vec![255; 4]));
+            if first == 1 {
+                streamer.release_transient_ui_image(&image);
+            } else {
+                streamer.release_background_ui_image(&image);
+            }
+            assert!(streamer.ui_wanted.contains(&image));
+            assert!(streamer.ui_ready.contains_key(&image));
+            assert_eq!(streamer.entries[&image].refs, 1 + world_refs);
+            if first == 1 {
+                streamer.release_background_ui_image(&image);
+            } else {
+                streamer.release_transient_ui_image(&image);
+            }
+            assert_eq!(streamer.ui_wanted.contains(&image), permanent);
+            assert_eq!(streamer.entries[&image].refs, world_refs + u32::from(permanent));
+            let after = streamer.entries[&image].refs;
+            streamer.release_transient_ui_image(&image);
+            streamer.release_background_ui_image(&image);
+            assert_eq!(streamer.entries[&image].refs, after);
         }
     }
 

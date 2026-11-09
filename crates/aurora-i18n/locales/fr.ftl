@@ -13658,3 +13658,15 @@ workspaces-background-common = Couleur commune
 workspaces-background-display = Écran { $number }
 workspaces-background-display-fallback = La disposition des écrans a changé. La couleur commune est utilisée.
 workspaces-background-inherit = Utiliser la couleur commune
+
+workspaces-picture-choose = Choisir une image dans l’inventaire…
+workspaces-picture-unavailable = Image indisponible. Choisissez une texture chargée avec toutes les permissions dans votre inventaire.
+workspaces-picture-rights = Utilise des textures avec toutes les permissions de votre inventaire.
+workspaces-picture-fill = Remplir
+workspaces-picture-fit = Ajuster
+workspaces-picture-stretch = Étirer
+workspaces-picture-center = Centrer
+workspaces-picture-tile = Mosaïque
+workspaces-picture-span = Étendre sur tous les écrans
+workspaces-picture-brightness = Luminosité
+workspaces-picture-apply-brightness = Appliquer la luminosité
