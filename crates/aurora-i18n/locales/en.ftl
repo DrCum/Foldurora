@@ -13636,3 +13636,4 @@ workspaces-camera-unavailable = Camera restore requires an unrestricted avatar v
 workspaces-capture-background = Remember workspace background
 workspaces-background-solid = Use solid color
 workspaces-background-black = Black background
+workspaces-update = Update selected

@@ -309,6 +309,14 @@ impl Catalogue {
                 .map(|r| (Some(r.id), r.layout.clone())),
         }
     }
+    /// Explicit overwrite keeps the stable record identity and its references.
+    /// Validate before assignment so a rejected current capture changes nothing.
+    pub(crate) fn update_layout(&mut self, id: Uuid, layout: Layout) -> Result<(), &'static str> {
+        layout.validate()?;
+        let record = self.records.iter_mut().find(|r| r.id == id).ok_or("workspace record")?;
+        record.layout = layout;
+        Ok(())
+    }
     pub(crate) fn remove_references(&mut self, id: Uuid) {
         self.favorites.retain(|favorite| *favorite != id);
         if self.startup == (Startup::Named { workspace: id }) {
@@ -603,5 +611,32 @@ mod tests {
         assert_eq!(settings.camera.preset, crate::camera::CameraPreset::Front);
         baseline.settings(&mut settings, false);
         assert_eq!(settings.camera.camera_offset, original.camera_offset);
+    }
+    #[test]
+    fn workspace_update_keeps_id_name_favorites_and_startup_and_rejects_invalid_capture_atomically() {
+        let mut catalogue = Catalogue::empty(Uuid::new_v4(), "a".repeat(64));
+        let id = Uuid::new_v4();
+        catalogue.records.push(Record {
+            id,
+            name: "Desk".into(),
+            layout: layout(),
+        });
+        catalogue.favorites.push(id);
+        catalogue.startup = Startup::Named { workspace: id };
+        let mut changed = layout();
+        changed.viewport.enabled = true;
+        changed.viewport.left = 50.0;
+        catalogue.update_layout(id, changed.clone()).unwrap();
+        assert_eq!(catalogue.records[0].id, id);
+        assert_eq!(catalogue.records[0].name, "Desk");
+        assert_eq!(catalogue.favorites, vec![id]);
+        assert_eq!(catalogue.startup, Startup::Named { workspace: id });
+        let original = catalogue.encode().unwrap();
+        let mut invalid = changed;
+        invalid.viewport.left = 100.0;
+        assert!(catalogue.update_layout(id, invalid).is_err());
+        assert_eq!(catalogue.encode().unwrap(), original);
+        assert!(catalogue.update_layout(Uuid::new_v4(), layout()).is_err());
+        assert_eq!(catalogue.encode().unwrap(), original);
     }
 }

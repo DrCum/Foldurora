@@ -257,6 +257,12 @@ impl WorkspaceUi {
                                 command = Some(Command::Save(self.name.trim().to_owned()));
                             }
                             if let Some(id) = self.selected.filter(|id| c.record(*id).is_some()) {
+                                if ui
+                                    .add_enabled(enabled && c.preview.is_none(), egui::Button::new(tr!("workspaces-update")))
+                                    .clicked()
+                                {
+                                    command = Some(Command::Update(id));
+                                }
                                 let favorite = c.catalogue.as_ref().is_some_and(|c| c.favorites.contains(&id));
                                 if ui
                                     .add_enabled(
@@ -353,6 +359,7 @@ impl WorkspaceUi {
         let command = command?;
         let target = match &command {
             Command::Rename(id, _)
+            | Command::Update(id)
             | Command::Delete(id)
             | Command::Preview(id)
             | Command::Switch(id)
@@ -732,5 +739,17 @@ mod tests {
         }
         assert!(open_manager);
         assert_eq!(s.world_viewport, before);
+    }
+    #[test]
+    fn native_workspace_update_is_a_source_bound_request_without_mutating_the_painted_record() {
+        let (c, mut st) = fixture();
+        let id = st.selected.unwrap();
+        let original = c.catalogue.as_ref().unwrap().encode().unwrap();
+        let mut frames = Frames::new();
+        let update = click(&mut frames, &mut st, &c, aurora_i18n::tr!("workspaces-update")).unwrap();
+        assert!(matches!(update.command, Command::Update(target) if target == id));
+        assert_eq!(update.ticket.record, Some(id));
+        assert_eq!(Some(update.ticket.source), c.source);
+        assert_eq!(c.catalogue.as_ref().unwrap().encode().unwrap(), original);
     }
 }

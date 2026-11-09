@@ -13597,3 +13597,4 @@ workspaces-camera-unavailable = カメラの復元には制限のないアバタ
 workspaces-capture-background = ワークスペースの背景を記憶
 workspaces-background-solid = 単色を使用
 workspaces-background-black = 黒い背景
+workspaces-update = 選択した設定を更新
