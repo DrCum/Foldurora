@@ -1,5 +1,15 @@
 # Aurora Viewer architecture
 
+`aurora-session/chat/contacts.rs` defines bounded, source/policy-bound contact
+pages and the model-only Direct-open receipt ledger. Complete staged pages alone
+become selectable; source/privacy changes purge rows while retaining token
+high-water marks. Offline friends remain selectable when native rules allow.
+Open reserves one operation before native creation, and duplicate/query paths
+never repeat it. Immutable receipts contain only the requested identity/outcome;
+fresh title/unread presentation separately requires current native Read policy.
+These pure types do not yet enable a contact wire command or host chooser UI.
+
+
 `LoginSource` retains the actual native `Arc<LoginResponse>` for asynchronous
 name and contact-policy answers. `World` rejects old-login successes/failures,
 including reused wire identifiers, before applying or forwarding them. Saved

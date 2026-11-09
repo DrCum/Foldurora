@@ -19,6 +19,8 @@ mod review;
 pub use review::*;
 mod close;
 pub use close::*;
+mod contacts;
+pub use contacts::*;
 #[cfg(test)]
 mod conference_tests;
 #[cfg(test)]

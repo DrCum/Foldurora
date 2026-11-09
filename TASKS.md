@@ -5,7 +5,11 @@
   `9caf6761`. Shared FSData Direct-contact policy passes15 focused cases at
   `523d6d40` after an explicitly preserved compile failure; a subsequent legacy
   precedence/cache-provenance correction passes14 viewer cases at51fc. Saved
-  message/fallback callback login isolation is the next necessary dependency.
+  message/fallback callback login isolation passes its focused actual HTTP and
+  viewer checks at3cdf, with alias/spoof-proof captured grid classification.
+  Contact-directory and Direct-open receipt models pass10 development cases;
+  native adapter, authenticated wire, Close reopening and chooser/search UI
+  integration remain unfinished.
   Chooser/Open/search are still unfinished. One combined full
   checkpoint follows the feature group. Source publication remains held.
 
