@@ -407,7 +407,7 @@ impl OpenDirectReceipt {
 pub struct OpenDirectView {
     pub policy: NativeChatPolicy,
     pub title: Label,
-    pub unread: u32,
+    pub unread: u64,
 }
 impl OpenDirectView {
     pub fn validate(&self, receipt: &OpenDirectReceipt) -> Result<(), ChatError> {

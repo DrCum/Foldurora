@@ -109,7 +109,7 @@ impl WorkerContacts {
     }
 }
 impl WorkerChat {
-    fn contact_page(
+    pub(super) fn contact_page(
         &mut self,
         native: &impl NativeChat,
         packet: &ChatPacket,
@@ -135,7 +135,7 @@ impl WorkerChat {
         self.received = packet.sequence;
         Ok(vec![policy_packet, reply])
     }
-    fn open_direct(
+    pub(super) fn open_direct(
         &mut self,
         native: &mut impl NativeChat,
         packet: &ChatPacket,
