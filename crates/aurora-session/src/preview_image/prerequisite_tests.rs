@@ -22,6 +22,7 @@ fn policy() -> PreviewPolicy {
         source(),
         PreviewEpochs::new(1, 1, 1, 1, 1).unwrap(),
         PreviewAccess {
+            capture_inactive: false,
             ready: true,
             active: true,
             activation: 2,
@@ -88,6 +89,7 @@ fn preview_claim_accessors_and_layout_check_exact_policy_without_creating_author
                 source(),
                 policy().epochs(),
                 PreviewAccess {
+                    capture_inactive: false,
                     activation: 3,
                     ..policy().access()
                 },
@@ -97,6 +99,7 @@ fn preview_claim_accessors_and_layout_check_exact_policy_without_creating_author
                 source(),
                 policy().epochs(),
                 PreviewAccess {
+                    capture_inactive: false,
                     capture_active: false,
                     ..policy().access()
                 },
@@ -143,6 +146,7 @@ fn preview_actual_surface_epoch_resets_only_under_advanced_render_and_never_revi
         source(),
         actual.epochs(),
         PreviewAccess {
+            capture_inactive: false,
             active: false,
             capture_active: false,
             ..actual.access()

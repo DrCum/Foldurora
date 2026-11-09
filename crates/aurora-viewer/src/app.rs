@@ -9729,6 +9729,7 @@ impl App {
         }
         if !self.host_submission_allowed() {
             self.host_preview_frame(&mut gfx, photo_context);
+            self.host_preview_inactive(&mut gfx, photo_context);
             if let Some(controls) = late_controls {
                 self.net.set_controls(controls);
             }

@@ -13813,3 +13813,5 @@ workspaces-huds-pending = Waiting for saved HUDs to appear.
 workspaces-huds-unconfirmed = Some saved HUDs were not confirmed. Inspect attachments before trying another switch.
 
 host-mcp-pending-manage = Requests await approval. Open character management to review host MCP requests.
+
+host-monitor-live-inactive = Inactive world sample · { $youngest }–{ $oldest } s ago

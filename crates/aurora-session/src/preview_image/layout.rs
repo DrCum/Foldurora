@@ -4,6 +4,7 @@ use super::*;
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "LayoutFields", into = "LayoutFields")]
 pub struct PreviewLayout {
+    kind: PreviewKind,
     source: PreviewSource,
     epochs: PreviewEpochs,
     activation: u64,
@@ -20,6 +21,7 @@ impl std::fmt::Debug for PreviewLayout {
 #[derive(Clone, Copy, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct LayoutFields {
+    kind: PreviewKind,
     source: PreviewSource,
     epochs: PreviewEpochs,
     activation: u64,
@@ -38,8 +40,50 @@ impl PreviewLayout {
         source_size: [u32; 2],
         source_rect: [u32; 4],
     ) -> Result<Self, ImageError> {
+        Self::build(LayoutFields {
+            kind: PreviewKind::LastActive,
+            source,
+            epochs,
+            activation,
+            demand,
+            device_epoch,
+            source_size,
+            source_rect,
+        })
+    }
+    pub fn new_inactive(
+        source: PreviewSource,
+        epochs: PreviewEpochs,
+        activation: u64,
+        demand: u64,
+        device_epoch: u64,
+        source_size: [u32; 2],
+        source_rect: [u32; 4],
+    ) -> Result<Self, ImageError> {
+        Self::build(LayoutFields {
+            kind: PreviewKind::LiveInactive,
+            source,
+            epochs,
+            activation,
+            demand,
+            device_epoch,
+            source_size,
+            source_rect,
+        })
+    }
+    fn build(fields: LayoutFields) -> Result<Self, ImageError> {
+        let LayoutFields {
+            kind,
+            source,
+            epochs,
+            activation,
+            demand,
+            device_epoch,
+            source_size,
+            source_rect,
+        } = fields;
         let [x, y, width, height] = source_rect;
-        if activation == 0
+        if (kind == PreviewKind::LastActive && activation == 0)
             || demand == 0
             || device_epoch == 0
             || source_size.contains(&0)
@@ -51,6 +95,7 @@ impl PreviewLayout {
             return Err(ImageError::Invalid);
         }
         Ok(Self {
+            kind,
             source,
             epochs,
             activation,
@@ -59,6 +104,9 @@ impl PreviewLayout {
             source_size,
             source_rect,
         })
+    }
+    pub fn kind(self) -> PreviewKind {
+        self.kind
     }
     pub fn source(self) -> PreviewSource {
         self.source
@@ -88,27 +136,19 @@ impl PreviewLayout {
         self.source == policy.source()
             && self.epochs == policy.epochs()
             && self.activation == policy.access().activation
-            && policy.access().capture_active
+            && policy.captures(self.kind)
     }
 }
 impl TryFrom<LayoutFields> for PreviewLayout {
     type Error = &'static str;
     fn try_from(value: LayoutFields) -> Result<Self, Self::Error> {
-        Self::new(
-            value.source,
-            value.epochs,
-            value.activation,
-            value.demand,
-            value.device_epoch,
-            value.source_size,
-            value.source_rect,
-        )
-        .map_err(|_| "invalid preview layout")
+        Self::build(value).map_err(|_| "invalid preview layout")
     }
 }
 impl From<PreviewLayout> for LayoutFields {
     fn from(value: PreviewLayout) -> Self {
         Self {
+            kind: value.kind,
             source: value.source,
             epochs: value.epochs,
             activation: value.activation,

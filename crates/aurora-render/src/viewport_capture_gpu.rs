@@ -1,13 +1,13 @@
 //! Render-owner viewport sampling. Frontend and backend share one pure queue;
-//! only try_lock is used, never across GPU APIs or pixel packing. No caller in
-//! App/native hosting enables this service yet. It grants no world authority.
+//! only try_lock is used, never across GPU APIs or pixel packing.
+//! App/native hosting grants no world authority through this service.
 
 use crate::WorldViewport;
 use crate::pipeline_cache::CachedPipelines;
 use crate::viewport_capture::{
-    CaptureBoundary, CaptureBudget, CaptureCap, CaptureError, CaptureLayout, CaptureOutcome, CapturePixels, CapturePublicationGuard,
-    CaptureQueue, CaptureRequest, CaptureResources, CaptureRetentionGuard, CaptureToken, CapturedViewport, MapCallback,
-    WORKER_CAPTURE_BYTES,
+    CaptureBoundary, CaptureBudget, CaptureCap, CaptureError, CaptureKind, CaptureLayout, CaptureOutcome, CapturePixels,
+    CapturePublicationGuard, CaptureQueue, CaptureRequest, CaptureResources, CaptureRetentionGuard, CaptureToken, CapturedViewport,
+    MapCallback, WORKER_CAPTURE_BYTES,
 };
 use bytemuck::{Pod, Zeroable};
 use parking_lot::{Mutex, MutexGuard};
@@ -188,12 +188,44 @@ impl Shared {
     }
 
     pub fn request(&self, boundary: CaptureBoundary, viewport: WorldViewport, cap: CaptureCap) -> Result<FrameCapture, CaptureError> {
+        self.request_kind(boundary, viewport, cap, false)
+    }
+
+    #[cfg(feature = "monitor-prototype")]
+    pub fn request_inactive(
+        &self,
+        boundary: CaptureBoundary,
+        viewport: WorldViewport,
+        cap: CaptureCap,
+    ) -> Result<FrameCapture, CaptureError> {
+        self.request_kind(boundary, viewport, cap, true)
+    }
+
+    fn request_kind(
+        &self,
+        boundary: CaptureBoundary,
+        viewport: WorldViewport,
+        cap: CaptureCap,
+        inactive: bool,
+    ) -> Result<FrameCapture, CaptureError> {
         let mut state = self.lock()?;
         // Frontend physical changes revoke synchronously before this request.
         // Queue reconciliation must not bump physical identity a second time
         // after the native adapter has already captured its new witness.
         state.queue.synchronize_boundary(boundary)?;
-        let request = match state.queue.request_metadata(viewport, cap, self.now()) {
+        #[cfg(not(feature = "monitor-prototype"))]
+        if inactive {
+            return Err(CaptureError::Unsupported);
+        }
+        #[cfg(feature = "monitor-prototype")]
+        let result = if inactive {
+            state.queue.request_inactive_metadata(viewport, cap, self.now())
+        } else {
+            state.queue.request_metadata(viewport, cap, self.now())
+        };
+        #[cfg(not(feature = "monitor-prototype"))]
+        let result = state.queue.request_metadata(viewport, cap, self.now());
+        let request = match result {
             Ok(request) => request,
             Err(error) => {
                 if matches!(error, CaptureError::Clock | CaptureError::Exhausted) {
@@ -493,11 +525,55 @@ impl GpuCapture {
         viewport: WorldViewport,
         index: u64,
     ) {
+        self.encode_source(device, queue, encoder, source, frame, boundary, viewport, index, false);
+    }
+
+    /// The queue owner supplies only its own small no-UI Monitor output. The
+    /// original native boundary/rectangle remain sealed metadata; sampling uses
+    /// the full offscreen texture, never that rectangle as offscreen UVs.
+    #[cfg(feature = "monitor-prototype")]
+    pub fn encode_inactive(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        source: &wgpu::Texture,
+        frame: FrameCapture,
+        index: u64,
+    ) {
+        let boundary = frame.request.boundary();
+        let viewport = frame.request.viewport();
+        self.encode_source(device, queue, encoder, source, frame, boundary, viewport, index, true);
+    }
+
+    fn encode_source(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        source: &wgpu::Texture,
+        frame: FrameCapture,
+        boundary: CaptureBoundary,
+        viewport: WorldViewport,
+        index: u64,
+        inactive: bool,
+    ) {
+        let expected = if inactive {
+            CaptureKind::InactiveWorld
+        } else {
+            CaptureKind::ActiveViewport
+        };
+        let source_size = (source.width(), source.height());
+        let dimensions_match = if inactive {
+            source_size == frame.request.layout().size()
+        } else {
+            source_size == boundary.size()
+        };
         if self.pending.is_some()
+            || frame.request.kind() != expected
             || frame.request.boundary() != boundary
             || frame.request.viewport() != viewport
-            || source.width() != boundary.size().0
-            || source.height() != boundary.size().1
+            || !dimensions_match
             || !sampleable(source.format(), source.usage())
         {
             self.shared.fail(&frame, CaptureError::Unsupported);
@@ -572,7 +648,12 @@ impl GpuCapture {
             return;
         };
         debug_assert_eq!(pair.lease.layout(), layout);
-        queue.write_buffer(&pair.uniform, 0, bytemuck::bytes_of(&params(&frame.request, source.format())));
+        let mut sample = params(&frame.request, source.format());
+        if inactive {
+            sample.rect = [0.0, 0.0, 1.0, 1.0];
+            sample.source_size = [source_size.0 as f32, source_size.1 as f32];
+        }
+        queue.write_buffer(&pair.uniform, 0, bytemuck::bytes_of(&sample));
         let pipeline = self.pipeline.get_or_insert_with(|| pipeline(device));
         let source_view = source.create_view(&Default::default());
         let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -1603,6 +1684,103 @@ mod tests {
             panic!("synthetic lifecycle capture failed");
         };
         image
+    }
+
+    #[test]
+    #[cfg(feature = "monitor-prototype")]
+    #[ignore = "explicit offline GPU gate: synthetic small textures, no native source authority"]
+    fn viewport_gpu_live_offscreen_export_keeps_native_crop_identity_full_texture_uv_and_opaque_color() {
+        let _gpu = crate::test_gpu::lock();
+        let instance = wgpu::Instance::default();
+        let adapter = pollster::block_on(instance.request_adapter(&Default::default())).expect("live export GPU adapter");
+        let (device, queue) = pollster::block_on(adapter.request_device(&Default::default())).expect("live export GPU device");
+        for format in [
+            wgpu::TextureFormat::Rgba8Unorm,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            wgpu::TextureFormat::Bgra8Unorm,
+            wgpu::TextureFormat::Bgra8UnormSrgb,
+        ] {
+            let shared = Shared::with_budget((1920, 1080), CaptureBudget::new(WORKER_CAPTURE_BYTES).unwrap()).unwrap();
+            shared.clock_override.store(0, Ordering::Release);
+            let boundary = shared.boundary(7, (1920, 1080)).unwrap();
+            let crop = WorldViewport {
+                x: 960,
+                y: 80,
+                width: 960,
+                height: 960,
+            };
+            let frame = shared.request_inactive(boundary, crop, CaptureCap::Small).unwrap();
+            let size = frame.request.layout().size();
+            let source = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("synthetic fitted Monitor output"),
+                size: wgpu::Extent3d {
+                    width: size.0,
+                    height: size.1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let colors = [[64_u8, 128, 192, 0], [192, 64, 128, 0], [128, 192, 64, 0], [32, 96, 160, 0]];
+            let mut bytes = vec![0; size.0 as usize * size.1 as usize * 4];
+            for y in 0..size.1 {
+                for x in 0..size.0 {
+                    let mut color = colors[usize::from(x >= size.0 / 2) + 2 * usize::from(y >= size.1 / 2)];
+                    if matches!(format, wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb) {
+                        color.swap(0, 2);
+                    }
+                    let offset = ((y * size.0 + x) * 4) as usize;
+                    bytes[offset..offset + 4].copy_from_slice(&color);
+                }
+            }
+            queue.write_texture(
+                source.as_image_copy(),
+                &bytes,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(size.0 * 4),
+                    rows_per_image: Some(size.1),
+                },
+                source.size(),
+            );
+            let mut capture = GpuCapture::new(shared.clone());
+            let mut encoder = device.create_command_encoder(&Default::default());
+            capture.encode(&device, &queue, &mut encoder, &source, frame.clone(), boundary, crop, 1);
+            assert!(
+                matches!(shared.take().unwrap(), Some(CaptureOutcome::Failed(token, CaptureError::Unsupported)) if token == frame.request.token()),
+                "ordinary frame must refuse an inactive claim"
+            );
+            let frame = shared.request_inactive(boundary, crop, CaptureCap::Small).unwrap();
+            capture.encode_inactive(&device, &queue, &mut encoder, &source, frame, 2);
+            queue.submit([encoder.finish()]);
+            capture.after_submit(&queue);
+            let image = gpu_image(&device, &mut capture);
+            assert_eq!(image.request().kind(), CaptureKind::InactiveWorld);
+            assert_eq!(image.request().boundary(), boundary);
+            assert_eq!(image.request().viewport(), crop);
+            assert_eq!(image.request().layout().size(), size);
+            assert_eq!(image.frame(), 2);
+            for (index, (x, y)) in [(0, 0), (size.0 - 1, 0), (0, size.1 - 1), (size.0 - 1, size.1 - 1)]
+                .into_iter()
+                .enumerate()
+            {
+                let offset = ((y * size.0 + x) * 4) as usize;
+                let pixel = &image.pixels().bytes()[offset..offset + 4];
+                for channel in 0..3 {
+                    assert!(pixel[channel].abs_diff(colors[index][channel]) <= 2, "{format:?}: {pixel:?}");
+                }
+                assert_eq!(pixel[3], 255);
+            }
+            let publication = shared.publication_guard(&image).unwrap();
+            assert!(publication.current());
+            shared.invalidate();
+            assert!(!publication.current());
+            assert!(!shared.can_publish(&image));
+        }
     }
 
     #[test]

@@ -171,11 +171,23 @@ impl AcceptedViewSource {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum CaptureMode {
+    Active { activation: u64, viewport: HostedViewport },
+    Inactive,
+}
+impl CaptureMode {
+    pub(crate) fn kind(self) -> aurora_session::preview_image::PreviewKind {
+        match self {
+            Self::Active { .. } => aurora_session::preview_image::PreviewKind::LastActive,
+            Self::Inactive => aurora_session::preview_image::PreviewKind::LiveInactive,
+        }
+    }
+}
 #[derive(Clone)]
 pub(crate) struct AcceptedPreviewCapture {
     source: AcceptedPreviewSource,
-    activation: u64,
-    viewport: HostedViewport,
+    mode: CaptureMode,
     witness: EpochFence,
     frontdoor: Arc<Frontdoor>,
 }
@@ -183,17 +195,20 @@ impl AcceptedPreviewCapture {
     pub(crate) fn source(&self) -> &AcceptedPreviewSource {
         &self.source
     }
-    pub(crate) fn activation(&self) -> u64 {
-        self.activation
-    }
-    pub(crate) fn viewport(&self) -> HostedViewport {
-        self.viewport
+    pub(crate) fn mode(&self) -> CaptureMode {
+        self.mode
     }
     pub(crate) fn witness(&self) -> EpochFence {
         self.witness.clone()
     }
     pub(crate) fn current(&self, now: Instant) -> bool {
-        self.frontdoor.current() && self.source.current(now) && self.witness.current() && self.activation != 0
+        self.frontdoor.capture_ready()
+            && self.source.current(now)
+            && self.witness.current()
+            && match self.mode {
+                CaptureMode::Active { activation, viewport } => activation != 0 && viewport.validate().is_ok(),
+                CaptureMode::Inactive => true,
+            }
     }
 }
 
@@ -371,6 +386,30 @@ impl Broker {
         {
             return None;
         }
+        // The worker independently proves native Standby before any scene
+        // effect/export. Here the Broker joins actual owned receipts and a
+        // quiet Coordinator; absence of an Active is not itself authority.
+        if self.coordinator.active() != Some(binding.worker.worker) {
+            let entry = self.coordinator.workers().find(|entry| entry.binding == binding)?;
+            if self.coordinator.busy()
+                || !entry.live
+                || child.granted.is_some()
+                || child
+                    .status
+                    .as_ref()
+                    .is_none_or(|status| status.phase != Phase::Online || status.blocked || status.native_window == 0)
+                || !source.current(Instant::now())
+            {
+                return None;
+            }
+            let proof = AcceptedPreviewCapture {
+                source: source.clone(),
+                mode: CaptureMode::Inactive,
+                witness: self.preview_frontdoor.capture_fence(self.preview_frontdoor.capture_generation()),
+                frontdoor: self.preview_frontdoor.clone(),
+            };
+            return proof.current(Instant::now()).then_some(proof);
+        }
         capture_from_accepted(
             source,
             self.preview_frontdoor.clone(),
@@ -428,8 +467,10 @@ fn capture_from_accepted(
     }
     let result = AcceptedPreviewCapture {
         source: source.clone(),
-        activation: active.activation,
-        viewport: active.viewport,
+        mode: CaptureMode::Active {
+            activation: active.activation,
+            viewport: active.viewport,
+        },
         witness: frontdoor.capture_fence(generation),
         frontdoor,
     };

@@ -25,6 +25,7 @@ fn policy() -> PreviewPolicy {
         source(),
         PreviewEpochs::new(1, 1, 1, 1, 1).unwrap(),
         PreviewAccess {
+            capture_inactive: false,
             ready: true,
             active: true,
             activation: 2,

@@ -343,3 +343,81 @@ fn native_producer_post_poll_native_loss_or_retarget_rejects_original_ready_clai
     assert_eq!(pending.claim, claim);
     assert_eq!(pending.deadline, now + TTL);
 }
+
+#[test]
+fn live_native_pending_rechecks_exact_source_boundary_lease_and_deadline_after_sampling() {
+    let world = world();
+    let now = Instant::now();
+    let mut f = facts(&world, now);
+    let active = f.authority.take().unwrap();
+    let authority = crate::session_host::worker::InactivePreviewAuthority {
+        scope: active.scope,
+        boundary: active.boundary,
+    };
+    f.inactive = Some(authority);
+    let mut native = HostPreview::default();
+    native.sync(f, now);
+    let policy = native.policy.unwrap();
+    let observed = native.observed.unwrap();
+    let mut ledger = Ledger::default();
+    ledger.apply(policy.source(), 1, 7, config(PreviewRate::One), None).unwrap();
+    let layout = inactive_layout(policy, ledger.current(), observed.inactive, observed.viewport).unwrap();
+    let mut model = SourceImages::new(policy.source(), ImageBudget::new(HOST_IMAGE_BYTES).unwrap()).unwrap();
+    model.sync(policy, 0).unwrap();
+    let claim = model
+        .request_inactive(1, 7, layout.geometry(PreviewSize::Small).unwrap(), 1)
+        .unwrap();
+    let mut pending = Pending {
+        token: ConnectionToken::transport_fixture(policy.source(), 1, 1, 1).unwrap(),
+        claim,
+        deadline: now + TTL,
+        gpu: None,
+    };
+    assert!(pending_inactive_matches(
+        policy,
+        Some(layout),
+        ledger.current(),
+        &pending,
+        Some(authority),
+        now
+    ));
+    assert!(!pending_inactive_matches(
+        policy,
+        Some(layout),
+        ledger.current(),
+        &pending,
+        None,
+        now
+    ));
+    for invalid in 0..5 {
+        let mut changed = authority;
+        match invalid {
+            0 => changed.scope.expires_at = now,
+            1 => {
+                changed.scope.source = PreviewSource::new(
+                    policy.source().worker(),
+                    policy.source().session(),
+                    policy.source().lease_epoch() + 1,
+                )
+                .unwrap()
+            }
+            2 => changed.boundary = aurora_render::viewport_capture::CaptureBoundary::new(42, 9, (1280, 720)).unwrap(),
+            3 => changed.boundary = aurora_render::viewport_capture::CaptureBoundary::new(41, 10, (1280, 720)).unwrap(),
+            4 => changed.boundary = aurora_render::viewport_capture::CaptureBoundary::new(41, 9, (640, 360)).unwrap(),
+            _ => unreachable!(),
+        }
+        assert!(
+            !pending_inactive_matches(policy, Some(layout), ledger.current(), &pending, Some(changed), now),
+            "changed boundary case {invalid}"
+        );
+    }
+    pending.deadline = now;
+    assert!(!pending_inactive_matches(
+        policy,
+        Some(layout),
+        ledger.current(),
+        &pending,
+        Some(authority),
+        now
+    ));
+}

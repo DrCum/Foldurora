@@ -752,7 +752,7 @@ impl Pair {
                         self.retire_pixels();
                     }
                 }
-                if !policy.access().capture_active {
+                if !policy.access().can_capture() {
                     self.retire_pixels();
                 }
                 self.policy = Some(policy);
@@ -876,7 +876,7 @@ impl Pair {
         if auth.scope.role_epoch <= self.pixel_epoch
             || self
                 .policy
-                .is_none_or(|p| !p.access().retain_last_active || (!retiring && !p.access().capture_active))
+                .is_none_or(|p| !p.access().retain_last_active || (!retiring && !p.access().can_capture()))
         {
             return Err(Error::Sequence);
         }

@@ -1,6 +1,6 @@
-//! Native LastActive policy and optional producer. A validated Some bootstrap
-//! and explicit typed demand are required; no roster subscription or inactive
-//! world-render loop is created here. Root owns combined endpoint enablement.
+//! Native preview policy and producer. A validated Some bootstrap and explicit
+//! typed demand are required. Inactive sampling additionally requires fresh
+//! native Standby, visibility/admission and reduced render-owner resources.
 //!
 //! Legacy `FSSessionWorker::sharingAllowed` (fssessionworker.cpp:294, pinned
 //! abbe3cb0) forbids names/location privacy. Aurora also applies its
@@ -18,6 +18,9 @@ use std::time::Instant;
 use uuid::Uuid;
 
 mod demand;
+mod live;
+#[cfg(test)]
+mod live_tests;
 mod producer;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -132,6 +135,7 @@ impl From<PreviewAuthority> for ActiveGrant {
 struct NativePreviewFacts {
     scope: Option<PreviewScope>,
     authority: Option<PreviewAuthority>,
+    inactive: Option<crate::session_host::worker::InactivePreviewAuthority>,
     world: WorldPolicy,
     physical: Option<PhysicalStamp>,
     viewport: Option<WorldViewport>,
@@ -149,6 +153,7 @@ struct Observation {
     physical: Option<PhysicalStamp>,
     viewport: Option<WorldViewport>,
     active: Option<ActiveGrant>,
+    inactive: Option<aurora_render::viewport_capture::CaptureBoundary>,
     capture_generation: u64,
     capture_ready: bool,
     retention_ready: bool,
@@ -221,6 +226,19 @@ impl HostPreview {
                     && (authority.viewport.rect.width, authority.viewport.rect.height) == authority.boundary.size()
             })
             .map(ActiveGrant::from);
+        let inactive = facts
+            .inactive
+            .filter(|authority| {
+                active.is_none()
+                    && Some(authority.scope.source) == source
+                    && authority.scope.expires_at > now
+                    && physical.is_some_and(|physical| {
+                        physical.device == authority.boundary.device_epoch()
+                            && physical.surface == authority.boundary.surface_epoch()
+                            && physical.size == authority.boundary.size()
+                    })
+            })
+            .map(|authority| authority.boundary);
         let retention_ready = source.is_some()
             && facts.lifecycle_ready
             && facts.world.allows_retention()
@@ -236,6 +254,7 @@ impl HostPreview {
             physical,
             viewport: facts.viewport,
             active,
+            inactive,
             capture_generation: facts.capture_generation,
             capture_ready: facts.capture_ready,
             retention_ready,
@@ -246,7 +265,7 @@ impl HostPreview {
             return false;
         }
         let old = self.observed;
-        let cancel = self.policy.is_some_and(|policy| policy.access().capture_active)
+        let cancel = self.policy.is_some_and(|policy| policy.access().can_capture())
             && old.is_some_and(|old| old.capture_generation == next.capture_generation);
         let source_changed = old.is_none_or(|old| old.source != next.source);
         let privacy_changed = old.is_none_or(|old| old.world != next.world || old.retention_ready != next.retention_ready);
@@ -282,6 +301,12 @@ impl HostPreview {
             && facts.photo.allows_capture()
             && facts.remembered;
         let access = PreviewAccess {
+            capture_inactive: retention_ready
+                && inactive.is_some()
+                && facts.capture_ready
+                && facts.capture_generation != 0
+                && facts.photo.allows_capture()
+                && facts.remembered,
             ready: retention_ready,
             active: retention_ready && active.is_some(),
             activation: active.map_or(activation, |grant| grant.activation),
@@ -361,6 +386,10 @@ impl App {
         }
     }
 
+    pub(super) fn host_preview_inactive(&mut self, gfx: &mut Gfx, photo: aurora_render::PhotoContext) {
+        self.run_preview_producer(Some(gfx), photo, producer::Pass::BeforeInactiveRender);
+    }
+
     pub(super) fn host_preview_before_render(
         &mut self,
         gfx: &mut Gfx,
@@ -380,6 +409,10 @@ impl App {
                 && scope.source.session() == actual.session
                 && scope.source.lease_epoch() == actual.lease_epoch)
                 .then_some(scope)
+        });
+        let inactive = scope.and_then(|_| {
+            let gfx = gfx?;
+            self.host_session.as_ref()?.inactive_preview_authority(&gfx.window, &gfx.renderer)
         });
         let authority = scope.and_then(|_| {
             let gfx = gfx?;
@@ -411,12 +444,13 @@ impl App {
         NativePreviewFacts {
             scope,
             authority,
+            inactive,
             world: WorldPolicy::observe(&self.world),
             physical,
             viewport,
             capture_generation: gfx.map_or(0, |gfx| gfx.renderer.viewport_capture_generation()),
             capture_ready: gfx.is_some_and(|gfx| !gfx.renderer.failed() && !gfx.renderer.device_lost() && !gfx.renderer.vr_engaged())
-                && self.host_submission_allowed()
+                && (self.host_submission_allowed() || inactive.is_some())
                 && self.options_ui.capture.is_none()
                 && !self.drawing_paused(),
             lifecycle_ready: !self.exit_prompt.open
@@ -494,6 +528,7 @@ mod tests {
         };
         NativePreviewFacts {
             scope: Some(scope),
+            inactive: None,
             authority: Some(PreviewAuthority {
                 scope,
                 activation: 8,

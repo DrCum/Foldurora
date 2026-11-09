@@ -1,5 +1,5 @@
-//! Actual LastActive producer. All socket/MAC/pixel copying stays on existing
-//! owners. These calls require the reviewed sealed V4 APIs and root module join.
+//! Native active/inactive producer. All socket/MAC/pixel copying stays on
+//! existing owners. Sealed V5 metadata distinguishes the actual render origin.
 use super::demand::{Applied, Decision, Ledger};
 use super::{App, Gfx};
 use crate::session_host::preview_io::{
@@ -18,6 +18,7 @@ pub(super) enum Pass {
     Cpu,
     Observe,
     BeforeRender(WorldViewport),
+    BeforeInactiveRender,
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct RetentionKey {
@@ -60,6 +61,7 @@ pub(super) struct Producer {
     ever_requested: bool,
     retirement_needed: bool,
     exhausted: bool,
+    stopping: Option<(ConnectionToken, u64)>,
 }
 impl Default for Producer {
     fn default() -> Self {
@@ -79,6 +81,7 @@ impl Default for Producer {
             ever_requested: false,
             retirement_needed: false,
             exhausted: false,
+            stopping: None,
         }
     }
 }
@@ -107,6 +110,7 @@ impl Producer {
         }
     }
     fn cancel(&mut self, app: &App, renderer: &mut Renderer, reason: Unavailable) {
+        renderer.stop_monitor_prototype();
         let had_capture = self.capture.take().map(|fence| fence.revoke()).is_some();
         self.capture_key = None;
         if let Some(pending) = self.pending.take() {
@@ -203,7 +207,13 @@ impl Producer {
         let mut layout = app
             .host_preview
             .observed
-            .and_then(|observed| native_layout(policy, self.ledger.current(), observed.active, observed.viewport))
+            .and_then(|observed| {
+                if policy.access().capture_inactive {
+                    inactive_layout(policy, self.ledger.current(), observed.inactive, observed.viewport)
+                } else {
+                    native_layout(policy, self.ledger.current(), observed.active, observed.viewport)
+                }
+            })
             .filter(|_| !self.exhausted);
         let next = layout.zip(self.ledger.current()).map(|(layout, config)| CaptureKey {
             layout,
@@ -219,11 +229,12 @@ impl Producer {
             }
         }
         let capture = self.capture.as_ref().filter(|fence| fence.current()).cloned();
-        let policy = if capture.is_none() && policy.access().capture_active {
+        let policy = if capture.is_none() && policy.access().can_capture() {
             PreviewPolicy::new(
                 policy.source(),
                 policy.epochs(),
                 aurora_session::preview_image::PreviewAccess {
+                    capture_inactive: false,
                     capture_active: false,
                     ..policy.access()
                 },
@@ -286,7 +297,11 @@ impl Producer {
         match received.command {
             PreviewCommand::RememberActive { demand, size, rate } => {
                 let config = DemandConfiguration { size, rate };
-                let decision = self.ledger.classify(demand, config);
+                let decision = if self.stopping.is_some() {
+                    Decision::Reject(DemandRejection::Denied)
+                } else {
+                    self.ledger.classify(demand, config)
+                };
                 let receipt = match decision {
                     Decision::Known(receipt) => Self::fresh(received.received_at, now).then_some(receipt),
                     Decision::Reject(reason) => {
@@ -313,10 +328,8 @@ impl Producer {
                     if self.ledger.current().is_some_and(|current| current.demand == demand) {
                         self.cancel(app, &mut gfx.renderer, Unavailable::Denied);
                     }
-                    if self.ledger.stop(demand)
-                        && let Some(channel) = app.host_session.as_ref().and_then(|bridge| bridge.preview_channel())
-                    {
-                        let _ = channel.acknowledge_stop(received.token, demand);
+                    if self.ledger.stop(demand) {
+                        self.stopping = Some((received.token, demand));
                     }
                     true
                 } else {
@@ -369,6 +382,21 @@ impl Producer {
         })
     }
     fn pending_current(&self, pending: &Pending, app: &App, gfx: &Gfx, context: &Context, now: Instant) -> bool {
+        if pending.claim.kind() == aurora_session::preview_image::PreviewKind::LiveInactive {
+            return context.token == Some(pending.token)
+                && context.capture.as_ref().is_some_and(|capture| capture.current())
+                && context.retention.current(now)
+                && pending_inactive_matches(
+                    context.policy,
+                    context.layout,
+                    self.ledger.current(),
+                    pending,
+                    app.host_session
+                        .as_ref()
+                        .and_then(|bridge| bridge.inactive_preview_authority(&gfx.window, &gfx.renderer)),
+                    now,
+                );
+        }
         context.token == Some(pending.token)
             && context.capture.as_ref().is_some_and(|capture| capture.current())
             && context.retention.current(now)
@@ -501,7 +529,12 @@ impl Producer {
             aurora_session::PreviewSize::Medium => CaptureCap::Medium,
             aurora_session::PreviewSize::Large => CaptureCap::Large,
         };
-        match gfx.renderer.request_viewport_capture(viewport, cap) {
+        let request = if self.pending.as_ref().unwrap().claim.kind() == aurora_session::preview_image::PreviewKind::LiveInactive {
+            gfx.renderer.request_inactive_capture(viewport, cap)
+        } else {
+            gfx.renderer.request_viewport_capture(viewport, cap)
+        };
+        match request {
             Ok(token) => {
                 self.pending.as_mut().unwrap().gpu = Some(token);
                 self.ever_requested = true;
@@ -560,8 +593,40 @@ impl Producer {
             if let Pass::BeforeRender(viewport) = pass {
                 self.freeze(app, gfx, &context, viewport);
             }
+            if pass == Pass::BeforeInactiveRender
+                && self.stopping.is_none()
+                && context.policy.access().capture_inactive
+                && let Some(config) = self.ledger.current()
+                && let Some(layout) = context.layout
+            {
+                let rect = layout.source_rect();
+                let viewport = WorldViewport {
+                    x: rect[0],
+                    y: rect[1],
+                    width: rect[2],
+                    height: rect[3],
+                };
+                gfx.renderer.poll_monitor_prototype();
+                gfx.renderer.configure_monitor_prototype(Some(monitor_config(config)));
+                self.freeze(app, gfx, &context, viewport);
+                if self.pending.as_ref().is_some_and(|pending| pending.gpu.is_some())
+                    && self.current_pending(app, gfx, &context, Instant::now())
+                {
+                    gfx.renderer
+                        .try_render_monitor_prototype(Instant::now(), |renderer, size| app.prepare_inactive_monitor(renderer, size));
+                }
+            }
         }
         self.cleanup(&mut gfx.renderer);
+        if self.stopping.is_some()
+            && !self.retirement_needed
+            && gfx.renderer.poll_monitor_retirement()
+            && let Some((token, demand)) = self.stopping
+            && let Some(channel) = app.host_session.as_ref().and_then(|bridge| bridge.preview_channel())
+            && channel.acknowledge_stop(token, demand).is_ok()
+        {
+            self.stopping = None;
+        }
     }
 }
 fn reason(error: CaptureError) -> Unavailable {
@@ -631,6 +696,73 @@ fn pending_authority_matches(
                         && [authority.boundary.size().0, authority.boundary.size().1] == layout.source_size()
                 })
         })
+}
+
+fn pending_inactive_matches(
+    policy: PreviewPolicy,
+    layout: Option<PreviewLayout>,
+    applied: Option<Applied>,
+    pending: &Pending,
+    authority: Option<crate::session_host::worker::InactivePreviewAuthority>,
+    now: Instant,
+) -> bool {
+    pending.deadline > now
+        && pending.claim.kind() == aurora_session::preview_image::PreviewKind::LiveInactive
+        && claim_matches(policy, layout, applied, pending.claim)
+        && authority.is_some_and(|authority| {
+            authority.scope.expires_at > now
+                && authority.scope.source == policy.source()
+                && authority.boundary.surface_epoch() == pending.claim.epochs().surface()
+                && layout.is_some_and(|layout| {
+                    authority.boundary.device_epoch() == layout.device_epoch()
+                        && [authority.boundary.size().0, authority.boundary.size().1] == layout.source_size()
+                })
+        })
+}
+pub(super) fn inactive_layout(
+    policy: PreviewPolicy,
+    config: Option<Applied>,
+    authority: Option<aurora_render::viewport_capture::CaptureBoundary>,
+    view: Option<WorldViewport>,
+) -> Option<PreviewLayout> {
+    if !policy.access().capture_inactive {
+        return None;
+    }
+    let config = config?;
+    let authority = authority?;
+    let view = view?;
+    if authority.surface_epoch() != policy.epochs().surface() {
+        return None;
+    }
+    let boundary = authority;
+    let layout = PreviewLayout::new_inactive(
+        policy.source(),
+        policy.epochs(),
+        policy.access().activation,
+        config.demand,
+        boundary.device_epoch(),
+        [boundary.size().0, boundary.size().1],
+        [view.x, view.y, view.width, view.height],
+    )
+    .ok()?;
+    layout.geometry(config.config.size).ok()?;
+    Some(layout)
+}
+fn monitor_config(applied: Applied) -> aurora_render::monitor::Config {
+    use aurora_render::monitor::{Config, Rate};
+    Config {
+        size: match applied.config.size {
+            aurora_session::PreviewSize::Small => CaptureCap::Small,
+            aurora_session::PreviewSize::Medium => CaptureCap::Medium,
+            aurora_session::PreviewSize::Large => CaptureCap::Large,
+        },
+        rate: match applied.config.rate {
+            aurora_session::PreviewRate::Half => Rate::Half,
+            aurora_session::PreviewRate::One => Rate::One,
+            aurora_session::PreviewRate::Two => Rate::Two,
+            aurora_session::PreviewRate::Five => Rate::Five,
+        },
+    }
 }
 
 /// Metadata correlation only. This never substitutes for strict native window,

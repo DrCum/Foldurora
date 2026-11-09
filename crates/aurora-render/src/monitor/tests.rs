@@ -205,6 +205,8 @@ fn monitor_small_gpu_targets_are_persistent_bounded_and_have_no_readback_usage()
         let callback = done.clone();
         let lost = Arc::new(AtomicBool::new(false));
         let frame = Frame {
+            _resources: None,
+            cold_resources: None,
             texture: first,
             epoch: epoch.clone(),
             lost: lost.clone(),
@@ -309,6 +311,12 @@ fn monitor_world_packets_keep_surface_size_and_never_prove_presentation() {
             std::thread::sleep(Duration::from_millis(1));
         };
         assert!(frame.stats().draws > 0, "existing scene geometry actually drawn");
+        // Observe the actual backend immediately after construction, not its
+        // final packet settings (which could conceal transient default targets).
+        let cold = frame.cold_resources.expect("native queue captured cold resource facts");
+        assert_eq!(cold.samples, 1);
+        assert_eq!(cold.probe_slots, 1);
+        assert_eq!((cold.shadow_size, cold.shadow_count), (512, 0));
         assert!(!frame.stats().presented);
         let texture = frame.texture().unwrap();
         assert_eq!((texture.width(), texture.height()), cap.dimensions());
@@ -331,7 +339,13 @@ fn monitor_world_packets_keep_surface_size_and_never_prove_presentation() {
         assert_eq!(proof.frame, None, "offscreen frames never grant foreground input");
         assert_eq!(proof.surface_epoch, original.surface_epoch);
         assert!(!renderer.try_render_monitor_prototype(Instant::now(), |_, _| panic!("promotion revoked demand")));
+        assert!(!renderer.poll_monitor_retirement(), "borrowed retired output must retain resources");
         drop(frame);
+        while !renderer.poll_monitor_retirement() {
+            assert!(Instant::now() < deadline, "small backend never acknowledged real retirement");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(renderer.size(), (1280, 720));
     }
     // Only a real surface presentation can satisfy a fresh foreground boundary.
     window.set_visible(true);
@@ -426,4 +440,28 @@ fn monitor_borrowed_queue_handle_never_closes_owner_but_cannot_outlive_its_autho
     let borrowed = owner.borrowed();
     drop(owner);
     assert!(borrowed.try_submit_with(|| panic!("closed owner must not build")).is_err());
+}
+
+#[test]
+fn monitor_process_resource_lease_survives_cancellation_replacement_and_borrowed_callback_lifetimes() {
+    let pool = ResourcePool::default();
+    let owned = pool.acquire().unwrap();
+    let callback = owned.clone();
+    let borrowed = callback.clone();
+    assert!(!pool.idle());
+    assert!(pool.acquire().is_none());
+    let mut lane = Lane::<u32>::default();
+    lane.configure(Some(config(CaptureCap::Small, Rate::One)));
+    lane.retire();
+    assert!(!pool.idle(), "capture cancellation does not retire actual allocation");
+    drop(owned);
+    assert!(pool.acquire().is_none());
+    drop(callback);
+    assert!(pool.acquire().is_none());
+    drop(borrowed);
+    assert!(pool.idle());
+    let replacement = pool.acquire().unwrap();
+    assert!(!pool.idle());
+    drop(replacement);
+    assert!(pool.idle());
 }

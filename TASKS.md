@@ -4411,3 +4411,9 @@ Open-source technologies that could set Aurora apart (human request of 2026-10-1
     and Root execution; the measured negative run remains recorded.
   - ⬜ Later parity: custom labels/colors/defaults, bulk edits/search/reordering,
     paging, persistent last selection, multiple windows and import/export.
+
+- 🔧 Foldurora live inactive Monitor join: explicit native Standby and visible
+  size/rate admission, fitted small scene, reduced cold resources, sealed V5
+  active/inactive export and owner-acknowledged Stop retirement implemented.
+  Pure component checks pass; combined Windows/GPU/package and hosted human
+  acceptance are pending. See docs/FOLDURORA_LIVE_MONITORS_20261109.md.

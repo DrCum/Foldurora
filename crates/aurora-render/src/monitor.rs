@@ -1,12 +1,11 @@
-//! Experimental inactive-world renderer. Not connected to the host or enabled
-//! by default. Scheduling here is a local backstop, NOT account/privacy authority
+//! Small inactive-world renderer. Scheduling here is a local backstop, NOT account/privacy authority
 //! or aggregate admission; callers must supply those before scene preparation.
 //! No surface, photo readback, transport or input proof is exposed by this API.
 
 use crate::viewport_capture::CaptureCap;
 use parking_lot::Mutex;
 use std::sync::{
-    Arc,
+    Arc, OnceLock,
     atomic::{AtomicBool, Ordering},
 };
 use std::time::{Duration, Instant};
@@ -40,6 +39,64 @@ impl Config {
     }
 }
 
+/// Apply the same reduced feature policy before cold allocation and on every
+/// packet. Pixel/privacy effects remain on FrameParams; presentation settings
+/// and the worker's saved graphics preferences are never changed.
+pub(crate) fn reduced_settings(mut settings: crate::RenderSettings) -> crate::RenderSettings {
+    settings.aa = crate::AntiAliasing::None;
+    settings.shadow_resolution = 0;
+    settings.projector_shadow_limit = 0;
+    settings.probe_slots = 1;
+    settings.ssao = 0;
+    settings.screen_indirect = false;
+    settings.contact_shadows = false;
+    settings.water_reflection_scale = 0.0;
+    settings.mirror_scale = 0.0;
+    settings.water_effects.enabled = false;
+    settings.ssr = false;
+    settings.occlusion = false;
+    settings.render_scale_percent = 100;
+    settings
+}
+
+/// One cold small-backend allocation per process, shared across renderer/device
+/// replacements. View plus actual submission callbacks/borrowed Frames retain
+/// the lease. Logical cancellation or constructing another Renderer cannot
+/// renew it. Host aggregate credit is independent and remains charged until ACK.
+#[derive(Clone, Default)]
+pub(crate) struct ResourcePool(Arc<AtomicBool>);
+impl ResourcePool {
+    fn acquire(&self) -> Option<ResourceLease> {
+        self.0.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).ok()?;
+        Some(ResourceLease {
+            _credit: Arc::new(ResourceCredit(self.clone())),
+        })
+    }
+    fn idle(&self) -> bool {
+        !self.0.load(Ordering::Acquire)
+    }
+}
+struct ResourceCredit(ResourcePool);
+impl Drop for ResourceCredit {
+    fn drop(&mut self) {
+        self.0.0.store(false, Ordering::Release);
+    }
+}
+#[derive(Clone)]
+pub(crate) struct ResourceLease {
+    _credit: Arc<ResourceCredit>,
+}
+fn process_resources() -> &'static ResourcePool {
+    static POOL: OnceLock<ResourcePool> = OnceLock::new();
+    POOL.get_or_init(ResourcePool::default)
+}
+pub(crate) fn resources_idle() -> bool {
+    process_resources().idle()
+}
+pub(crate) fn acquire_resources() -> Option<ResourceLease> {
+    process_resources().acquire()
+}
+
 /// One configuration lifetime, revoked before promotion/hide/resize/close.
 /// Revocation is permanent, including for results already borrowed by a reader.
 #[derive(Clone)]
@@ -56,16 +113,32 @@ impl Epoch {
     }
 }
 
+/// Test-only facts captured immediately after cold allocation, before the
+/// first packet can change settings and hide an oversized transient allocation.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ColdResources {
+    pub samples: u32,
+    pub probe_slots: u32,
+    pub shadow_size: u32,
+    pub shadow_count: u8,
+}
+
 /// Completed GPU image on this renderer's device, never a presentation proof.
 /// Keep this lease until the consumer's GPU use has completed. Holding both
 /// output leases makes the producer skip samples instead of allocating more.
-/// Cross-process export/readback is deliberately absent from this prototype.
+/// The App uses the separate credited CaptureRequest service for IPC; this GPU
+/// lease itself is never exported as a native/input proof.
 pub struct Frame {
     pub(crate) texture: Arc<wgpu::Texture>,
     pub(crate) epoch: Epoch,
     pub(crate) lost: Arc<AtomicBool>,
     pub(crate) index: u64,
     pub(crate) stats: crate::RenderStats,
+    #[cfg(test)]
+    pub(crate) cold_resources: Option<ColdResources>,
+    // Drop GPU handles before returning the process-wide allocation credit.
+    pub(crate) _resources: Option<ResourceLease>,
 }
 impl Frame {
     pub fn texture(&self) -> Option<&wgpu::Texture> {
@@ -103,7 +176,7 @@ impl<T> Completion<T> {
 }
 #[derive(Clone)]
 pub(crate) struct Request {
-    pub config: Config,
+    pub dimensions: (u32, u32),
     pub epoch: Epoch,
     pub completion: Arc<Completion<Frame>>,
 }

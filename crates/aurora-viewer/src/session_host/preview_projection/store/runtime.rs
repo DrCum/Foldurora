@@ -793,7 +793,7 @@ impl BrokerProjection {
                     }
                 }
                 // Build from authenticated actual Layout only AFTER exact
-                // native config ACK, and only for the real accepted Active.
+                // native config ACK and a kind-matched accepted capture proof.
                 let eligible: Vec<_> = store
                     .entries
                     .iter()
@@ -801,10 +801,12 @@ impl BrokerProjection {
                         store.visible(entry.source)
                             && entry.pending.is_none()
                             && entry.model.is_some()
-                            && captures
-                                .iter()
-                                .any(|capture| capture.source().source() == entry.source && capture.current(Instant::now()))
-                            && entry.policy.is_some_and(|policy| policy.policy().access().capture_active)
+                            && captures.iter().any(|capture| {
+                                capture.source().source() == entry.source
+                                    && capture.current(Instant::now())
+                                    && entry.layout.is_some_and(|layout| capture.mode().kind() == layout.layout().kind())
+                            })
+                            && entry.policy.is_some_and(|policy| policy.policy().access().can_capture())
                             && entry.layout_current
                             && entry.layout.is_some()
                     })
@@ -818,7 +820,14 @@ impl BrokerProjection {
                         && entry.policy.is_some_and(|policy| layout.matches_policy(policy.policy()))
                         && let Ok(geometry) = layout.geometry(accepted.options.size)
                         && let Some(model) = &mut entry.model
-                        && let Ok(claim) = model.request(accepted.token.connection(), accepted.demand, geometry, now)
+                        && let Ok(claim) = match layout.kind() {
+                            aurora_session::preview_image::PreviewKind::LastActive => {
+                                model.request(accepted.token.connection(), accepted.demand, geometry, now)
+                            }
+                            aurora_session::preview_image::PreviewKind::LiveInactive => {
+                                model.request_inactive(accepted.token.connection(), accepted.demand, geometry, now)
+                            }
+                        }
                     {
                         entry.pending = Some(claim);
                         entry.pending_at = now;

@@ -379,12 +379,17 @@ impl MonitorUi {
                         })
                         .to_owned()
                     },
-                    |(_, (youngest, oldest))| {
-                        aurora_i18n::tr!(
+                    |(image, (youngest, oldest))| match image.admitted.stamp().kind() {
+                        aurora_session::preview_image::PreviewKind::LastActive => aurora_i18n::tr!(
                             "host-monitor-last-active",
                             youngest = (youngest / 1000) as i64,
                             oldest = oldest.div_ceil(1000) as i64
-                        )
+                        ),
+                        aurora_session::preview_image::PreviewKind::LiveInactive => aurora_i18n::tr!(
+                            "host-monitor-live-inactive",
+                            youngest = (youngest / 1000) as i64,
+                            oldest = oldest.div_ceil(1000) as i64
+                        ),
                     },
                 );
                 let width = ((ui.available_width() - 3.0 * ui.spacing().item_spacing.x) / 4.0).max(1.0);

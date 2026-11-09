@@ -267,6 +267,7 @@ impl Owned {
             self.descriptor.source,
             PreviewEpochs::new(1, 1, 1, 1, 1).unwrap(),
             PreviewAccess {
+                capture_inactive: false,
                 ready: true,
                 active: capture,
                 activation,
@@ -774,6 +775,7 @@ fn preview_host_old_pair_refresh_refuses_authenticated_privacy_denial_and_releas
         owned.descriptor.source,
         PreviewEpochs::new(2, 2, 1, 1, 1).unwrap(),
         PreviewAccess {
+            capture_inactive: false,
             activation: 1,
             ..Default::default()
         },

@@ -56,6 +56,7 @@ impl Connected {
             policy.source(),
             policy.epochs(),
             aurora_session::preview_image::PreviewAccess {
+                capture_inactive: false,
                 capture_active: false,
                 ..policy.access()
             },
@@ -117,6 +118,7 @@ impl Connected {
                 state.policy.source(),
                 state.policy.epochs(),
                 aurora_session::preview_image::PreviewAccess {
+                    capture_inactive: false,
                     capture_active: false,
                     ..state.policy.access()
                 },

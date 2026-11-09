@@ -693,6 +693,7 @@ impl AdmittedFixture {
             source.preview(),
             epochs,
             PreviewAccess {
+                capture_inactive: false,
                 ready: true,
                 active: true,
                 activation: 1,
@@ -710,6 +711,7 @@ impl AdmittedFixture {
             source.preview(),
             epochs,
             PreviewAccess {
+                capture_inactive: false,
                 ready: true,
                 active: false,
                 activation: 1,

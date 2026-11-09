@@ -1,14 +1,21 @@
-//! Prototype entry on the existing Renderer. No App/host caller is enabled.
+//! Small inactive-world entry on the existing Renderer. The native App joins
+//! scheduling only after exact source/privacy/lease and aggregate admission.
 use super::*;
 use crate::monitor::{Config, Frame, Request};
 
 impl Renderer {
     /// Configure only after aggregate admission and current inactive-source,
     /// visibility and privacy checks. None suspends a hidden/minimized/closed
-    /// view. The native host does NOT call this experimental API yet.
+    /// view. The App retains this reservation until actual backend retirement.
     pub fn configure_monitor_prototype(&mut self, config: Option<Config>) {
         self.monitor.configure(config.filter(|_| {
-            self.threaded() && !self.failed && !self.lost.get() && !self.vr_engaged() && !self.vr.wanted() && !self.session_fences.pending()
+            self.threaded()
+                && !self.monitor_release_pending
+                && !self.failed
+                && !self.lost.get()
+                && !self.vr_engaged()
+                && !self.vr.wanted()
+                && !self.session_fences.pending()
         }));
     }
 
@@ -19,6 +26,38 @@ impl Renderer {
         if self.monitor.retire() {
             self.motion_cut = true;
         }
+    }
+
+    /// Drain and destroy the small backend before acknowledging a demand Stop.
+    /// Revocation alone never frees the host's aggregate resource reservation.
+    /// A failed/lost owner cannot prove release: it stays charged until exit.
+    pub fn poll_monitor_retirement(&mut self) -> bool {
+        self.stop_monitor_prototype();
+        self.poll_monitor_prototype();
+        if self.failed || self.lost.get() {
+            return false;
+        }
+        if self.monitor.pending() || self.monitor_release_pending {
+            return false;
+        }
+        if !self.monitor_resources {
+            return crate::monitor::resources_idle();
+        }
+        let owner = match &self.host {
+            Host::Thread { owner, .. } => owner.borrowed(),
+            _ => return false,
+        };
+        match owner.try_submit(Job::ReleaseMonitor) {
+            Ok(Some(submitted)) => {
+                if let Some(done) = submitted.previous {
+                    self.apply_done(done);
+                }
+                self.monitor_release_pending = true;
+            }
+            Ok(None) => {}
+            Err(_) => self.fail(),
+        }
+        false
     }
 
     /// Completion maintenance runs independently of preview FPS, with no wait
@@ -65,7 +104,8 @@ impl Renderer {
         now: Instant,
         prepare: impl FnOnce(&mut Renderer, (u32, u32)) -> (FrameParams, DrawLists),
     ) -> bool {
-        if self.failed
+        if self.monitor_release_pending
+            || self.failed
             || self.lost.get()
             || self.vr_engaged()
             || self.vr.wanted()
@@ -78,6 +118,20 @@ impl Renderer {
             return false;
         }
         self.monitor.poll();
+        // Never cold-allocate under unknown/insufficient driver headroom.
+        // This is in addition to host aggregate credit, not a total VRAM claim.
+        if !self.monitor_resources
+            && self
+                .viewport_capture_pending
+                .as_ref()
+                .is_some_and(|frame| frame.request.kind() == crate::viewport_capture::CaptureKind::InactiveWorld)
+            && self
+                .video_memory
+                .read(&self.device)
+                .is_none_or(|video| video.budget.saturating_sub(video.usage) < 256 * 1024 * 1024)
+        {
+            return false;
+        }
         if self.monitor.due(now).is_none() {
             return false;
         }
@@ -87,7 +141,17 @@ impl Renderer {
         };
         match owner.try_submit_with(|| {
             let (config, epoch, completion) = self.monitor.begin(now).expect("reserved due Monitor");
-            let (params, lists) = prepare(self, config.dimensions());
+            self.monitor_resources = true;
+            let viewport_capture = self
+                .viewport_capture_pending
+                .take_if(|frame| frame.request.kind() == crate::viewport_capture::CaptureKind::InactiveWorld);
+            let dimensions = viewport_capture
+                .as_ref()
+                .map_or(config.dimensions(), |frame| frame.request.layout().size());
+            if viewport_capture.is_some() {
+                self.viewport_capture_retirement.dirty();
+            }
+            let (params, lists) = prepare(self, dimensions);
             self.records.flush(&self.device, &mut self.writes);
             self.cull.objects.flush(&self.device, &mut self.writes);
             self.cull.boxes.flush(&self.device, &mut self.writes);
@@ -106,8 +170,8 @@ impl Renderer {
                 ui: None,
                 surface: SurfaceState {
                     epoch: self.surface_epoch,
-                    width: config.dimensions().0,
-                    height: config.dimensions().1,
+                    width: dimensions.0,
+                    height: dimensions.1,
                     vsync: false,
                 },
                 settings: self.settings,
@@ -115,13 +179,20 @@ impl Renderer {
                 picks: Vec::new(),
                 drawn: Vec::new(),
                 capture: None,
-                viewport_capture: None,
+                viewport_capture,
                 histogram: None,
                 motion_cut: true,
                 input_at: None,
             };
             self.frames += 1;
-            Job::Monitor(Box::new(packet), Request { config, epoch, completion })
+            Job::Monitor(
+                Box::new(packet),
+                Request {
+                    dimensions,
+                    epoch,
+                    completion,
+                },
+            )
         }) {
             Ok(Some(submitted)) => {
                 if let Some(done) = submitted.previous {
