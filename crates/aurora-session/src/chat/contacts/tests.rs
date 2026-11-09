@@ -97,6 +97,26 @@ fn contacts_complete_pages_are_atomic_sorted_and_offline_friends_remain_selectab
 }
 
 #[test]
+fn contacts_new_search_retires_old_membership_while_friend_refresh_retains_its_last_complete_list() {
+    let mut d = directory();
+    let friends = d.begin(ContactChannel::Friends, 1).unwrap();
+    d.accept(&page(friends, 1, vec![row(9, "Friend", false, true)])).unwrap();
+    let search = d.begin(ContactChannel::Search, 1).unwrap();
+    d.accept(&page(search, 1, vec![row(8, "Search", false, true)])).unwrap();
+    let refreshing = d.begin(ContactChannel::Friends, 2).unwrap();
+    let searching = d.begin(ContactChannel::Search, 2).unwrap();
+    assert!(d.selected(friends.key, peer(9)));
+    assert!(!d.selected(search.key, peer(8)));
+    assert!(d.completed(ContactChannel::Search).is_none());
+    assert_eq!(d.fail(search.key), Err(ChatError::StaleRequest));
+    assert_eq!(d.request(ContactChannel::Search), Some(searching));
+    d.fail(searching.key).unwrap();
+    assert!(d.completed(ContactChannel::Search).is_none());
+    assert_eq!(d.request(ContactChannel::Friends), Some(refreshing));
+    assert!(d.selected(friends.key, peer(9)));
+}
+
+#[test]
 fn contacts_bad_page_source_token_cursor_total_and_cross_page_duplicate_never_publish_partial_rows() {
     let mut d = directory();
     let first = d.begin(ContactChannel::Friends, 1).unwrap();

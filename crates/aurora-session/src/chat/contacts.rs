@@ -238,12 +238,29 @@ impl ContactDirectory {
             return Err(ChatError::StaleRequest);
         }
         self.highwater[index] = token;
+        // Folderstorm beginSearch discards the previous query's membership;
+        // beginFriends may keep its completed list during a refresh.
+        if channel == ContactChannel::Search {
+            self.completed[index] = None;
+        }
         self.transfers[index] = Some(Transfer {
             key,
             total: None,
             rows: Vec::new(),
         });
         Ok(ContactPageRequest { key, offset: 0 })
+    }
+    pub fn fail(&mut self, key: ContactKey) -> Result<(), ChatError> {
+        key.validate()?;
+        if key.source != self.source {
+            return Err(ChatError::Binding);
+        }
+        let index = key.channel.index();
+        if self.transfers[index].as_ref().is_none_or(|transfer| transfer.key != key) {
+            return Err(ChatError::StaleRequest);
+        }
+        self.transfers[index] = None;
+        Ok(())
     }
     pub fn request(&self, channel: ContactChannel) -> Option<ContactPageRequest> {
         let transfer = self.transfers[channel.index()].as_ref()?;
