@@ -19,11 +19,14 @@ permission excludes private evidence and coverage-input metadata.
   `/workspace/work/workspace-folders-20261109`. Preserve all earlier refs.
 - ONE new corrected combined Windows request, published and byte-verified:
   https://github.com/DrCum/Foldurora/blob/a18cf58040540f35f315eb6d672dcde6cbfe5071/docs/FOLDURORA_COMBINED_WINDOWS_REQUEST_EC0BCB52.md
-  Prepared/published only; no delivery, acknowledgment, run or package claimed.
-  Slick must check current history then relay ONCE to the existing Cumputer
-  Builder, thread01a1af77-a465-71c3-be08-cd9d1b927f83. Last verified state idle
-  after failed1ba. No separate EA63 request was published/dispatched. Direct
-  app status/PR attachment connection is closed; do not replace the Builder.
+  Slick verified the existing Cumputer Builder was idle after1ba with no ec0
+  request, then delivered this complete request ONCE. Builder explicitly
+  acknowledged and started turn01a1c162-1b8d-7fb1-95eb-f4a878800551, checking
+  source identity and unchanged MCP/session sources before workspace gates.
+  Builder thread01a1af77-a465-71c3-be08-cd9d1b927f83 is active per this relay;
+  no test result, executable or new package claimed. Do not duplicate delivery
+  or disturb frozen source. No separate EA63 request published/dispatched.
+  Direct app status/PR attachment connection is closed; do not replace Builder.
 
 ## Windows feedback and corrected integration
 
