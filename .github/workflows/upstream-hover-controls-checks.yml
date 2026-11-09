@@ -1,0 +1,100 @@
+name: Isolated hover and control checks
+on:
+  push:
+    branches: [checks/upstream-hover-controls-20261109]
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+concurrency:
+  group: isolated-hover-control-checks
+  cancel-in-progress: true
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+  CARGO_BUILD_JOBS: '2'
+  SOURCE_SHA: ef01cebfc1a756b16ee86a847fb470bf15c24091
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Checkout pinned source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ef01cebfc1a756b16ee86a847fb470bf15c24091
+          fetch-depth: 0
+          filter: blob:none
+      - name: Source and runner
+        run: |
+          mkdir -p .scratch/validation
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git rev-parse HEAD | tee .scratch/validation/source.txt
+          echo "$GITHUB_SHA" > .scratch/validation/workflow.txt
+          rustc --version | tee .scratch/validation/rust.txt
+          cargo --version | tee .scratch/validation/cargo.txt
+          rustup component add rustfmt clippy
+          df -h .
+      - name: Existing viewer libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev
+      - name: Restore repository Linux cache
+        uses: ./.github/actions/rust-cache
+        with:
+          name: linux-tests
+      - name: Formatting and Clippy
+        run: |
+          cargo fmt --all -- --check 2>&1 | tee .scratch/validation/fmt.log
+          cargo clippy --profile ci --workspace --all-targets --locked -- -D warnings -A dead-code 2>&1 | tee .scratch/validation/clippy.log
+      - name: Inventory hover and cached restriction regressions with both captures
+        run: |
+          AURORA_CAPTURE="$GITHUB_WORKSPACE/.scratch/validation/inventory.png" cargo test --profile ci --workspace --locked inventory_hover -- --nocapture 2>&1 | tee .scratch/validation/hover.log
+      - name: Preferences and native account controls regressions with captures
+        run: |
+          AURORA_CAPTURE="$GITHUB_WORKSPACE/.scratch/validation/preferences.png" cargo test --profile ci --workspace --locked ui::options:: -- --nocapture 2>&1 | tee .scratch/validation/options.log
+          cargo test --profile ci --workspace --locked world::friends_only::tests:: -- --nocapture 2>&1 | tee .scratch/validation/friends-only.log
+          cargo test --profile ci --workspace --locked ui::controls:: -- --nocapture 2>&1 | tee .scratch/validation/controls.log
+          cargo test --profile ci --workspace --locked app::tests:: -- --nocapture 2>&1 | tee .scratch/validation/app.log
+      - name: Settings migration and neighboring Inventory safeguards
+        run: |
+          cargo test --profile ci --workspace --locked settings::tests:: -- --nocapture 2>&1 | tee .scratch/validation/settings.log
+          cargo test --profile ci --workspace --locked ui::inventory::delete_tests:: -- --nocapture 2>&1 | tee .scratch/validation/delete.log
+          cargo test --profile ci --workspace --locked ui::inventory::clipboard::tests:: -- --nocapture 2>&1 | tee .scratch/validation/clipboard.log
+      - name: Appearance and translation checks
+        run: |
+          cargo test --profile ci --workspace --locked theme_guard -- --nocapture 2>&1 | tee .scratch/validation/theme.log
+          cargo test --profile ci --workspace --locked every_language_has_english_keys_and_variables -- --nocapture 2>&1 | tee .scratch/validation/translation-keys.log
+          cargo test --profile ci --workspace --locked every_bundled_message_formats_with_its_declared_variables -- --nocapture 2>&1 | tee .scratch/validation/translation-format.log
+      - name: Verify required checks and captures
+        run: |
+          python3 - <<'PYCODE'
+          import pathlib,re
+          root=pathlib.Path('.scratch/validation')
+          required={
+            'hover.log':['inventory_hover_pictures_work_with_text_tooltips_off','inventory_hover_picture_uses_both_inventory_presentations_without_selecting','inventory_hover_picture_only_capture_both_presentations'],
+            'options.log':['show_friends_only_switches_from_controls_once_logged_in','inventory_pictures_preference_can_be_clicked_with_text_tooltips_off','hover_controls_preferences_capture'],
+            'settings.log':['inventory_hover_pictures_keep_what_earlier_files_showed'],
+          }
+          for file,names in required.items():
+            log=re.sub(r'\x1b\[[0-9;]*m','',(root/file).read_text())
+            for name in names: assert '::'+name+' ... ok' in log,(file,name)
+          for name in ['inventory-picture-classic','inventory-picture-aurora','friends-only','inventory-pictures']:
+            assert (root/(name+'.png')).stat().st_size>0,name
+          print('Required regressions and four actual CPU captures passed.')
+          PYCODE
+      - name: Verify frozen source
+        if: always()
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git diff --exit-code
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: hover-controls-linux-ef01cebfc1a7
+          path: .scratch/validation/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
