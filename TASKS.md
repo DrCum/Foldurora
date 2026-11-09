@@ -1,5 +1,12 @@
 # Aurora Viewer — task tracking
 
+- Foldurora MCP Windows correction (2026-11-09): preserve failed1ba972d1 and
+  early68 MCP passes; full/default1356 audit and all downstream stages NOT RUN.
+  Resolve eight viewer lint diagnostics on separate source, retain actual native
+  continuation/security guards and unsupported workspace mutation boundary;
+  strengthen save reply target correlation and guard actual metadata admission.
+  Two new cases compile/unrun; corrected default gate1358 awaits Windows.
+
 - Foldurora queued upstream integration (2026-11-09 UTC), separate from frozen
   workspace candidate da8ee12fd: PR18 media475df44e, PR19 sound65da1dfb,
   PR26 Preferences16071c7d and PR32 controls0d2d1ae9. Source reviewed and full

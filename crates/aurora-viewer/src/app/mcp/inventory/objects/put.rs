@@ -395,15 +395,7 @@ pub(super) fn tick(app: &mut App, assistant: &mut Assistant) {
             let object = p.object;
             if runtime
                 .continue_action(&capture, || {
-                    pending_for(
-                        &mut assistant.inventory,
-                        request,
-                        &capture,
-                        PendingKind::PutObserve {
-                            object,
-                            operation: capture.request_id.clone(),
-                        },
-                    );
+                    pending_for(&mut assistant.inventory, request, &capture, PendingKind::PutObserve { object });
                     app.build.request_contents(&app.world, idx, true);
                     app.flush_build();
                 })

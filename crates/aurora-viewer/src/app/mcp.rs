@@ -490,9 +490,6 @@ pub(super) fn world_native_event(app: &mut App, event: &aurora_net::NetEvent) ->
 pub(super) fn inventory_native_event(app: &mut App, event: &aurora_net::NetEvent) -> bool {
     inventory::native_event(app, event)
 }
-pub(super) fn inventory_continuation(app: &App, request: Uuid) -> bool {
-    inventory::continuation(app, request)
-}
 pub(super) fn inventory_native_command(app: &mut App, command: &aurora_net::NetCommand) {
     inventory::native_command(app, command);
 }

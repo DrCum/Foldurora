@@ -80,17 +80,13 @@ enum PendingKind {
     },
     ContentSave {
         item: Uuid,
-        asset: Uuid,
         object: Uuid,
         script: bool,
     },
     Contents {
         object: Uuid,
     },
-    Running {
-        object: Uuid,
-        item: Uuid,
-    },
+    Running,
     Metadata {
         item: Uuid,
         object: Uuid,
@@ -102,7 +98,6 @@ enum PendingKind {
     },
     PutObserve {
         object: Uuid,
-        operation: String,
     },
     Links {
         stage: links::Stage,
@@ -118,10 +113,6 @@ enum PendingKind {
     LibraryCopy {
         group: Uuid,
         index: usize,
-    },
-    TaskMutation {
-        object: Uuid,
-        item: Uuid,
     },
 }
 #[derive(Clone)]
@@ -512,13 +503,6 @@ pub(super) fn execute(app: &mut App, assistant: &mut Assistant, capture: &Captur
 pub(super) fn validate_receipt(app: &App, state: &State, capture: &Capture) -> bool {
     receipts::validate(app, state, capture)
 }
-pub(super) fn continuation(app: &App, request: Uuid) -> bool {
-    app.character_mcp
-        .as_ref()
-        .and_then(|a| a.inventory.pending.get(&request))
-        .is_none_or(|p| super::continuation_current(app, &p.capture))
-}
-
 fn commit_continuation<R>(app: &mut App, capture: &Capture, commit: impl FnOnce(&mut App) -> R) -> Result<R, &'static str> {
     if !super::continuation_current(app, capture) {
         return Err("stale_source_or_authority");

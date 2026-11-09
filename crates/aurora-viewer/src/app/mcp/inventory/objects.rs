@@ -629,10 +629,7 @@ pub(super) fn native_event(app: &mut App, event: &NetEvent) -> bool {
                 let p = Pending {
                     capture,
                     started: Instant::now(),
-                    kind: PendingKind::Running {
-                        object: *object_id,
-                        item: *item_id,
-                    },
+                    kind: PendingKind::Running,
                 };
                 let value = if valid && super::super::continuation_current(app, &p.capture) {
                     json!({"object_id":object_id.to_string(),"item_id":item_id.to_string(),"running":running,"mono":mono,"running_snapshot":token.to_string(),"expires_in_seconds":10,"server_observed":true})

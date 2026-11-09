@@ -277,6 +277,9 @@ fn read(path: &Path) -> Result<Vec<u8>, &'static str> {
     }
     let mut file = options.open(path).map_err(|_| "pose_file_unavailable")?;
     let opened = file.metadata().map_err(|_| "pose_file_unavailable")?;
+    if !opened.is_file() || opened.len() != before.len() {
+        return Err("pose_file_changed");
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;

@@ -175,7 +175,6 @@ pub(super) fn execute(app: &mut App, state: &mut State, c: &Capture) -> Result<V
                 c,
                 PendingKind::ContentSave {
                     item: id,
-                    asset: item.asset_id,
                     object: Uuid::nil(),
                     script: item.asset_type == 10,
                 },
@@ -308,6 +307,13 @@ fn read_result(
     let _ = request;
     out
 }
+fn save_reply_matches(item: Uuid, object: Uuid, script: bool, event: &NetEvent) -> bool {
+    match event {
+        NetEvent::InventoryContentSaved { item: saved, .. } => !script && object.is_nil() && *saved == item,
+        NetEvent::ScriptSaved { target, .. } => script && target.item == item && target.object == object,
+        _ => false,
+    }
+}
 pub(super) fn native_event(app: &mut App, event: &NetEvent) -> bool {
     let request = match event {
         NetEvent::ScriptLoaded { request, .. }
@@ -330,6 +336,13 @@ pub(super) fn native_event(app: &mut App, event: &NetEvent) -> bool {
         PendingKind::ContentRead { .. } | PendingKind::ContentSave { .. } | PendingKind::Metadata { .. }
     ) {
         return false;
+    }
+    if let PendingKind::ContentSave { item, object, script } = &pending.kind
+        && !save_reply_matches(*item, *object, *script, event)
+    {
+        // A matching request ID cannot confirm another target or save kind.
+        // Keep the original pending receipt for its actual response/timeout.
+        return true;
     }
     let source = super::super::source_current(app, &pending.capture);
     let result = match (event, &pending.kind) {
@@ -590,7 +603,6 @@ pub(super) fn task_execute(app: &mut App, state: &mut State, c: &Capture) -> Res
         c,
         PendingKind::ContentSave {
             item: s.item,
-            asset: s.asset,
             object: s.object,
             script: true,
         },
@@ -603,4 +615,37 @@ pub(super) fn status_gate(app: &App, original: &Capture) -> Result<(), &'static 
     let id = uuid(&original.arguments, "id")?;
     info(app, id, false)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod save_reply_tests {
+    use super::*;
+    #[test]
+    fn mcp_content_save_reply_requires_original_script_item_and_object() {
+        let item = Uuid::from_u128(101);
+        let object = Uuid::from_u128(102);
+        let reply = |item, object| NetEvent::ScriptSaved {
+            request: Uuid::from_u128(103),
+            target: ScriptTarget { item, object },
+            result: Err("synthetic save failure".into()),
+        };
+        assert!(save_reply_matches(item, object, true, &reply(item, object)));
+        assert!(!save_reply_matches(item, object, true, &reply(item, Uuid::nil())));
+        assert!(!save_reply_matches(item, object, true, &reply(Uuid::from_u128(104), object)));
+        assert!(!save_reply_matches(item, object, false, &reply(item, object)));
+        assert!(save_reply_matches(item, Uuid::nil(), true, &reply(item, Uuid::nil())));
+    }
+    #[test]
+    fn mcp_notecard_save_reply_cannot_complete_a_script_or_foreign_item_receipt() {
+        let item = Uuid::from_u128(201);
+        let reply = NetEvent::InventoryContentSaved {
+            request: Uuid::from_u128(202),
+            item,
+            result: Err("synthetic save failure".into()),
+        };
+        assert!(save_reply_matches(item, Uuid::nil(), false, &reply));
+        assert!(!save_reply_matches(item, Uuid::nil(), true, &reply));
+        assert!(!save_reply_matches(Uuid::from_u128(203), Uuid::nil(), false, &reply));
+        assert!(!save_reply_matches(item, Uuid::from_u128(204), false, &reply));
+    }
 }
