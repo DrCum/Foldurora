@@ -1,0 +1,100 @@
+name: Isolated Preferences reset checks
+on:
+  push:
+    branches: [checks/upstream-preferences-reset-confirm-20261109]
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+concurrency:
+  group: isolated-preferences-reset-checks
+  cancel-in-progress: true
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+  CARGO_BUILD_JOBS: '2'
+  SOURCE_SHA: 6560c020435b61d1b226a2372ef8a91b8580d1b3
+jobs:
+  preferences:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout pinned public port source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 6560c020435b61d1b226a2372ef8a91b8580d1b3
+          fetch-depth: 0
+          filter: blob:none
+      - name: Source and runner
+        run: |
+          mkdir -p .scratch/validation
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git rev-parse HEAD | tee .scratch/validation/source.txt
+          echo "$GITHUB_SHA" > .scratch/validation/workflow.txt
+          rustc --version | tee .scratch/validation/rust.txt
+          cargo --version | tee .scratch/validation/cargo.txt
+          df -h .
+          rustup component add rustfmt clippy
+      - name: Existing viewer system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev
+      - name: Restore compatible repository Linux CI cache
+        uses: ./.github/actions/rust-cache
+        with:
+          name: linux-tests
+      - name: Formatting
+        run: |
+          cargo fmt --all -- --check 2>&1 | tee .scratch/validation/fmt.log
+      - name: Viewer Clippy
+        run: |
+          cargo clippy --profile ci --workspace --all-targets --locked -- -D warnings -A dead-code 2>&1 | tee .scratch/validation/clippy.log
+      - name: Preferences regressions
+        run: |
+          cargo test --profile ci --workspace --locked ui::options:: -- --nocapture 2>&1 | tee .scratch/validation/options.log
+      - name: Shared theme guard
+        run: |
+          cargo test --profile ci --workspace --locked theme_guard -- --nocapture 2>&1 | tee .scratch/validation/theme.log
+      - name: Translation keys and variables
+        run: |
+          cargo test --profile ci --workspace --locked every_language_has_english_keys_and_variables -- --nocapture 2>&1 | tee .scratch/validation/translation-keys.log
+          cargo test --profile ci --workspace --locked every_bundled_message_formats_with_its_declared_variables -- --nocapture 2>&1 | tee .scratch/validation/translation-format.log
+      - name: Representative synthetic opaque CPU captures
+        env:
+          AURORA_CAPTURE: .scratch/validation/preferences-reset.png
+        run: |
+          cargo test --profile ci --workspace --locked preferences_reset_dialogs_keep_the_footer_and_actions_visible -- --nocapture 2>&1 | tee .scratch/validation/capture.log
+      - name: Verify all five reset regressions executed
+        run: |
+          python3 - <<'PYCODE'
+          import pathlib,re
+          log=pathlib.Path('.scratch/validation/options.log').read_text()
+          log=re.sub(r'\x1b\[[0-9;]*m','',log)
+          expected=[
+            'preferences_reset_footer_only_opens_the_requested_confirmation',
+            'preferences_reset_cancel_escape_outside_and_window_close_leave_settings_alone',
+            'preferences_reset_confirmation_keeps_the_requested_page_and_runs_once_with_undo',
+            'preferences_reset_modified_button_asks_before_changing_any_row',
+            'preferences_reset_dialogs_keep_the_footer_and_actions_visible',
+          ]
+          for name in expected:
+            assert '::'+name+' ... ok' in log,name
+          for name in ['page','all','modified']:
+            assert pathlib.Path('.scratch/validation/preferences-reset-'+name+'.png').stat().st_size>0
+          print('All five reset regressions and three CPU captures passed.')
+          PYCODE
+      - name: Verify source remained frozen
+        if: always()
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git diff --exit-code
+      - name: Upload raw scoped checks and captures
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: preferences-reset-6560c020435b
+          path: .scratch/validation/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
