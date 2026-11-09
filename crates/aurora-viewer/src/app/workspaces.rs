@@ -426,6 +426,7 @@ impl App {
         if !self.workspaces.ready() || !self.workspaces.advance() {
             return;
         }
+        self.workspace_images.cancel_picker();
         if !matches!(action.command, Command::DecideHuds(..)) {
             self.workspace_huds.retire();
         }
@@ -666,6 +667,28 @@ impl App {
                     last.background = None;
                 }
                 self.workspace_save_definitions(next);
+            }
+            Command::BackgroundImage(target) => self.workspace_picture_choose(target, window),
+            Command::BackgroundPicture(target, picture) => self.workspace_picture_write(target, picture, window),
+            Command::BackgroundMode(target, mode) => {
+                let paint = self
+                    .workspaces
+                    .background()
+                    .paint(target.as_ref().map(|t| &t.0), target.as_ref().map(|t| t.1));
+                if let Some(mut picture) = paint.picture().cloned() {
+                    picture.mode = mode;
+                    self.workspace_picture_write(target, picture, window);
+                }
+            }
+            Command::BackgroundBrightness(target, brightness) => {
+                let paint = self
+                    .workspaces
+                    .background()
+                    .paint(target.as_ref().map(|t| &t.0), target.as_ref().map(|t| t.1));
+                if let Some(mut picture) = paint.picture().cloned() {
+                    picture.brightness = brightness;
+                    self.workspace_picture_write(target, picture, window);
+                }
             }
             Command::CaptureCamera(capture) => {
                 if self.workspaces.preview.is_some() {
@@ -966,7 +989,7 @@ impl App {
         }
     }
 
-    fn workspace_save_definitions(&mut self, next: Catalogue) {
+    pub(super) fn workspace_save_definitions(&mut self, next: Catalogue) {
         self.workspace_save_with_active(next, self.workspaces.active);
     }
     fn workspace_save_with_active(&mut self, mut next: Catalogue, active: Option<Uuid>) {

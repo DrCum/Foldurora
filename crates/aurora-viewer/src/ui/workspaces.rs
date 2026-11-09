@@ -1,7 +1,7 @@
 //! Native named geometry manager. Drawing never mutates the catalogue or World.
 use crate::theme::Palette;
 use crate::workspace::controller::{Action, Command, Controller, Status, Ticket};
-use crate::workspace::model::{Arrangement, Background, Startup};
+use crate::workspace::model::{Arrangement, ImageMode, Startup};
 use uuid::Uuid;
 pub(crate) const WINDOW: &str = "named_workspaces";
 pub(crate) struct WorkspaceUi {
@@ -17,6 +17,7 @@ pub(crate) struct WorkspaceUi {
     background_edit: Option<[u8; 4]>,
     display_topology: Option<Arrangement>,
     background_target: usize,
+    image_brightness: Option<u8>,
 }
 impl Default for WorkspaceUi {
     fn default() -> Self {
@@ -33,6 +34,7 @@ impl Default for WorkspaceUi {
             background_edit: None,
             display_topology: None,
             background_target: 0,
+            image_brightness: None,
         }
     }
 }
@@ -42,6 +44,7 @@ impl WorkspaceUi {
             self.display_topology = current.cloned();
             self.background_target = 0;
             self.background_edit = None;
+            self.image_brightness = None;
         }
     }
     fn selection_changed(&mut self) {
@@ -121,6 +124,7 @@ impl WorkspaceUi {
                         Status::InventoryWindowUnavailable => tr!("workspaces-additional-unavailable"),
                         Status::CameraUnavailable => tr!("workspaces-camera-unavailable"),
                         Status::HudUnavailable => tr!("workspaces-huds-unavailable"),
+                        Status::PictureUnavailable => tr!("workspaces-picture-unavailable"),
                     };
                     ui.label(status);
                     if let Some(r) = c.preview.as_ref().map(|p| p.candidate).or(c.active).and_then(|id| c.record(id)) {
@@ -228,6 +232,10 @@ impl WorkspaceUi {
                         ui.add_enabled_ui(enabled && c.preview.is_none(), |ui| {
                             let background = c.background();
                             let old_target = self.background_target;
+                            let spanning = background.paint(None, None).spanning();
+                            if spanning && self.background_target > 0 {
+                                self.background_target = 0;
+                            }
                             let label = |index| {
                                 if index == 0 {
                                     tr!("workspaces-background-common").to_owned()
@@ -241,15 +249,18 @@ impl WorkspaceUi {
                                     ui.selectable_value(&mut self.background_target, 0, label(0));
                                     if let Some(a) = &self.display_topology {
                                         for index in 1..=a.len() {
-                                            ui.selectable_value(&mut self.background_target, index, label(index));
+                                            ui.add_enabled_ui(!spanning, |ui| {
+                                                ui.selectable_value(&mut self.background_target, index, label(index));
+                                            });
                                         }
                                     }
                                 });
                             if old_target != self.background_target {
                                 self.background_edit = None;
+                                self.image_brightness = None;
                             }
-                            if let Background::Displays { rules, .. } = &background
-                                && Some(rules.arrangement()) != self.display_topology.as_ref()
+                            if let Some(arrangement) = background.arrangement()
+                                && Some(arrangement) != self.display_topology.as_ref()
                             {
                                 ui.label(tr!("workspaces-background-display-fallback"));
                             }
@@ -288,6 +299,61 @@ impl WorkspaceUi {
                                             self.background_edit = None;
                                         }
                                     });
+                                    let target = self
+                                        .display_topology
+                                        .clone()
+                                        .filter(|_| self.background_target > 0)
+                                        .map(|a| (a, self.background_target - 1));
+                                    if ui.button(tr!("workspaces-picture-choose")).clicked() {
+                                        command = Some(Command::BackgroundImage(target.clone()));
+                                        self.image_brightness = None;
+                                    }
+                                    ui.label(tr!("workspaces-picture-rights"));
+                                    let paint = background.paint(target.as_ref().map(|t| &t.0), target.as_ref().map(|t| t.1));
+                                    if let Some(picture) = paint.picture() {
+                                        let name = |mode| match mode {
+                                            ImageMode::Fill => tr!("workspaces-picture-fill"),
+                                            ImageMode::Fit => tr!("workspaces-picture-fit"),
+                                            ImageMode::Stretch => tr!("workspaces-picture-stretch"),
+                                            ImageMode::Center => tr!("workspaces-picture-center"),
+                                            ImageMode::Tile => tr!("workspaces-picture-tile"),
+                                            ImageMode::Span => tr!("workspaces-picture-span"),
+                                        };
+                                        let mut mode = picture.mode;
+                                        egui::ComboBox::from_id_salt("workspace_image_placement")
+                                            .selected_text(name(mode))
+                                            .show_ui(ui, |ui| {
+                                                for m in [
+                                                    ImageMode::Fill,
+                                                    ImageMode::Fit,
+                                                    ImageMode::Stretch,
+                                                    ImageMode::Center,
+                                                    ImageMode::Tile,
+                                                    ImageMode::Span,
+                                                ] {
+                                                    if m != ImageMode::Span || target.is_none() {
+                                                        ui.selectable_value(&mut mode, m, name(m));
+                                                    }
+                                                }
+                                            });
+                                        if mode != picture.mode {
+                                            command = Some(Command::BackgroundMode(target.clone(), mode));
+                                        }
+                                        let percent = self
+                                            .image_brightness
+                                            .get_or_insert(((u16::from(picture.brightness) * 100 + 127) / 255) as u8);
+                                        ui.add(
+                                            egui::Slider::new(percent, 0..=100)
+                                                .text(tr!("workspaces-picture-brightness"))
+                                                .suffix("%"),
+                                        );
+                                        if ui.button(tr!("workspaces-picture-apply-brightness")).clicked() {
+                                            command = Some(Command::BackgroundBrightness(
+                                                target,
+                                                ((u16::from(*percent) * 255 + 50) / 100) as u8,
+                                            ));
+                                        }
+                                    }
                                 },
                             );
                         });
@@ -1003,5 +1069,22 @@ mod tests {
         assert!(st.background_edit.is_none());
         st.background_displays(None);
         assert!(st.display_topology.is_none());
+    }
+    #[test]
+    fn native_workspace_image_chooser_emits_captured_display_target_without_mutating_private_background() {
+        let (c, mut st) = fixture();
+        let a = Arrangement::from_physical(&[[0, 0, 100, 100], [100, 0, 200, 100]]).unwrap();
+        st.background_displays(Some(&a));
+        st.background_target = 2;
+        let original = c.catalogue.as_ref().unwrap().encode().unwrap();
+        let mut frames = Frames::new();
+        let action = click(&mut frames, &mut st, &c, aurora_i18n::tr!("workspaces-picture-choose")).unwrap();
+        assert!(matches!(action.command,Command::BackgroundImage(Some((ref topology,1))) if topology==&a));
+        assert!(c.accepts(&action.ticket));
+        assert_eq!(c.catalogue.as_ref().unwrap().encode().unwrap(), original);
+        let mut changed = c;
+        changed.bind(None);
+        assert!(!changed.accepts(&action.ticket));
+        assert!(draw(&mut frames, &mut st, &changed, vec![]).1.is_none());
     }
 }

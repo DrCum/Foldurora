@@ -1,5 +1,5 @@
 use super::{
-    model::{Arrangement, Background, Catalogue, HudRef, InventoryWindow, Layout, Startup},
+    model::{Arrangement, Background, Catalogue, HudRef, ImageMode, InventoryWindow, Layout, Picture, Startup},
     store::Lane,
 };
 use uuid::Uuid;
@@ -39,6 +39,10 @@ pub(crate) enum Command {
     CaptureBackground(bool),
     BackgroundCommon(Option<[u8; 3]>),
     BackgroundDisplay(Arrangement, usize, Option<[u8; 3]>),
+    BackgroundImage(Option<(Arrangement, usize)>),
+    BackgroundPicture(Option<(Arrangement, usize)>, Picture),
+    BackgroundMode(Option<(Arrangement, usize)>, ImageMode),
+    BackgroundBrightness(Option<(Arrangement, usize)>, u8),
     CaptureHuds(bool),
     CaptureAdditionalInventory(bool),
     SelectHud(HudRef, bool),
@@ -66,6 +70,7 @@ pub(crate) enum Status {
     InventoryWindowUnavailable,
     CameraUnavailable,
     HudUnavailable,
+    PictureUnavailable,
 }
 pub(crate) struct Preview {
     pub baseline: Layout,

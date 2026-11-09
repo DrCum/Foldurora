@@ -3,6 +3,7 @@ use uuid::Uuid;
 
 mod background;
 pub(crate) use background::{Arrangement, Background, MAX_DISPLAYS};
+pub(crate) use background::{ImageMode, Picture, TextureRef};
 mod camera;
 pub(crate) use camera::CameraContext;
 mod inventory_window;

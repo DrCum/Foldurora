@@ -148,6 +148,7 @@ mod viewer_stats;
 mod viewfinder;
 mod wearable_editor;
 mod workspace_displays;
+mod workspace_images;
 mod workspace_inventory;
 mod workspaces;
 mod world_click_demo;
@@ -658,6 +659,7 @@ pub struct App {
     workspaces: crate::workspace::controller::Controller,
     workspace_ui: ui::workspaces::WorkspaceUi,
     workspace_displays: workspace_displays::Displays,
+    workspace_images: workspace_images::Images,
     workspace_huds: crate::workspace::huds::Runtime,
     loading_stage: String,
     move_complete_at: Option<Instant>,
@@ -1647,6 +1649,7 @@ impl App {
             workspaces: Default::default(),
             workspace_ui: Default::default(),
             workspace_displays: Default::default(),
+            workspace_images: Default::default(),
             workspace_huds: Default::default(),
             loading_stage: String::new(),
             move_complete_at: None,
@@ -3137,6 +3140,7 @@ impl App {
         self.blender_live.stop();
         self.clear_blender_preview();
         self.blender_live = Default::default();
+        self.workspace_images.clear(&mut self.scene);
         if let Some(g) = &mut self.gfx {
             self.scene.clear(&mut g.renderer);
         }
@@ -10998,10 +11002,47 @@ impl App {
             && matches!(self.screen, Screen::World)
             && (self.workspace_ui.open
                 || (self.effective_viewport_settings().enabled
-                    && matches!(self.workspace_background(), crate::workspace::model::Background::Displays { .. })));
+                    && matches!(
+                        self.workspace_background(),
+                        crate::workspace::model::Background::Displays { .. } | crate::workspace::model::Background::Images { .. }
+                    )));
         self.workspace_displays
             .prepare(&gfx.window, Instant::now(), ctx.pixels_per_point(), need_workspace_displays);
         self.workspace_ui.background_displays(self.workspace_displays.arrangement());
+        let picture_source = self.workspace_source();
+        let picture_enabled = !gfx.renderer.vr_engaged()
+            && !gfx.renderer.failed()
+            && !gfx.renderer.device_lost()
+            && gfx.renderer.stalled_for().is_none()
+            && gfx.window.is_visible() == Some(true)
+            && gfx.window.is_minimized() == Some(false);
+        let picture_canvas = ctx.viewport_rect();
+        let picture_world = crate::world_viewport::PhotoScene::new((w, h), viewport).logical_rect(picture_canvas);
+        let picture_regions = ui::workspace_background::pictures::regions(
+            picture_canvas,
+            picture_world,
+            &self.workspace_background(),
+            self.workspace_displays.arrangement(),
+            self.workspace_displays.rectangles(),
+        );
+        if self
+            .workspace_images
+            .choice
+            .as_ref()
+            .is_some_and(|c| !self.workspaces.accepts(&c.ticket))
+        {
+            self.workspace_images.cancel_picker();
+        }
+        let need_pictures = picture_enabled && (!picture_regions.is_empty() || self.workspace_images.choice.is_some());
+        self.workspace_images.prepare(
+            &ctx,
+            &mut self.scene,
+            &mut gfx.renderer,
+            &self.world,
+            picture_source.as_ref().filter(|_| need_pictures),
+            self.workspaces.binding,
+            ui::workspace_background::pictures::references(&picture_regions),
+        );
         self.workspace_huds_prepare(&gfx.renderer, &gfx.window);
         self.inventory_ui.archive_input(self.inventory_archive_ui.input());
         let mut full = ctx.run_ui(raw, |ui| {
@@ -11025,6 +11066,12 @@ impl App {
             if !gfx.renderer.vr_engaged() {
                 let canvas = ui.ctx().viewport_rect();
                 let rendered = crate::world_viewport::PhotoScene::new((w, h), viewport).logical_rect(canvas);
+                let picture_source = self.workspace_source();
+                let current_images = !self.workspace_images.view.is_empty()
+                    && self
+                        .workspace_images
+                        .policy
+                        .current(&self.world, picture_source.as_ref(), self.workspaces.binding);
                 ui::workspace_background::paint(
                     ui.ctx(),
                     canvas,
@@ -11032,6 +11079,7 @@ impl App {
                     &self.workspace_background(),
                     self.workspace_displays.arrangement(),
                     self.workspace_displays.rectangles(),
+                    current_images.then_some(&self.workspace_images.view),
                 );
             }
             let bounds = self.effective_viewport_settings().toolbar_rect((w, h), ui.ctx().viewport_rect());
@@ -17871,6 +17919,10 @@ impl App {
         let favorite = self.workspace_ui.favorites(&ctx, &self.workspaces);
         if a.workspace.is_none() {
             a.workspace = favorite;
+        }
+        let picture = self.workspace_picture_picker(&ctx, &p, renderer, board_window);
+        if a.workspace.is_none() {
+            a.workspace = picture;
         }
         a.exit = self.exit_prompt.show(&ctx, &p, self.in_world());
         self.ui_parts.lap(Part::UiRest, t);

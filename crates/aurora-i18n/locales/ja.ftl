@@ -13623,3 +13623,15 @@ workspaces-background-common = 共通の色
 workspaces-background-display = ディスプレイ { $number }
 workspaces-background-display-fallback = ディスプレイの配置が変わったため、共通の色を使用します。
 workspaces-background-inherit = 共通の色を使用
+
+workspaces-picture-choose = インベントリの画像を選択…
+workspaces-picture-unavailable = 画像を使用できません。インベントリから、読み込み済みで全権限のあるテクスチャを選択してください。
+workspaces-picture-rights = インベントリ内の全権限のあるテクスチャを使用します。
+workspaces-picture-fill = 画面を埋める
+workspaces-picture-fit = 全体を表示
+workspaces-picture-stretch = 引き伸ばす
+workspaces-picture-center = 中央
+workspaces-picture-tile = タイル
+workspaces-picture-span = すべてのディスプレイにまたがる
+workspaces-picture-brightness = 明るさ
+workspaces-picture-apply-brightness = 明るさを適用
