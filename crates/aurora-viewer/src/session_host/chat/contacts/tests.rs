@@ -167,7 +167,7 @@ fn receipt(packets: &[ChatPacket]) -> &OpenDirectReply {
         .iter()
         .find_map(|packet| {
             if let ChatMessage::Event(ChatEvent::OpenDirect(reply)) = &packet.message {
-                Some(reply)
+                Some(reply.as_ref())
             } else {
                 None
             }

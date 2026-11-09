@@ -397,7 +397,7 @@ fn contacts_wire_rejects_cross_source_rows_and_unbound_or_forged_open_presentati
     for message in [
         ChatMessage::Command(ChatCommand::OpenDirect(request)),
         ChatMessage::Command(ChatCommand::QueryOpenDirect(request)),
-        ChatMessage::Event(ChatEvent::OpenDirect(OpenDirectReply { receipt, view: None })),
+        ChatMessage::Event(ChatEvent::OpenDirect(Box::new(OpenDirectReply { receipt, view: None }))),
     ] {
         let packet = ChatPacket {
             version: VERSION,

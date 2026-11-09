@@ -562,7 +562,7 @@ pub enum ChatEvent {
     ContactsPolicy(ContactsPolicy),
     ContactPage(ContactPage),
     ContactPageFailed(ContactKey),
-    OpenDirect(OpenDirectReply),
+    OpenDirect(Box<OpenDirectReply>),
     Line(ChatLine),
     Receipt(SendReceipt),
     ReadBatch(Vec<ReadStateRow>),

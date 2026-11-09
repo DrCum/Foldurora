@@ -332,7 +332,7 @@ impl WorkerChat {
         let policy = self.contacts.policy.ok_or(ChatError::Unavailable)?;
         let replies = vec![
             self.packet(packet.sequence, ChatEvent::ContactsPolicy(policy))?,
-            self.packet(packet.sequence, ChatEvent::OpenDirect(OpenDirectReply { receipt, view }))?,
+            self.packet(packet.sequence, ChatEvent::OpenDirect(Box::new(OpenDirectReply { receipt, view })))?,
         ];
         self.received = packet.sequence;
         Ok(replies)

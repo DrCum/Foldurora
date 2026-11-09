@@ -9,8 +9,8 @@
   focused cases pass. Its explicit CPU capture failed on texture acknowledgment;
   the applied-texture fix passes at5ce with two inspected CPU images, alongside7
   affected UI cases including simultaneous Search/Send suppression. Negative
-  sources/logs/ELFs are preserved. A stronger actual HTTP test now proves Busy
-  after original Session disposal. Final combined lint/full checkpoint and
+  sources/logs/ELFs are preserved. The added HTTP regression for Busy after
+  original Session disposal awaits execution. Final combined lint/full checkpoint and
   Windows/native/human acceptance remain pending. Newer source is unpublished;
   exact BC20 approval does not cover this group. The17 deferred Linux Profile
   Copy failures and separate terrain failure remain failed, never waived.

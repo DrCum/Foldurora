@@ -114,7 +114,7 @@ fn contacts_host_receipt_alone_cannot_publish_title_and_recovery_never_resends_o
     let sequence = peer.sent;
     peer.poll_open_direct(now + Duration::from_secs(2));
     assert_eq!(peer.sent, sequence + 1);
-    peer.observe(&event(&peer, 3, ChatEvent::OpenDirect(opened(request, false))))
+    peer.observe(&event(&peer, 3, ChatEvent::OpenDirect(Box::new(opened(request, false)))))
         .unwrap();
     assert!(!peer.conversations.contains_key(&Conversation::Direct(resident())));
     assert!(peer.contacts.pending.is_some(), "missing view retains bounded query recovery");
@@ -125,7 +125,7 @@ fn contacts_host_receipt_alone_cannot_publish_title_and_recovery_never_resends_o
     let before = peer.sent;
     peer.poll_open_direct(now + Duration::from_secs(9));
     assert_eq!(peer.sent, before + 1, "recovery queries the receipt without repeating native Open");
-    peer.observe(&event(&peer, 4, ChatEvent::OpenDirect(opened(request, true))))
+    peer.observe(&event(&peer, 4, ChatEvent::OpenDirect(Box::new(opened(request, true)))))
         .unwrap();
     assert_eq!(
         peer.conversations[&Conversation::Direct(resident())].title.as_str(),
