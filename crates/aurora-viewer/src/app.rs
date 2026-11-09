@@ -3896,6 +3896,12 @@ impl App {
                 // the simulator we land in plays none of our animations yet
                 self.static_eyes.on_arrival();
                 self.tp_checks = vec![10.0, 3.0];
+                // New region must learn walk/run again (LLAgent::sendWalkRun
+                // after RegionHandshake, llviewermessage.cpp). Without this
+                // Always run stays lit in Controls while the sim walks (#3041).
+                self.send(NetCommand::SetAlwaysRun(
+                    self.always_run || self.temp_run.is_some() || self.joystick.running,
+                ));
                 // (a border crossing leaves the camera where it is)
                 if !self.world.arrived_by_crossing {
                     self.camera.on_teleport_arrival(&self.settings.camera);
@@ -14759,6 +14765,7 @@ impl App {
             second_life,
         });
         self.options_ui.login_favorites = self.login_favorites.key().map(|key| self.login_form.favorites.shown(key));
+        self.options_ui.friends_only = (!self.world.agent_id.is_nil()).then_some(self.world.friends_only());
         self.options_ui.friends_only_keep = (!self.world.agent_id.is_nil()).then_some(self.world.friends_only.keep_after_teleport);
         let time_of_day = self.settings.time_of_day;
         if self.options_ui.anti_spam_version != self.world.anti_spam.version {
@@ -14855,6 +14862,10 @@ impl App {
             if shown {
                 self.keep_login_favorites(true);
             }
+        }
+        // the same switch as BarAction::ToggleFriendsOnly
+        if let Some(on) = res.friends_only {
+            self.world.set_friends_only(on);
         }
         if let Some(keep) = res.friends_only_keep {
             self.world.friends_only.keep_after_teleport = keep;
