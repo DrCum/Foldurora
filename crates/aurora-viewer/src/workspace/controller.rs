@@ -34,6 +34,7 @@ pub(crate) enum Command {
     ShowFavorites(bool),
     RememberFolders(bool),
     CaptureGraphics(bool),
+    CaptureCamera(bool),
 }
 #[derive(Clone, Debug)]
 pub(crate) struct Action {
@@ -51,6 +52,7 @@ pub(crate) enum Status {
     Invalid,
     Previewing,
     FolderUnavailable,
+    CameraUnavailable,
 }
 pub(crate) struct Preview {
     pub baseline: Layout,
@@ -158,6 +160,9 @@ impl Controller {
             .map_or_else(|| current.baseline_for(&layout), |p| p.baseline.clone());
         if baseline.inventory_folder.is_none() && layout.inventory_folder.is_some() {
             baseline.inventory_folder = current.inventory_folder;
+        }
+        if baseline.camera.is_none() && layout.camera.is_some() {
+            baseline.camera = current.camera;
         }
         if baseline.graphics.is_none() && layout.graphics.is_some() {
             baseline.graphics = current.graphics;
@@ -480,6 +485,7 @@ mod tests {
         Layout {
             inventory_folder: None,
             graphics: None,
+            camera: None,
             geometry: [Some(super::super::model::Geometry {
                 point: 0,
                 offset: [left, 0.0],
@@ -620,5 +626,22 @@ mod tests {
         let p = c.placement.take().unwrap();
         c.finish_placement(p);
         assert!(c.previous.as_ref().unwrap().0.graphics.is_none());
+    }
+    #[test]
+    fn workspace_camera_preview_union_rolls_back_and_previous_tracks_only_final_target() {
+        let mut c = Controller::default();
+        let mut live = layout(0.0);
+        live.camera = Some(super::super::model::CameraContext::capture(
+            &crate::camera::CameraSettings::default(),
+            0.4,
+        ));
+        let mut target = layout(10.0);
+        target.camera = live.camera.clone();
+        c.begin_preview(target, Uuid::new_v4(), live.clone(), false);
+        c.begin_preview(layout(20.0), Uuid::new_v4(), live.clone(), true);
+        assert_eq!(c.preview.as_ref().unwrap().baseline.camera, live.camera);
+        let placement = c.placement.take().unwrap();
+        c.finish_placement(placement);
+        assert!(c.previous.as_ref().unwrap().0.camera.is_none());
     }
 }

@@ -97,6 +97,7 @@ impl WorkspaceUi {
                         Status::Previewing => tr!("workspaces-previewing"),
                         Status::Ready => tr!("workspaces-ready"),
                         Status::FolderUnavailable => tr!("workspaces-folder-unavailable"),
+                        Status::CameraUnavailable => tr!("workspaces-camera-unavailable"),
                     };
                     ui.label(status);
                     if let Some(r) = c.preview.as_ref().map(|p| p.candidate).or(c.active).and_then(|id| c.record(id)) {
@@ -110,6 +111,16 @@ impl WorkspaceUi {
                         let mut show = cat.show_favorites;
                         let mut folders = cat.remember_folders;
                         let mut graphics = cat.capture_graphics;
+                        let mut camera = cat.capture_camera;
+                        if ui
+                            .add_enabled(
+                                enabled && c.preview.is_none(),
+                                egui::Checkbox::new(&mut camera, tr!("workspaces-capture-camera")),
+                            )
+                            .changed()
+                        {
+                            command = Some(Command::CaptureCamera(camera));
+                        }
                         if ui
                             .add_enabled(
                                 enabled && c.preview.is_none(),
@@ -388,6 +399,7 @@ mod tests {
         let layout = Layout {
             inventory_folder: None,
             graphics: None,
+            camera: None,
             geometry: [None; 4],
             viewport: (&s.world_viewport).into(),
             bars: Bars {

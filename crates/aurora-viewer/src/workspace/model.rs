@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+mod camera;
+pub(crate) use camera::CameraContext;
 mod graphics;
 pub(crate) use graphics::Graphics;
 
@@ -8,6 +10,7 @@ pub(crate) use graphics::Graphics;
 pub(crate) struct CaptureGroups {
     pub inventory: bool,
     pub graphics: bool,
+    pub camera: bool,
 }
 
 pub(crate) const LIMIT: usize = 32;
@@ -93,9 +96,14 @@ pub(crate) struct Layout {
     pub inventory_folder: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub graphics: Option<Graphics>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub camera: Option<CameraContext>,
 }
 impl Layout {
     pub(crate) fn validate(&self) -> Result<(), &'static str> {
+        if let Some(camera) = &self.camera {
+            camera.validate()?;
+        }
         if let Some(graphics) = &self.graphics {
             graphics.validate()?;
         }
@@ -131,11 +139,17 @@ impl Layout {
         if let Some(graphics) = &self.graphics {
             graphics.apply(settings);
         }
+        if let Some(camera) = &self.camera {
+            camera.preferences(&mut settings.camera);
+        }
     }
     pub(crate) fn baseline_for(&self, target: &Self) -> Self {
         let mut baseline = self.clone();
         if target.inventory_folder.is_none() {
             baseline.inventory_folder = None;
+        }
+        if target.camera.is_none() {
+            baseline.camera = None;
         }
         if target.graphics.is_none() {
             baseline.graphics = None;
@@ -151,11 +165,16 @@ impl Layout {
                 .zip(current.inventory_folder)
                 .is_none_or(|(saved, live)| saved == live)
             && self.graphics.as_ref().is_none_or(|saved| current.graphics.as_ref() == Some(saved))
+            && self
+                .camera
+                .as_ref()
+                .is_none_or(|saved| current.camera.as_ref().is_some_and(|live| saved.matches(live)))
     }
     pub(crate) fn groups(&self) -> CaptureGroups {
         CaptureGroups {
             inventory: self.inventory_folder.is_some(),
             graphics: self.graphics.is_some(),
+            camera: self.camera.is_some(),
         }
     }
 }
@@ -188,6 +207,8 @@ pub(crate) struct Catalogue {
     pub remember_folders: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub capture_graphics: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub capture_camera: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -229,6 +250,7 @@ impl Catalogue {
             show_favorites: false,
             remember_folders: false,
             capture_graphics: false,
+            capture_camera: false,
         }
     }
     pub(crate) fn validate(&self) -> Result<(), &'static str> {
@@ -305,6 +327,7 @@ mod tests {
         Layout {
             inventory_folder: None,
             graphics: None,
+            camera: None,
             geometry: [Some(Geometry {
                 point: 7,
                 offset: [-32768.0, 32768.0],
@@ -541,5 +564,27 @@ mod tests {
         baseline.settings(&mut settings, false);
         assert_eq!(crate::graphics_presets::saved::Saved::capture(&settings), quality);
         assert_eq!(settings.fps_limit, 73);
+    }
+    #[test]
+    fn workspace_camera_preview_save_projection_does_not_persist_candidate_or_unrelated_preferences() {
+        let mut settings = crate::settings::Settings::default();
+        let mut baseline = layout();
+        baseline.camera = Some(CameraContext::capture(&settings.camera, 0.3));
+        let original = settings.camera.clone();
+        let mut changed = settings.camera.clone();
+        changed.apply_preset(crate::camera::CameraPreset::Front);
+        let mut target = baseline.clone();
+        target.camera = Some(CameraContext::capture(&changed, 0.8));
+        settings.workspace_held = Some(baseline.clone());
+        target.settings(&mut settings, false);
+        settings.camera.enable_mouselook = false;
+        settings.fps_limit = 73;
+        let saved = settings.to_saved();
+        assert_eq!(saved.camera.camera_offset, original.camera_offset);
+        assert!(!saved.camera.enable_mouselook);
+        assert_eq!(saved.fps_limit, 73);
+        assert_eq!(settings.camera.preset, crate::camera::CameraPreset::Front);
+        baseline.settings(&mut settings, false);
+        assert_eq!(settings.camera.camera_offset, original.camera_offset);
     }
 }
