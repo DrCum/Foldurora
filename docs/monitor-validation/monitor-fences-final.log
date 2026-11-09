@@ -1,0 +1,11 @@
+    Finished `ci` profile [unoptimized] target(s) in 0.16s
+     Running unittests src/lib.rs (/workspace/Foldurora/target/ci/deps/aurora_render-2d44ace34a6b6e66)
+
+running 4 tests
+test session_fence::tests::cancelled_owner_and_gpu_requests_cannot_relabel_the_next_request ... ok
+test session_fence::tests::a_gpu_callback_proves_only_its_frozen_frame_and_surface ... ok
+test session_fence::tests::no_surface_presentation_is_not_a_prepared_frame ... ok
+test session_fence::tests::owner_keeps_one_ordered_request_and_consumes_its_answer_once ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 471 filtered out; finished in 0.00s
+

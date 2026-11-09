@@ -1,0 +1,106 @@
+[
+  {
+    "name": "monitor-format-final",
+    "command": [
+      "cargo",
+      "fmt",
+      "--all",
+      "--check"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "monitor-clippy-default-final",
+    "command": [
+      "cargo",
+      "clippy",
+      "--profile",
+      "ci",
+      "--locked",
+      "-p",
+      "aurora-render",
+      "--all-targets",
+      "--",
+      "-D",
+      "warnings",
+      "-A",
+      "dead-code"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "monitor-clippy-feature-final",
+    "command": [
+      "cargo",
+      "clippy",
+      "--profile",
+      "ci",
+      "--locked",
+      "-p",
+      "aurora-render",
+      "--features",
+      "monitor-prototype",
+      "--all-targets",
+      "--",
+      "-D",
+      "warnings",
+      "-A",
+      "dead-code"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "monitor-rendezvous-final",
+    "command": [
+      "cargo",
+      "test",
+      "--profile",
+      "ci",
+      "--locked",
+      "-p",
+      "aurora-render",
+      "--features",
+      "monitor-prototype",
+      "--lib",
+      "render_thread::tests",
+      "--",
+      "--nocapture"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "monitor-fences-final",
+    "command": [
+      "cargo",
+      "test",
+      "--profile",
+      "ci",
+      "--locked",
+      "-p",
+      "aurora-render",
+      "--features",
+      "monitor-prototype",
+      "--lib",
+      "session_fence::tests",
+      "--",
+      "--nocapture"
+    ],
+    "exit": 0
+  },
+  {
+    "name": "monitor-session-final",
+    "command": [
+      "cargo",
+      "test",
+      "--profile",
+      "ci",
+      "--locked",
+      "-p",
+      "aurora-session",
+      "preview_",
+      "--",
+      "--nocapture"
+    ],
+    "exit": 0
+  }
+]

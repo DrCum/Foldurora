@@ -1,0 +1,63 @@
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling serde_core v1.0.229
+   Compiling serde v1.0.229
+   Compiling syn v3.0.6
+   Compiling serde_json v1.0.154
+   Compiling serde_derive v1.0.229
+   Compiling aurora-session v0.1.0 (/workspace/work/monitor-foundation/crates/aurora-session)
+    Finished `ci` profile [unoptimized] target(s) in 8.24s
+     Running unittests src/lib.rs (/workspace/Foldurora/target/ci/deps/aurora_session-29574aa21a7d187e)
+
+running 29 tests
+test preview_image::cancel_tests::preview_cancel_already_admitted_claim_or_no_pending_request_never_changes_history ... ok
+test preview_image::cancel_tests::preview_cancel_exact_pending_keeps_history_credit_and_all_request_high_water_marks ... ok
+test preview_image::cancel_tests::preview_cancel_old_owner_request_one_cannot_cancel_recreated_owner_request_one ... ok
+test preview_image::cancel_tests::preview_cancel_each_mismatched_claim_scope_preserves_real_pending_and_retained_history ... ok
+test preview_image::prerequisite_tests::preview_actual_surface_epoch_resets_only_under_advanced_render_and_never_revives_old_claims_or_history ... ok
+test preview_image::prerequisite_tests::preview_claim_accessors_and_layout_check_exact_policy_without_creating_authority ... ok
+test preview_image::prerequisite_tests::preview_observed_cached_policy_cannot_rejuvenate_original_authenticated_expiry ... ok
+test preview_image::prerequisite_tests::preview_observed_future_and_overflowing_receipts_retire_current_history ... ok
+test preview_image::tests::preview_image_memory_credit_stays_charged_after_model_or_cache_is_removed ... ok
+test preview_image::tests::preview_image_expiry_future_clock_replay_and_exhaustion_fail_closed ... ok
+test preview_image::prerequisite_tests::preview_layout_rejects_unknown_fields_zero_epochs_and_overflowing_crop ... ok
+test preview_image::tests::preview_image_parking_keeps_only_already_admitted_history_and_rejects_late_frames ... ok
+test preview_image::tests::preview_image_recreated_model_never_reuses_request_and_activation_rollback_is_rejected ... ok
+test preview_image::tests::preview_image_source_privacy_view_and_device_revocations_invalidate_held_snapshots ... ok
+test preview_image::tests::preview_image_unique_visible_sources_use_defaults_and_five_inactive_budget ... ok
+test preview_image::tests::preview_policy_successor_allows_normal_park_and_render_scoped_surface_replacement_without_refreshing_old_floor ... ok
+test preview_image::tests::preview_policy_successor_matches_real_model_source_epoch_activation_and_equal_epoch_flag_rejections ... ok
+test preview_image::tests::preview_image_metadata_rejects_unknown_fields_bad_sources_flags_and_geometry ... ok
+test preview_wire::tests::preview_wire_hello_is_fixed_untrusted_worker_only_and_rejects_every_partial_shape ... ok
+test preview_image::tests::preview_image_stamp_has_one_exact_format_kind_request_and_geometry ... ok
+test preview_wire::tests::preview_wire_maximally_escaped_bounded_metadata_decodes_and_overflow_rejects_before_serde ... ok
+test preview_wire::tests::preview_wire_rejects_oversized_versions_reserved_roles_directions_and_noncanonical_lengths ... ok
+test preview_wire::tests::preview_wire_metadata_rejects_unknown_generic_payloads_binding_directions_and_zero_ids ... ok
+test preview_wire::tests::preview_wire_v3_unavailable_retains_full_claim_and_rejects_old_request_only_shape ... ok
+test preview_wire::tests::preview_wire_maximal_closed_metadata_and_full_stamp_fit_fixed_storage_without_pixels_serde ... ok
+test preview_wire::tests::preview_wire_v3_role_epoch_layout_and_capture_stop_are_closed_and_direction_bound ... ok
+test preview_wire::tests::preview_wire_v4_native_demand_receipt_exact_accepted_and_all_bounded_rejections_roundtrip ... ok
+test preview_wire::tests::preview_wire_v4_native_demand_receipt_rejects_zero_identity_silent_config_change_and_unknown_shape ... ok
+test preview_wire::tests::preview_wire_all_fit_caps_check_layout_exact_payload_and_forbidden_stamp_fields ... ok
+
+test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 26 filtered out; finished in 0.00s
+
+     Running tests/chat.rs (/workspace/Foldurora/target/ci/deps/chat-f788a24e8da60bba)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 0.00s
+
+     Running tests/core.rs (/workspace/Foldurora/target/ci/deps/core-b692a586f0cec4ff)
+
+running 1 test
+test preview_admission_reserves_pending_rates_and_never_renders_a_promoted_or_stale_source ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 25 filtered out; finished in 0.00s
+
+     Running tests/review.rs (/workspace/Foldurora/target/ci/deps/review-925632cec3523382)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 0.00s
+
