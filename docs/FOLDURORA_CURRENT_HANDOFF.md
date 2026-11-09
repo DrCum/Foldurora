@@ -18,7 +18,7 @@ Current frozen combined candidate:
   startup/favorites PR20 and integrated disabled renderer PR21.
 - Source/remote tree verified. No package/version/full runtime result yet.
 - Source worktree `/workspace/work/workspace-folders-20261109` is now on the
-  separate `feat/workspace-hud-restore-20261109` branch for the next slice;
+  separate `feat/workspace-hud-restore-v2-20261109` branch for the next slice;
   all frozen branch heads and Git objects remain preserved.
 
 Full Windows request, byte-verified,12791bytes, SHA256
@@ -96,8 +96,22 @@ presentation without replaying consumed startup or polling failed IO. The first
 DTO run3/1 failed because a unit variant accepted an extra field; the unchanged
 refusal test passes with an empty struct variant. Negative evidence is retained.
 
-Active next work is HUD restoration source audit; no HUD implementation yet.
-Plan: `/workspace/scratch/workspace-hud-restore-20261109/PLAN.md`. Reuse native
+An additional authoring dependency is published at
+`bd6e631d4f78591286abf9e181c24c9de8873e96`, tree
+`b5f984bbd6a4c78ada24d55875e74c6720419afa`, branch
+`feat/workspace-update-20261109`, PR25. Explicit Update selected preserves record
+ID/name/favorite/startup, uses current capture choices and the existing native
+selected-record/CAS/receipt gates, changes no physical layout or Previous.
+Qualified viewer Clippy0, actual theme scan1/0/0 and localization13/0/0; two real
+model/UI cases compile, not run locally. Future requirements1160, no new full
+build request. Earlier Save/Update wording did not establish an Update action;
+the missing action was found and implemented in this slice.
+
+Active HUD WIP is based on bd6e, on the separate v2 branch above. Untracked
+`crates/aurora-viewer/src/workspace/model/huds.rs` contains a bounded private
+HudRef/HudSet DTO. Three exact-source model cases pass; it is NOT yet wired to
+Layout/mod.rs/UI/App, so no HUD feature/runtime/compiled-viewer claim.
+Plan: `/workspace/scratch/workspace-hud-restore-v2-20261109/PLAN.md`. Reuse native
 additive appearance transactions (one pending transaction, serial bounded lane),
 own ordinary archive visibility, source/lock/capacity rechecks and one explicit
 workspace review. No direct rez commands, replacement/detach or automatic wear
@@ -125,6 +139,9 @@ from Preview/startup. Inspect item completeness/native limits before coding.
    PR19audio65da1dfb were read, not integrated. Verify current heads/source before
    applying. PR11–16 already integrated; do not duplicate. Refresh upstream head.
 5. Automatic read policies and offer/permission/notification Attention remain.
+Newly observed upstream PR26 (Preferences reset confirmation) head
+6560c020435b61d1b226a2372ef8a91b8580d1b3 is queued for phase4 review, not
+integrated. No functional MCP PR was in the latest actual open-PR collection.
 
 Latest feature-boundary PR search found no functional MCP PR; PR20/21 references
 MCP but does not implement that independently assigned work. Retain the two
