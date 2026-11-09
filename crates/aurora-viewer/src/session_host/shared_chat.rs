@@ -124,7 +124,7 @@ impl SharedChat {
             // The canonical queued operation/receipt ledgers remain untouched.
             for state in &mut model.states {
                 state.ui.with_surface(surface, |ui| {
-                    let _ = ui.take_contact_action();
+                    ui.discard_contact_action();
                     let _ = ui.take_read_action();
                     let _ = ui.take_close_action();
                 });

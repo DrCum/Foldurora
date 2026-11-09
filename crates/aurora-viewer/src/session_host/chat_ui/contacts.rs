@@ -115,7 +115,6 @@ impl ContactsUi {
             && mode == InputMode::Live
         {
             self.action = Some(ContactAction::Refresh(source));
-            self.refreshed = Some(now);
         }
         ui.horizontal_wrapped(|ui| {
             ui.add(
@@ -214,7 +213,8 @@ impl ContactsUi {
             let message = match &operation.status {
                 OpenStatus::Pending => "host-contacts-opening",
                 OpenStatus::Uncertain => "host-contacts-uncertain",
-                OpenStatus::Completed(OpenDirectOutcome::Opened { .. }) => "host-contacts-opened",
+                OpenStatus::Completed(OpenDirectOutcome::Opened { .. }) if operation.presented.is_some() => "host-contacts-opened",
+                OpenStatus::Completed(OpenDirectOutcome::Opened { .. }) if snapshot.contacts.open_busy => "host-contacts-opening",
                 OpenStatus::Completed(_) => "host-contacts-open-failed",
             };
             ui.label(aurora_i18n::text(message));
@@ -222,15 +222,22 @@ impl ContactsUi {
         if self.error {
             ui.label(aurora_i18n::tr!("host-contacts-open-failed"));
         }
-        clicked || self.action.is_some_and(|action| matches!(action, ContactAction::Open(_)))
+        clicked
     }
 }
 impl ChatUi {
     pub fn cancel_contact_open(&mut self) {
         self.view.contacts.cancel();
     }
+    pub fn discard_contact_action(&mut self) {
+        self.view.contacts.action = None;
+    }
     pub fn take_contact_action(&mut self) -> Option<ContactAction> {
-        self.view.contacts.action.take()
+        let action = self.view.contacts.action.take();
+        if matches!(action, Some(ContactAction::Refresh(_))) {
+            self.view.contacts.refreshed = Some(Instant::now());
+        }
+        action
     }
     pub fn open_queue_failed(&mut self, draft: OpenDraft) {
         if draft.instance == self.instance && draft.request.selection.source == self.source {

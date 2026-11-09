@@ -236,6 +236,19 @@ mod tests {
         assert!(!friends(&world, true).unwrap().rows[0].can_open);
         assert_eq!(open(&mut world, request(), true), OpenDirectOutcome::Capacity);
         assert!(!world.social.has_session(&PEER));
+        let mut collision = self::world();
+        collision.groups.groups.push(aurora_net::social::GroupMembership {
+            id: PEER,
+            name: "Synthetic group alias".into(),
+            insignia: Uuid::nil(),
+            powers: 0,
+            accept_notices: false,
+            list_in_profile: false,
+            contribution: 0,
+        });
+        assert!(!friends(&collision, true).unwrap().rows[0].can_open);
+        assert_eq!(open(&mut collision, request(), true), OpenDirectOutcome::RejectedNative);
+        assert!(collision.social.ims.is_empty(), "group identity must not become a resident session");
         let mut world = self::world();
         use aurora_net::contact_policy::{Feed, NO_SUPPORT, Patch, SUPPORT};
         world.apply(aurora_net::NetEvent::ContactPolicy {

@@ -1216,6 +1216,14 @@ impl ChatUi {
                 ui.label(RichText::new(read_status_text(operation.status)).small().color(p.muted));
             }
         });
+        // Open is an operation intent, not navigation until an authorized ack.
+        // Do not discard its release and then lose it during egui's repaint.
+        if matches!(self.view.contacts.action, Some(ContactAction::Open(_))) {
+            action = None;
+            self.view.read_action = None;
+            self.view.close_action = None;
+            self.cancel_compositions(self.surface);
+        }
         self.sync(snapshot);
         let conversation_changed = std::mem::take(&mut self.view.changed);
         navigating |= source_changed || conversation_changed;
