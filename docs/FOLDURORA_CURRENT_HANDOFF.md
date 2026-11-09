@@ -7,9 +7,9 @@
 - Commit: `520782f2998150a26c74c51e18eccc7c4994c737`.
 - Tree: `bcded0890dbdb359d44db28c399956fa2fb1ccd5`.
 - [Draft PR46](https://github.com/DrCum/Foldurora/pull/46); head independently rechecked unchanged.
-- Slick confirmed ONE delivery of the complete pinned request to the existing
-  Windows Builder after radio completed. Builder is active; written acknowledgment,
-  check outcomes and package are not yet reported. Do not duplicate the request.
+- Slick confirmed ONE delivery after radio completed. The existing Windows Builder
+  has now completed this candidate and is idle. No duplicate run/request.
+- [Verified sanitized Monitor result](https://github.com/DrCum/Foldurora/blob/f5352283395e7c6f04e3765582435d5590aa5130/docs/FOLDURORA_WINDOWS_VALIDATION_520782F2.md).
 - [Pinned Windows request](https://github.com/DrCum/Foldurora/blob/9d880db77c9986bf412eacd1d39216b6a0629318/docs/FOLDURORA_LIVE_MONITORS_WINDOWS_REQUEST_520782F2.md).
 
 Source implements visible, explicitly admitted native Standby sampling, including
@@ -27,11 +27,11 @@ included in16. App/World/IO/GPU tests were compiled, not run. No test definition
 were removed. Full Linux linking and earlier terrain/filesystem concerns remain
 unresolved; Windows results are not Linux passes.
 
-Monitor Windows gates remain pending: strict checks, ONE unfiltered full run with
-all1413 required outcomes passing exactly once, the separate explicitly ignored
-GPU export gate, verified ordinary viewer/sidecar package and scoped startup.
-The ordinary dependency now includes Monitor; prior prototype passes do not
-substitute. No Windows/GPU/package/native result exists for520782f2 yet.
+Monitor Windows automated/package gates are complete for this exact source:
+parser/format/strict workspace Clippy passed; ONE unfiltered full run passed
+9198/0/63 with all1413 required outcomes exactly once; the separate GPU export
+gate passed once. The ordinary package includes Monitor and scoped standalone
+startup passed. These are automated/package results, not hosted native acceptance.
 [Behavior and bounds](https://github.com/DrCum/Foldurora/blob/520782f2998150a26c74c51e18eccc7c4994c737/docs/FOLDURORA_LIVE_MONITORS_20261109.md).
 
 Known limitation: uncertain source/metadata reservations remain charged until
@@ -39,6 +39,61 @@ worker exit. Privacy/teleport closure can require restarting that worker before
 sampling resumes. Automatic recovery is unfinished. Hosted movement/switching/
 viewport/responsiveness, Monitor chat, real-grid/RLVa, driver-reset and XR
 acceptance remain open. Keep this candidate frozen.
+
+## Verified Monitor Windows package and scope
+
+The immutable result above was independently read through GitHub. Canonical
+Git-LF Cargo.lock SHA256 remains
+e04f6814529802ba6469b9455294aabfcfbec989d0e271698b3723a04d682e32.
+PowerShell parser, formatting and strict workspace Clippy exited0. ONE full run:
+**9198 passed,0 failed,63 ignored,0 filtered**,37 summaries/9261 named rows.
+All1413 requirements passed exactly once from that full run alone; zero missing,
+duplicate or nonpassing outcomes. The23 additions comprise ten formerly nondefault
+tests and thirteen new cases. Both invocations used child-only render-thread and
+GPU-validation settings, preserving parent values.
+
+The real small-world/retirement fixture passed; libtest reported it running at
+60seconds before completion. This is fixture timing, not hosted performance
+acceptance. The explicit ignored GPU export case then passed ONCE separately
+(1/0/0,9260 filtered,23 summaries), contributing no row to the1413 full-run audit.
+Its assertions exercised all four RGBA/BGRA linear/sRGB formats, offset native
+crop/boundary, four small-texture corners, opaque alpha, ordinary-export refusal
+and guard invalidation. Adapter/backend/driver were unobserved in both test runs;
+do not borrow identity from standalone startup. Public station/audio hardware
+probes remained ignored. Platform exclusions and the alternate MCP backend's
+three unintegrated cases remain unchanged; Apply/Previous remain unsupported.
+
+Ordinary viewer/sidecar XR-static build, versions/help and packaging passed.
+The renderer compiler invocation included monitor-prototype AND xr-static-loader.
+The source stamp matched on the first build. Both executables were supplied to
+the packager; required manifests/MCP documents/notices are included. Built,
+staged and ZIP-entry hashes matched for both executables.
+
+| Artifact | Version | Bytes | SHA256 |
+| --- | --- | ---: | --- |
+| Foldurora-520782f29981-windows-x64.zip | |74819659|6868063c75d7d0928c0468f5f89697e7b8965f01f4d28375f4611be010b919ce|
+| aurora-viewer.exe |0.9.3-beta.20261106.1+525.g520782f29|177644032|b7f87a5c01785a0065ef898d6f7d8b7b4f4c672f4fa35b514f933ee1f27182bd|
+| foldurora-mcp.exe |0.1.0|3467776|a008768de6ef8a5753a4a8e8d83e2ce9c7fc015b02e7a7051b0cbe503d2393d0|
+
+Standalone startup ONLY: default-theme offline demo, Windows26200,
+Vulkan/RTX3060/NVIDIA610.88,1280x800/96DPI,frame650,exit0 after32.97seconds.
+Inspected synthetic world/offline indicator; zero new matching MCP pipes in24
+passive samples and zero controller descriptors. No CPU capture matrix ran.
+
+Hosted live sampling is NOT RUN: the fixture did not establish a managed
+Ready/Standby source, and updater-test installations are excluded by the existing
+host profile guard. Do not bypass that guard or invent native authority.
+Never-active samples, cadence, open/reopen, privacy/teleport/promotion retirement,
+host movement/resize/viewport/picking/mouselook, login-bound workspaces and
+functional MCP interactions remain open. Real-grid/RLVa, real radio, GPU reset,
+XR and Japanese glyph coverage received no new acceptance evidence.
+
+Source limits remain: host512MiB credit,128MiB/configured source/up to4 previews,
+separate image pools, pending/uncertain charges retained; known driver headroom
+requires256MiB cold/64MiB subsequent. Privacy/teleport closure can require worker
+exit for recovery. Packaging does not establish automatic hosted recovery.
+Radio/98b/a903 ZIP hashes and prior artifact/cache preservation were verified by
+the Builder. Preserve this new package alongside them and all failed evidence.
 
 ## Completed radio checkpoint
 
@@ -127,8 +182,9 @@ are required. Do not infer a capability or start competing MCP implementation.
 PR44head08cfebacd6c959d878e35162a0919359b1f23846 remains a native-frame plan/probe,
 not a production repair; native placement/owned-popup/cover proof is still needed.
 
-Next: await the existing Monitor Builder's acknowledgment/results, preserve the
-frozen source, address concrete findings separately and complete native acceptance.
+Next: preserve the frozen Monitor source and verified package; complete the
+scoped hosted/human checklist when available and address concrete findings on
+separate source. Do not repeat this completed validation or infer acceptance.
 Quick-action extensions, aliases/accents/alerts, session sets, restart/recovery,
 background audio/voice, remaining conference extensions and automatic-read/
 notification Attention remain shelved. No duplicate validation, unrelated work,
