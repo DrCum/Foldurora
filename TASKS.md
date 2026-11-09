@@ -1,5 +1,28 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Foldurora Preferences reset confirmations (human upstream request,
+  2026-11-09; upstream #3043, `c10cd55456d4b0fadd78f833012c14588cccbf6e`):
+  independent base `388b299c429d776b3fc7a9890162cd3d940b9dc3`, reviewed against
+  published workspace source `975250266db7eaf93f8f9af9cd4e9d8ffd4126c6` and
+  handoff `82d5d17d8e624ce6f72e49c5e51eaa563d94a245`. All three reset buttons
+  ask before acting; cancellation preserves settings, acceptance runs once
+  on the next body pass and retains the existing eight-second Undo. Preserve
+  the requested page and existing account/grid/saved-preset reset exclusions.
+  Folderstorm reference: `LLFloaterPreference::onClickClearSettings` in
+  `indra/newview/llfloaterpreference.cpp` at `abbe3cb0ca66`; Aurora deliberately
+  also confirms page and modified resets. No App, host, renderer, inventory,
+  Shared Chat or Attention edits. Preferences is shared across editor layouts.
+  EN/FR/JA catalogues, TESTING and this TASKS entry need Dev Agent reconciliation;
+  the existing workspace result flag is disjoint. Slick is unavailable: no
+  coordination delivery or Windows build start is claimed. Focused results
+  and exact frozen source belong to the PR; combined validation/package stays
+  at the related feature-group checkpoint under policy `f78d2814`.
+  - ⬜ Native/default-glass Windows confirmation, dismissal, Undo, neighboring
+    controls and Japanese glyph acceptance; no grid login by automation.
+  - Deferred before edits: update grace `5789dfd0` requires the deferred updater;
+    video-memory retry `3a00c305` depends on GPU allocation backoff and overlaps
+    protected renderer/Monitor work. PR #11 and other published ports excluded.
+
 - 🔧 Selective upstream catch-up (human request, 2026-11-07; no issue): apply
   sixteen reviewed upstream commits individually with `-x` to frozen photo/
   branding base `f5ae21d5`, from upstream snapshot `576dd54a`. Production
