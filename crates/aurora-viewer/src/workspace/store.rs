@@ -75,6 +75,23 @@ impl Lane {
             }
         }
     }
+    /// Used only at logout/exit, never during ordinary rendering or switching.
+    pub(crate) fn finish(&self, timeout: std::time::Duration) -> Result<Option<Reply>, ()> {
+        if !self.busy.get() {
+            return Ok(None);
+        }
+        match self.receive.recv_timeout(timeout) {
+            Ok(reply) => {
+                self.busy.set(false);
+                Ok(Some(reply))
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Ok(None),
+            Err(_) => {
+                self.busy.set(false);
+                Err(())
+            }
+        }
+    }
 }
 fn perform(r: &Request) -> Result<Option<Catalogue>, ()> {
     if r.operation == 0
@@ -113,6 +130,39 @@ fn perform(r: &Request) -> Result<Option<Catalogue>, ()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn workspace_logout_timeout_keeps_pending_reply_available_for_a_later_finish() {
+        let (send, _requests) = sync_channel::<Request>(1);
+        let (results, receive) = sync_channel(1);
+        let lane = Lane {
+            send,
+            receive,
+            busy: std::cell::Cell::new(true),
+        };
+        assert!(lane.finish(std::time::Duration::ZERO).unwrap().is_none());
+        assert!(lane.busy.get());
+        let source = super::super::controller::Source {
+            agent: Uuid::new_v4(),
+            login: Uuid::new_v4(),
+            grid: "a".repeat(64),
+            hosted: None,
+        };
+        assert!(
+            results
+                .send(Reply {
+                    source: source.clone(),
+                    binding: 3,
+                    operation: 4,
+                    result: Ok(None)
+                })
+                .is_ok()
+        );
+        let reply = lane.finish(std::time::Duration::ZERO).unwrap().unwrap();
+        assert_eq!(reply.source, source);
+        assert_eq!(reply.operation, 4);
+        assert_eq!(reply.binding, 3);
+        assert!(!lane.busy.get());
+    }
     #[test]
     fn workspace_store_missing_load_atomic_write_revision_and_unknown_bytes_preservation() {
         assert_eq!(NativeStoreKind::Workspaces.max_bytes(), crate::workspace::model::MAX_FILE);

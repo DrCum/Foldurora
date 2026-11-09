@@ -17839,6 +17839,10 @@ impl App {
         self.show_characters(&ctx, &p);
         let modified = self.workspace_modified();
         a.workspace = self.workspace_ui.show(&ctx, &p, &self.workspaces, modified);
+        let favorite = self.workspace_ui.favorites(&ctx, &self.workspaces);
+        if a.workspace.is_none() {
+            a.workspace = favorite;
+        }
         a.exit = self.exit_prompt.show(&ctx, &p, self.in_world());
         self.ui_parts.lap(Part::UiRest, t);
         a
@@ -20570,6 +20574,7 @@ impl ApplicationHandler for App {
     /// closed connection and every exit ended in a segmentation fault (before
     /// the browsers' private profiles were cleaned up).
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        self.workspace_source_boundary();
         self.host_preview.retire();
         self.gfx = None;
     }

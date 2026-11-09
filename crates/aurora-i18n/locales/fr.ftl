@@ -13613,3 +13613,13 @@ host-contacts-search = Rechercher
 host-contacts-results = Résultats pour : { $query }
 host-contacts-searching = Recherche…
 host-contacts-search-failed = La recherche est indisponible ou a échoué. Réessayez dans un instant. Les amis restent accessibles.
+
+# Workspace favorites and source-bound startup restore
+workspaces-show-favorites = Afficher la barre des espaces favoris
+workspaces-startup = À la connexion :
+workspaces-startup-none = Ne pas restaurer
+workspaces-startup-last = Dernière disposition
+workspaces-startup-selected = Espace sélectionné
+workspaces-favorite = Favori
+workspaces-unfavorite = Retirer des favoris
+workspaces-startup-named = Enregistré : { $name }

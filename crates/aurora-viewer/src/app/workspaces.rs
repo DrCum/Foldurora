@@ -3,7 +3,7 @@
 use super::{App, Renderer, Screen, Window, ui};
 use crate::workspace::{
     controller::{Action, Command, Pending, Source, Status},
-    model::{Bars, Catalogue, LIMIT, Layout, Record, Viewport, valid_name},
+    model::{Bars, Catalogue, LIMIT, Layout, Record, Startup, Viewport, valid_name},
     store::{Lane, Request},
 };
 use uuid::Uuid;
@@ -131,7 +131,7 @@ impl App {
             self.workspaces.bind(source);
             self.workspace_ui.reset();
         }
-        let permit = self.workspace_ui.open && self.gfx.as_ref().is_some_and(|g| self.workspace_permit(&g.renderer, &g.window));
+        let permit = self.gfx.as_ref().is_some_and(|g| self.workspace_permit(&g.renderer, &g.window));
         if self.workspaces.permit != permit {
             self.workspaces.advance();
         }
@@ -157,7 +157,7 @@ impl App {
         if let Ok(Some(reply)) = polled {
             self.workspaces.accept_reply(reply);
         }
-        if self.workspace_ui.open
+        if (self.workspace_ui.open || self.workspaces.startup_waiting)
             && self.workspaces.permit
             && self.workspaces.pending.is_none()
             && self.workspaces.catalogue.is_none()
@@ -168,11 +168,18 @@ impl App {
         if self.workspaces.pending.is_some() && self.workspaces.permit {
             self.egui_ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
+        self.workspace_startup();
+        self.workspace_remember_last(false);
     }
     /// Called before World consumes login/disconnect, including exact
     /// same-source reauthentication. No old IO/UI capture can be readmitted.
     pub(super) fn workspace_source_boundary(&mut self) {
         self.workspace_cancel_preview(true);
+        self.workspace_finish_io();
+        self.workspace_remember_last(true);
+        self.workspace_finish_io();
+        // Only logout/reauthentication resets startup, not activation or focus.
+        self.workspaces.startup_source = None;
         self.workspaces.bind(None);
         self.workspace_ui.reset();
     }
@@ -233,6 +240,7 @@ impl App {
         }
     }
     pub(super) fn workspace_open(&mut self) {
+        self.workspaces.cancel_startup();
         if self.workspaces.preview.is_some() {
             self.workspace_cancel_preview(true);
         }
@@ -244,7 +252,12 @@ impl App {
     }
     pub(super) fn workspace_action(&mut self, action: Action, renderer: &Renderer, window: &Window) {
         let target = match &action.command {
-            Command::Rename(id, _) | Command::Delete(id) | Command::Preview(id) | Command::Switch(id) => Some(*id),
+            Command::Rename(id, _)
+            | Command::Delete(id)
+            | Command::Preview(id)
+            | Command::Switch(id)
+            | Command::Favorite(id)
+            | Command::Startup(Startup::Named { workspace: id }) => Some(*id),
             _ => None,
         };
         if target.is_some() && target != action.ticket.record {
@@ -274,6 +287,7 @@ impl App {
         if !self.workspaces.ready() || !self.workspaces.advance() {
             return;
         }
+        self.workspaces.cancel_startup();
         let commit = matches!(&action.command, Command::Switch(_));
         let rename = match &action.command {
             Command::Rename(id, _) => Some(*id),
@@ -370,6 +384,7 @@ impl App {
                 let mut next = self.workspaces.catalogue.clone().expect("ready workspace catalogue");
                 let before = next.records.len();
                 next.records.retain(|r| r.id != id);
+                next.remove_references(id);
                 if next.records.len() == before {
                     return;
                 }
@@ -383,6 +398,37 @@ impl App {
                 };
                 next.revision = revision;
                 self.workspace_io(Some(next), self.workspaces.active.filter(|a| *a != id));
+            }
+            Command::Favorite(id) => {
+                if self.workspaces.preview.is_some() || self.workspaces.record(id).is_none() {
+                    return;
+                }
+                let mut next = self.workspaces.catalogue.clone().expect("ready workspace catalogue");
+                if next.favorites.contains(&id) {
+                    next.favorites.retain(|favorite| *favorite != id);
+                } else {
+                    next.favorites.push(id);
+                }
+                self.workspace_save_definitions(next);
+            }
+            Command::Startup(startup) => {
+                if self.workspaces.preview.is_some() {
+                    return;
+                }
+                let mut next = self.workspaces.catalogue.clone().expect("ready workspace catalogue");
+                next.startup = startup;
+                if startup == Startup::LastArrangement {
+                    next.last_layout = Some(self.workspace_capture());
+                }
+                self.workspace_save_definitions(next);
+            }
+            Command::ShowFavorites(show) => {
+                if self.workspaces.preview.is_some() {
+                    return;
+                }
+                let mut next = self.workspaces.catalogue.clone().expect("ready workspace catalogue");
+                next.show_favorites = show;
+                self.workspace_save_definitions(next);
             }
             Command::Cancel | Command::Retry => {}
         }
@@ -444,5 +490,106 @@ impl App {
             .active
             .and_then(|id| self.workspaces.record(id))
             .is_some_and(|r| self.workspace_capture() != r.layout)
+    }
+
+    fn workspace_save_definitions(&mut self, mut next: Catalogue) {
+        let Some(revision) = (if self.workspaces.persisted {
+            next.revision.checked_add(1)
+        } else {
+            Some(1)
+        }) else {
+            self.workspaces.exhausted = true;
+            return;
+        };
+        next.revision = revision;
+        if next.validate().is_ok() {
+            self.workspace_io(Some(next), self.workspaces.active);
+        }
+    }
+
+    fn workspace_finish_io(&mut self) {
+        if self.workspaces.pending.is_none() {
+            return;
+        }
+        match self
+            .workspaces
+            .lane
+            .as_ref()
+            .map(|lane| lane.finish(std::time::Duration::from_millis(1500)))
+        {
+            Some(Ok(Some(reply))) => self.workspaces.accept_reply(reply),
+            _ => log::warn!("workspace: final write did not finish before the login boundary"),
+        }
+    }
+
+    fn workspace_startup(&mut self) {
+        if !self.workspaces.startup_waiting {
+            return;
+        }
+        if self.panels.settings || self.workspaces.status == Status::Error {
+            self.workspaces.cancel_startup();
+            return;
+        }
+        let Some((id, layout)) = self.workspaces.take_startup() else {
+            return;
+        };
+        if layout.validate().is_err() {
+            return;
+        }
+        let current = self.workspace_capture();
+        let baseline = self.workspaces.begin_preview(layout, id.unwrap_or(Uuid::nil()), current, true);
+        if id.is_none() {
+            self.workspaces.placement.as_mut().expect("startup placement").active = None;
+        }
+        self.settings.workspace_held = Some(baseline.clone());
+        ui::layout::workspace_preview(&self.egui_ctx, Some(baseline.geometry));
+        self.workspaces
+            .placement
+            .as_ref()
+            .expect("startup placement")
+            .layout
+            .settings(&mut self.settings, self.host_session.is_some());
+        self.egui_ctx.request_repaint();
+    }
+
+    fn workspace_remember_last(&mut self, force: bool) {
+        if self.workspaces.pending.is_some()
+            || self.workspaces.preview.is_some()
+            || self.panels.settings
+            || self.workspaces.placement.is_some()
+            || self.workspaces.source.as_ref() != self.workspace_source().as_ref()
+            || self
+                .workspaces
+                .catalogue
+                .as_ref()
+                .is_none_or(|c| c.startup != Startup::LastArrangement)
+            || (!force && !self.workspaces.permit)
+        {
+            return;
+        }
+        let layout = self.workspace_capture();
+        let now = std::time::Instant::now();
+        let stable = self
+            .workspaces
+            .last_observed
+            .as_ref()
+            .is_some_and(|(old, since)| old == &layout && now.saturating_duration_since(*since) >= std::time::Duration::from_secs(2));
+        if !stable && !force {
+            if self.workspaces.last_observed.as_ref().is_none_or(|(old, _)| old != &layout) {
+                self.workspaces.last_observed = Some((layout, now));
+            }
+            return;
+        }
+        if self
+            .workspaces
+            .catalogue
+            .as_ref()
+            .is_some_and(|c| c.last_layout.as_ref() == Some(&layout))
+        {
+            return;
+        }
+        let mut next = self.workspaces.catalogue.clone().expect("loaded startup settings");
+        next.last_layout = Some(layout);
+        self.workspace_save_definitions(next);
     }
 }

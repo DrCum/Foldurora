@@ -13578,3 +13578,13 @@ host-contacts-search = 検索
 host-contacts-results = 「{ $query }」の検索結果
 host-contacts-searching = 検索中…
 host-contacts-search-failed = 検索できませんでした。しばらくしてから再試行してください。フレンド一覧は引き続き利用できます。
+
+# Workspace favorites and source-bound startup restore
+workspaces-show-favorites = ワークスペースのお気に入りバーを表示
+workspaces-startup = ログイン時：
+workspaces-startup-none = 復元しない
+workspaces-startup-last = 前回の配置
+workspaces-startup-selected = 選択したワークスペース
+workspaces-favorite = お気に入りに追加
+workspaces-unfavorite = お気に入りから削除
+workspaces-startup-named = 保存済み：{ $name }

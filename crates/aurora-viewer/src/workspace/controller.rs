@@ -1,5 +1,5 @@
 use super::{
-    model::{Catalogue, Layout},
+    model::{Catalogue, Layout, Startup},
     store::Lane,
 };
 use uuid::Uuid;
@@ -29,6 +29,9 @@ pub(crate) enum Command {
     Cancel,
     Previous,
     Retry,
+    Favorite(Uuid),
+    Startup(Startup),
+    ShowFavorites(bool),
 }
 #[derive(Clone, Debug)]
 pub(crate) struct Action {
@@ -86,6 +89,9 @@ pub(crate) struct Controller {
     pub operation: u64,
     pub status: Status,
     pub exhausted: bool,
+    pub startup_waiting: bool,
+    pub startup_source: Option<Source>,
+    pub last_observed: Option<(Layout, std::time::Instant)>,
 }
 impl Default for Controller {
     fn default() -> Self {
@@ -106,6 +112,9 @@ impl Default for Controller {
             operation: 0,
             status: Status::Unavailable,
             exhausted: false,
+            startup_waiting: false,
+            startup_source: None,
+            last_observed: None,
         }
     }
 }
@@ -118,7 +127,17 @@ impl Controller {
         } else {
             self.exhausted = true;
         }
+        // Activation changes are layout authority boundaries, not new logins.
+        // Preserve the normalized startup identity across temporary source gaps.
+        self.startup_waiting = false;
+        if let Some(mut login) = source.clone() {
+            login.hosted = login.hosted.map(|(source, _)| (source, 0));
+            if self.startup_source.as_ref() != Some(&login) {
+                self.startup_waiting = true;
+            }
+        }
         self.source = source;
+        self.last_observed = None;
         self.catalogue = None;
         self.persisted = false;
         self.active = None;
@@ -249,6 +268,26 @@ impl Controller {
     }
     pub(crate) fn record(&self, id: Uuid) -> Option<&super::model::Record> {
         self.catalogue.as_ref()?.records.iter().find(|r| r.id == id)
+    }
+    pub(crate) fn take_startup(&mut self) -> Option<(Option<Uuid>, Layout)> {
+        if !self.startup_waiting || !self.ready() || self.preview.is_some() {
+            return None;
+        }
+        let source = self.source.as_ref()?;
+        let catalogue = self.catalogue.as_ref()?;
+        if catalogue.account != source.agent || catalogue.grid != source.grid || catalogue.validate().is_err() {
+            return None;
+        }
+        let layout = catalogue.startup_layout();
+        self.cancel_startup();
+        layout
+    }
+    pub(crate) fn cancel_startup(&mut self) {
+        self.startup_waiting = false;
+        if let Some(mut source) = self.source.clone() {
+            source.hosted = source.hosted.map(|(source, _)| (source, 0));
+            self.startup_source = Some(source);
+        }
     }
 }
 
@@ -479,5 +518,54 @@ mod tests {
         c.previous = Some((target.clone(), None));
         c.begin_previous(old);
         assert_eq!(c.placement.as_ref().unwrap().layout.geometry[3], target.geometry[3]);
+    }
+
+    #[test]
+    fn workspace_startup_runs_once_per_login_and_not_after_temporary_source_loss() {
+        let source = source();
+        let mut c = Controller::default();
+        c.bind(Some(source.clone()));
+        c.bind(None);
+        c.bind(Some(source.clone()));
+        assert!(c.startup_waiting, "an unconsumed startup survives a temporary source gap");
+        let mut catalogue = Catalogue::empty(source.agent, source.grid.clone());
+        catalogue.startup = Startup::LastArrangement;
+        catalogue.last_layout = Some(layout(12.0));
+        c.catalogue = Some(catalogue.clone());
+        assert!(c.take_startup().is_none(), "no effect without native permit");
+        c.permit = true;
+        assert_eq!(c.take_startup(), Some((None, layout(12.0))));
+        assert!(c.take_startup().is_none());
+        c.bind(None);
+        c.bind(Some(source.clone()));
+        c.catalogue = Some(catalogue.clone());
+        c.permit = true;
+        assert!(!c.startup_waiting);
+        assert!(c.take_startup().is_none());
+        c.startup_source = None; // App's explicit reauthentication boundary.
+        c.bind(Some(source));
+        c.catalogue = Some(catalogue);
+        c.permit = true;
+        assert!(c.take_startup().is_some());
+    }
+
+    #[test]
+    fn workspace_startup_rejects_another_accounts_catalogue_and_changed_login() {
+        let source = source();
+        let mut c = Controller::default();
+        c.bind(Some(source.clone()));
+        c.permit = true;
+        let mut catalogue = Catalogue::empty(Uuid::new_v4(), source.grid.clone());
+        catalogue.startup = Startup::LastArrangement;
+        catalogue.last_layout = Some(layout(2.0));
+        c.catalogue = Some(catalogue);
+        assert!(c.take_startup().is_none());
+        assert!(c.startup_waiting);
+        let ticket = c.ticket().unwrap();
+        let mut next = source;
+        next.login = Uuid::new_v4();
+        c.bind(Some(next));
+        assert!(c.startup_waiting);
+        assert!(!c.accepts(&ticket));
     }
 }

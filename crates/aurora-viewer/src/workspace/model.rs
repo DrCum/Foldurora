@@ -128,6 +128,30 @@ pub(crate) struct Catalogue {
     pub grid: String,
     pub revision: u64,
     pub records: Vec<Record>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub favorites: Vec<Uuid>,
+    #[serde(default, skip_serializing_if = "Startup::disabled")]
+    pub startup: Startup,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_layout: Option<Layout>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub show_favorites: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum Startup {
+    #[default]
+    Disabled,
+    LastArrangement,
+    Named {
+        workspace: Uuid,
+    },
+}
+impl Startup {
+    fn disabled(&self) -> bool {
+        *self == Self::Disabled
+    }
 }
 pub(crate) fn valid_name(name: &str) -> bool {
     !name.is_empty() && name == name.trim() && name.len() <= 96 && name.chars().count() <= 64 && !name.chars().any(char::is_control)
@@ -147,6 +171,10 @@ impl Catalogue {
             grid,
             revision: 1,
             records: Vec::new(),
+            favorites: Vec::new(),
+            startup: Startup::Disabled,
+            last_layout: None,
+            show_favorites: false,
         }
     }
     pub(crate) fn validate(&self) -> Result<(), &'static str> {
@@ -166,7 +194,34 @@ impl Catalogue {
             }
             r.layout.validate()?;
         }
+        let mut favorites = std::collections::BTreeSet::new();
+        if self.favorites.len() > LIMIT
+            || self.favorites.iter().any(|id| !ids.contains(id) || !favorites.insert(*id))
+            || matches!(self.startup, Startup::Named { workspace } if !ids.contains(&workspace))
+        {
+            return Err("workspace reference");
+        }
+        if let Some(layout) = &self.last_layout {
+            layout.validate()?;
+        }
         Ok(())
+    }
+    pub(crate) fn startup_layout(&self) -> Option<(Option<Uuid>, Layout)> {
+        match self.startup {
+            Startup::Disabled => None,
+            Startup::LastArrangement => self.last_layout.clone().map(|layout| (None, layout)),
+            Startup::Named { workspace } => self
+                .records
+                .iter()
+                .find(|r| r.id == workspace)
+                .map(|r| (Some(r.id), r.layout.clone())),
+        }
+    }
+    pub(crate) fn remove_references(&mut self, id: Uuid) {
+        self.favorites.retain(|favorite| *favorite != id);
+        if self.startup == (Startup::Named { workspace: id }) {
+            self.startup = Startup::Disabled;
+        }
     }
     pub(crate) fn decode(bytes: &[u8], account: Uuid, grid: &str) -> Result<Self, &'static str> {
         if bytes.len() > MAX_FILE {
@@ -310,5 +365,64 @@ mod tests {
         assert!(!c.name_available("DESK", None));
         c.records[0].name = "DESK".into();
         assert!(c.validate().is_ok());
+    }
+
+    #[test]
+    fn workspace_legacy_catalogue_defaults_to_no_startup_or_favorites() {
+        let c = Catalogue::empty(Uuid::new_v4(), "a".repeat(64));
+        let value = serde_json::to_value(&c).unwrap();
+        assert!(value.get("startup").is_none());
+        assert!(value.get("favorites").is_none());
+        assert_eq!(
+            Catalogue::decode(&serde_json::to_vec(&value).unwrap(), c.account, &c.grid).unwrap(),
+            c
+        );
+        assert!(c.startup_layout().is_none());
+    }
+
+    #[test]
+    fn workspace_favorite_and_startup_ids_survive_rename_and_are_retired_on_delete() {
+        let mut c = Catalogue::empty(Uuid::new_v4(), "a".repeat(64));
+        let id = Uuid::new_v4();
+        c.records.push(Record {
+            id,
+            name: "Desk".into(),
+            layout: layout(),
+        });
+        c.favorites.push(id);
+        c.startup = Startup::Named { workspace: id };
+        c.records[0].name = "Renamed".into();
+        let loaded = Catalogue::decode(&c.encode().unwrap(), c.account, &c.grid).unwrap();
+        assert_eq!(loaded.startup_layout(), Some((Some(id), layout())));
+        assert_eq!(loaded.favorites, vec![id]);
+        c.records.clear();
+        assert!(c.validate().is_err());
+        c.remove_references(id);
+        assert!(c.validate().is_ok());
+        assert_eq!(c.startup, Startup::Disabled);
+        assert!(c.favorites.is_empty());
+    }
+
+    #[test]
+    fn workspace_unknown_startup_and_duplicate_or_foreign_favorites_fail_closed() {
+        let mut c = Catalogue::empty(Uuid::new_v4(), "a".repeat(64));
+        let id = Uuid::new_v4();
+        c.records.push(Record {
+            id,
+            name: "Desk".into(),
+            layout: layout(),
+        });
+        c.favorites = vec![id, id];
+        assert!(c.validate().is_err());
+        c.favorites = vec![Uuid::new_v4()];
+        assert!(c.validate().is_err());
+        c.favorites.clear();
+        let mut value = serde_json::to_value(&c).unwrap();
+        value["startup"] = serde_json::json!({"mode":"named", "workspace":id, "future":true});
+        assert!(Catalogue::decode(&serde_json::to_vec(&value).unwrap(), c.account, &c.grid).is_err());
+        c.startup = Startup::LastArrangement;
+        c.last_layout = Some(layout());
+        c.last_layout.as_mut().unwrap().viewport.left = f32::NAN;
+        assert!(c.validate().is_err());
     }
 }
