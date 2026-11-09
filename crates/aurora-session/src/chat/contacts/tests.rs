@@ -426,3 +426,56 @@ fn contacts_wire_rejects_cross_source_rows_and_unbound_or_forged_open_presentati
         }
     }
 }
+
+#[test]
+fn contact_search_codec_binds_query_to_source_channel_policy_and_utf8_byte_limit() {
+    use crate::chat::{ChatCommand, ChatMessage, ChatPacket, VERSION, decode, encode};
+    let request = ContactSearchRequest {
+        key: ContactKey {
+            channel: ContactChannel::Search,
+            ..open(1).selection
+        },
+        policy_revision: 1,
+        query: ContactText::new("Resident.Name 界").unwrap(),
+    };
+    let packet = ChatPacket {
+        version: VERSION,
+        source: source(1),
+        sequence: 1,
+        reply_to: 0,
+        message: ChatMessage::Command(ChatCommand::SearchContacts(request.clone())),
+    };
+    assert_eq!(decode(&encode(&packet).unwrap()).unwrap(), packet);
+    assert_eq!(
+        encode(&ChatPacket {
+            source: source(2),
+            ..packet
+        }),
+        Err(ChatError::Binding)
+    );
+    assert_eq!(
+        ContactSearchRequest {
+            key: open(1).selection,
+            ..request.clone()
+        }
+        .validate(),
+        Err(ChatError::Invalid)
+    );
+    assert_eq!(
+        ContactSearchRequest {
+            query: ContactText::new("a").unwrap(),
+            ..request.clone()
+        }
+        .validate(),
+        Err(ChatError::Invalid)
+    );
+    assert_eq!(
+        ContactSearchRequest {
+            policy_revision: 0,
+            ..request
+        }
+        .validate(),
+        Err(ChatError::StalePolicy)
+    );
+    assert!(ContactText::<127>::new(&"界".repeat(43)).is_err());
+}

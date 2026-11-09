@@ -50,7 +50,7 @@ fn setup() -> (Peer, crate::session_host::chat_transport::WorkerIo) {
     peer.observe(&event(&peer, 1, ChatEvent::ContactsPolicy(policy(1, true)))).unwrap();
     peer.refresh_contacts(source(), Instant::now()).unwrap();
     let reply = ChatPacket {
-        reply_to: peer.contacts.flight.as_ref().unwrap().sequence,
+        reply_to: peer.contacts.flight[0].as_ref().unwrap().sequence,
         ..event(&peer, 2, ChatEvent::ContactPage(page(1)))
     };
     peer.observe(&reply).unwrap();
@@ -134,4 +134,48 @@ fn contacts_host_receipt_alone_cannot_publish_title_and_recovery_never_resends_o
     assert!(peer.contacts.pending.is_none());
     assert!(peer.contacts.snapshot(true).opens[0].presented.is_some());
     assert!(peer.reads.is_empty(), "Open never fabricates read metadata or clears unread");
+}
+
+#[test]
+fn contact_search_host_pending_pages_are_paced_and_never_revoke_friends_or_reuse_old_membership() {
+    let (mut peer, _worker) = setup();
+    peer.search_contacts(source(), 1, ContactText::new("Synthetic Name").unwrap(), Instant::now())
+        .unwrap();
+    let search = peer.contacts.search_key.unwrap();
+    assert_eq!(search.channel, ContactChannel::Search);
+    let pending = ContactPage {
+        key: search,
+        policy_revision: 1,
+        offset: 0,
+        total: 0,
+        limited: false,
+        pending: true,
+        rows: vec![],
+    };
+    peer.observe(&event(&peer, 3, ChatEvent::ContactPage(pending))).unwrap();
+    let now = Instant::now();
+    let before = peer.sent;
+    peer.poll_contacts(now + Duration::from_millis(10));
+    assert_eq!(peer.sent, before, "pending HTTP is not a busy loop");
+    peer.poll_contacts(now + Duration::from_millis(300));
+    assert_eq!(peer.sent, before + 1);
+    assert!(
+        peer.contacts.snapshot(true).selected(key(1), resident(), 1),
+        "pending Search preserves Friends"
+    );
+    let ready = ContactPage { key: search, ..page(2) };
+    peer.observe(&event(&peer, 4, ChatEvent::ContactPage(ready.clone()))).unwrap();
+    assert!(peer.contacts.snapshot(true).selected(search, resident(), 1));
+    peer.search_contacts(source(), 1, ContactText::new("Different Name").unwrap(), Instant::now())
+        .unwrap();
+    assert!(
+        !peer.contacts.snapshot(true).selected(search, resident(), 1),
+        "new query immediately revokes previous Search membership"
+    );
+    assert!(peer.contacts.snapshot(true).selected(key(1), resident(), 1));
+    assert_eq!(
+        peer.observe(&event(&peer, 5, ChatEvent::ContactPage(ready))),
+        Err(ChatError::StaleRequest)
+    );
+    assert!(peer.contacts.snapshot(true).search_loading);
 }

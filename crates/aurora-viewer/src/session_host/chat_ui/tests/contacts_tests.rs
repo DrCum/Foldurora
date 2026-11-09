@@ -118,8 +118,11 @@ fn contacts_ui_actual_friend_row_selects_locally_then_explicit_open_captures_off
     let snapshot = contacts_snapshot();
     let mut frames = Frames::new();
     assert!(frames.click(&snapshot, Id::unique("host_contacts_friends_rect")).is_none());
-    assert_eq!(frames.ui.take_contact_action(), Some(ContactAction::Refresh(source())),
-        "opening Friends requests one original-source metadata refresh, never an IM");
+    assert_eq!(
+        frames.ui.take_contact_action(),
+        Some(ContactAction::Refresh(source())),
+        "opening Friends requests one original-source metadata refresh, never an IM"
+    );
     let resident = snapshot.contacts.friends.as_ref().unwrap().rows[0].resident;
     assert!(frames.click(&snapshot, Id::unique(("host_contact_row_rect", resident))).is_none());
     assert_eq!(frames.ui.key().conversation, Conversation::Nearby);
@@ -157,4 +160,44 @@ fn contacts_ui_missing_fresh_view_cannot_select_cached_row_but_later_authorized_
     ui.sync(Some(&snapshot));
     assert_eq!(ui.key().conversation, direct());
     assert!(ui.view.contacts.pending.is_none());
+}
+
+#[test]
+fn contact_search_ui_captures_explicit_query_and_friends_can_open_during_search() {
+    let mut snapshot = contacts_snapshot();
+    let mut frames = Frames::new();
+    assert!(frames.click(&snapshot, Id::unique("host_contacts_new_rect")).is_none());
+    assert!(frames.ui.take_contact_action().is_none(), "opening New IM performs no search");
+    assert!(frames.click(&snapshot, Id::unique("host_contacts_query_rect")).is_none());
+    assert!(frames.show(Some(&snapshot), vec![Event::Text("Synthetic.Name".into())]).is_none());
+    assert!(frames.click(&snapshot, Id::unique("host_contacts_search_rect")).is_none());
+    let Some(ContactAction::Search {
+        source: captured,
+        revision,
+        query,
+    }) = frames.ui.take_contact_action()
+    else {
+        panic!("explicit Search action")
+    };
+    assert_eq!(captured, source());
+    assert_eq!(revision, 1);
+    assert_eq!(query.as_str(), "Synthetic.Name");
+    assert_eq!(frames.ui.key().conversation, Conversation::Nearby);
+    snapshot.contacts.search_loading = true;
+    snapshot.contacts.search_key = Some(ContactKey {
+        source: source(),
+        channel: ContactChannel::Search,
+        token: 2,
+    });
+    snapshot.contacts.search_query = Some(query);
+    assert!(frames.click(&snapshot, Id::unique("host_contacts_friends_rect")).is_none());
+    let _ = frames.ui.take_contact_action();
+    let resident = snapshot.contacts.friends.as_ref().unwrap().rows[0].resident;
+    assert!(frames.click(&snapshot, Id::unique(("host_contact_row_rect", resident))).is_none());
+    assert!(frames.click(&snapshot, Id::unique("host_contacts_open_rect")).is_none());
+    let Some(ContactAction::Open(open)) = frames.ui.take_contact_action() else {
+        panic!("Friends remain usable during Search")
+    };
+    assert_eq!(open.request.selection.channel, ContactChannel::Friends);
+    assert!(frames.ui.take_read_action().is_none() && frames.ui.take_close_action().is_none());
 }

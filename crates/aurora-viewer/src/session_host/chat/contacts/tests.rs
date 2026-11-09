@@ -52,6 +52,9 @@ struct Native {
     opens: usize,
     allow: bool,
     display: String,
+    searches: usize,
+    search_key: Option<ContactKey>,
+    search_ready: bool,
 }
 impl Default for Native {
     fn default() -> Self {
@@ -63,6 +66,9 @@ impl Default for Native {
             opens: 0,
             allow: true,
             display: "Synthetic friend".into(),
+            searches: 0,
+            search_key: None,
+            search_ready: false,
         }
     }
 }
@@ -110,6 +116,20 @@ impl NativeChat for Native {
                 can_open: true,
             }],
         })
+    }
+    fn start_search(&mut self, key: ContactKey, _query: &str) -> Result<(), ChatError> {
+        self.searches += 1;
+        self.search_key = Some(key);
+        Ok(())
+    }
+    fn search(&self, key: ContactKey) -> Result<Option<NativeContacts>, ChatError> {
+        if self.search_key != Some(key) {
+            return Err(ChatError::Binding);
+        }
+        if !self.search_ready {
+            return Ok(None);
+        }
+        self.friends().map(Some)
     }
     fn open_direct(&mut self, request: OpenDirectRequest) -> OpenDirectOutcome {
         self.opens += 1;
@@ -244,5 +264,62 @@ fn contacts_worker_pages_keep_snapshot_but_policy_and_source_changes_revoke_old_
     let recovered = worker.handle_received(&mut native, &query, now, now).unwrap();
     assert_eq!(receipt(&recovered).receipt, unknown);
     assert!(receipt(&recovered).view.is_none());
+    assert_eq!(native.opens, 0);
+}
+
+#[test]
+fn contact_search_worker_pending_poll_and_duplicate_begin_never_repeat_http_and_old_policy_cannot_open() {
+    use aurora_session::chat::ContactSearchRequest;
+    let (mut worker, mut native) = (WorkerChat::default(), Native::default());
+    prepare(&mut worker, &mut native);
+    let key = ContactKey {
+        channel: ContactChannel::Search,
+        token: 2,
+        ..selection()
+    };
+    let request = ContactSearchRequest {
+        key,
+        policy_revision: 1,
+        query: ContactText::new("Synthetic Name").unwrap(),
+    };
+    for sequence in 2..=3 {
+        let reply = run(&mut worker, &mut native, sequence, ChatCommand::SearchContacts(request.clone()));
+        assert!(
+            reply
+                .iter()
+                .any(|packet| matches!(&packet.message,ChatMessage::Event(ChatEvent::ContactPage(page)) if page.pending && page.key==key))
+        );
+    }
+    assert_eq!(native.searches, 1);
+    let changed = ContactSearchRequest {
+        query: ContactText::new("Different query").unwrap(),
+        ..request
+    };
+    assert_eq!(
+        worker.handle(&mut native, &packet(4, ChatCommand::SearchContacts(changed))),
+        Err(ChatError::RequestChanged)
+    );
+    native.search_ready = true;
+    let rows = run(
+        &mut worker,
+        &mut native,
+        5,
+        ChatCommand::ContactPage(ContactPageRequest { key, offset: 0 }),
+    );
+    assert!(
+        rows.iter().any(
+            |packet| matches!(&packet.message,ChatMessage::Event(ChatEvent::ContactPage(page)) if !page.pending && page.rows.len()==1)
+        )
+    );
+    let open = OpenDirectRequest {
+        selection: key,
+        ..operation()
+    };
+    native.stamp += 1;
+    let result = run(&mut worker, &mut native, 6, ChatCommand::OpenDirect(open));
+    assert_eq!(
+        receipt(&result).receipt.state,
+        OpenDirectState::Terminal(OpenDirectOutcome::StaleTarget)
+    );
     assert_eq!(native.opens, 0);
 }

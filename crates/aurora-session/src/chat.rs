@@ -543,6 +543,7 @@ impl ChatDrafts {
 pub enum ChatCommand {
     Send(SendRequest),
     ContactPage(ContactPageRequest),
+    SearchContacts(ContactSearchRequest),
     OpenDirect(OpenDirectRequest),
     QueryOpenDirect(OpenDirectRequest),
     CloseConversation(CloseRequest),
@@ -600,6 +601,7 @@ impl fmt::Debug for ChatPacket {
             ChatMessage::Command(ChatCommand::ReviewConversation(_)) => "review_conversation",
             ChatMessage::Command(ChatCommand::QueryReviewReceipt(_)) => "query_review_receipt",
             ChatMessage::Command(ChatCommand::ContactPage(_)) => "contact_page",
+            ChatMessage::Command(ChatCommand::SearchContacts(_)) => "search_contacts",
             ChatMessage::Command(ChatCommand::OpenDirect(_)) => "open_direct",
             ChatMessage::Command(ChatCommand::QueryOpenDirect(_)) => "query_open_direct",
             ChatMessage::Command(ChatCommand::Poll { .. }) => "poll",
@@ -639,6 +641,10 @@ impl ChatPacket {
             ChatMessage::Command(command) => {
                 if self.reply_to != 0 {
                     return Err(ChatError::Sequence);
+                }
+                if let ChatCommand::SearchContacts(request) = command {
+                    request.validate()?;
+                    source = request.key.source;
                 }
                 if let ChatCommand::ContactPage(request) = command {
                     request.validate()?;

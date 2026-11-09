@@ -60,6 +60,12 @@ pub(crate) trait NativeChat {
     fn friends(&self) -> Result<NativeContacts, ChatError> {
         Err(ChatError::Unavailable)
     }
+    fn start_search(&mut self, _key: aurora_session::chat::ContactKey, _query: &str) -> Result<(), ChatError> {
+        Err(ChatError::Unavailable)
+    }
+    fn search(&self, _key: aurora_session::chat::ContactKey) -> Result<Option<NativeContacts>, ChatError> {
+        Err(ChatError::Unavailable)
+    }
     /// Recheck native membership/permission before creating anything. No focus,
     /// Read, unblocking, message, call or native-window activation is permitted.
     fn open_direct(&mut self, _request: aurora_session::chat::OpenDirectRequest) -> aurora_session::chat::OpenDirectOutcome {
@@ -428,6 +434,7 @@ impl WorkerChat {
         self.outgoing.checked_add(MAX_REPLY as u64).ok_or(ChatError::Sequence)?;
         match command {
             ChatCommand::ContactPage(request) => self.contact_page(native, packet, *request),
+            ChatCommand::SearchContacts(request) => self.search_contacts(native, packet, request, received_at, now),
             ChatCommand::OpenDirect(request) => self.open_direct(native, packet, *request, received_at, now, false),
             ChatCommand::QueryOpenDirect(request) => self.open_direct(native, packet, *request, received_at, now, true),
             ChatCommand::CloseConversation(request) => {

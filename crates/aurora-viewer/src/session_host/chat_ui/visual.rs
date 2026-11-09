@@ -499,3 +499,49 @@ fn host_chat_cpu_visual_fixture() {
     std::fs::write(output.join("manifest.json"), serde_json::to_vec_pretty(&manifest).unwrap()).unwrap();
     println!("CPU chat visual captures: {}", output.display());
 }
+
+#[test]
+#[ignore = "explicit synthetic CPU Friends capture; run alone with AURORA_HOST_CONTACTS_VISUAL_DIR"]
+fn host_contacts_cpu_visual_fixture() {
+    use aurora_session::chat::{CompletedContacts, ContactChannel, ContactKey, ContactRow, ContactText, ContactsPolicy};
+    let output =
+        std::path::PathBuf::from(std::env::var_os("AURORA_HOST_CONTACTS_VISUAL_DIR").expect("set a new disposable capture directory"));
+    assert!(
+        !output.exists() || std::fs::read_dir(&output).unwrap().next().is_none(),
+        "preserve previous captures"
+    );
+    std::fs::create_dir_all(&output).unwrap();
+    let mut snapshot = snapshot(source());
+    snapshot.contacts.policy = Some(ContactsPolicy {
+        source: source(),
+        revision: 1,
+        can_browse: true,
+    });
+    snapshot.contacts.friends = Some(CompletedContacts {
+        key: ContactKey {
+            source: source(),
+            channel: ContactChannel::Friends,
+            token: 1,
+        },
+        policy_revision: 1,
+        limited: false,
+        rows: (10..13)
+            .map(|id| ContactRow {
+                resident: ConversationId::from_bytes([id; 16]).unwrap(),
+                display: ContactText::new(&format!("Synthetic friend {id}")).unwrap(),
+                username: ContactText::new(&format!("synthetic.friend{id}")).unwrap(),
+                online: id == 10,
+                can_open: id != 12,
+            })
+            .collect(),
+    });
+    let mut records = Vec::new();
+    for (name, size) in [("friends-normal", [640, 640]), ("friends-narrow", [380, 640])] {
+        let mut frames = Frames::new(size, 1.0);
+        assert!(frames.click(&snapshot, Id::unique("host_contacts_friends_rect")).is_none());
+        assert!(matches!(frames.chat.take_contact_action(), Some(ContactAction::Refresh(_))));
+        let title = snapshot.conversations[0].title.as_str();
+        records.push(frames.capture(&output, name, &snapshot, title, &[NEARBY_SENDER], &[DIRECT_TEXT]));
+    }
+    std::fs::write(output.join("contacts-captures.json"), serde_json::to_vec_pretty(&records).unwrap()).unwrap();
+}

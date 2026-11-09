@@ -3,7 +3,7 @@
 use super::super::chat_broker::OpenStatus;
 use super::*;
 use aurora_session::ConversationId;
-use aurora_session::chat::{ContactKey, OpenDirectOutcome, OpenDirectRequest};
+use aurora_session::chat::{ContactKey, ContactText, OpenDirectOutcome, OpenDirectRequest};
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -13,16 +13,22 @@ pub(crate) struct OpenDraft {
     pub surface: ChatSurface,
     pub generation: u64,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ContactAction {
     Refresh(ChatSource),
     Open(OpenDraft),
+    Search {
+        source: ChatSource,
+        revision: u64,
+        query: ContactText<127>,
+    },
 }
 impl ContactAction {
-    pub fn source(self) -> ChatSource {
+    pub fn source(&self) -> ChatSource {
         match self {
-            Self::Refresh(source) => source,
+            Self::Refresh(source) => *source,
             Self::Open(draft) => draft.request.selection.source,
+            Self::Search { source, .. } => *source,
         }
     }
 }
@@ -30,6 +36,11 @@ impl ContactAction {
 pub(super) struct ContactsUi {
     visible: bool,
     filter: String,
+    query: String,
+    search_mode: bool,
+    search_key: Option<ContactKey>,
+    search_requested: Option<(Option<ContactKey>, Instant)>,
+    search_error: bool,
     online: bool,
     selection: Option<(ContactKey, ConversationId, u64)>,
     policy: Option<u64>,
@@ -43,6 +54,7 @@ impl ContactsUi {
     pub fn cancel(&mut self) {
         self.pending = None;
         self.action = None;
+        self.search_requested = None;
         self.generation = self.generation.saturating_add(1);
     }
     pub fn sync(&mut self, snapshot: Option<&HostChatSnapshot>) {
@@ -55,6 +67,16 @@ impl ContactsUi {
             self.selection = None;
             self.refreshed = None;
         }
+        let next_key = snapshot.and_then(|snapshot| snapshot.contacts.search_key);
+        if let Some((previous, since)) = self.search_requested {
+            let changed = next_key != previous
+                || snapshot.is_some_and(|snapshot| snapshot.contacts.search_loading || snapshot.contacts.search_failed);
+            if changed || since.elapsed() > Duration::from_secs(5) {
+                self.search_requested = None;
+                self.search_error = !changed;
+            }
+        }
+        self.search_key = next_key;
         self.policy = policy;
         if policy.is_none() {
             self.visible = false;
@@ -91,24 +113,44 @@ impl ContactsUi {
     ) -> bool {
         self.action = None;
         let available = snapshot.is_some_and(|snapshot| snapshot.contacts.policy.is_some_and(|policy| policy.can_browse));
-        let friends_button = ui.add_enabled(
-            available && matches!(mode, InputMode::Live | InputMode::Editing),
-            egui::Button::selectable(self.visible, aurora_i18n::tr!("common-friends")),
-        );
-        #[cfg(test)]
-        ui.ctx()
-            .data_mut(|data| data.insert_temp(Id::unique("host_contacts_friends_rect"), friends_button.rect));
-        let clicked = friends_button.clicked();
+        let mut clicked = false;
+        ui.horizontal_wrapped(|ui| {
+            let friends_button = ui.add_enabled(
+                available && matches!(mode, InputMode::Live | InputMode::Editing),
+                egui::Button::selectable(self.visible && !self.search_mode, aurora_i18n::tr!("common-friends")),
+            );
+            #[cfg(test)]
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(Id::unique("host_contacts_friends_rect"), friends_button.rect));
+            let new_button = ui.add_enabled(
+                available && matches!(mode, InputMode::Live | InputMode::Editing),
+                egui::Button::selectable(self.visible && self.search_mode, aurora_i18n::tr!("host-contacts-new")),
+            );
+            #[cfg(test)]
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(Id::unique("host_contacts_new_rect"), new_button.rect));
+            if friends_button.clicked() {
+                self.visible = !(self.visible && !self.search_mode);
+                self.search_mode = false;
+                clicked = true;
+            }
+            if new_button.clicked() {
+                self.visible = !(self.visible && self.search_mode);
+                self.search_mode = true;
+                clicked = true;
+            }
+        });
         if clicked {
-            self.visible = !self.visible;
             self.cancel();
+            self.selection = None;
         }
         if !self.visible || !available {
             return clicked;
         }
         let snapshot = snapshot.expect("checked snapshot");
         let now = Instant::now();
-        if !snapshot.contacts.loading
+        if !self.search_mode
+            && !snapshot.contacts.loading
             && self
                 .refreshed
                 .is_none_or(|when| now.saturating_duration_since(when) >= Duration::from_secs(5))
@@ -116,32 +158,86 @@ impl ContactsUi {
         {
             self.action = Some(ContactAction::Refresh(source));
         }
-        ui.horizontal_wrapped(|ui| {
-            ui.add(
-                TextEdit::singleline(&mut self.filter)
-                    .hint_text(aurora_i18n::tr!("host-contacts-filter"))
-                    .char_limit(127)
-                    .desired_width(180.0),
-            );
-            ui.checkbox(&mut self.online, aurora_i18n::tr!("host-contacts-online"));
-        });
-        if snapshot.contacts.loading {
-            ui.label(aurora_i18n::tr!("host-contacts-loading"));
-        }
-        if snapshot.contacts.failed {
-            ui.label(aurora_i18n::tr!("host-contacts-failed"));
+        if self.search_mode {
+            ui.horizontal_wrapped(|ui| {
+                let input = ui.add(
+                    TextEdit::singleline(&mut self.query)
+                        .hint_text(aurora_i18n::tr!("host-contacts-query"))
+                        .char_limit(127)
+                        .desired_width(180.0),
+                );
+                #[cfg(test)]
+                ui.ctx()
+                    .data_mut(|data| data.insert_temp(Id::unique("host_contacts_query_rect"), input.rect));
+                let query = ContactText::new(&self.query).ok().filter(|query| query.as_str().len() >= 2);
+                let enabled = mode == InputMode::Live
+                    && ui.input(|input| input.focused)
+                    && !egui::Popup::is_any_open(ui.ctx())
+                    && !snapshot.contacts.search_loading
+                    && self.search_requested.is_none()
+                    && query.is_some();
+                let button = ui.add_enabled(enabled, egui::Button::new(aurora_i18n::tr!("host-contacts-search")));
+                #[cfg(test)]
+                ui.ctx()
+                    .data_mut(|data| data.insert_temp(Id::unique("host_contacts_search_rect"), button.rect));
+                if button.clicked()
+                    && let (Some(query), Some(policy)) = (query, snapshot.contacts.policy)
+                {
+                    self.cancel();
+                    self.selection = None;
+                    self.search_error = false;
+                    self.action = Some(ContactAction::Search {
+                        source,
+                        revision: policy.revision,
+                        query,
+                    });
+                }
+            });
+            if let Some(query) = &snapshot.contacts.search_query {
+                ui.label(aurora_i18n::tr!("host-contacts-results", query = query.as_str()));
+            }
+            if snapshot.contacts.search_loading || self.search_requested.is_some() {
+                ui.label(aurora_i18n::tr!("host-contacts-searching"));
+            }
+            if snapshot.contacts.search_failed || self.search_error {
+                ui.label(aurora_i18n::tr!("host-contacts-search-failed"));
+            }
+        } else {
+            ui.horizontal_wrapped(|ui| {
+                ui.add(
+                    TextEdit::singleline(&mut self.filter)
+                        .hint_text(aurora_i18n::tr!("host-contacts-filter"))
+                        .char_limit(127)
+                        .desired_width(180.0),
+                );
+                ui.checkbox(&mut self.online, aurora_i18n::tr!("host-contacts-online"));
+            });
+            if snapshot.contacts.loading {
+                ui.label(aurora_i18n::tr!("host-contacts-loading"));
+            }
+            if snapshot.contacts.failed {
+                ui.label(aurora_i18n::tr!("host-contacts-failed"));
+            }
         }
         let mut double = false;
-        if let Some(friends) = &snapshot.contacts.friends {
+        if let Some(friends) = if self.search_mode {
+            &snapshot.contacts.search
+        } else {
+            &snapshot.contacts.friends
+        } {
             if friends.limited {
                 ui.label(aurora_i18n::tr!("host-contacts-limited"));
             }
-            let filter = self.filter.to_ascii_lowercase();
+            let filter = if self.search_mode {
+                String::new()
+            } else {
+                self.filter.to_ascii_lowercase()
+            };
             let rows: Vec<_> = friends
                 .rows
                 .iter()
                 .filter(|row| {
-                    (!self.online || row.online)
+                    (self.search_mode || !self.online || row.online)
                         && (filter.is_empty()
                             || format!("{} {}", row.display.as_str(), row.username.as_str())
                                 .to_ascii_lowercase()
@@ -180,7 +276,8 @@ impl ContactsUi {
                     }
                 });
         }
-        let enabled = !snapshot.contacts.open_busy
+        let enabled = (!self.search_mode || (self.search_requested.is_none() && !snapshot.contacts.search_loading))
+            && !snapshot.contacts.open_busy
             && self.pending.is_none()
             && self.generation != u64::MAX
             && mode == InputMode::Live
@@ -234,8 +331,12 @@ impl ChatUi {
     }
     pub fn take_contact_action(&mut self) -> Option<ContactAction> {
         let action = self.view.contacts.action.take();
-        if matches!(action, Some(ContactAction::Refresh(_))) {
-            self.view.contacts.refreshed = Some(Instant::now());
+        match &action {
+            Some(ContactAction::Refresh(_)) => self.view.contacts.refreshed = Some(Instant::now()),
+            Some(ContactAction::Search { .. }) => {
+                self.view.contacts.search_requested = Some((self.view.contacts.search_key, Instant::now()))
+            }
+            _ => {}
         }
         action
     }

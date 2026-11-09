@@ -113,6 +113,11 @@ enum HostIntent {
     ChatRead(MarkReadRequest),
     ChatClose(CloseRequest),
     ChatContacts(ChatSource),
+    ChatSearch {
+        source: ChatSource,
+        revision: u64,
+        query: aurora_session::chat::ContactText<127>,
+    },
     ChatOpenDirect(aurora_session::chat::OpenDirectRequest),
     ReviewConversation(ReviewCapture, HostedViewport),
     CancelReview(u64),
@@ -135,6 +140,7 @@ impl HostIntent {
             | Self::ChatRead(_)
             | Self::ChatClose(_)
             | Self::ChatContacts(_)
+            | Self::ChatSearch { .. }
             | Self::ChatOpenDirect(_)
             | Self::ReviewConversation(_, _)
             | Self::CancelReview(_)
@@ -546,6 +552,27 @@ impl HostController {
             return Err(HostError::Unavailable);
         }
         self.send(HostIntent::ChatContacts(source))
+    }
+    pub fn search_contacts(
+        &self,
+        source: ChatSource,
+        revision: u64,
+        query: aurora_session::chat::ContactText<127>,
+    ) -> Result<u64, HostError> {
+        if query.as_str().len() < 2
+            || !self.snapshot().chat.iter().any(|chat| {
+                chat.source == source
+                    && chat.authenticated
+                    && chat.live
+                    && chat
+                        .contacts
+                        .policy
+                        .is_some_and(|policy| policy.can_browse && policy.revision == revision)
+            })
+        {
+            return Err(HostError::Unavailable);
+        }
+        self.send(HostIntent::ChatSearch { source, revision, query })
     }
     pub fn open_direct(&self, request: aurora_session::chat::OpenDirectRequest) -> Result<u64, HostError> {
         if !(aurora_session::chat::OpenDirectRequest { request: 1, ..request })
@@ -1634,6 +1661,22 @@ impl Broker {
             HostIntent::Detach(worker) => {
                 let effects = self.coordinator.detach(worker)?;
                 self.effects(effects)?;
+            }
+            HostIntent::ChatSearch { source, revision, query } => {
+                let live = self
+                    .coordinator
+                    .workers()
+                    .any(|entry| entry.live && entry.binding == source.binding() && entry.status.phase == Phase::Online);
+                let child = self
+                    .children
+                    .iter_mut()
+                    .find(|child| child.config.identity == source.worker && child.config.lease_epoch == source.lease_epoch)
+                    .ok_or(HostError::Unavailable)?;
+                if !live || child.detached || child.exited || child.last_seen.is_none_or(|seen| seen.elapsed() > REACHABLE) {
+                    child.chat.set_control(None, false);
+                    anyhow::bail!(HostError::Unavailable);
+                }
+                child.chat.search_contacts(source, revision, query, Instant::now())?;
             }
             HostIntent::ChatContacts(source) => {
                 let live = self

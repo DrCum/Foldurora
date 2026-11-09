@@ -122,6 +122,26 @@ impl ContactPageRequest {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct ContactSearchRequest {
+    pub key: ContactKey,
+    pub policy_revision: u64,
+    pub query: ContactText<127>,
+}
+impl ContactSearchRequest {
+    pub fn validate(&self) -> Result<(), ChatError> {
+        self.key.validate()?;
+        if self.key.channel != ContactChannel::Search || self.query.as_str().len() < 2 {
+            return Err(ChatError::Invalid);
+        }
+        if self.policy_revision == 0 {
+            return Err(ChatError::StalePolicy);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ContactPage {
     pub key: ContactKey,
     pub policy_revision: u64,

@@ -372,6 +372,9 @@ impl Shell {
                     super::chat_ui::ContactAction::Refresh(source) => {
                         let _ = self.controller.refresh_contacts(source);
                     }
+                    super::chat_ui::ContactAction::Search { source, revision, query } => {
+                        let _ = self.controller.search_contacts(source, revision, query);
+                    }
                     super::chat_ui::ContactAction::Open(draft) => match self.controller.open_direct(draft.request) {
                         Ok(ticket) => self.shared_chat.queued_open(draft, ticket),
                         Err(_) => self.shared_chat.open_queue_failed(draft),

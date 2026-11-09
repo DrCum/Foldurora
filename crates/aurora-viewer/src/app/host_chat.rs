@@ -75,6 +75,27 @@ impl NativeChat for AppChat<'_> {
         self.source().ok_or(ChatError::Binding)?;
         contacts::friends(&self.app.world, !self.app.exit_prompt.open)
     }
+    fn start_search(&mut self, key: aurora_session::chat::ContactKey, query: &str) -> Result<(), ChatError> {
+        if self.source() != Some(key.source) || !contacts::policy(&self.app.world, !self.app.exit_prompt.open).can_browse {
+            return Err(ChatError::Denied);
+        }
+        let command = self
+            .app
+            .world
+            .begin_host_contact_search(key, query)
+            .map_err(|_| ChatError::Unavailable)?;
+        if self.source() != Some(key.source) {
+            return Err(ChatError::Binding);
+        }
+        self.app.send(command);
+        Ok(())
+    }
+    fn search(&self, key: aurora_session::chat::ContactKey) -> Result<Option<crate::session_host::chat::NativeContacts>, ChatError> {
+        if self.source() != Some(key.source) {
+            return Err(ChatError::Binding);
+        }
+        contacts::search(&self.app.world, key, !self.app.exit_prompt.open)
+    }
     fn open_direct(&mut self, request: aurora_session::chat::OpenDirectRequest) -> aurora_session::chat::OpenDirectOutcome {
         if self.source() != Some(request.selection.source) {
             return aurora_session::chat::OpenDirectOutcome::RejectedNative;

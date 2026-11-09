@@ -2,11 +2,11 @@
 //! Socket recovery can query a receipt, never resubmit native Open.
 use super::*;
 use aurora_session::ConversationId;
-use aurora_session::chat::NativeChatPolicy;
 use aurora_session::chat::{
     CompletedContacts, ContactChannel, ContactDirectory, ContactKey, ContactPage, ContactPageRequest, ContactsPolicy, MAX_RECEIPTS,
     OpenDirectOutcome, OpenDirectReply, OpenDirectRequest, OpenDirectState,
 };
+use aurora_session::chat::{ContactSearchRequest, ContactText, NativeChatPolicy};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum OpenStatus {
     Pending,
@@ -23,6 +23,11 @@ pub(crate) struct OpenOperation {
 pub(crate) struct ContactsSnapshot {
     pub policy: Option<ContactsPolicy>,
     pub friends: Option<CompletedContacts>,
+    pub search: Option<CompletedContacts>,
+    pub search_key: Option<ContactKey>,
+    pub search_query: Option<ContactText<127>>,
+    pub search_loading: bool,
+    pub search_failed: bool,
     pub loading: bool,
     pub failed: bool,
     pub open_busy: bool,
@@ -30,14 +35,21 @@ pub(crate) struct ContactsSnapshot {
 }
 impl ContactsSnapshot {
     pub fn selected(&self, key: ContactKey, resident: ConversationId, revision: u64) -> bool {
+        let rows = match key.channel {
+            ContactChannel::Friends => &self.friends,
+            ContactChannel::Search => &self.search,
+        };
         self.policy
             .is_some_and(|policy| policy.source == key.source && policy.can_browse && policy.revision == revision)
-            && key.channel == ContactChannel::Friends
-            && self.friends.as_ref().is_some_and(|friends| {
-                friends.key == key
-                    && friends.policy_revision == revision
-                    && friends.rows.iter().any(|row| row.resident == resident && row.can_open)
+            && rows.as_ref().is_some_and(|rows| {
+                rows.key == key && rows.policy_revision == revision && rows.rows.iter().any(|row| row.resident == resident && row.can_open)
             })
+    }
+}
+fn channel_index(channel: ContactChannel) -> usize {
+    match channel {
+        ContactChannel::Friends => 0,
+        ContactChannel::Search => 1,
     }
 }
 struct PageFlight {
@@ -60,8 +72,11 @@ pub(super) struct ContactsBook {
     directory: Option<ContactDirectory>,
     policy: Option<ContactsPolicy>,
     serial: u64,
-    flight: Option<PageFlight>,
-    failed: bool,
+    flight: [Option<PageFlight>; 2],
+    page_at: [Option<Instant>; 2],
+    failed: [bool; 2],
+    search_key: Option<ContactKey>,
+    search_query: Option<ContactText<127>>,
     opens: VecDeque<OpenRecord>,
     open_highwater: u64,
     pending: Option<OpenFlight>,
@@ -71,8 +86,11 @@ impl ContactsBook {
         if let Some(directory) = &mut self.directory {
             directory.clear();
         }
-        self.flight = None;
-        self.failed = false;
+        self.flight = [None, None];
+        self.page_at = [None, None];
+        self.failed = [false, false];
+        self.search_key = None;
+        self.search_query = None;
         for record in &mut self.opens {
             record.operation.presented = None;
         }
@@ -91,7 +109,16 @@ impl ContactsBook {
                     .directory
                     .as_ref()
                     .is_some_and(|directory| directory.request(ContactChannel::Friends).is_some()),
-            failed: active && self.failed,
+            search: policy.and_then(|_| self.directory.as_ref()?.completed(ContactChannel::Search).cloned()),
+            search_key: policy.and(self.search_key),
+            search_query: policy.and(self.search_query.clone()),
+            search_loading: active
+                && self
+                    .directory
+                    .as_ref()
+                    .is_some_and(|directory| directory.request(ContactChannel::Search).is_some()),
+            search_failed: active && self.failed[1],
+            failed: active && self.failed[0],
             open_busy: self.pending.is_some(),
             opens: self.opens.iter().map(|record| record.operation.clone()).collect(),
         }
@@ -105,30 +132,37 @@ impl ContactsBook {
             for record in &mut self.opens {
                 record.operation.presented = None;
             }
-            self.flight = None;
-            self.failed = false;
+            self.flight = [None, None];
+            self.page_at = [None, None];
+            self.failed = [false, false];
+            self.search_key = None;
+            self.search_query = None;
         }
         self.policy = Some(policy);
         Ok(())
     }
     pub(super) fn page(&mut self, reply_to: u64, page: &ContactPage) -> Result<(), ChatError> {
-        let flight = self.flight.as_ref().ok_or(ChatError::StaleRequest)?;
+        let index = channel_index(page.key.channel);
+        let flight = self.flight[index].as_ref().ok_or(ChatError::StaleRequest)?;
         if flight.sequence != reply_to || flight.request.key != page.key || flight.request.offset != page.offset {
             return Err(ChatError::StaleRequest);
         }
         self.directory.as_mut().ok_or(ChatError::Unavailable)?.accept(page)?;
-        self.flight = None;
-        self.failed = false;
+        self.flight[index] = None;
+        self.page_at[index] = page.pending.then(|| Instant::now() + Duration::from_millis(250));
+        self.failed[index] = false;
         Ok(())
     }
     pub(super) fn failed(&mut self, reply_to: u64, key: ContactKey) -> Result<(), ChatError> {
-        let flight = self.flight.as_ref().ok_or(ChatError::StaleRequest)?;
+        let index = channel_index(key.channel);
+        let flight = self.flight[index].as_ref().ok_or(ChatError::StaleRequest)?;
         if flight.sequence != reply_to || flight.request.key != key {
             return Err(ChatError::StaleRequest);
         }
         self.directory.as_mut().ok_or(ChatError::Unavailable)?.fail(key)?;
-        self.flight = None;
-        self.failed = true;
+        self.flight[index] = None;
+        self.page_at[index] = None;
+        self.failed[index] = true;
         Ok(())
     }
     fn open_status(&mut self, request: OpenDirectRequest, status: OpenStatus) {
@@ -212,36 +246,94 @@ impl Peer {
             .begin(ContactChannel::Friends, serial)
             .map_err(|_| HostError::Unavailable)?;
         self.contacts.serial = serial;
-        self.contacts.failed = false;
+        self.contacts.failed[0] = false;
         self.poll_contacts(now);
         self.publish();
         Ok(())
     }
-    pub(super) fn poll_contacts(&mut self, now: Instant) -> bool {
-        if let Some(flight) = &self.contacts.flight {
-            if now.saturating_duration_since(flight.since) < RECEIPT_WAIT {
-                return false;
-            }
-            let (sequence, key) = (flight.sequence, flight.request.key);
-            let _ = self.contacts.failed(sequence, key);
-            return true;
+    pub(in crate::session_host) fn search_contacts(
+        &mut self,
+        source: ChatSource,
+        revision: u64,
+        query: ContactText<127>,
+        now: Instant,
+    ) -> Result<(), HostError> {
+        if !self.live
+            || self.io.is_none()
+            || self.source != Some(source)
+            || !self
+                .contacts
+                .policy
+                .is_some_and(|policy| policy.can_browse && policy.revision == revision)
+        {
+            return Err(HostError::Unavailable);
         }
-        let Some(request) = self
-            .contacts
-            .directory
-            .as_ref()
-            .and_then(|directory| directory.request(ContactChannel::Friends))
-        else {
-            return false;
+        let directory = self.contacts.directory.as_mut().ok_or(HostError::Unavailable)?;
+        if directory.request(ContactChannel::Search).is_some() {
+            return Err(HostError::Busy);
+        }
+        let serial = self.contacts.serial.checked_add(1).ok_or(HostError::Unavailable)?;
+        let key = ContactKey {
+            source,
+            channel: ContactChannel::Search,
+            token: serial,
         };
-        if let Ok(sequence) = self.queue_contact_command(ChatCommand::ContactPage(request)) {
-            self.contacts.flight = Some(PageFlight {
-                request,
-                sequence,
-                since: now,
-            });
+        let request = ContactSearchRequest {
+            key,
+            policy_revision: revision,
+            query: query.clone(),
+        };
+        request.validate().map_err(|_| HostError::Unavailable)?;
+        directory
+            .begin(ContactChannel::Search, serial)
+            .map_err(|_| HostError::Unavailable)?;
+        self.contacts.serial = serial;
+        self.contacts.search_key = Some(key);
+        self.contacts.search_query = Some(query);
+        self.contacts.failed[1] = false;
+        match self.queue_contact_command(ChatCommand::SearchContacts(request)) {
+            Ok(sequence) => {
+                self.contacts.flight[1] = Some(PageFlight {
+                    request: ContactPageRequest { key, offset: 0 },
+                    sequence,
+                    since: now,
+                })
+            }
+            Err(_) => {
+                let _ = self.contacts.directory.as_mut().ok_or(HostError::Unavailable)?.fail(key);
+                self.contacts.failed[1] = true;
+            }
         }
-        false
+        self.publish();
+        Ok(())
+    }
+    pub(super) fn poll_contacts(&mut self, now: Instant) -> bool {
+        let mut changed = false;
+        for channel in [ContactChannel::Friends, ContactChannel::Search] {
+            let index = channel_index(channel);
+            if let Some(flight) = &self.contacts.flight[index] {
+                if now.saturating_duration_since(flight.since) >= RECEIPT_WAIT {
+                    let (sequence, key) = (flight.sequence, flight.request.key);
+                    let _ = self.contacts.failed(sequence, key);
+                    changed = true;
+                }
+                continue;
+            }
+            if self.contacts.page_at[index].is_some_and(|when| now < when) {
+                continue;
+            }
+            let Some(request) = self.contacts.directory.as_ref().and_then(|directory| directory.request(channel)) else {
+                continue;
+            };
+            if let Ok(sequence) = self.queue_contact_command(ChatCommand::ContactPage(request)) {
+                self.contacts.flight[index] = Some(PageFlight {
+                    request,
+                    sequence,
+                    since: now,
+                });
+            }
+        }
+        changed
     }
     pub(in crate::session_host) fn admit_open_direct(&mut self, request: OpenDirectRequest, now: Instant) -> Result<(), HostError> {
         if self.source != Some(request.selection.source) || request.validate().is_err() || request.request <= self.contacts.open_highwater {

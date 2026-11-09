@@ -1,6 +1,7 @@
 //! Bounded native Friends snapshots and once-only model Open, on the private
 //! authenticated chat lane. Native state remains the operation authority.
 use super::*;
+use aurora_session::chat::ContactSearchRequest;
 use aurora_session::chat::{
     ContactChannel, ContactKey, ContactPage, ContactPageRequest, ContactRow, ContactsPolicy, MAX_CONTACT_PAGE_ROWS, MAX_FRIEND_CONTACTS,
     OpenDirectLedger, OpenDirectOutcome, OpenDirectReply, OpenDirectRequest, OpenDirectState, OpenDirectView,
@@ -16,6 +17,11 @@ pub(crate) struct NativeContacts {
     pub rows: Vec<ContactRow>,
     pub limited: bool,
 }
+struct Search {
+    request: ContactSearchRequest,
+    data: Option<NativeContacts>,
+    failed: bool,
+}
 struct Friends {
     key: ContactKey,
     data: NativeContacts,
@@ -25,6 +31,8 @@ pub(super) struct WorkerContacts {
     pub(super) policy: Option<ContactsPolicy>,
     native: Option<NativeContactPolicy>,
     highwater: u64,
+    search_highwater: u64,
+    search: Option<Search>,
     friends: VecDeque<Friends>,
     opens: Option<OpenDirectLedger>,
 }
@@ -47,6 +55,7 @@ impl WorkerContacts {
             });
             self.native = policy;
             self.friends.clear();
+            self.search = None;
         }
         if self.opens.is_none() {
             self.opens = Some(OpenDirectLedger::new(source)?);
@@ -54,14 +63,93 @@ impl WorkerContacts {
         Ok(())
     }
     fn selection(&self, request: OpenDirectRequest) -> bool {
-        self.policy
+        if !self
+            .policy
             .is_some_and(|policy| policy.can_browse && policy.revision == request.policy_revision)
-            && self.friends.iter().any(|friends| {
+        {
+            return false;
+        }
+        match request.selection.channel {
+            ContactChannel::Friends => self.friends.iter().any(|friends| {
                 friends.key == request.selection && friends.data.rows.iter().any(|row| row.resident == request.resident && row.can_open)
-            })
+            }),
+            ContactChannel::Search => self
+                .search
+                .as_ref()
+                .filter(|search| !search.failed && search.request.key == request.selection)
+                .and_then(|search| search.data.as_ref())
+                .is_some_and(|data| data.rows.iter().any(|row| row.resident == request.resident && row.can_open)),
+        }
+    }
+    fn search_page(&mut self, request: ContactPageRequest, native: &impl NativeChat) -> Result<ContactPage, ChatError> {
+        let policy = self.policy.filter(|policy| policy.can_browse).ok_or(ChatError::Denied)?;
+        let search = self
+            .search
+            .as_mut()
+            .filter(|search| !search.failed && search.request.key == request.key)
+            .ok_or(ChatError::StaleRequest)?;
+        if search.data.is_none() {
+            match native.search(request.key) {
+                Ok(Some(data)) => {
+                    let mut seen = BTreeSet::new();
+                    if data.rows.len() > aurora_session::chat::MAX_SEARCH_CONTACTS {
+                        search.failed = true;
+                        return Err(ChatError::Capacity);
+                    }
+                    for row in &data.rows {
+                        row.validate()?;
+                        if !seen.insert(row.resident) {
+                            search.failed = true;
+                            return Err(ChatError::Invalid);
+                        }
+                    }
+                    search.data = Some(data);
+                }
+                Ok(None) => {
+                    if request.offset != 0 {
+                        return Err(ChatError::Invalid);
+                    }
+                    return Ok(ContactPage {
+                        key: request.key,
+                        policy_revision: policy.revision,
+                        offset: 0,
+                        total: 0,
+                        limited: false,
+                        pending: true,
+                        rows: vec![],
+                    });
+                }
+                Err(error) => {
+                    search.failed = true;
+                    return Err(error);
+                }
+            }
+        }
+        let data = search.data.as_ref().ok_or(ChatError::Unavailable)?;
+        if usize::from(request.offset) > data.rows.len() {
+            return Err(ChatError::Invalid);
+        }
+        Ok(ContactPage {
+            key: request.key,
+            policy_revision: policy.revision,
+            offset: request.offset,
+            total: data.rows.len() as u16,
+            limited: data.limited,
+            pending: false,
+            rows: data
+                .rows
+                .iter()
+                .skip(request.offset as usize)
+                .take(MAX_CONTACT_PAGE_ROWS)
+                .cloned()
+                .collect(),
+        })
     }
     fn page(&mut self, request: ContactPageRequest, native: &impl NativeChat) -> Result<ContactPage, ChatError> {
         let policy = self.policy.filter(|policy| policy.can_browse).ok_or(ChatError::Denied)?;
+        if request.key.channel == ContactChannel::Search {
+            return self.search_page(request, native);
+        }
         if request.key.source != policy.source || request.key.channel != ContactChannel::Friends {
             return Err(ChatError::Binding);
         }
@@ -109,6 +197,58 @@ impl WorkerContacts {
     }
 }
 impl WorkerChat {
+    pub(super) fn search_contacts(
+        &mut self,
+        native: &mut impl NativeChat,
+        packet: &ChatPacket,
+        request: &ContactSearchRequest,
+        received_at: Option<Instant>,
+        now: Instant,
+    ) -> Result<Vec<ChatPacket>, ChatError> {
+        let source = self.context(native)?;
+        self.contacts.sync(source, native)?;
+        let duplicate = self
+            .contacts
+            .search
+            .as_ref()
+            .is_some_and(|search| search.request.key == request.key);
+        if duplicate {
+            if self.contacts.search.as_ref().is_none_or(|search| search.request != *request) {
+                return Err(ChatError::RequestChanged);
+            }
+        } else {
+            if request.key.token <= self.contacts.search_highwater {
+                return Err(ChatError::StaleRequest);
+            }
+            self.contacts.search_highwater = request.key.token;
+            self.contacts.search = Some(Search {
+                request: request.clone(),
+                data: None,
+                failed: true,
+            });
+            let age = received_at.and_then(|received| now.checked_duration_since(received));
+            let allowed = age.is_some_and(|age| age <= Duration::from_secs(2))
+                && self
+                    .contacts
+                    .policy
+                    .is_some_and(|policy| policy.can_browse && policy.revision == request.policy_revision)
+                && self.context(native)? == source;
+            if allowed
+                && native.start_search(request.key, request.query.as_str()).is_ok()
+                && let Some(search) = &mut self.contacts.search
+            {
+                search.failed = false;
+            }
+        }
+        self.contact_page(
+            native,
+            packet,
+            ContactPageRequest {
+                key: request.key,
+                offset: 0,
+            },
+        )
+    }
     pub(super) fn contact_page(
         &mut self,
         native: &impl NativeChat,

@@ -43,6 +43,7 @@ pub mod group_money;
 pub mod groups;
 pub mod hand_ik;
 pub mod home;
+pub(crate) mod host_contacts;
 pub mod hover_height;
 pub mod hud_lock;
 pub mod hud_scale;
@@ -524,6 +525,7 @@ pub struct World {
     /// Block list (LLMuteList).
     pub mutes: mutes::MuteList,
     pub(crate) contact_policy: contact_policy::State,
+    pub(crate) host_contact_search: Option<host_contacts::Search>,
     pub poser_consent: poser_consent::State,
     pub portals: portals::State,
     /// Firestorm LSL bridge messages kept out of nearby chat.
@@ -847,6 +849,7 @@ impl World {
             aliases_synced: 0,
             mutes: mutes::MuteList::default(),
             contact_policy: Default::default(),
+            host_contact_search: None,
             poser_consent: poser_consent::State::default(),
             portals: portals::State::default(),
             lsl_bridge: lslbridge::LslBridge::default(),
@@ -2515,6 +2518,7 @@ impl World {
             | NetEvent::DisplayNameUpdate { source, .. }
             | NetEvent::SetDisplayNameReply { source, .. }
             | NetEvent::ContactPolicy { source, .. }
+            | NetEvent::ContactSearch { source, .. }
             | NetEvent::SavedInstantMessage { source, .. }
             | NetEvent::OfflineMessagesFailed { source } => Some(source),
             _ => None,
@@ -2528,6 +2532,7 @@ impl World {
         }
         match ev {
             NetEvent::LoggedIn(l) => {
+                self.host_contact_search = None;
                 self.contact_policy = contact_policy::State::for_login(&l);
                 self.bind_shared_chat_activity(l.agent_id, l.session_id);
                 self.agent_id = l.agent_id;
@@ -3488,6 +3493,10 @@ impl World {
                 if self.social.avatar_names.notify_changes {
                     self.system_message(notice);
                 }
+                None
+            }
+            NetEvent::ContactSearch { source, request, result } => {
+                self.complete_host_contact_search(&source, request, result);
                 None
             }
             NetEvent::ContactPolicy { source, feed, result } => match result {

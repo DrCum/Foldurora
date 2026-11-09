@@ -214,6 +214,9 @@ impl ChatWindow {
                 super::chat_ui::ContactAction::Refresh(source) => {
                     let _ = controller.refresh_contacts(source);
                 }
+                super::chat_ui::ContactAction::Search { source, revision, query } => {
+                    let _ = controller.search_contacts(source, revision, query);
+                }
                 super::chat_ui::ContactAction::Open(draft) => {
                     match controller.open_direct(draft.request) {
                         Ok(ticket) => model.queued_open(draft, ticket),

@@ -91,19 +91,62 @@ pub(super) fn friends(world: &World, ui_ready: bool) -> Result<NativeContacts, C
         limited: world.social.friends.len() > MAX_FRIEND_CONTACTS,
     })
 }
+pub(super) fn search(world: &World, key: aurora_session::chat::ContactKey, ui_ready: bool) -> Result<Option<NativeContacts>, ChatError> {
+    if !policy(world, ui_ready).can_browse {
+        return Err(ChatError::Denied);
+    }
+    let Some(results) = world.host_contact_search_results(key).map_err(|_| ChatError::Unavailable)? else {
+        return Ok(None);
+    };
+    let mut rows: Vec<_> = results
+        .residents
+        .iter()
+        .map(|resident| ContactRow {
+            resident: conversation_id(resident.id).expect("validated search UUID"),
+            display: text(&resident.display),
+            username: text(&resident.username),
+            online: world
+                .social
+                .friends
+                .iter()
+                .take(MAX_FRIEND_CONTACTS)
+                .any(|friend| friend.id == resident.id && friend.online),
+            can_open: eligible(world, resident.id) && exportable(world, resident.id),
+        })
+        .collect();
+    rows.sort_by(|a, b| {
+        b.online
+            .cmp(&a.online)
+            .then_with(|| {
+                a.display
+                    .as_str()
+                    .to_ascii_lowercase()
+                    .cmp(&b.display.as_str().to_ascii_lowercase())
+            })
+            .then_with(|| a.username.as_str().cmp(b.username.as_str()))
+            .then_with(|| a.resident.cmp(&b.resident))
+    });
+    Ok(Some(NativeContacts {
+        rows,
+        limited: results.limited,
+    }))
+}
 pub(super) fn open(world: &mut World, request: OpenDirectRequest, ui_ready: bool) -> OpenDirectOutcome {
     let peer = uuid(request.resident);
-    if request.validate().is_err()
-        || request.selection.channel != ContactChannel::Friends
-        || !policy(world, ui_ready).can_browse
-        || !world
+    let member = match request.selection.channel {
+        ContactChannel::Friends => world
             .social
             .friends
             .iter()
             .take(MAX_FRIEND_CONTACTS)
-            .any(|friend| friend.id == peer)
-        || !eligible(world, peer)
-    {
+            .any(|friend| friend.id == peer),
+        ContactChannel::Search => world
+            .host_contact_search_results(request.selection)
+            .ok()
+            .flatten()
+            .is_some_and(|results| results.residents.iter().any(|resident| resident.id == peer)),
+    };
+    if request.validate().is_err() || !member || !policy(world, ui_ready).can_browse || !eligible(world, peer) {
         return OpenDirectOutcome::RejectedNative;
     }
     if !exportable(world, peer) {
@@ -280,5 +323,54 @@ mod tests {
         assert_eq!(snapshot.rows.len(), MAX_FRIEND_CONTACTS);
         assert!(snapshot.limited);
         assert!(snapshot.rows[..MAX_FRIEND_CONTACTS / 2].iter().all(|row| row.online));
+    }
+    #[test]
+    fn contact_search_native_nonfriend_requires_captured_complete_membership_and_rechecks_new_query() {
+        use aurora_net::{
+            NetEvent,
+            contact_search::{Resident, Results},
+        };
+        let mut world = world();
+        world.social.end_friendship(&PEER);
+        let mut request = request();
+        request.selection.channel = ContactChannel::Search;
+        let NetCommand::ContactSearch { source, request: id, .. } =
+            world.begin_host_contact_search(request.selection, "Synthetic Name").unwrap()
+        else {
+            panic!()
+        };
+        assert_eq!(
+            open(&mut world, request, true),
+            OpenDirectOutcome::RejectedNative,
+            "pending HTTP grants no membership"
+        );
+        world.apply(NetEvent::ContactSearch {
+            source,
+            request: id,
+            result: Ok(Results {
+                residents: vec![Resident {
+                    id: PEER,
+                    display: "Search resident".into(),
+                    username: "search.resident".into(),
+                }],
+                limited: false,
+            }),
+        });
+        let rows = search(&world, request.selection, true).unwrap().unwrap();
+        assert_eq!(rows.rows.len(), 1);
+        assert!(rows.rows[0].can_open);
+        assert!(matches!(open(&mut world, request, true), OpenDirectOutcome::Opened { .. }));
+        assert!(world.social.focus_im.is_none());
+        assert!(world.social.ims[0].lines.is_empty());
+        let key = aurora_session::chat::ContactKey {
+            token: 2,
+            ..request.selection
+        };
+        world.begin_host_contact_search(key, "Different Name").unwrap();
+        assert_eq!(
+            open(&mut world, request, true),
+            OpenDirectOutcome::RejectedNative,
+            "completed previous search cannot authorize a new Open"
+        );
     }
 }
