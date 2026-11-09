@@ -13657,3 +13657,8 @@ workspaces-expanded-unavailable = Expanded folders are unavailable. Use the main
 
 workspaces-capture-additional = Remember the additional Inventory window
 workspaces-additional-unavailable = Additional Inventory could not be restored. Close its dialogs, finish edits, and try again.
+
+workspaces-background-common = Common color
+workspaces-background-display = Display { $number }
+workspaces-background-display-fallback = Display arrangement changed. Using the common color.
+workspaces-background-inherit = Use common color

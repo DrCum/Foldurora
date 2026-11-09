@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 mod background;
-pub(crate) use background::Background;
+pub(crate) use background::{Arrangement, Background, MAX_DISPLAYS};
 mod camera;
 pub(crate) use camera::CameraContext;
 mod inventory_window;
@@ -218,7 +218,10 @@ impl Layout {
                 .as_ref()
                 .zip(current.huds.as_ref())
                 .is_none_or(|(wanted, live)| wanted.is_subset_of(live))
-            && self.background.is_none_or(|saved| current.background == Some(saved))
+            && self
+                .background
+                .as_ref()
+                .is_none_or(|saved| current.background.as_ref() == Some(saved))
             && self.graphics.as_ref().is_none_or(|saved| current.graphics.as_ref() == Some(saved))
             && self
                 .camera

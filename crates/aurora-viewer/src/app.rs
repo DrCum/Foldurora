@@ -147,6 +147,7 @@ mod texture_refresh;
 mod viewer_stats;
 mod viewfinder;
 mod wearable_editor;
+mod workspace_displays;
 mod workspace_inventory;
 mod workspaces;
 mod world_click_demo;
@@ -656,6 +657,7 @@ pub struct App {
     layout_autosave: ui::layout::Autosave,
     workspaces: crate::workspace::controller::Controller,
     workspace_ui: ui::workspaces::WorkspaceUi,
+    workspace_displays: workspace_displays::Displays,
     workspace_huds: crate::workspace::huds::Runtime,
     loading_stage: String,
     move_complete_at: Option<Instant>,
@@ -1644,6 +1646,7 @@ impl App {
             layout_autosave: Default::default(),
             workspaces: Default::default(),
             workspace_ui: Default::default(),
+            workspace_displays: Default::default(),
             workspace_huds: Default::default(),
             loading_stage: String::new(),
             move_complete_at: None,
@@ -10991,6 +10994,14 @@ impl App {
         self.tick_boards_presented(Some(gesture_board::Presentation::new(&gfx.renderer, &gfx.window)));
         self.pump_inventory_archive();
         self.inventory_archive_ui.begin();
+        let need_workspace_displays = !gfx.renderer.vr_engaged()
+            && matches!(self.screen, Screen::World)
+            && (self.workspace_ui.open
+                || (self.effective_viewport_settings().enabled
+                    && matches!(self.workspace_background(), crate::workspace::model::Background::Displays { .. })));
+        self.workspace_displays
+            .prepare(&gfx.window, Instant::now(), ctx.pixels_per_point(), need_workspace_displays);
+        self.workspace_ui.background_displays(self.workspace_displays.arrangement());
         self.workspace_huds_prepare(&gfx.renderer, &gfx.window);
         self.inventory_ui.archive_input(self.inventory_archive_ui.input());
         let mut full = ctx.run_ui(raw, |ui| {
@@ -11014,7 +11025,14 @@ impl App {
             if !gfx.renderer.vr_engaged() {
                 let canvas = ui.ctx().viewport_rect();
                 let rendered = crate::world_viewport::PhotoScene::new((w, h), viewport).logical_rect(canvas);
-                ui::workspace_background::paint(ui.ctx(), canvas, rendered, self.workspace_background());
+                ui::workspace_background::paint(
+                    ui.ctx(),
+                    canvas,
+                    rendered,
+                    &self.workspace_background(),
+                    self.workspace_displays.arrangement(),
+                    self.workspace_displays.rectangles(),
+                );
             }
             let bounds = self.effective_viewport_settings().toolbar_rect((w, h), ui.ctx().viewport_rect());
             if ui::layout::set_toolbar_canvas(ui.ctx(), bounds) {

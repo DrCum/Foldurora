@@ -1,7 +1,7 @@
 //! Native named geometry manager. Drawing never mutates the catalogue or World.
 use crate::theme::Palette;
 use crate::workspace::controller::{Action, Command, Controller, Status, Ticket};
-use crate::workspace::model::{Background, Startup};
+use crate::workspace::model::{Arrangement, Background, Startup};
 use uuid::Uuid;
 pub(crate) const WINDOW: &str = "named_workspaces";
 pub(crate) struct WorkspaceUi {
@@ -15,6 +15,8 @@ pub(crate) struct WorkspaceUi {
     selection_exhausted: bool,
     favorites_painted: Option<Ticket>,
     background_edit: Option<[u8; 4]>,
+    display_topology: Option<Arrangement>,
+    background_target: usize,
 }
 impl Default for WorkspaceUi {
     fn default() -> Self {
@@ -29,10 +31,19 @@ impl Default for WorkspaceUi {
             selection_exhausted: false,
             favorites_painted: None,
             background_edit: None,
+            display_topology: None,
+            background_target: 0,
         }
     }
 }
 impl WorkspaceUi {
+    pub(crate) fn background_displays(&mut self, current: Option<&Arrangement>) {
+        if self.display_topology.as_ref() != current {
+            self.display_topology = current.cloned();
+            self.background_target = 0;
+            self.background_edit = None;
+        }
+    }
     fn selection_changed(&mut self) {
         if let Some(next) = self.selection_epoch.checked_add(1) {
             self.selection_epoch = next;
@@ -215,25 +226,70 @@ impl WorkspaceUi {
                             command = Some(Command::CaptureBackground(background));
                         }
                         ui.add_enabled_ui(enabled && c.preview.is_none(), |ui| {
-                            ui.horizontal_wrapped(|ui| {
-                                let color = self.background_edit.get_or_insert_with(|| match c.background() {
-                                    Background::Solid { rgb: [r, g, b] } => [r, g, b, 255],
-                                    Background::Black {} => {
-                                        let mut rgba = p.raised.to_array();
-                                        rgba[3] = 255;
-                                        rgba
+                            let background = c.background();
+                            let old_target = self.background_target;
+                            let label = |index| {
+                                if index == 0 {
+                                    tr!("workspaces-background-common").to_owned()
+                                } else {
+                                    tr!("workspaces-background-display", number = index)
+                                }
+                            };
+                            egui::ComboBox::from_id_salt("workspace_background_display")
+                                .selected_text(label(self.background_target))
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(&mut self.background_target, 0, label(0));
+                                    if let Some(a) = &self.display_topology {
+                                        for index in 1..=a.len() {
+                                            ui.selectable_value(&mut self.background_target, index, label(index));
+                                        }
                                     }
                                 });
-                                super::widgets::color_button(ui, p, "workspace_background_color", color, false);
-                                if ui.button(tr!("workspaces-background-solid")).clicked() {
-                                    command = Some(Command::Background(Background::Solid {
-                                        rgb: [color[0], color[1], color[2]],
-                                    }));
-                                }
-                                if ui.button(tr!("workspaces-background-black")).clicked() {
-                                    command = Some(Command::Background(Background::Black {}));
-                                }
-                            });
+                            if old_target != self.background_target {
+                                self.background_edit = None;
+                            }
+                            if let Background::Displays { rules, .. } = &background
+                                && Some(rules.arrangement()) != self.display_topology.as_ref()
+                            {
+                                ui.label(tr!("workspaces-background-display-fallback"));
+                            }
+                            ui.push_id(
+                                ("workspace_background_edit", self.display_topology.clone(), self.background_target),
+                                |ui| {
+                                    ui.horizontal_wrapped(|ui| {
+                                        let color = self.background_edit.get_or_insert_with(|| {
+                                            let [r, g, b] = self
+                                                .display_topology
+                                                .as_ref()
+                                                .filter(|_| self.background_target > 0)
+                                                .map_or_else(|| background.common(), |a| background.color(a, self.background_target - 1));
+                                            [r, g, b, 255]
+                                        });
+                                        super::widgets::color_button(ui, p, "workspace_background_color", color, false);
+                                        if ui.button(tr!("workspaces-background-solid")).clicked() {
+                                            let rgb = [color[0], color[1], color[2]];
+                                            command = if self.background_target == 0 {
+                                                Some(Command::BackgroundCommon(Some(rgb)))
+                                            } else {
+                                                self.display_topology
+                                                    .clone()
+                                                    .map(|a| Command::BackgroundDisplay(a, self.background_target - 1, Some(rgb)))
+                                            };
+                                        }
+                                        if self.background_target > 0
+                                            && ui.button(tr!("workspaces-background-inherit")).clicked()
+                                            && let Some(a) = self.display_topology.clone()
+                                        {
+                                            command = Some(Command::BackgroundDisplay(a, self.background_target - 1, None));
+                                            self.background_edit = None;
+                                        }
+                                        if ui.button(tr!("workspaces-background-black")).clicked() {
+                                            command = Some(Command::BackgroundCommon(None));
+                                            self.background_edit = None;
+                                        }
+                                    });
+                                },
+                            );
                         });
                         let mut show = cat.show_favorites;
                         let mut folders = cat.remember_folders;
@@ -927,5 +983,25 @@ mod tests {
         let mut changed = c;
         changed.bind(None);
         assert!(draw(&mut frames, &mut st, &changed, vec![]).1.is_none());
+    }
+    #[test]
+    fn native_workspace_display_background_edits_are_typed_and_topology_change_retires_the_target() {
+        let (c, mut st) = fixture();
+        let a = Arrangement::from_physical(&[[0, 0, 100, 100], [100, 0, 200, 100]]).unwrap();
+        st.background_displays(Some(&a));
+        st.background_target = 2;
+        st.background_edit = Some([10, 20, 30, 255]);
+        let original = c.catalogue.as_ref().unwrap().encode().unwrap();
+        let mut frames = Frames::new();
+        let action = click(&mut frames, &mut st, &c, aurora_i18n::tr!("workspaces-background-solid")).unwrap();
+        assert!(matches!(action.command, Command::BackgroundDisplay(ref current, 1, Some([10,20,30])) if current == &a));
+        assert!(c.accepts(&action.ticket));
+        assert_eq!(c.catalogue.as_ref().unwrap().encode().unwrap(), original);
+        let b = Arrangement::from_physical(&[[0, 0, 100, 100]]).unwrap();
+        st.background_displays(Some(&b));
+        assert_eq!(st.background_target, 0);
+        assert!(st.background_edit.is_none());
+        st.background_displays(None);
+        assert!(st.display_topology.is_none());
     }
 }
