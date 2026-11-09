@@ -2,13 +2,20 @@
 
 ## Goal, policy and current source
 
-Continue Sodie's ordered AFK roadmap, make routine decisions and document them.
-When blocked, retain source/evidence and take the next independent feature.
-Check the independently owned functional MCP PR between feature groups; no
-competing implementation. No Astra. At most two implementation tasks and one
-heavy cloud check. Standing permission covers source/build handoff publication;
-no merge, installation, release, credentials or grid login. Human acceptance is
-Sodie's. Overall Folderstorm/Aurora work remains unfinished.
+Latest priority: finish Advanced Workspaces, then address Builder feedback and
+review/integrate open upstream, functional MCP and Inactive Monitor PRs. The
+user has SHELVED quick-action extensions, aliases/accents/custom alerts, session
+sets, host restart/recovery, background audio/voice policies, remaining conference
+gaps and automatic-read/Attention extensions. Do not resume those as the next
+phase. Preserve their existing checkpoints. Loaded-folder and graphics restore
+must not block this scope if difficult; retain implemented work and describe
+bounded limitations. No removal/disablement is authorized by shelving.
+
+At most two implementation tasks and one heavy cloud check; no Astra, no new
+subagents. Same32GB environment and compatible ci graph. Standing permission
+covers source/build handoff publication, not private evidence, merge, installation,
+release, credentials or grid login. Human acceptance remains Sodie's. Source
+slices, compiled tests and native acceptance are distinct.
 
 Current corrected frozen candidate:
 - `fix/mcp-descriptor-regression-20261109`
@@ -18,17 +25,19 @@ Current corrected frozen candidate:
   PR28, HUD PR27, Update PR25, background PR24 and themed contexts PR23.
 - Source/remote tree verified; no new Windows full/package/native result.
 - Source worktree `/workspace/work/workspace-folders-20261109` now continues on
-  separate `feat/workspace-display-backgrounds-20261109`; all frozen heads remain.
+  separate `feat/workspace-local-backgrounds-20261109` on frozen ccccf418;
+  all frozen heads remain.
 
-Sanitized pinned Windows request (prepared only; delivery/ack/run UNCONFIRMED):
+Sanitized pinned Windows request (Slick verified delivery ONCE and active acknowledgment):
 https://github.com/DrCum/Foldurora/blob/f305efdc55dc0d6d8f71ea9849b1f9e748e8df7a/docs/FOLDURORA_ADVANCED_CONTEXT_WINDOWS_REQUEST_A903E16C.md
 15475bytes; SHA256 `85e45ec4ae4798294f3c6665cd34814fd2d59ef7c36d7bc743d863add8464f64`.
 Source target is a903, not the documentation commit. Default full-run gate1184;
 early small MCP package gate then ONE full workspace run and separate nondefault
 renderer gates, ordinary xr-static-loader viewer/sidecar package. Reuses Builder's
 existing dev cache. Source-visible additions are public; private coverage inputs
-and identifying metadata are not in this request. Slick must check history and
-relay ONCE to the existing Cumputer Builder01a1af77-a465-71c3-be08-cd9d1b927f83.
+and identifying metadata are not in this request. Slick now verifies the existing
+Cumputer Builder01a1af77-a465-71c3-be08-cd9d1b927f83 is active at the early MCP
+package gate. No test/build/package result or native acceptance is claimed.
 Do not duplicate a delivered/running request or rerun an unchanged failed source.
 
 Automatic review rejected the first request upload because it contained private
@@ -37,8 +46,8 @@ destination absence checked, and the sanitized payload was published via the sam
 supported tool and byte-verified. No private evidence/alternate-route fallback. Local progress-docs history retains
 the unsanitized draft as evidence: publish only reviewed sanitized file bytes,
 never push that branch/history wholesale.
-Direct app connection/PR attachments remain closed; no owner acknowledgment or
-new build start is claimed. The latest completed Builder was idle.
+Direct app connection/PR attachments remain closed. Delivery/active acknowledgment
+comes from Slick; no direct-tool execution or owner acknowledgment is claimed.
 
 Slick delivered the pinned5f990 request ONCE. Builder has completed and is
 IDLE. The candidate FAILED its full suite:8935passed/1failed/58ignored, zero
@@ -97,7 +106,7 @@ claimed. Continue source-side advanced workspaces in the meantime.
   Profile Copy's exclusive tests were retired with the approved removal, not
   passed. The old Linux terrain/software-GPU failure remains unresolved.
 
-Cloud has32GB fixed disk, about184MiB free. Full viewer test linking is resource-
+Cloud has32GB fixed disk, about157MiB free. Full viewer test linking is resource-
 blocked; no new full Linux run is claimed. Only idle reproducible caches have
 been reclaimed; source, binaries, profiles and needed evidence remain. Current
 receipts/logs are under `/workspace/scratch/workspace-{folders,graphics,camera,
@@ -224,42 +233,52 @@ negative logs remain; fixes retain assertions. Source doc
 FOLDURORA_WORKSPACE_DISPLAY_BACKGROUNDS_20261109.md and scratch
 /workspace/scratch/workspace-display-backgrounds-20261109/ retain receipts.
 
-A903 request/source stay frozen; delivery/ack/run remain unconfirmed. Direct
-Builder read and PR attachment both returned connection closed; no new dispatch
-or execution claimed. Slick must check/relay the already prepared request once.
+A903 request/source stay frozen. Slick verified the request delivered once and
+the Builder active/acknowledging its early MCP gate. Do not dispatch a duplicate.
+Direct Builder read and PR attachment both returned connection closed; no direct
+tool delivery or new validation outcome is claimed.
 The feature-boundary open-PR collection still has no functional MCP PR.
 
-## Roadmap and next actions
+## Current work and next actions
 
-1. **Live inactive Monitor:** PR21 small same-device view foundation integrated
-   but nondefault/disabled and no App caller. Actual source/privacy/RLVa/mandatory
-   HUD admission, aggregate reservations, inactive scene preparation, bounded
-   async native transport/freshness/retirement, cold allocation headroom and
-   promotion/drain joins remain. Existing images still say LastActive. Reuse
-   the preserved graph/old prototype as references, not a second renderer owner.
-2. **Advanced workspaces:** startup/favorites implemented; optional graphics and
-   avatar-relative camera contexts implemented; folder restoration covers only
-   loaded visible ordinary main Inventory. Expanded main-tree and one native additional-window state are implemented as
-   source slices above. Image backgrounds remain incomplete; per-display colors
-   are implemented as the source slice above.
-   HUD restore/review is implemented in the subsequent source slice, not yet native accepted. Solid padding colors are implemented in the
-   subsequent source slice above; bounded expanded-folder and additional native
-   Inventory restoration are published as above. Named-preset lookup beyond current
-   snapshots and free/world/object/photo camera anchors remain intentional
-   differences, not silently full Folderstorm parity.
-3. Fixed-slot actions, aliases/accents/alerts, session sets, restart/recovery,
-   background audio/voice: audit actual source/backlog then port in dependencies.
-4. Conference identification gaps and Aurora catch-up; PR18media475df44e and
-   PR19audio65da1dfb were read, not integrated. Verify current heads/source before
-   applying. PR11–16 already integrated; do not duplicate. Refresh upstream head.
-5. Automatic read policies and offer/permission/notification Attention remain.
-Newly observed upstream PR26 (Preferences reset confirmation) head
-16071c7d9f53d65214b34a8f18e6f0453e0313e3 is queued for phase4 review, not
-integrated. No functional MCP PR was in the latest actual open-PR collection.
+1. **Finish Advanced Workspaces:** source slices above preserve startup/favorites,
+   optional graphics/avatar-relative camera, loaded folders, HUD review, one native
+   additional Inventory window and per-display colors. Inventory image background
+   slice is published/frozen at ccccf418a4d1e4061324d29eb397493fc9e2e012,
+   tree ea59e8ac44e56881fe8cb9440cc1bceb202a7566, branch
+   feat/workspace-image-backgrounds-20261109, draft PR34
+   https://github.com/DrCum/Foldurora/pull/34. It adds six modes/brightness, private original
+   item/asset/grid references, fresh ordinary/archive/full-permission/RLVa proofs,
+   bounded shared256px previews, separate releasable hover/background ownership,
+   fixed independent native chooser and current-world image clipping.13 focused
+   cases pass (5 new/8 reused); qualified viewer all-target Clippy0, format0,13
+   localization and1 unchanged theme scan pass. Five more genuine native/UI/cache/
+   streamer cases compile UNRUN. Ten new cases, future combined gate1208. The final
+   fresh chooser-proof correction is included. Local managed-file import and
+   high-resolution wallpaper admission remain unfinished. Current local-image
+   branch is clean at ccccf418; its implementation has not begun. Source and negatives
+   are preserved under /workspace/scratch/workspace-image-backgrounds-20261109/.
+   Loaded-folder/graphics limitations are optional and do not block other work.
+2. **Builder fixes and combined validation:** await a903 result while completing
+   this same workspace goal; preserve frozen heads and all failed evidence. Then
+   integrate concrete corrections and freeze the next coherent combined group.
+   Do not relabel old full suites or component evidence as new Windows/native proof.
+3. **Review/integrate open PRs:** PR18media475df44e, PR19audio65da1dfb and PR26
+   Preferences confirmation16071c7d are queued; verify actual heads/dependencies and
+   already-present source first. PR11–16 are already integrated. PR21's disabled
+   Monitor prototype is integrated, but production caller/admission/transport/
+   memory/drain work remains; review any new owner head before overlapping work.
+   Newly visible functional MCP PR33 head674a1a73989b5319f955b7b2cf4b26e9e4e0c3a6
+   is based on d0d8 and changes153 files; queue substantive review/integration
+   after the workspace finish, preserving native permissions/approvals and all
+   lead fixes. Its NativeStoreKind catalogue still has the original three kinds.
+   New upstream controls/keyboard PR32 head0d2d1ae9f09d1cfe0f090f06eebf4f832f693d6c
+   is also queued. Retain the MCP owner boundary, OVERLAPPED lint corrections
+   and a903 security regressions. No functional merge or new acceptance is claimed.
+   Check working agents' PRs at feature boundaries; no competing functional MCP.
 
-Latest feature-boundary PR search found no functional MCP PR; PR20/21 references
-MCP but does not implement that independently assigned work. Retain the two
-Windows OVERLAPPED style corrections when integrating it. Do not change frozen5f990 or rerun it unchanged. Continue independent source work meanwhile.
+Shelved groups above remain documented backlog, not next implementation work.
+No whole-Folderstorm/Aurora completion is claimed.
 
 User exclusions: custom Inventory tabs, Previous Look, extra wear confirmations,
 Fade/Birdseye, Folderstorm assistant/controller integration and Squirty notices.
