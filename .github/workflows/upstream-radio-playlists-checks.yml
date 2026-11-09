@@ -1,0 +1,93 @@
+name: Isolated radio playlist and staff checks
+on:
+  push:
+    branches: [checks/upstream-radio-playlists-20261109]
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+concurrency:
+  group: isolated-radio-playlist-checks
+  cancel-in-progress: true
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+  CARGO_BUILD_JOBS: '2'
+  SOURCE_SHA: 513795069b58ffaa852ef1ceb047b5a371591ccc
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Checkout pinned source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 513795069b58ffaa852ef1ceb047b5a371591ccc
+          fetch-depth: 0
+          filter: blob:none
+      - name: Source and runner
+        run: |
+          mkdir -p .scratch/validation
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git rev-parse HEAD | tee .scratch/validation/source.txt
+          echo "$GITHUB_SHA" > .scratch/validation/workflow.txt
+          rustc --version | tee .scratch/validation/rust.txt
+          cargo --version | tee .scratch/validation/cargo.txt
+          rustup component add rustfmt clippy
+          df -h .
+      - name: Existing viewer libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev
+      - name: Restore repository Linux cache
+        uses: ./.github/actions/rust-cache
+        with:
+          name: linux-tests
+      - name: Focused audio lint
+        run: |
+          cargo clippy --profile ci --locked -p aurora-audio --all-targets -- -D warnings 2>&1 | tee .scratch/validation/audio-clippy.log
+      - name: Complete audio library regressions including offline playlist security
+        run: |
+          cargo test --profile ci --locked -p aurora-audio --lib -- --nocapture 2>&1 | tee .scratch/validation/audio.log
+      - name: Actual viewer staff and existing native consent regressions
+        run: |
+          cargo test --profile ci --workspace --locked world::staff::tests:: -- --nocapture 2>&1 | tee .scratch/validation/staff.log
+          cargo test --profile ci --workspace --locked media::filter::tests:: -- --nocapture 2>&1 | tee .scratch/validation/consent.log
+      - name: Appearance and translation checks
+        run: |
+          cargo test --profile ci --workspace --locked theme_guard -- --nocapture 2>&1 | tee .scratch/validation/theme.log
+          cargo test --profile ci --workspace --locked every_language_has_english_keys_and_variables -- --nocapture 2>&1 | tee .scratch/validation/translation-keys.log
+          cargo test --profile ci --workspace --locked every_bundled_message_formats_with_its_declared_variables -- --nocapture 2>&1 | tee .scratch/validation/translation-format.log
+      - name: Verify required behavior ran and public probes stayed ignored
+        run: |
+          python3 - <<'PYCODE'
+          import pathlib,re
+          root=pathlib.Path('.scratch/validation')
+          required={
+            'audio.log':['azuracast_player_and_pls_resolve_to_decodable_audio','discovered_redirects_cannot_contact_a_second_origin','playlist_discovery_never_expands_the_allowed_origin_or_scheme','playlist_nesting_stops_after_the_document_budget','four_playlist_documents_can_still_end_in_decodable_audio','direct_audio_keeps_its_bytes_even_at_a_playlist_path_and_above_the_document_limit'],
+            'staff.log':['the_team_is_marked_by_key','nobody_is_staff_by_default','lindens_are_marked_by_their_last_name_on_second_life_only'],
+            'consent.log':['an_unknown_site_is_asked_about_once','scripts_files_and_browser_pages_never_load','answers_are_kept_as_asked','trusted_media_is_never_asked_about_but_refusals_hold'],
+          }
+          for file,names in required.items():
+            log=re.sub(r'\x1b\[[0-9;]*m','',(root/file).read_text())
+            for name in names: assert '::'+name+' ... ok' in log,(file,name)
+          audio=re.sub(r'\x1b\[[0-9;]*m','',(root/'audio.log').read_text())
+          assert 'playlist::tests::lightman_live_probe ... ignored' in audio
+          assert 'playlist::tests::lightman_live_probe ... ok' not in audio
+          print('Required audio/consent/staff cases passed; public station probes were not executed.')
+          PYCODE
+      - name: Verify frozen source
+        if: always()
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git diff --exit-code
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: radio-playlist-linux-513795069b58
+          path: .scratch/validation/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
