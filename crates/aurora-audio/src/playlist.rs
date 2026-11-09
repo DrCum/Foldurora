@@ -372,6 +372,56 @@ mod tests {
     }
 
     #[test]
+    fn four_playlist_documents_can_still_end_in_decodable_audio() {
+        let paths = ["/one.pls", "/two.m3u", "/three.pls", "/four.m3u", "/stream.mp3"];
+        let mut routes = Vec::new();
+        for (index, path) in paths[..4].iter().enumerate() {
+            let pls = index % 2 == 0;
+            routes.push(Route {
+                path,
+                head: format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: {}",
+                    if pls { "audio/x-scpls" } else { "audio/x-mpegurl" }
+                ),
+                body: if pls {
+                    format!("[playlist]\nFile1={}", paths[index + 1]).into_bytes()
+                } else {
+                    format!("#EXTM3U\n{}", paths[index + 1]).into_bytes()
+                },
+            });
+        }
+        routes.push(Route {
+            path: "/stream.mp3",
+            head: "HTTP/1.1 200 OK\r\nContent-Type: audio/mpeg".into(),
+            body: mp3_silence(20),
+        });
+        let (base, server) = serve(routes);
+        let response = open(&format!("{base}/one.pls"), &Arc::new(AtomicBool::new(false))).unwrap();
+        assert_eq!(response.url.path(), "/stream.mp3");
+        let mut decoder = DecodeStream::open(Box::new(ReadOnlySource::new(response.body)), Some("mp3")).unwrap();
+        assert!(!decoder.next_chunk().unwrap().unwrap().samples.is_empty());
+        drop(decoder);
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn direct_audio_keeps_its_bytes_even_at_a_playlist_path_and_above_the_document_limit() {
+        let audio = mp3_silence(400);
+        assert!(audio.len() as u64 > MAX_DOCUMENT_BYTES);
+        let (base, server) = serve(vec![Route {
+            path: "/direct.pls",
+            head: "HTTP/1.1 200 OK\r\nContent-Type: audio/mpeg".into(),
+            body: audio.clone(),
+        }]);
+        let mut response = open(&format!("{base}/direct.pls"), &Arc::new(AtomicBool::new(false))).unwrap();
+        let mut received = Vec::new();
+        response.body.read_to_end(&mut received).unwrap();
+        assert_eq!(received, audio, "audio bytes are streamed, not capped or consumed as a document");
+        drop(response);
+        server.join().unwrap();
+    }
+
+    #[test]
     #[ignore = "contacts the public Lightman station; explicit manual network probe only"]
     fn lightman_live_probe() {
         use crate::icy::IcyReader;

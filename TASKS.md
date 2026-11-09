@@ -1,5 +1,11 @@
 # Aurora Viewer — task tracking
 
+- 🔧 Independent Aurora radio/team metadata ports (2026-11-09): 19d99484
+  and 39fd2e79 on fix/upstream-radio-playlists-20261109, base388b299c.
+  See docs/FOLDURORA_UPSTREAM_RADIO_20261109.md for bounded discovery,
+  regression/native checks and deferred archive/crash/host/render dependencies.
+  Preserve active frozen98b30be2 Windows validation; no competing build request.
+
 - 🔧 Selective upstream catch-up (human request, 2026-11-07; no issue): apply
   sixteen reviewed upstream commits individually with `-x` to frozen photo/
   branding base `f5ae21d5`, from upstream snapshot `576dd54a`. Production
