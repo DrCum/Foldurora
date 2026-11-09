@@ -1,0 +1,158 @@
+name: Isolated controls and keyboard checks
+on:
+  push:
+    branches: [checks/upstream-controls-keyboard-20261109]
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+concurrency:
+  group: isolated-controls-keyboard-checks
+  cancel-in-progress: true
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+  CARGO_BUILD_JOBS: '2'
+  SOURCE_SHA: 8024e2de5723bceb223ebe490864468b6f7ae6e5
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Checkout pinned source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 8024e2de5723bceb223ebe490864468b6f7ae6e5
+          fetch-depth: 0
+          filter: blob:none
+      - name: Source and runner
+        run: |
+          mkdir -p .scratch/validation
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git rev-parse HEAD | tee .scratch/validation/source.txt
+          echo "$GITHUB_SHA" > .scratch/validation/workflow.txt
+          rustc --version | tee .scratch/validation/rust.txt
+          cargo --version | tee .scratch/validation/cargo.txt
+          rustup component add rustfmt clippy
+          df -h .
+      - name: Existing viewer libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev libxkbcommon-dev libwayland-dev
+      - name: Restore repository Linux cache
+        uses: ./.github/actions/rust-cache
+        with:
+          name: linux-tests
+      - name: Formatting and Clippy
+        run: |
+          cargo fmt --all -- --check 2>&1 | tee .scratch/validation/fmt.log
+          cargo clippy --profile ci --workspace --all-targets --locked -- -D warnings -A dead-code 2>&1 | tee .scratch/validation/clippy.log
+      - name: Preferences and fonts regressions
+        run: |
+          cargo test --profile ci --workspace --locked ui::options:: -- --nocapture 2>&1 | tee .scratch/validation/options.log
+      - name: Toolbar regressions
+        run: |
+          cargo test --profile ci --workspace --locked ui::toolbar::tests:: -- --nocapture 2>&1 | tee .scratch/validation/toolbar.log
+      - name: Selected inventory deletion and focus regressions
+        run: |
+          cargo test --profile ci --workspace --locked ui::inventory::delete_tests:: -- --nocapture 2>&1 | tee .scratch/validation/delete.log
+          cargo test --profile ci --workspace --locked ui::inventory::clipboard::tests:: -- --nocapture 2>&1 | tee .scratch/validation/focus.log
+      - name: Shortcut and deterministic layout regressions
+        run: |
+          cargo test --profile ci --workspace --locked keybinds::tests:: -- --nocapture 2>&1 | tee .scratch/validation/keybinds.log
+          for layout in wasd zqsd qwertz; do
+            AURORA_DEMO=1 AURORA_DEMO_KEYBOARD="$layout" cargo test --profile ci --workspace --locked environment_shortcuts_pick_the_legacy_times_of_day -- --nocapture 2>&1 | tee ".scratch/validation/layout-$layout.log"
+          done
+      - name: Appearance and translation checks
+        run: |
+          cargo test --profile ci --workspace --locked theme_guard -- --nocapture 2>&1 | tee .scratch/validation/theme.log
+          cargo test --profile ci --workspace --locked every_language_has_english_keys_and_variables -- --nocapture 2>&1 | tee .scratch/validation/translation-keys.log
+          cargo test --profile ci --workspace --locked every_bundled_message_formats_with_its_declared_variables -- --nocapture 2>&1 | tee .scratch/validation/translation-format.log
+      - name: Capture the toolbar editor in both looks
+        run: |
+          AURORA_CAPTURE="$GITHUB_WORKSPACE/.scratch/validation/toolbar.png" cargo test --profile ci --workspace --locked toolbar_style_rows_respond_at_their_visible_positions_in_both_looks -- --nocapture 2>&1 | tee .scratch/validation/capture.log
+      - name: Verify required regressions executed
+        run: |
+          python3 - <<'PYCODE'
+          import pathlib,re
+          root=pathlib.Path('.scratch/validation')
+          required={
+            'options.log':['system_font_popup_width_stays_fixed_across_ui_scales'],
+            'toolbar.log':['toolbar_style_rows_respond_at_their_visible_positions_in_both_looks'],
+            'delete.log':['the_backspace_key_deletes_on_a_mac_only','delete_shortcut_retains_confirmation_worn_and_selected_item_guards'],
+            'keybinds.log':['environment_shortcuts_pick_the_legacy_times_of_day','letter_shortcuts_follow_the_layout_and_movement_keeps_its_places'],
+            'focus.log':['delete_keeps_text_input_priority_and_blocks_modified_keys_pending_and_protected_selection','delete_key_confirms_and_moves_selected_folder_with_its_contents_and_no_copy_item','inventory_keyboard_uses_only_the_focused_folder_window'],
+          }
+          for file,names in required.items():
+            log=re.sub(r'\x1b\[[0-9;]*m','',(root/file).read_text())
+            for name in names: assert '::'+name+' ... ok' in log,(file,name)
+          for style in ['classic','aurora']: assert (root/('toolbar-'+style+'.png')).stat().st_size>0
+          print('Required behavior, permissions/focus regressions and both captures passed.')
+          PYCODE
+      - name: Verify frozen source
+        if: always()
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git diff --exit-code
+      - name: Upload Linux evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: controls-keyboard-linux-8024e2de5723
+          path: .scratch/validation/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+  macos:
+    needs: linux
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - name: Checkout pinned source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 8024e2de5723bceb223ebe490864468b6f7ae6e5
+          fetch-depth: 0
+          filter: blob:none
+      - name: Source and runner
+        run: |
+          mkdir -p .scratch/validation
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git rev-parse HEAD | tee .scratch/validation/source.txt
+          echo "$GITHUB_SHA" > .scratch/validation/workflow.txt
+          uname -m | tee .scratch/validation/architecture.txt
+          rustc --version | tee .scratch/validation/rust.txt
+          cargo --version | tee .scratch/validation/cargo.txt
+          df -h .
+      - name: Restore repository macOS cache
+        uses: ./.github/actions/rust-cache
+        with:
+          name: macos-tests
+      - name: Actual macOS Backspace branch and focused inventory handling
+        run: |
+          cargo test --profile ci --workspace --locked ui::inventory::delete_tests:: -- --nocapture 2>&1 | tee .scratch/validation/delete.log
+          cargo test --profile ci --workspace --locked ui::inventory::clipboard::tests:: -- --nocapture 2>&1 | tee .scratch/validation/focus.log
+      - name: Verify Mac alias and confirmation case executed
+        run: |
+          python3 - <<'PYCODE'
+          import pathlib,re
+          log=re.sub(r'\x1b\[[0-9;]*m','',pathlib.Path('.scratch/validation/delete.log').read_text())
+          for name in ['the_backspace_key_deletes_on_a_mac_only','delete_shortcut_retains_confirmation_worn_and_selected_item_guards']:
+            assert '::'+name+' ... ok' in log,name
+          print('Actual macOS branch and guarded confirmation cases executed.')
+          PYCODE
+      - name: Verify frozen source
+        if: always()
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git diff --exit-code
+      - name: Upload macOS evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: controls-keyboard-macos-8024e2de5723
+          path: .scratch/validation/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
