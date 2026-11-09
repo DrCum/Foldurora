@@ -1259,6 +1259,9 @@ pub enum PhotoContext {
 /// Camera and environment for one frame.
 #[derive(Debug, Clone)]
 pub struct FrameParams {
+    /// World-only output rectangle in native-window physical pixels. Photos
+    /// and XR use their own full-frame output instead.
+    pub world_viewport: Option<crate::WorldViewport>,
     /// Session-local scripted vision effects; empty keeps the normal render path.
     pub rlva_spheres: Vec<SphereEffect>,
     pub rlva_resolution_divisor: u32,

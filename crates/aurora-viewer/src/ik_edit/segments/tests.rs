@@ -29,6 +29,7 @@ fn fixture() -> (World, Editor) {
 fn projector(point: Vec3) -> Projector {
     let eye = point + Vec3::new(0.9, -1.2, 0.5);
     Projector {
+        world_viewport: None,
         view_proj: glam::camera::rh::proj::directx::perspective_infinite_reverse(0.8, 16.0 / 9.0, 0.05)
             * glam::camera::rh::view::look_to_mat4(eye, (point - eye).normalize(), Vec3::Z),
         width: 1600.0,

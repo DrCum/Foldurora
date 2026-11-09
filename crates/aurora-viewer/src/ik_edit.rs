@@ -241,7 +241,7 @@ impl Editor {
                 up,
             })
         } else {
-            let center = egui::pos2(proj.width / proj.ppp * 0.5, proj.height / proj.ppp * 0.5);
+            let center = proj.clip_rect().center();
             ray(proj, pointer).zip(ray(proj, center)).and_then(|((o, d), (_, normal))| {
                 let point = frame.model.transform_point3(self.control_position());
                 crate::build::geom::ray_plane(o, d, point, normal).map(|hit| Drag::Move {
@@ -953,7 +953,9 @@ impl Editor {
         self.sync_prim_draft();
         // World overlays stay in Background, like the build gizmos. Middle
         // joint areas can rise above a floater after being clicked.
-        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::unique("ik-skeleton")));
+        let painter = ctx
+            .layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::unique("ik-skeleton")))
+            .with_clip_rect(proj.clip_rect());
         let segments = self.skeleton_segments(world, proj, &frame);
         self.draw_segments(&painter, palette, &segments);
         if let Some(bone) = self.selected
@@ -1013,6 +1015,9 @@ impl Editor {
                     continue;
                 };
                 let at = anchor;
+                if !proj.clip_rect().contains(at) {
+                    continue;
+                }
                 let half = if limb.is_some() { 12.0 } else { 6.0 };
                 let response = egui::Area::new(egui::Id::unique(("ik-joint", joint)))
                     .fixed_pos(at - egui::vec2(half, half))
@@ -1020,6 +1025,7 @@ impl Editor {
                     .movable(false)
                     .interactable(!gizmo_owns && !self.clip.waiting_source())
                     .show(ctx, |ui| {
+                        ui.set_clip_rect(ui.clip_rect().intersect(proj.clip_rect()));
                         let sense = if self.links.bone_pick {
                             Sense::click()
                         } else if gizmo_owns || self.clip.waiting_source() {
@@ -1092,7 +1098,7 @@ impl Editor {
         if selected_pole {
             self.show_poles(ctx, palette, proj, &frame, rig, gizmo_owns);
         }
-        self.pick_segment(ctx, palette, world, &frame, &segments, gizmo_owns);
+        self.pick_segment(ctx, palette, world, proj, &frame, &segments, gizmo_owns);
         let mut open = self.open;
         let mut floater = Floater::new(
             "ik-edit",

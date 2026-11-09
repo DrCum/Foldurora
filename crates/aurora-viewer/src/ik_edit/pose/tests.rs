@@ -358,6 +358,7 @@ fn actual_pointer_can_select_the_human_torso_and_move_rotate_a_released_foot() {
         let projector = |point: Vec3| {
             let eye = point + Vec3::new(3.0, -4.0, 3.0);
             Projector {
+                world_viewport: None,
                 view_proj: glam::camera::rh::proj::directx::perspective_infinite_reverse(0.8, 16.0 / 9.0, 0.05)
                     * glam::camera::rh::view::look_to_mat4(eye, (point - eye).normalize(), Vec3::Z),
                 width: 1600.0,

@@ -47,7 +47,7 @@ fn shade(c: Color32, k: f32) -> Color32 {
 impl<'a> Painter3d<'a> {
     pub fn new(painter: egui::Painter, cam: &'a Cam, pal: Palette) -> Self {
         Painter3d {
-            painter,
+            painter: painter.with_clip_rect(cam.clip_rect()),
             cam,
             pal,
             tris: Vec::new(),

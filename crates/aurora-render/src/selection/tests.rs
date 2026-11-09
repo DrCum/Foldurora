@@ -95,73 +95,89 @@ fn halo_preserves_material_and_tracks_holes_and_disconnected_islands() {
         mapped_at_creation: false,
     });
     let original = [40u8, 80, 120, 255];
-    for (pulse, scale) in [(0.0, 1.0), (0.18, 1.0), (0.0, 1.5), (0.0, 2.0)] {
-        overlay.update(&queue, [0.4, 0.1, 0.9, 1.0], pulse, scale);
-        let mut encoder = device.create_command_encoder(&Default::default());
-        {
-            let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("test original material"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: f64::from(original[0]) / 255.0,
-                            g: f64::from(original[1]) / 255.0,
-                            b: f64::from(original[2]) / 255.0,
-                            a: 1.0,
-                        }),
-                        store: wgpu::StoreOp::Store,
+    for clip in [
+        None,
+        Some(crate::WorldViewport {
+            x: 16,
+            y: 8,
+            width: 32,
+            height: 48,
+        }),
+    ] {
+        for (pulse, scale) in [(0.0, 1.0), (0.18, 1.0), (0.0, 1.5), (0.0, 2.0)] {
+            overlay.update(&queue, [0.4, 0.1, 0.9, 1.0], pulse, scale);
+            let mut encoder = device.create_command_encoder(&Default::default());
+            {
+                let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("test original material"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: f64::from(original[0]) / 255.0,
+                                g: f64::from(original[1]) / 255.0,
+                                b: f64::from(original[2]) / 255.0,
+                                a: 1.0,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+            }
+            overlay.encode(&mut encoder, &view, None, clip);
+            encoder.copy_texture_to_buffer(
+                output.as_image_copy(),
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &readback,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(256),
+                        rows_per_image: Some(64),
                     },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-        }
-        overlay.encode(&mut encoder, &view, None);
-        encoder.copy_texture_to_buffer(
-            output.as_image_copy(),
-            wgpu::TexelCopyBufferInfo {
-                buffer: &readback,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(256),
-                    rows_per_image: Some(64),
                 },
-            },
-            wgpu::Extent3d {
-                width: 64,
-                height: 64,
-                depth_or_array_layers: 1,
-            },
-        );
-        queue.submit([encoder.finish()]);
-        readback.map_async(wgpu::MapMode::Read, .., |result| result.expect("readback"));
-        device.poll(wgpu::PollType::wait_indefinitely()).expect("GPU completion");
-        let bytes = readback.get_mapped_range(..).expect("mapped pixels");
-        let pixel = |x: usize, y: usize| &bytes[(y * 64 + x) * 4..(y * 64 + x + 1) * 4];
-        assert_eq!(pixel(0, 0), original, "outside the halo is untouched");
-        assert_ne!(pixel(59, 33), original, "thin island at any DPI");
-        if scale == 1.0 {
-            assert_eq!(pixel(22, 32), original, "centre of the ring hole is untouched");
-        }
-        assert_ne!(pixel(22, 23), original, "halo follows the inner ring silhouette");
-        assert_ne!(pixel(22, 15), original, "halo follows the outer ring silhouette");
-        assert_ne!(pixel(47, 16), original, "first disconnected island");
-        assert_ne!(pixel(47, 47), original, "second disconnected island");
-        for (i, &covered) in coverage.iter().enumerate() {
-            if covered != 0 {
-                if pulse == 0.0 {
-                    assert_eq!(&bytes[i * 4..i * 4 + 4], original, "interior {i}");
-                } else {
-                    assert_ne!(&bytes[i * 4..i * 4 + 4], original, "pulse {i}");
+                wgpu::Extent3d {
+                    width: 64,
+                    height: 64,
+                    depth_or_array_layers: 1,
+                },
+            );
+            queue.submit([encoder.finish()]);
+            readback.map_async(wgpu::MapMode::Read, .., |result| result.expect("readback"));
+            device.poll(wgpu::PollType::wait_indefinitely()).expect("GPU completion");
+            let bytes = readback.get_mapped_range(..).expect("mapped pixels");
+            let pixel = |x: usize, y: usize| &bytes[(y * 64 + x) * 4..(y * 64 + x + 1) * 4];
+            assert_eq!(pixel(0, 0), original, "outside the halo is untouched");
+            if clip.is_none() {
+                assert_ne!(pixel(59, 33), original, "thin island at any DPI");
+            }
+            if scale == 1.0 {
+                assert_eq!(pixel(22, 32), original, "centre of the ring hole is untouched");
+            }
+            assert_ne!(pixel(22, 23), original, "halo follows the inner ring silhouette");
+            assert_ne!(pixel(22, 15), original, "halo follows the outer ring silhouette");
+            assert_ne!(pixel(47, 16), original, "first disconnected island");
+            assert_ne!(pixel(47, 47), original, "second disconnected island");
+            for (i, &covered) in coverage.iter().enumerate() {
+                if clip.is_some_and(|v| v.local((i % 64) as f32, (i / 64) as f32).is_none()) {
+                    assert_eq!(&bytes[i * 4..i * 4 + 4], original, "workspace margin {i}");
+                    continue;
+                }
+                if covered != 0 {
+                    if pulse == 0.0 {
+                        assert_eq!(&bytes[i * 4..i * 4 + 4], original, "interior {i}");
+                    } else {
+                        assert_ne!(&bytes[i * 4..i * 4 + 4], original, "pulse {i}");
+                    }
                 }
             }
+            drop(bytes);
+            readback.unmap();
         }
-        drop(bytes);
-        readback.unmap();
     }
 }

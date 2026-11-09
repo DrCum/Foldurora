@@ -58,6 +58,7 @@ pub enum BarAction {
     /// Build floater: 0 toggle, 1 edit, 2 create, 3 land.
     Build(u8),
     Logout,
+    Characters,
     Quit,
     TeleportHome,
     /// World › Set Home to Here, or the home buttons' right click
@@ -820,6 +821,9 @@ fn main_menus(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &StatusIn
             *action = BarAction::ToggleImmersive;
         }
         menu::separator(ui, p);
+        if menu::item(ui, p, "users", aurora_i18n::tr!("character-switch-title")) {
+            *action = BarAction::Characters;
+        }
         if menu::item(ui, p, "logout", aurora_i18n::tr!("ui-bars-log-out")) {
             *action = BarAction::Logout;
         }

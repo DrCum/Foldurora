@@ -192,11 +192,14 @@ pub struct Renderer {
     /// Texture animation clock (tex_anim.rs), shared with the backend.
     anim_clock: crate::tex_anim::AnimClock,
     /// Inverse view-projection of the last frame built (cursor rays).
+    last_viewport: crate::WorldViewport,
     last_inv_vp: Mat4,
     last_view: Mat4,
     /// Pixel to read the depth of in the next frame, and the last answer.
     hover_request: Option<(u32, u32)>,
     hover_latest: Option<Vec3>,
+    /// Results from before the most recent viewport change cannot restore hover.
+    hover_valid_from: u64,
     /// Clicks whose depth leaves with the next frame, the answers that
     /// came back, and the ticket of the next click.
     pick_requests: Vec<crate::pick::ClickRequest>,
@@ -265,7 +268,8 @@ pub struct Renderer {
 impl Renderer {
     /// Create the renderer on the native graphics backend for the given window, on
     /// the GPU `gpu` asks for (`adapter_choice::Wanted`: empty for the
-    /// automatic choice).
+    /// automatic choice). The initial world viewport avoids allocating full
+    /// desktop-sized world targets before a saved workspace's first frame.
     ///
     /// The surface is made from the window's raw handles and does not keep
     /// the window alive: after a device loss the surface is abandoned, never
@@ -273,7 +277,14 @@ impl Renderer {
     /// the old window open behind a new one. The renderer's host keeps
     /// `window` instead, dropped after the backend, or kept by a render
     /// thread left behind in the driver (`render_thread::KeepAlive`).
-    pub fn new<W>(window: Arc<W>, width: u32, height: u32, vsync: bool, gpu: &str) -> Result<Renderer, RenderError>
+    pub fn new<W>(
+        window: Arc<W>,
+        width: u32,
+        height: u32,
+        vsync: bool,
+        gpu: &str,
+        viewport: Option<crate::WorldViewport>,
+    ) -> Result<Renderer, RenderError>
     where
         W: wgpu::rwh::HasWindowHandle + wgpu::rwh::HasDisplayHandle + Send + Sync + 'static,
     {
@@ -515,6 +526,7 @@ impl Renderer {
             adapter,
             width,
             height,
+            world_viewport: viewport,
             vsync,
             timestamps,
             adapter_specific,
@@ -582,10 +594,12 @@ impl Renderer {
             can_capture,
             output_format,
             anim_clock,
+            last_viewport: viewport.map_or_else(|| crate::WorldViewport::full((width, height)), |v| v.fitted((width, height))),
             last_inv_vp: Mat4::IDENTITY,
             last_view: Mat4::IDENTITY,
             hover_request: None,
             hover_latest: None,
+            hover_valid_from: 0,
             pick_requests: Vec::new(),
             pick_answers: Vec::new(),
             pick_ticket: 0,
@@ -1067,7 +1081,9 @@ impl Renderer {
 
     /// Take in what a frame gave back.
     fn apply(&mut self, mut r: FrameResult) {
-        self.hover_latest = r.hover;
+        if r.index >= self.hover_valid_from {
+            self.hover_latest = r.hover;
+        }
         if let Some(h) = r.histogram.take() {
             self.histogram = Some(h);
         }
@@ -1268,6 +1284,16 @@ impl Renderer {
             Some(s) => Some(crate::packet::Capture::Snapshot(s)),
             None => capture_for(self.capture_scene, self.capture_request, self.can_capture),
         };
+        let viewport = params
+            .world_viewport
+            .map_or_else(|| crate::WorldViewport::full(self.size), |v| v.fitted(self.size));
+        if viewport != self.last_viewport {
+            self.hover_latest = None;
+            self.hover_request = None;
+            self.hover_valid_from = self.frames;
+            self.fail_picks();
+        }
+        self.last_viewport = viewport;
         self.last_inv_vp = (params.proj * params.view).inverse();
         self.last_view = params.view;
         let index = self.frames;
@@ -1459,7 +1485,7 @@ impl Renderer {
         let ticket = self.pick_ticket;
         self.pick_ticket += 1;
         let (w, h) = self.size;
-        if x < 0.0 || y < 0.0 || x >= w as f32 || y >= h as f32 || self.failed {
+        if x < 0.0 || y < 0.0 || x >= w as f32 || y >= h as f32 || self.last_viewport.local(x, y).is_none() || self.failed {
             self.pick_answers.push((ticket, None));
         } else {
             self.pick_requests.push((ticket, x as u32, y as u32));
@@ -1511,7 +1537,7 @@ impl Renderer {
         let ticket = self.pick_ticket;
         self.pick_ticket += 1;
         let (w, h) = self.size;
-        if x < 0.0 || y < 0.0 || x >= w as f32 || y >= h as f32 || self.failed {
+        if x < 0.0 || y < 0.0 || x >= w as f32 || y >= h as f32 || self.last_viewport.local(x, y).is_none() || self.failed {
             self.drawn_answers.push((ticket, Default::default()));
         } else {
             self.drawn_requests.push((ticket, x as u32, y as u32, mode));
@@ -1541,7 +1567,7 @@ impl Renderer {
     /// before; kept to compare the two (AURORA_CLICK_PICK).
     pub fn pick_world(&mut self, x: f32, y: f32) -> Option<Vec3> {
         let (w, h) = self.size;
-        if x < 0.0 || y < 0.0 || x >= w as f32 || y >= h as f32 || self.failed {
+        if x < 0.0 || y < 0.0 || x >= w as f32 || y >= h as f32 || self.last_viewport.local(x, y).is_none() || self.failed {
             return None;
         }
         let mut frame = None;
@@ -1581,7 +1607,7 @@ impl Renderer {
     /// (a few frames old).
     pub fn hover_pick(&mut self, x: f32, y: f32) -> Option<Vec3> {
         let (w, h) = self.size;
-        if x < 0.0 || y < 0.0 || x >= w as f32 || y >= h as f32 {
+        if x < 0.0 || y < 0.0 || x >= w as f32 || y >= h as f32 || self.last_viewport.local(x, y).is_none() {
             return None;
         }
         self.hover_request = Some((x as u32, y as u32));
@@ -1591,7 +1617,8 @@ impl Renderer {
     /// World ray under a pixel of the last frame: origin on the near plane,
     /// unit direction.
     pub fn cursor_ray(&self, x: f32, y: f32) -> Option<(Vec3, Vec3)> {
-        let (w, h) = (self.size.0 as f32, self.size.1 as f32);
+        let (x, y) = self.last_viewport.local(x, y)?;
+        let (w, h) = (self.last_viewport.width as f32, self.last_viewport.height as f32);
         let ndc = |z: f32| Vec4::new(x / w * 2.0 - 1.0, 1.0 - y / h * 2.0, z, 1.0);
         let un = |v: Vec4| {
             let p = self.last_inv_vp * v;
@@ -1622,8 +1649,10 @@ impl Renderer {
             return None;
         }
         let ndc = c.truncate() / c.w;
-        let x = (ndc.x * 0.5 + 0.5) * self.size.0 as f32;
-        let y = (0.5 - ndc.y * 0.5) * self.size.1 as f32;
+        let viewport = f
+            .world_viewport
+            .map_or_else(|| crate::WorldViewport::full(self.size), |v| v.fitted(self.size));
+        let [x, y] = viewport.project([ndc.x, ndc.y]);
         Some((x, y, c.w))
     }
 

@@ -15,6 +15,7 @@ impl App {
     pub(super) fn on_hud_scroll(&mut self, steps: f32) -> bool {
         self.build.sync_hud_zoom(&mut self.world);
         if !self.settings.show_huds
+            || !self.world_pointer_inside()
             || self.camera.mouselook()
             || !matches!(self.screen, Screen::World)
             || self.mouse_mode != MouseMode::None
@@ -79,7 +80,14 @@ impl App {
         {
             return None;
         }
-        Some(legacy_hud_view_area(size, self.egui_ctx.pixels_per_point()))
+        let viewport = self.world_viewport_for_size((size[0], size[1]), false);
+        let [left, top, right, bottom] = legacy_hud_view_area([viewport.width, viewport.height], self.egui_ctx.pixels_per_point());
+        Some([
+            left + viewport.x as f32,
+            top + viewport.y as f32,
+            right + viewport.x as f32,
+            bottom + viewport.y as f32,
+        ])
     }
 
     pub(super) fn keep_scaled_huds_accessible(&mut self, view: HudView) {
@@ -87,7 +95,8 @@ impl App {
             return;
         }
         // View zoom must only change the projection, not local HUD positions.
-        self.world.hud_scales.prepare_clamp([view.width, view.height]);
+        let area = self.world_viewport.map_or([0.0, 0.0, view.width, view.height], |v| v.area());
+        self.world.hud_scales.prepare_clamp([area[2] - area[0], area[3] - area[1]]);
         let Some(me) = self
             .world
             .objects
@@ -107,7 +116,7 @@ impl App {
             let Some(rect) = self.scene.hud_rect(&self.world, root, view) else {
                 continue;
             };
-            let delta = accessible_delta(rect, [view.width, view.height]);
+            let delta = accessible_delta_in_area(rect, area);
             self.world.hud_scales.clamped(id);
             if delta != [0.0, 0.0] {
                 let px = view.unit();
@@ -133,6 +142,7 @@ impl App {
         let ppp = ctx.pixels_per_point();
         let rect = egui::Rect::from_min_max(egui::pos2(left / ppp, top / ppp), egui::pos2(right / ppp, bottom / ppp));
         ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::unique("hud_view_bounds")))
+            .with_clip_rect(self.world_clip_rect(ppp))
             .rect_stroke(rect, 0.0, egui::Stroke::new(1.0, self.palette.ink), egui::StrokeKind::Inside);
     }
 
@@ -143,6 +153,7 @@ impl App {
             || self.mouse_mode != MouseMode::None
             || ctx.is_pointer_over_egui()
             || ctx.egui_wants_pointer_input()
+            || !self.world_pointer_inside()
         {
             return;
         }
@@ -158,7 +169,9 @@ impl App {
             egui::pos2(bounds[0] / ppp, bounds[1] / ppp),
             egui::pos2(bounds[2] / ppp, bounds[3] / ppp),
         );
-        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::unique("hud_scale")));
+        let painter = ctx
+            .layer_painter(egui::LayerId::new(egui::Order::Background, egui::Id::unique("hud_scale")))
+            .with_clip_rect(self.world_clip_rect(ppp));
         painter.rect_stroke(
             rect.expand(2.0),
             2.0,
@@ -167,7 +180,7 @@ impl App {
         );
         let text = format!("{:.0} %", self.world.hud_scale(idx) * 100.0);
         let galley = painter.layout_no_wrap(text, egui::FontId::proportional(13.0), self.palette.ink);
-        let screen = ctx.content_rect();
+        let screen = ctx.content_rect().intersect(self.world_clip_rect(ppp));
         let label = egui::pos2(
             rect.left()
                 .clamp(screen.left(), (screen.right() - galley.size().x - 8.0).max(screen.left())),
@@ -619,6 +632,13 @@ fn accessible_delta(rect: [f32; 4], screen: [f32; 2]) -> [f32; 2] {
     })
 }
 
+fn accessible_delta_in_area(rect: [f32; 4], area: [f32; 4]) -> [f32; 2] {
+    accessible_delta(
+        [rect[0] - area[0], rect[1] - area[1], rect[2] - area[0], rect[3] - area[1]],
+        [area[2] - area[0], area[3] - area[1]],
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -748,5 +768,13 @@ mod tests {
         assert_eq!(accessible_delta([-1000.0, -1000.0, 2000.0, 2000.0], [1280.0, 720.0]), [0.0, 0.0]);
         assert_eq!(accessible_delta([1300.0, 10.0, 1400.0, 110.0], [1280.0, 720.0]), [-44.0, 0.0]);
         assert_eq!(accessible_delta([-110.0, -110.0, -10.0, -10.0], [1280.0, 720.0]), [34.0, 34.0]);
+        assert_eq!(
+            accessible_delta_in_area([1800.0, 250.0, 1900.0, 350.0], [1920.0, 240.0, 3200.0, 960.0]),
+            [44.0, 0.0]
+        );
+        assert_eq!(
+            accessible_delta_in_area([3220.0, 970.0, 3320.0, 1070.0], [1920.0, 240.0, 3200.0, 960.0]),
+            [-44.0, -34.0]
+        );
     }
 }

@@ -13221,3 +13221,45 @@ picker-pipette-no-texture = Aucune texture copiable trouvée dans votre inventai
 picker-pipette-no-material = Aucun matériau copiable trouvé dans votre inventaire.
 
 local-texture-preview-hint = Texture locale — aperçu d’un fichier de cet ordinateur.
+
+# Multi-monitor world viewport
+mm-world-viewport = Vue du monde sur plusieurs écrans
+mm-enable = Utiliser une vue du monde personnalisée
+mm-enable-help = Étirez la fenêtre sur plusieurs écrans, puis réservez une zone au monde 3D. La caméra, les HUD et les clics dans le monde restent dans cette zone ; les panneaux peuvent occuper le reste. La vue subjective, l’interface masquée, le mode photo et la VR utilisent leur cadre entier.
+mm-presets = Position du monde
+mm-presets-help = Commencez par la moitié gauche ou droite de la fenêtre étirée, puis ajustez les marges pour des écrans de tailles différentes.
+mm-world-left = Moitié gauche
+mm-world-right = Moitié droite
+mm-full-window = Fenêtre entière
+mm-margin-left = Marge gauche
+mm-margin-right = Marge droite
+mm-margin-top = Marge supérieure
+mm-margin-bottom = Marge inférieure
+mm-margin-help = Pourcentage de la fenêtre réservé aux panneaux. Les marges opposées sont réduites ensemble pour conserver au moins 5 % pour le monde.
+
+# Native character windows
+character-switch-title = Personnages
+character-switch-description = Gardez vos personnages connectés dans des fenêtres séparées. Passez à une fenêtre ouverte ou ouvrez la connexion d’un personnage enregistré. Vous vous connectez vous-même.
+character-switch-shared-settings = Les préférences et la disposition sont partagées. La dernière fenêtre qui enregistre peut remplacer les modifications d’une autre fenêtre.
+character-switch-demo = Démonstration hors ligne : ces personnages et fenêtres sont simulés.
+character-switch-demo-action = Démonstration uniquement : aucune fenêtre n’a été ouverte ni activée.
+character-switch-search = Rechercher un personnage ou une grille…
+character-switch-current = Cette fenêtre
+character-switch-opening = Ouverture de la fenêtre de connexion…
+character-switch-online = Connecté dans une autre fenêtre
+character-switch-connecting = Connexion dans une autre fenêtre
+character-switch-login-open = Fenêtre de connexion ouverte
+character-switch-offline = Hors ligne
+character-switch-switch = Activer
+character-switch-open-login = Ouvrir la connexion
+character-switch-empty = Aucun personnage enregistré. Connectez-vous avec « Mémoriser le nom » activé pour en ajouter un.
+character-switch-no-results = Aucun personnage correspondant.
+character-switch-limit = Les 64 premiers personnages enregistrés sont affichés. Réorganisez-les dans le gestionnaire des comptes de connexion pour choisir ceux qui apparaissent.
+character-switch-launch-requested = Une fenêtre de connexion s’ouvre. Choisissez « Connexion » dans cette fenêtre lorsque vous êtes prêt.
+character-switch-focus-requested = Activation demandée. Si votre bureau la bloque, sélectionnez le viewer dans la barre des tâches ou le Dock.
+character-switch-failed = La fenêtre du personnage a changé ou n’a pas pu être ouverte. Attendez la mise à jour de la liste, puis réessayez.
+character-switch-beta-grid = Second Life Bêta
+character-switch-custom-grid = Grille personnalisée
+character-switch-missing = Ce personnage enregistré est indisponible. Sélectionnez un compte sur cet écran de connexion.
+character-switch-cli-help = --saved-account <id>  Sélectionner un personnage enregistré sur un écran de connexion manuel
+character-switch-other-grid = Cet avatar a une fenêtre ouverte sur une autre grille. Fermez-la avant cette connexion ; ses données de compte sont partagées entre les grilles.

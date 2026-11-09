@@ -9,6 +9,9 @@ impl App {
     }
 
     pub(super) fn sample_texture(&mut self) {
+        if !self.world_pointer_inside() {
+            return;
+        }
         let Some(materials) = pipette::needs_sample(&self.egui_ctx, self.cursor_pos) else {
             return;
         };

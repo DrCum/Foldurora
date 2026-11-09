@@ -320,6 +320,7 @@ fn ik_edit_pointer_ray_roundtrips_the_projected_contact_at_scaled_ui_resolution(
     let view = glam::camera::rh::view::look_to_mat4(eye, (Vec3::Z - eye).normalize(), Vec3::Z);
     let projection = glam::camera::rh::proj::directx::perspective_infinite_reverse(0.8, 16.0 / 9.0, 0.05);
     let projector = Projector {
+        world_viewport: None,
         view_proj: projection * view,
         width: 1600.0,
         height: 900.0,
@@ -365,6 +366,7 @@ fn ik_edit_contact_grip_gestures_preserve_selection_and_stay_behind_windows() {
     let eye = point + Vec3::new(3.0, -3.0, 2.0);
     let view = glam::camera::rh::view::look_to_mat4(eye, (point - eye).normalize(), Vec3::Z);
     let proj = Projector {
+        world_viewport: None,
         view_proj: glam::camera::rh::proj::directx::perspective_infinite_reverse(0.8, 16.0 / 9.0, 0.05) * view,
         width: 1600.0,
         height: 900.0,

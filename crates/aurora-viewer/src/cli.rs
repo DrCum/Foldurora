@@ -21,6 +21,9 @@ pub struct Cli {
     /// `--grid <name>` or `--loginuri <uri>` (CmdLineGridChoice,
     /// CmdLineLoginURI): the grid the login screen starts on.
     pub grid: Option<Grid>,
+    /// Select an exact saved account/grid on the login screen. This opaque
+    /// catalogue identity carries no credential and never submits a login.
+    pub saved_account: Option<String>,
     /// The startup SLURL (CmdLineLoginLocation): `--url <slurl>`, `-url`
     /// (the form the system's `secondlife:` handler passes) or a bare
     /// argument. Like the Legacy Viewer's `last_option`, nothing after it is
@@ -79,7 +82,11 @@ pub fn get() -> &'static Cli {
                 .map(|(code, _)| code)
                 .collect::<Vec<_>>()
                 .join(", ");
-            println!("{}", aurora_i18n::tr!("cli-help", languages = languages));
+            println!(
+                "{}\n{}",
+                aurora_i18n::tr!("cli-help", languages = languages),
+                aurora_i18n::tr!("character-switch-cli-help")
+            );
             std::process::exit(0);
         }
         if cli.version {
@@ -110,6 +117,14 @@ fn parse(args: impl Iterator<Item = String>) -> Cli {
             cli.title = args.next();
         } else if a == "--vr" {
             cli.vr = true;
+        } else if let Some(value) = a.strip_prefix("--saved-account=") {
+            cli.saved_account = Some(value.to_owned());
+        } else if a == "--saved-account" {
+            cli.saved_account = Some(if args.peek().is_some_and(|value| !value.starts_with('-')) {
+                args.next().unwrap_or_default()
+            } else {
+                String::new()
+            });
         } else if let Some(v) = a.strip_prefix("--fps-limit=") {
             cli.fps_limit = parse_fps_limit(v);
         } else if a == "--fps-limit" {
@@ -151,6 +166,11 @@ fn parse(args: impl Iterator<Item = String>) -> Cli {
     cli.title = cli.title.map(|t| t.trim().to_owned()).filter(|t| !t.is_empty());
     cli.language = cli.language.map(|value| value.trim().to_owned()).filter(|value| !value.is_empty());
     cli.url = cli.url.map(|u| u.trim().to_owned()).filter(|u| !u.is_empty());
+    if cli.saved_account.is_some() {
+        // A character window opens a manual login form even if another
+        // argument also supplied the older automatic-login option.
+        cli.login = Mutex::new(None);
+    }
     cli
 }
 
@@ -263,6 +283,44 @@ pub fn title_slug() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn saved_character_option_only_opens_manual_login_and_cannot_follow_a_slurl() {
+        let id = crate::characters::identity("grid", "synthetic");
+        for arguments in [
+            vec!["--saved-account".into(), id.clone()],
+            vec![format!("--saved-account={id}")],
+            vec![
+                "--login".into(),
+                "synthetic".into(),
+                "Resident".into(),
+                "synthetic-marker".into(),
+                "--saved-account".into(),
+                id.clone(),
+            ],
+        ] {
+            let cli = parse(arguments.into_iter());
+            assert_eq!(cli.saved_account.as_deref(), Some(id.as_str()));
+            assert!(cli.login.lock().unwrap().is_none());
+        }
+        let cli = parse(["--saved-account", "--help"].into_iter().map(String::from));
+        assert_eq!(
+            cli.saved_account.as_deref(),
+            Some(""),
+            "invalid target stays explicit for a safe empty login screen"
+        );
+        assert!(cli.help);
+        let cli = parse(
+            [
+                "--url".into(),
+                "secondlife:///app/agent/synthetic/about".into(),
+                "--saved-account".into(),
+                id,
+            ]
+            .into_iter(),
+        );
+        assert!(cli.saved_account.is_none());
+    }
 
     #[test]
     fn language_forms_and_help_preserve_the_process_override() {

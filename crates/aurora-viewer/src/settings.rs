@@ -680,6 +680,8 @@ pub struct Settings {
     pub window_maximized: bool,
     /// Start in a borderless window covering the current monitor.
     pub window_fullscreen: bool,
+    /// World-only viewport; the full native canvas remains available to panels.
+    pub world_viewport: crate::world_viewport::ViewportSettings,
     /// Legacy single-account authorization, read once for migration only.
     #[serde(skip_serializing)]
     pub mfa_hash: String,
@@ -1862,6 +1864,7 @@ impl Default for Settings {
             window_y: None,
             window_maximized: false,
             window_fullscreen: false,
+            world_viewport: Default::default(),
             mfa_hash: String::new(),
             font: crate::ui::fonts::DEFAULT.into(),
             font_scale: 1.0,

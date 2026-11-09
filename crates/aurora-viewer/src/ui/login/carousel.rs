@@ -142,11 +142,13 @@ pub fn show(
     // answer (success, error, MFA or terms) the identity typed in the Add
     // form is the one sent, challenged and saved, never a saved card's.
     if !form.editing && !form.adding && !form.busy && form.selection_shown_for.as_ref() != Some(&current_key) {
-        let index = if !paginated && form.selection_shown_for.is_none() && form.pending_connect.is_none() && !form.busy {
-            (!visible.is_empty()).then_some(visible.len() / 2)
-        } else {
-            form.accounts.iter().position(|account| account.key() == current_key)
-        };
+        let index =
+            if !paginated && form.selection_shown_for.is_none() && !form.explicit_selection && form.pending_connect.is_none() && !form.busy
+            {
+                (!visible.is_empty()).then_some(visible.len() / 2)
+            } else {
+                form.accounts.iter().position(|account| account.key() == current_key)
+            };
         if let Some(index) = index.or_else(|| (!visible.is_empty()).then_some(visible.len() / 2)) {
             if index != index_of(settings, form).unwrap_or(usize::MAX) {
                 select(settings, form, index);
@@ -157,6 +159,7 @@ pub fn show(
             }
         }
         form.selection_shown_for = Some(current_key.clone());
+        form.explicit_selection = false;
     }
     let card_width = layout.card_width;
     // The overlay frame includes a one-point stroke on each side.
@@ -930,6 +933,71 @@ mod tests {
             ..Default::default()
         };
         (settings, form)
+    }
+
+    #[test]
+    fn explicit_saved_character_survives_first_carousel_frames_and_centers_paginated_targets() {
+        for (count, target, width) in [
+            (2, 0, 1280.0),
+            (2, 1, 1280.0),
+            (3, 0, 1280.0),
+            (3, 2, 1280.0),
+            (8, 0, 1280.0),
+            (8, 7, 1280.0),
+            (8, 7, 800.0),
+        ] {
+            let ctx = Context::default();
+            let theme = crate::theme::Theme::default();
+            theme.apply(&ctx, 1.0);
+            let (mut settings, mut form) = fixture(count);
+            for account in &mut form.accounts {
+                account.uri = "http://127.0.0.1:9/synthetic-grid".into();
+                account.remember_password = false;
+                account.remember_mfa = false;
+            }
+            let expected = form.accounts[target].key();
+            let id = crate::characters::account_id(&form.accounts[target]);
+            assert!(super::super::select_saved_character(&mut settings, &mut form, &id));
+            let screen = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(width, 760.0));
+            let layout = super::super::layout::Layout::new(screen, count);
+            for frame in 0..3 {
+                let mut action = LoginAction::None;
+                let _ = super::super::test_output(ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(screen),
+                        time: Some(frame as f64 / 30.0),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        action = show(
+                            ui,
+                            &theme.palette(),
+                            &Icons::default(),
+                            None,
+                            &mut settings,
+                            &mut form,
+                            &LoginInfo::preview_release("0.3.0"),
+                            None,
+                        );
+                    },
+                ));
+                assert_eq!(
+                    (settings.login_uri(), settings.username.trim().to_lowercase()),
+                    expected,
+                    "first rendered frame changed explicit target: count={count}, target={target}, width={width}, frame={frame}"
+                );
+                assert_eq!(form.selection_shown_for.as_ref(), Some(&expected));
+                assert!(matches!(action, LoginAction::None));
+                assert!(!form.busy && form.pending_connect.is_none() && form.transition.is_none());
+                if layout.paginated {
+                    assert_eq!(
+                        (form.page + layout.per_page / 2) % count,
+                        target,
+                        "the requested card must be centered"
+                    );
+                }
+            }
+        }
     }
 
     fn key(key: egui::Key) -> egui::Event {

@@ -86,6 +86,7 @@ fn beacon_line_depth_tracks_both_ends_and_clips_the_near_plane() {
         view_proj: glam::camera::rh::proj::directx::perspective_infinite_reverse(1.0, 1.0, 0.1),
         pixels_per_point: 1.5,
         size: [900, 900],
+        viewport: [0, 0, 900, 900],
         jitter: Vec2::ZERO,
     };
     let a = Vec3::new(-1.0, 0.0, -2.0);
@@ -123,6 +124,8 @@ struct Locals {
     screen_size: [f32; 2],
     screen_px: [f32; 2],
     jitter: [f32; 2],
+    viewport_origin: [f32; 2],
+    viewport_size: [f32; 2],
     dithering: u32,
     _pad: u32,
 }
@@ -144,6 +147,7 @@ pub(crate) struct LabelView {
     pub view_proj: Mat4,
     pub pixels_per_point: f32,
     pub size: [u32; 2],
+    pub viewport: [u32; 4],
     /// From a pixel of the surface to where the scene's depth has it.
     pub jitter: Vec2,
 }
@@ -456,6 +460,8 @@ impl LabelDepth {
             screen_size: [w / view.pixels_per_point, h / view.pixels_per_point],
             screen_px: [w, h],
             jitter: view.jitter.to_array(),
+            viewport_origin: [view.viewport[0] as f32, view.viewport[1] as f32],
+            viewport_size: [view.viewport[2] as f32, view.viewport[3] as f32],
             // as `egui_wgpu::RendererOptions::default`
             dithering: 1,
             _pad: 0,
@@ -552,6 +558,7 @@ mod tests {
             view_proj: Mat4::IDENTITY,
             pixels_per_point: 1.0,
             size: [8, 8],
+            viewport: [0, 0, 8, 8],
             jitter: Vec2::ZERO,
         };
         let mesh = |vertices| {
@@ -618,6 +625,7 @@ mod tests {
             view_proj: proj * look,
             pixels_per_point: 1.0,
             size: [800, 600],
+            viewport: [0, 0, 800, 600],
             jitter: Vec2::ZERO,
         }
     }

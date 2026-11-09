@@ -1466,6 +1466,7 @@ mod beacon_tests {
 
     fn projector(ppp: f32) -> super::super::hud::Projector {
         super::super::hud::Projector {
+            world_viewport: None,
             view_proj: Mat4::IDENTITY,
             width: 1600.0,
             height: 900.0,

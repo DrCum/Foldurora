@@ -234,6 +234,14 @@ impl DrawnPick {
         }
     }
 
+    /// A resized or moved world view invalidates requests still waiting for
+    /// a frame. Already encoded readbacks retain their own original camera.
+    pub fn viewport_changed(&mut self) {
+        for (ticket, _, _, _) in self.queue.drain(..) {
+            self.answers.push((ticket, Drawn::default()));
+        }
+    }
+
     /// The requests of a frame join those still waiting.
     pub fn ask(&mut self, asked: Vec<DrawnRequest>) {
         self.queue.extend(asked);
