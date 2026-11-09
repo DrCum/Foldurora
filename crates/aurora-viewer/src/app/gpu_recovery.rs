@@ -175,6 +175,7 @@ impl App {
     /// stays on screen until the new one has presented (`retired_window`).
     /// False when no new renderer could be made: the caller closes as before.
     pub(super) fn recover_from_gpu_loss(&mut self, event_loop: &ActiveEventLoop, safe: bool) -> bool {
+        self.workspace_huds.retire();
         self.invalidate_host_display();
         let Some(old) = self.gfx.take() else {
             return false;

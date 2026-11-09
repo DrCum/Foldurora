@@ -46,7 +46,14 @@ impl WorkspaceUi {
     pub(crate) fn reset(&mut self) {
         *self = Self::default();
     }
-    pub(crate) fn show(&mut self, ctx: &egui::Context, p: &Palette, c: &Controller, modified: bool) -> Option<Action> {
+    pub(crate) fn show(
+        &mut self,
+        ctx: &egui::Context,
+        p: &Palette,
+        c: &Controller,
+        modified: bool,
+        huds: &crate::workspace::huds::View,
+    ) -> Option<Action> {
         use aurora_i18n::tr;
         if !self.open {
             self.painted = None;
@@ -100,6 +107,7 @@ impl WorkspaceUi {
                         Status::Ready => tr!("workspaces-ready"),
                         Status::FolderUnavailable => tr!("workspaces-folder-unavailable"),
                         Status::CameraUnavailable => tr!("workspaces-camera-unavailable"),
+                        Status::HudUnavailable => tr!("workspaces-huds-unavailable"),
                     };
                     ui.label(status);
                     if let Some(r) = c.preview.as_ref().map(|p| p.candidate).or(c.active).and_then(|id| c.record(id)) {
@@ -109,7 +117,81 @@ impl WorkspaceUi {
                             marker = if modified { " *" } else { "" }
                         ));
                     }
+                    if c.permit {
+                        use crate::workspace::hud_lane::Progress;
+                        let message = match huds.progress {
+                            Progress::Idle => None,
+                            Progress::Review => Some(tr!("workspaces-huds-review")),
+                            Progress::Running => Some(tr!("workspaces-huds-running")),
+                            Progress::Complete => Some(tr!("workspaces-huds-complete")),
+                            Progress::Unavailable => Some(tr!("workspaces-huds-unavailable")),
+                            Progress::Declined => Some(tr!("workspaces-huds-declined")),
+                            Progress::Interrupted => Some(tr!("workspaces-huds-interrupted")),
+                            Progress::TimedOut => Some(tr!("workspaces-huds-timeout")),
+                            Progress::Failed => Some(tr!("workspaces-huds-failed")),
+                        };
+                        if let Some(message) = message {
+                            ui.label(message);
+                        }
+                        if let Some((nonce, rows)) = &huds.review {
+                            for row in rows {
+                                ui.label(&row.name);
+                            }
+                            ui.push_id(("workspace_hud_review", nonce), |ui| {
+                                ui.horizontal_wrapped(|ui| {
+                                    if ui
+                                        .add_enabled(enabled && c.preview.is_none(), egui::Button::new(tr!("workspaces-huds-accept")))
+                                        .clicked()
+                                    {
+                                        command = Some(Command::DecideHuds(*nonce, true));
+                                    }
+                                    if ui.add_enabled(enabled, egui::Button::new(tr!("common-cancel"))).clicked() {
+                                        command = Some(Command::DecideHuds(*nonce, false));
+                                    }
+                                });
+                            });
+                        }
+                    }
                     if let Some(cat) = &c.catalogue {
+                        super::widgets::collapsing(ui, p, "workspace_huds_selection", tr!("workspaces-huds-title"), false, |ui| {
+                            ui.label(tr!("workspaces-huds-help"));
+                            let mut capture = cat.capture_huds;
+                            if ui
+                                .add_enabled_ui(enabled && c.preview.is_none() && (huds.available || capture), |ui| {
+                                    super::widgets::checkbox(ui, p, &mut capture, tr!("workspaces-capture-huds"))
+                                })
+                                .inner
+                                .changed()
+                            {
+                                command = Some(Command::CaptureHuds(capture));
+                            }
+                            if !huds.available {
+                                ui.label(tr!("workspaces-huds-unavailable"));
+                            }
+                            for row in &huds.worn {
+                                ui.push_id(("workspace_hud", row.reference), |ui| {
+                                    let mut selected = cat.selected_huds.contains(row.reference);
+                                    if ui
+                                        .add_enabled_ui(enabled && c.preview.is_none() && huds.available, |ui| {
+                                            super::widgets::checkbox(ui, p, &mut selected, &row.name)
+                                        })
+                                        .inner
+                                        .changed()
+                                    {
+                                        command = Some(Command::SelectHud(row.reference, selected));
+                                    }
+                                });
+                            }
+                            if ui
+                                .add_enabled(
+                                    enabled && c.preview.is_none() && !cat.selected_huds.is_empty(),
+                                    egui::Button::new(tr!("workspaces-huds-clear")),
+                                )
+                                .clicked()
+                            {
+                                command = Some(Command::ClearHuds);
+                            }
+                        });
                         let mut background = cat.capture_background;
                         if ui
                             .add_enabled_ui(enabled && c.preview.is_none(), |ui| {
@@ -263,6 +345,15 @@ impl WorkspaceUi {
                                 {
                                     command = Some(Command::Update(id));
                                 }
+                                if ui
+                                    .add_enabled(
+                                        enabled && c.preview.is_none() && c.record(id).is_some_and(|r| r.layout.huds.is_some()),
+                                        egui::Button::new(tr!("workspaces-huds-review-selected")),
+                                    )
+                                    .clicked()
+                                {
+                                    command = Some(Command::ReviewHuds(id));
+                                }
                                 let favorite = c.catalogue.as_ref().is_some_and(|c| c.favorites.contains(&id));
                                 if ui
                                     .add_enabled(
@@ -351,7 +442,7 @@ impl WorkspaceUi {
             self.painted = None;
             return None;
         }
-        if was_open && !open && c.preview.is_some() {
+        if was_open && !open {
             command = Some(Command::Cancel);
         }
         self.painted = if open { current } else { None };
@@ -359,6 +450,7 @@ impl WorkspaceUi {
         let command = command?;
         let target = match &command {
             Command::Rename(id, _)
+            | Command::ReviewHuds(id)
             | Command::Update(id)
             | Command::Delete(id)
             | Command::Preview(id)
@@ -441,6 +533,7 @@ mod tests {
             graphics: None,
             camera: None,
             background: None,
+            huds: None,
             geometry: [None; 4],
             viewport: (&s.world_viewport).into(),
             bars: Bars {
@@ -473,10 +566,19 @@ mod tests {
         )
     }
     fn draw(frames: &mut Frames, st: &mut WorkspaceUi, c: &Controller, events: Vec<egui::Event>) -> (Vec<Text>, Option<Action>) {
+        draw_huds(frames, st, c, &Default::default(), events)
+    }
+    fn draw_huds(
+        frames: &mut Frames,
+        st: &mut WorkspaceUi,
+        c: &Controller,
+        huds: &crate::workspace::huds::View,
+        events: Vec<egui::Event>,
+    ) -> (Vec<Text>, Option<Action>) {
         let p = crate::theme::Theme::default().palette();
         let mut result = None;
         let texts = frames.run(events, |ui| {
-            let action = st.show(ui.ctx(), &p, c, false);
+            let action = st.show(ui.ctx(), &p, c, false, huds);
             if result.is_none() {
                 result = action;
             }
@@ -751,5 +853,49 @@ mod tests {
         assert_eq!(update.ticket.record, Some(id));
         assert_eq!(Some(update.ticket.source), c.source);
         assert_eq!(c.catalogue.as_ref().unwrap().encode().unwrap(), original);
+    }
+    #[test]
+    fn native_workspace_hud_review_buttons_cannot_retarget_a_replaced_nonce() {
+        let (c, mut st) = fixture();
+        let mut frames = Frames::new();
+        let mut huds = crate::workspace::huds::View {
+            available: true,
+            review: Some((
+                Uuid::new_v4(),
+                vec![crate::workspace::huds::HudRow {
+                    reference: crate::workspace::model::HudRef {
+                        item: Uuid::new_v4(),
+                        point: 31,
+                    },
+                    name: "Visible owned HUD".into(),
+                    worn: false,
+                }],
+            )),
+            progress: crate::workspace::hud_lane::Progress::Review,
+            ..Default::default()
+        };
+        let mut texts = Vec::new();
+        for _ in 0..3 {
+            texts = draw_huds(&mut frames, &mut st, &c, &huds, vec![]).0;
+        }
+        let pos = texts
+            .iter()
+            .find(|t| t.source == aurora_i18n::tr!("workspaces-huds-accept"))
+            .unwrap()
+            .rect
+            .center();
+        draw_huds(&mut frames, &mut st, &c, &huds, vec![egui::Event::PointerMoved(pos)]);
+        assert!(draw_huds(&mut frames, &mut st, &c, &huds, vec![pointer(pos, true)]).1.is_none());
+        let nonce = Uuid::new_v4();
+        huds.review.as_mut().unwrap().0 = nonce;
+        assert!(draw_huds(&mut frames, &mut st, &c, &huds, vec![pointer(pos, false)]).1.is_none());
+        draw_huds(&mut frames, &mut st, &c, &huds, vec![]);
+        draw_huds(&mut frames, &mut st, &c, &huds, vec![pointer(pos, true)]);
+        let action = draw_huds(&mut frames, &mut st, &c, &huds, vec![pointer(pos, false)]).1.unwrap();
+        assert!(matches!(action.command, Command::DecideHuds(n, true) if n == nonce));
+        assert!(
+            c.catalogue.as_ref().unwrap().selected_huds.is_empty(),
+            "paint only emits a typed request"
+        );
     }
 }

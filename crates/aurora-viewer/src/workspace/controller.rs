@@ -1,5 +1,5 @@
 use super::{
-    model::{Background, Catalogue, Layout, Startup},
+    model::{Background, Catalogue, HudRef, Layout, Startup},
     store::Lane,
 };
 use uuid::Uuid;
@@ -38,6 +38,11 @@ pub(crate) enum Command {
     CaptureCamera(bool),
     CaptureBackground(bool),
     Background(Background),
+    CaptureHuds(bool),
+    SelectHud(HudRef, bool),
+    ClearHuds,
+    ReviewHuds(Uuid),
+    DecideHuds(Uuid, bool),
 }
 #[derive(Clone, Debug)]
 pub(crate) struct Action {
@@ -56,6 +61,7 @@ pub(crate) enum Status {
     Previewing,
     FolderUnavailable,
     CameraUnavailable,
+    HudUnavailable,
 }
 pub(crate) struct Preview {
     pub baseline: Layout,
@@ -199,6 +205,9 @@ impl Controller {
             .map_or_else(|| current.baseline_for(&layout), |p| p.baseline.clone());
         if baseline.inventory_folder.is_none() && layout.inventory_folder.is_some() {
             baseline.inventory_folder = current.inventory_folder;
+        }
+        if baseline.huds.is_none() && layout.huds.is_some() {
+            baseline.huds = current.huds;
         }
         if baseline.background.is_none() && layout.background.is_some() {
             baseline.background = current.background;
@@ -531,6 +540,7 @@ mod tests {
             graphics: None,
             camera: None,
             background: None,
+            huds: None,
             geometry: [Some(super::super::model::Geometry {
                 point: 0,
                 offset: [left, 0.0],
@@ -784,5 +794,30 @@ mod tests {
             expected,
             "geometry-only Previous must not borrow that record's old context"
         );
+    }
+    #[test]
+    fn workspace_hud_preview_baseline_and_previous_preserve_only_the_scoped_additive_set() {
+        use super::super::model::{HudRef, HudSet};
+        let mut c = Controller::default();
+        let mut current = layout(1.0);
+        let original = HudSet::try_from(vec![HudRef {
+            item: Uuid::new_v4(),
+            point: 31,
+        }])
+        .unwrap();
+        current.huds = Some(original.clone());
+        let target = layout(2.0);
+        let id = Uuid::new_v4();
+        c.begin_preview(target, id, current.clone(), false);
+        assert!(c.preview.as_ref().unwrap().baseline.huds.is_none());
+        let mut target = layout(3.0);
+        target.huds = Some(HudSet::default());
+        c.begin_preview(target, id, current, true);
+        assert_eq!(c.preview.as_ref().unwrap().baseline.huds, Some(original.clone()));
+        let placement = c.placement.take().unwrap();
+        c.finish_placement(placement);
+        assert_eq!(c.previous.as_ref().unwrap().0.huds, Some(original.clone()));
+        c.begin_previous(layout(4.0));
+        assert_eq!(c.placement.as_ref().unwrap().layout.huds, Some(original));
     }
 }

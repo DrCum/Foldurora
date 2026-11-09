@@ -3,7 +3,9 @@
 use super::{App, Renderer, Screen, Window, ui};
 use crate::workspace::{
     controller::{Action, Command, Pending, Source, Status},
-    model::{Background, Bars, CameraContext, CaptureGroups, Catalogue, Graphics, LIMIT, Layout, Record, Startup, Viewport, valid_name},
+    model::{
+        Background, Bars, CameraContext, CaptureGroups, Catalogue, Graphics, HudSet, LIMIT, Layout, Record, Startup, Viewport, valid_name,
+    },
     store::{Lane, Request},
 };
 use uuid::Uuid;
@@ -148,7 +150,16 @@ impl App {
             .then(|| self.inventory_ui.workspace_folder(&self.world.inventory))
             .flatten();
         let inventory_folder = folder.filter(|id| self.workspace_folder_allowed(*id));
+        let huds = if groups.huds {
+            self.workspaces.source.clone().and_then(|source| {
+                crate::workspace::huds::worn(&self.world, &source, &mut self.workspace_huds.policy)
+                    .and_then(|rows| HudSet::try_from(rows.into_iter().map(|r| r.reference).collect::<Vec<_>>()).ok())
+            })
+        } else {
+            None
+        };
         Some(Layout {
+            huds,
             inventory_folder,
             background: groups.background.then(|| self.workspaces.background()),
             camera: groups
@@ -164,7 +175,7 @@ impl App {
             },
         })
     }
-    fn workspace_capture_for_save(&mut self) -> Option<Layout> {
+    fn workspace_capture_for_save(&mut self) -> Result<Layout, Status> {
         let groups = self
             .workspaces
             .catalogue
@@ -174,8 +185,24 @@ impl App {
                 graphics: c.capture_graphics,
                 camera: c.capture_camera,
                 background: c.capture_background,
+                huds: c.capture_huds,
             });
-        self.workspace_capture(groups)
+        let mut layout = self.workspace_capture(groups).ok_or(Status::CameraUnavailable)?;
+        if groups.huds {
+            let source = self.workspaces.source.as_ref().ok_or(Status::HudUnavailable)?;
+            let selected = self
+                .workspaces
+                .catalogue
+                .as_ref()
+                .ok_or(Status::HudUnavailable)?
+                .selected_huds
+                .clone();
+            let rows = crate::workspace::huds::resolve(&self.world, source, &mut self.workspace_huds.policy, &selected)
+                .filter(|rows| rows.len() == selected.refs().len() && rows.iter().all(|r| r.worn))
+                .ok_or(Status::HudUnavailable)?;
+            layout.huds = Some(HudSet::try_from(rows.into_iter().map(|r| r.reference).collect::<Vec<_>>()).map_err(|_| Status::Invalid)?);
+        }
+        Ok(layout)
     }
     pub(super) fn workspace_cancel_preview(&mut self, restore_geometry: bool) {
         let Some(p) = self.workspaces.preview.take() else { return };
@@ -209,6 +236,7 @@ impl App {
                 .source
                 .as_ref()
                 .is_some_and(|s| s.agent == self.world.agent_id && self.world.login.as_ref().is_some_and(|l| l.session_id == s.login));
+            self.workspace_huds.retire();
             self.workspace_cancel_preview(same);
             self.workspaces.bind(source);
             self.workspace_ui.reset();
@@ -253,6 +281,7 @@ impl App {
     /// Called before World consumes login/disconnect, including exact
     /// same-source reauthentication. No old IO/UI capture can be readmitted.
     pub(super) fn workspace_source_boundary(&mut self) {
+        self.workspace_huds.retire();
         self.workspace_cancel_preview(true);
         self.workspace_finish_io();
         self.workspace_remember_last(true);
@@ -332,6 +361,7 @@ impl App {
     pub(super) fn workspace_action(&mut self, action: Action, renderer: &Renderer, window: &Window) {
         let target = match &action.command {
             Command::Rename(id, _)
+            | Command::ReviewHuds(id)
             | Command::Update(id)
             | Command::Delete(id)
             | Command::Preview(id)
@@ -351,12 +381,14 @@ impl App {
             return;
         }
         if matches!(action.command, Command::Cancel) {
+            self.workspace_huds.retire();
             if self.workspaces.preview.is_some() {
                 self.workspace_cancel_preview(true);
             }
             return;
         }
         if matches!(action.command, Command::Retry) {
+            self.workspace_huds.retire();
             if self.workspaces.pending.is_none() {
                 self.workspaces.catalogue = None;
                 self.workspaces.advance();
@@ -367,6 +399,10 @@ impl App {
         if !self.workspaces.ready() || !self.workspaces.advance() {
             return;
         }
+        if !matches!(action.command, Command::DecideHuds(..)) {
+            self.workspace_huds.retire();
+        }
+        self.workspace_huds_prepare(renderer, window);
         self.workspaces.cancel_startup();
         let commit = matches!(&action.command, Command::Switch(_));
         let rename = match &action.command {
@@ -442,9 +478,12 @@ impl App {
                             self.workspaces.status = Status::Invalid;
                             return;
                         }
-                        let Some(layout) = self.workspace_capture_for_save() else {
-                            self.workspaces.status = Status::CameraUnavailable;
-                            return;
+                        let layout = match self.workspace_capture_for_save() {
+                            Ok(layout) => layout,
+                            Err(status) => {
+                                self.workspaces.status = status;
+                                return;
+                            }
                         };
                         if layout.validate().is_err() {
                             self.workspaces.status = Status::Invalid;
@@ -476,9 +515,12 @@ impl App {
                 if self.workspaces.preview.is_some() {
                     return;
                 }
-                let Some(layout) = self.workspace_capture_for_save() else {
-                    self.workspaces.status = Status::CameraUnavailable;
-                    return;
+                let layout = match self.workspace_capture_for_save() {
+                    Ok(layout) => layout,
+                    Err(status) => {
+                        self.workspaces.status = status;
+                        return;
+                    }
                 };
                 let mut next = self.workspaces.catalogue.clone().expect("ready workspace catalogue");
                 if next.update_layout(id, layout).is_err() {
@@ -528,9 +570,12 @@ impl App {
                 let mut next = self.workspaces.catalogue.clone().expect("ready workspace catalogue");
                 next.startup = startup;
                 if startup == Startup::LastArrangement {
-                    let Some(layout) = self.workspace_capture_for_save() else {
-                        self.workspaces.status = Status::CameraUnavailable;
-                        return;
+                    let layout = match self.workspace_capture_for_save() {
+                        Ok(layout) => layout,
+                        Err(status) => {
+                            self.workspaces.status = status;
+                            return;
+                        }
                     };
                     next.last_layout = Some(layout);
                 }
@@ -596,6 +641,62 @@ impl App {
                 }
                 self.workspace_save_definitions(next);
             }
+            Command::CaptureHuds(capture) => {
+                if self.workspaces.preview.is_some() {
+                    return;
+                }
+                let mut next = self.workspaces.catalogue.clone().expect("ready workspace catalogue");
+                next.capture_huds = capture;
+                if !capture && let Some(last) = &mut next.last_layout {
+                    last.huds = None;
+                }
+                self.workspace_save_definitions(next);
+            }
+            Command::ClearHuds => {
+                if self.workspaces.preview.is_some() {
+                    return;
+                }
+                let mut next = self.workspaces.catalogue.clone().expect("ready workspace catalogue");
+                next.selected_huds = HudSet::default();
+                self.workspace_save_definitions(next);
+            }
+            Command::SelectHud(reference, selected) => {
+                if self.workspaces.preview.is_some() {
+                    return;
+                }
+                let Some(source) = self.workspaces.source.clone() else { return };
+                let Some(rows) = crate::workspace::huds::worn(&self.world, &source, &mut self.workspace_huds.policy) else {
+                    self.workspaces.status = Status::HudUnavailable;
+                    return;
+                };
+                if !rows.iter().any(|r| r.reference == reference) {
+                    return;
+                }
+                let mut next = self.workspaces.catalogue.clone().expect("ready workspace catalogue");
+                let mut refs = next.selected_huds.refs().to_vec();
+                refs.retain(|r| r.item != reference.item);
+                if selected {
+                    refs.push(reference);
+                }
+                let Ok(refs) = HudSet::try_from(refs) else { return };
+                next.selected_huds = refs;
+                self.workspace_save_definitions(next);
+            }
+            Command::ReviewHuds(id) => {
+                if self.workspaces.preview.is_some() {
+                    return;
+                }
+                if let Some(wanted) = self.workspaces.record(id).and_then(|r| r.layout.huds.clone()) {
+                    self.workspace_huds_offer(&wanted, renderer, window);
+                }
+            }
+            Command::DecideHuds(nonce, accepted) => {
+                if self.workspaces.preview.is_some() {
+                    return;
+                }
+                let Some(source) = self.workspaces.source.clone() else { return };
+                self.workspace_huds.decide(&self.world, &source, nonce, accepted);
+            }
             Command::Cancel | Command::Retry => {}
         }
         self.egui_ctx.request_repaint();
@@ -630,9 +731,13 @@ impl App {
             p.room = Some(room);
             self.workspaces.placement = Some(p);
         } else if p.commit {
+            let huds = p.layout.huds.clone();
             let background = p.layout.background;
             let folder_restored = self.workspace_restore_folder(p.layout.inventory_folder);
             self.workspaces.finish_placement(p);
+            if let Some(huds) = huds {
+                self.workspace_huds_offer(&huds, renderer, window);
+            }
             if let Some(background) = background
                 && let Some(mut catalogue) = self.workspaces.catalogue.clone()
                 && catalogue.background != background
@@ -664,6 +769,7 @@ impl App {
                 self.workspace_action(action, renderer, window);
             }
         }
+        self.workspace_huds_tick(renderer, window);
     }
     pub(super) fn workspace_modified(&mut self) -> bool {
         let saved = self
@@ -797,7 +903,7 @@ impl App {
         {
             return;
         }
-        let Some(mut layout) = self.workspace_capture_for_save() else {
+        let Ok(mut layout) = self.workspace_capture_for_save() else {
             return;
         };
         if layout.inventory_folder.is_none() && self.workspaces.catalogue.as_ref().is_some_and(|c| c.remember_folders) {
@@ -833,5 +939,72 @@ impl App {
         let mut next = self.workspaces.catalogue.clone().expect("loaded startup settings");
         next.last_layout = Some(layout);
         self.workspace_save_definitions(next);
+    }
+    pub(super) fn workspace_huds_prepare(&mut self, renderer: &Renderer, window: &Window) {
+        if !self.workspace_ui.open {
+            // Closing the manager cancels future work even if its final paint
+            // could not emit an action ticket. Idle frames need no HUD scan.
+            self.workspace_huds.retire();
+            return;
+        }
+        let authorized = self.workspace_permit(renderer, window)
+            && !renderer.failed()
+            && !renderer.device_lost()
+            && renderer.stalled_for().is_none()
+            && self.workspace_source() == self.workspaces.source
+            && !self.panels.settings;
+        self.workspace_huds
+            .sync(&self.world, self.workspaces.source.as_ref(), self.workspaces.binding, authorized);
+    }
+    fn workspace_huds_offer(&mut self, wanted: &HudSet, renderer: &Renderer, window: &Window) {
+        self.workspace_ui.open = true;
+        self.workspace_huds_prepare(renderer, window);
+        let Some(source) = self.workspaces.source.clone() else { return };
+        self.workspace_huds.offer(&self.world, &source, wanted);
+        // A switch may originate from favorites/startup while the manager is
+        // closed. Make the explicit review discoverable; never auto-accept it.
+        self.workspace_ui.open = true;
+    }
+    fn workspace_huds_tick(&mut self, renderer: &Renderer, window: &Window) {
+        self.workspace_huds_prepare(renderer, window);
+        if !self.workspace_huds.busy() {
+            return;
+        }
+        self.egui_ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        let Some(batch) = self.workspace_huds.next(&self.world, self.appearance_ui.pending.is_some()) else {
+            return;
+        };
+        let Some(source) = self.workspaces.source.clone() else {
+            self.workspace_huds.retire();
+            return;
+        };
+        let Ok(refs) = HudSet::try_from(batch.clone()) else {
+            self.workspace_huds.refuse();
+            return;
+        };
+        if crate::workspace::huds::resolve(&self.world, &source, &mut self.workspace_huds.policy, &refs)
+            .is_none_or(|rows| rows.len() != batch.len())
+        {
+            self.workspace_huds.refuse();
+            return;
+        }
+        // Keep Aurora's complete-COF/attachment-limit/RLVa plan and final send
+        // guards. No direct rez, replacement, detach, fetching or copied assets.
+        let action = crate::world::appearance::Action::WearItems {
+            items: batch.iter().map(|r| r.item).collect(),
+            replace: false,
+            point: batch[0].point,
+        };
+        // Refuse incomplete COF/capacity before the native UI's normal error
+        // recovery can fetch missing inventory. This feature never initiates
+        // hidden metadata fetches to make a captured HUD available.
+        if crate::world::appearance::plan(&self.world.inventory, action.clone(), &self.world.outfit_attachment_points()).is_err() {
+            self.workspace_huds.dispatch_failed();
+            return;
+        }
+        self.apply_appearance_action(action);
+        if self.appearance_ui.pending.is_none() {
+            self.workspace_huds.dispatch_failed();
+        }
     }
 }
