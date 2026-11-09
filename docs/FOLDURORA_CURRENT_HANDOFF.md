@@ -29,11 +29,12 @@ Build source is5f990, not the documentation commit. Uses the retained private
 requirements, with separate nondefault Monitor gates. Preserve all unrelated
 security/slot/private store tests. No checklist/raw evidence publication.
 
-Slick was asked to check history and relay this once to the EXISTING Cumputer
-Windows Builder, thread01a1af77-a465-71c3-be08-cd9d1b927f83. Latest received result
-says a611 is finished and Builder idle. New request delivery/acknowledgment/start
-is UNCONFIRMED. No direct send tool is exposed; app PR attachments returned
-connection closed and are not claimed attached. No old candidate rerun.
+Slick confirmed delivery of the complete pinned5f990 request ONCE to the
+EXISTING Cumputer Windows Builder, thread01a1af77-a465-71c3-be08-cd9d1b927f83,
+and verified its new turn active. Validation is RUNNING; no result, package or
+native acceptance is claimed yet. Do not dispatch a duplicate request. App PR
+attachments returned connection closed and are not claimed attached. No old
+candidate rerun.
 
 ## Measured evidence and failures
 
@@ -71,7 +72,7 @@ connection closed and are not claimed attached. No old candidate rerun.
   Profile Copy's exclusive tests were retired with the approved removal, not
   passed. The old Linux terrain/software-GPU failure remains unresolved.
 
-Cloud has32GB fixed disk, about294MiB free. Full viewer test linking is resource-
+Cloud has32GB fixed disk, about268MiB free. Full viewer test linking is resource-
 blocked; no new full Linux run is claimed. Only idle reproducible caches have
 been reclaimed; source, binaries, profiles and needed evidence remain. Current
 receipts/logs are under `/workspace/scratch/workspace-{folders,graphics,camera,
