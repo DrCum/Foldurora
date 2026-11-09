@@ -15,7 +15,9 @@ use std::collections::{BTreeMap, VecDeque};
 
 mod contacts;
 use contacts::ContactsBook;
-pub(crate) use contacts::{ContactsSnapshot, OpenOperation, OpenStatus};
+#[cfg(test)]
+pub(crate) use contacts::OpenOperation;
+pub(crate) use contacts::{ContactsSnapshot, OpenStatus};
 
 mod close;
 use close::CloseBook;
@@ -692,7 +694,9 @@ impl Peer {
                         policy: view.policy,
                         title: view.title.clone(),
                     })?;
-                    self.closes.explicit_open(key.conversation, through);
+                    if self.closes.explicit_open(key.conversation, through) {
+                        self.contacts.presented(reply.receipt.request, view.policy);
+                    }
                 }
             }
             ChatEvent::Conversation(info) => {

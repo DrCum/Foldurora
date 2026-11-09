@@ -117,19 +117,21 @@ fn contacts_host_receipt_alone_cannot_publish_title_and_recovery_never_resends_o
     peer.observe(&event(&peer, 3, ChatEvent::OpenDirect(opened(request, false))))
         .unwrap();
     assert!(!peer.conversations.contains_key(&Conversation::Direct(resident())));
-    assert!(peer.contacts.pending.is_none());
+    assert!(peer.contacts.pending.is_some(), "missing view retains bounded query recovery");
     assert!(matches!(
         peer.contacts.snapshot(true).opens[0].status,
         OpenStatus::Completed(OpenDirectOutcome::Opened { .. })
     ));
     let before = peer.sent;
     peer.poll_open_direct(now + Duration::from_secs(9));
-    assert_eq!(peer.sent, before);
+    assert_eq!(peer.sent, before + 1, "recovery queries the receipt without repeating native Open");
     peer.observe(&event(&peer, 4, ChatEvent::OpenDirect(opened(request, true))))
         .unwrap();
     assert_eq!(
         peer.conversations[&Conversation::Direct(resident())].title.as_str(),
         "Fresh native title"
     );
+    assert!(peer.contacts.pending.is_none());
+    assert!(peer.contacts.snapshot(true).opens[0].presented.is_some());
     assert!(peer.reads.is_empty(), "Open never fabricates read metadata or clears unread");
 }

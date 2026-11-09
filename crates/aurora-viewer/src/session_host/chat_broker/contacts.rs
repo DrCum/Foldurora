@@ -2,6 +2,7 @@
 //! Socket recovery can query a receipt, never resubmit native Open.
 use super::*;
 use aurora_session::ConversationId;
+use aurora_session::chat::NativeChatPolicy;
 use aurora_session::chat::{
     CompletedContacts, ContactChannel, ContactDirectory, ContactKey, ContactPage, ContactPageRequest, ContactsPolicy, MAX_RECEIPTS,
     OpenDirectOutcome, OpenDirectReply, OpenDirectRequest, OpenDirectState,
@@ -16,6 +17,7 @@ pub(crate) enum OpenStatus {
 pub(crate) struct OpenOperation {
     pub request: OpenDirectRequest,
     pub status: OpenStatus,
+    pub presented: Option<NativeChatPolicy>,
 }
 #[derive(Clone, Default, PartialEq, Eq)]
 pub(crate) struct ContactsSnapshot {
@@ -23,6 +25,7 @@ pub(crate) struct ContactsSnapshot {
     pub friends: Option<CompletedContacts>,
     pub loading: bool,
     pub failed: bool,
+    pub open_busy: bool,
     pub opens: Vec<OpenOperation>,
 }
 impl ContactsSnapshot {
@@ -70,6 +73,9 @@ impl ContactsBook {
         }
         self.flight = None;
         self.failed = false;
+        for record in &mut self.opens {
+            record.operation.presented = None;
+        }
         if let Some(pending) = &self.pending {
             let request = pending.request;
             self.open_status(request, OpenStatus::Uncertain);
@@ -86,6 +92,7 @@ impl ContactsBook {
                     .as_ref()
                     .is_some_and(|directory| directory.request(ContactChannel::Friends).is_some()),
             failed: active && self.failed,
+            open_busy: self.pending.is_some(),
             opens: self.opens.iter().map(|record| record.operation.clone()).collect(),
         }
     }
@@ -95,6 +102,9 @@ impl ContactsBook {
         }
         self.directory.as_mut().ok_or(ChatError::Unavailable)?.set_policy(policy)?;
         if self.policy != Some(policy) {
+            for record in &mut self.opens {
+                record.operation.presented = None;
+            }
             self.flight = None;
             self.failed = false;
         }
@@ -123,7 +133,17 @@ impl ContactsBook {
     }
     fn open_status(&mut self, request: OpenDirectRequest, status: OpenStatus) {
         if let Some(record) = self.opens.iter_mut().find(|record| record.operation.request == request) {
-            record.operation.status = status;
+            if !matches!(record.operation.status, OpenStatus::Completed(_)) || record.operation.status == status {
+                record.operation.status = status;
+            }
+        }
+    }
+    pub(super) fn presented(&mut self, request: OpenDirectRequest, policy: NativeChatPolicy) {
+        if let Some(record) = self.opens.iter_mut().find(|record| record.operation.request == request) {
+            record.operation.presented = Some(policy);
+        }
+        if self.pending.as_ref().is_some_and(|pending| pending.request == request) {
+            self.pending = None;
         }
     }
     pub(super) fn receipt(&mut self, reply: &OpenDirectReply) -> Result<Option<(ChatKey, u64)>, ChatError> {
@@ -143,12 +163,13 @@ impl ContactsBook {
             return Err(ChatError::FinalReceipt);
         }
         record.operation.status = status;
+        record.operation.presented = None;
         let reopen = if matches!(reply.receipt.state, OpenDirectState::Terminal(OpenDirectOutcome::Opened { .. })) {
             reply.view.as_ref().map(|view| (view.policy.key, record.close_through))
         } else {
             None
         };
-        if matches!(reply.receipt.state, OpenDirectState::Terminal(_))
+        if matches!(reply.receipt.state, OpenDirectState::Terminal(ref outcome) if !matches!(outcome, OpenDirectOutcome::Opened { .. }))
             && self.pending.as_ref().is_some_and(|pending| pending.request == request)
         {
             self.pending = None;
@@ -247,6 +268,7 @@ impl Peer {
         self.contacts.opens.push_back(OpenRecord {
             operation: OpenOperation {
                 request,
+                presented: None,
                 status: if allowed {
                     OpenStatus::Pending
                 } else {

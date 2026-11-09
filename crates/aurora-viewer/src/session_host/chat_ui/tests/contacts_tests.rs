@@ -46,7 +46,14 @@ fn draft(ui: &ChatUi, snapshot: &HostChatSnapshot) -> OpenDraft {
 }
 fn complete(snapshot: &mut HostChatSnapshot, mut draft: OpenDraft, ticket: u64) {
     draft.request.request = ticket;
+    let presented = snapshot
+        .conversations
+        .iter()
+        .find(|info| info.policy.key.conversation == direct())
+        .unwrap()
+        .policy;
     snapshot.contacts.opens.push(OpenOperation {
+        presented: Some(presented),
         request: draft.request,
         status: OpenStatus::Completed(OpenDirectOutcome::Opened {
             resident: draft.request.resident,
@@ -124,4 +131,28 @@ fn contacts_ui_actual_friend_row_selects_locally_then_explicit_open_captures_off
     assert_eq!(open.request.selection.source, source());
     assert_eq!(open.request.request, 0);
     assert!(frames.ui.take_read_action().is_none() && frames.ui.take_close_action().is_none());
+}
+
+#[test]
+fn contacts_ui_missing_fresh_view_cannot_select_cached_row_but_later_authorized_receipt_can() {
+    let mut snapshot = contacts_snapshot();
+    let mut ui = ChatUi::new(source());
+    ui.sync(Some(&snapshot));
+    let draft = draft(&ui, &snapshot);
+    ui.queued_open(draft, 50);
+    complete(&mut snapshot, draft, 50);
+    let proof = snapshot.contacts.opens[0].presented.take();
+    snapshot.contacts.open_busy = true;
+    ui.sync(Some(&snapshot));
+    assert_eq!(
+        ui.key().conversation,
+        Conversation::Nearby,
+        "old cached readable row is not this Open's fresh view"
+    );
+    assert!(ui.view.contacts.pending.is_some());
+    snapshot.contacts.opens[0].presented = proof;
+    snapshot.contacts.open_busy = false;
+    ui.sync(Some(&snapshot));
+    assert_eq!(ui.key().conversation, direct());
+    assert!(ui.view.contacts.pending.is_none());
 }

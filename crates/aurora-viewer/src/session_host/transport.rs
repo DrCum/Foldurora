@@ -1649,7 +1649,7 @@ impl Broker {
                     child.chat.set_control(None, false);
                     anyhow::bail!(HostError::Unavailable);
                 }
-                child.chat.refresh_contacts(source, now)?;
+                child.chat.refresh_contacts(source, Instant::now())?;
             }
             HostIntent::ChatOpenDirect(mut request) => {
                 request.request = ticket;
@@ -1667,7 +1667,7 @@ impl Broker {
                     child.chat.set_control(None, false);
                     anyhow::bail!(HostError::Unavailable);
                 }
-                child.chat.admit_open_direct(request, now)?;
+                child.chat.admit_open_direct(request, Instant::now())?;
             }
             HostIntent::ChatClose(mut request) => {
                 request.request = ticket;

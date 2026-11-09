@@ -48,9 +48,16 @@ impl CloseBook {
     pub(super) fn highwater(&self) -> u64 {
         self.highwater
     }
-    pub(super) fn explicit_open(&mut self, conversation: Conversation, through: u64) {
+    pub(super) fn explicit_open(&mut self, conversation: Conversation, through: u64) -> bool {
         if self.opened_through.len() == aurora_session::chat::MAX_CONVERSATIONS && !self.opened_through.contains_key(&conversation) {
-            return;
+            return false;
+        }
+        if self
+            .hidden
+            .get(&conversation)
+            .is_some_and(|hidden| hidden.request.request > through)
+        {
+            return false;
         }
         let previous = self.opened_through.entry(conversation).or_default();
         *previous = (*previous).max(through);
@@ -70,6 +77,7 @@ impl CloseBook {
             // but retire recovery and optimistic hiding. No incoming credit.
             self.pending = None;
         }
+        true
     }
     pub fn hidden(&self, conversation: Conversation) -> bool {
         self.hidden.contains_key(&conversation)

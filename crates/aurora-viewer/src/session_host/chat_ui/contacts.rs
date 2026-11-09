@@ -181,7 +181,8 @@ impl ContactsUi {
                     }
                 });
         }
-        let enabled = self.pending.is_none()
+        let enabled = !snapshot.contacts.open_busy
+            && self.pending.is_none()
             && self.generation != u64::MAX
             && mode == InputMode::Live
             && ui.input(|input| input.focused)
@@ -264,15 +265,19 @@ impl ChatUi {
         };
         if let OpenStatus::Completed(outcome) = &operation.status {
             if let OpenDirectOutcome::Opened { key, .. } = outcome
+                && operation.presented.is_some()
+                && operation.presented == native_policy(snapshot, *key)
                 && !self.hidden.contains(&key.conversation)
                 && native_policy(snapshot, *key).is_some_and(|policy| policy.ready && policy.can_read)
             {
                 self.view.contacts.pending = None;
                 self.select(key.conversation);
                 self.view.contacts.visible = false;
-            } else {
+            } else if !matches!(outcome, OpenDirectOutcome::Opened { .. }) || !snapshot.contacts.open_busy {
                 self.view.contacts.pending = None;
             }
+        } else if matches!(operation.status, OpenStatus::Uncertain) && !snapshot.contacts.open_busy {
+            self.view.contacts.pending = None;
         }
     }
 }

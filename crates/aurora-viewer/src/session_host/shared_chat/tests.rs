@@ -1980,3 +1980,83 @@ fn shared_chat_external_navigation_flushes_delivered_edits_and_fences_held_point
     assert!(frames.pointer(at, false).is_none());
     assert_eq!(frames.send().unwrap().key, old);
 }
+
+#[test]
+fn contacts_attention_source_navigation_retires_original_open_selection_without_retargeting() {
+    use crate::session_host::chat_broker::{OpenOperation, OpenStatus};
+    use aurora_session::chat::{
+        CompletedContacts, ContactChannel, ContactKey, ContactRow, ContactText, ContactsPolicy, OpenDirectOutcome, OpenDirectRequest,
+    };
+    for navigate in [false, true] {
+        let mut frames = Frames::new();
+        let a = source(1);
+        let Conversation::Direct(resident) = direct() else { panic!() };
+        let contact = ContactKey {
+            source: a,
+            channel: ContactChannel::Friends,
+            token: 1,
+        };
+        {
+            let chat = Arc::make_mut(&mut frames.host.chat[0]);
+            chat.contacts.policy = Some(ContactsPolicy {
+                source: a,
+                revision: 1,
+                can_browse: true,
+            });
+            chat.contacts.friends = Some(CompletedContacts {
+                key: contact,
+                policy_revision: 1,
+                limited: false,
+                rows: vec![ContactRow {
+                    resident,
+                    display: ContactText::new("Synthetic friend").unwrap(),
+                    username: ContactText::new("synthetic").unwrap(),
+                    online: false,
+                    can_open: true,
+                }],
+            });
+        }
+        frames.model.sync(&frames.host, false);
+        assert!(frames.click(Id::unique("host_contacts_friends_rect")).is_none());
+        assert!(frames.click(Id::unique(("host_contact_row_rect", resident))).is_none());
+        assert!(frames.click(Id::unique("host_contacts_open_rect")).is_none());
+        let Some(chat_ui::ContactAction::Open(draft)) = frames.model.take_contact_action() else {
+            panic!("actual captured Open")
+        };
+        frames.model.queued_open(draft, 50);
+        if navigate {
+            assert!(frames.model.select_key(ChatKey {
+                source: source(2),
+                conversation: Conversation::Nearby
+            }));
+        }
+        {
+            let chat = Arc::make_mut(&mut frames.host.chat[0]);
+            let policy = chat
+                .conversations
+                .iter()
+                .find(|info| info.policy.key.conversation == direct())
+                .unwrap()
+                .policy;
+            chat.contacts.opens.push(OpenOperation {
+                request: OpenDirectRequest {
+                    request: 50,
+                    ..draft.request
+                },
+                status: OpenStatus::Completed(OpenDirectOutcome::Opened { resident, key: policy.key }),
+                presented: Some(policy),
+            });
+        }
+        frames.model.sync(&frames.host, false);
+        if navigate {
+            assert_eq!(frames.model.selected, Some(source(2)));
+            frames.model.select(a);
+        }
+        let state = frames.model.states.iter().find(|state| state.ui.source() == a).unwrap();
+        assert_eq!(
+            state.ui.retained_for(ChatSurface::Shared).0.conversation,
+            if navigate { Conversation::Nearby } else { direct() }
+        );
+        assert!(state.snapshot.reads.is_empty(), "Open and Attention navigation never mark read");
+    }
+}

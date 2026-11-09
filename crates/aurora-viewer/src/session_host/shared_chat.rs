@@ -302,6 +302,11 @@ impl SharedChat {
         {
             return false;
         }
+        if self.selected != Some(key.source)
+            && let Some(previous) = self.states.iter_mut().find(|state| Some(state.ui.source()) == self.selected)
+        {
+            previous.ui.with_surface(self.surface, ChatUi::cancel_contact_open);
+        }
         self.selected = Some(key.source);
         self.cancel_gestures();
         true
