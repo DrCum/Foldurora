@@ -13635,3 +13635,7 @@ workspaces-picture-tile = タイル
 workspaces-picture-span = すべてのディスプレイにまたがる
 workspaces-picture-brightness = 明るさ
 workspaces-picture-apply-brightness = 明るさを適用
+
+workspaces-local-choose = ローカル画像をインポート…
+workspaces-local-unavailable = 画像をインポートまたは読み込みできませんでした。ライブラリが使用できないか、上限に達している可能性があります。
+workspaces-local-working = 画像を準備中…

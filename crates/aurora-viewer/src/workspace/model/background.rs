@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 mod displays;
 pub(crate) use displays::{Arrangement, DisplayColors, MAX_DISPLAYS};
 mod images;
-pub(crate) use images::{DisplayPaints, ImageMode, Paint, Picture, TextureRef};
+pub(crate) use images::{DisplayPaints, DrawImage, ImageMode, LocalPicture, ManagedRef, Paint, Picture, TextureRef};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum Background {
@@ -102,7 +102,15 @@ impl Background {
         }
     }
     pub(crate) fn with_picture(&self, target: Option<(&Arrangement, usize)>, picture: Picture) -> Option<Self> {
-        if target.is_some() && picture.mode == ImageMode::Span {
+        let fallback = self.paint(target.map(|t| t.0), target.map(|t| t.1)).fallback();
+        self.with_paint(target, Paint::Texture { picture, fallback })
+    }
+    pub(crate) fn with_local(&self, target: Option<(&Arrangement, usize)>, picture: LocalPicture) -> Option<Self> {
+        let fallback = self.paint(target.map(|t| t.0), target.map(|t| t.1)).fallback();
+        self.with_paint(target, Paint::Local { picture, fallback })
+    }
+    fn with_paint(&self, target: Option<(&Arrangement, usize)>, paint: Paint) -> Option<Self> {
+        if target.is_some() && (paint.spanning() || self.paint(None, None).spanning()) {
             return None;
         }
         let (mut common, mut rules) = match self {
@@ -116,8 +124,6 @@ impl Background {
             }
             _ => (Paint::Color { rgb: self.common() }, None),
         };
-        let fallback = self.paint(target.map(|t| t.0), target.map(|t| t.1)).fallback();
-        let paint = Paint::Texture { picture, fallback };
         match target {
             None => common = paint,
             Some((a, i)) => {

@@ -13674,3 +13674,7 @@ workspaces-picture-tile = Tile
 workspaces-picture-span = Span all displays
 workspaces-picture-brightness = Brightness
 workspaces-picture-apply-brightness = Apply brightness
+
+workspaces-local-choose = Import local image…
+workspaces-local-unavailable = Could not import or load this workspace image. The library may be unavailable or full.
+workspaces-local-working = Preparing workspace image…

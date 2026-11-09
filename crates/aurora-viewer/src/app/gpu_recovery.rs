@@ -177,6 +177,7 @@ impl App {
     pub(super) fn recover_from_gpu_loss(&mut self, event_loop: &ActiveEventLoop, safe: bool) -> bool {
         self.workspace_huds.retire();
         self.workspace_images.clear(&mut self.scene);
+        self.workspace_local_images.retire();
         self.workspaces.inventory_pending = None;
         self.invalidate_host_display();
         let Some(old) = self.gfx.take() else {

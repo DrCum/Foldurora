@@ -40,6 +40,7 @@ pub(crate) enum Command {
     BackgroundCommon(Option<[u8; 3]>),
     BackgroundDisplay(Arrangement, usize, Option<[u8; 3]>),
     BackgroundImage(Option<(Arrangement, usize)>),
+    BackgroundLocal(Option<(Arrangement, usize)>),
     BackgroundPicture(Option<(Arrangement, usize)>, Picture),
     BackgroundMode(Option<(Arrangement, usize)>, ImageMode),
     BackgroundBrightness(Option<(Arrangement, usize)>, u8),
@@ -71,6 +72,7 @@ pub(crate) enum Status {
     CameraUnavailable,
     HudUnavailable,
     PictureUnavailable,
+    LocalImageUnavailable,
 }
 pub(crate) struct Preview {
     pub baseline: Layout,

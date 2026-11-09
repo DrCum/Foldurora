@@ -12,7 +12,7 @@ use crate::{
 use std::collections::HashSet;
 use uuid::Uuid;
 
-fn source_current(world: &World, source: &Source) -> bool {
+pub(crate) fn source_current(world: &World, source: &Source) -> bool {
     !source.agent.is_nil()
         && source.agent == world.agent_id
         && world.inventory.owner == source.agent
