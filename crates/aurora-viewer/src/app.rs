@@ -3896,6 +3896,12 @@ impl App {
                 // the simulator we land in plays none of our animations yet
                 self.static_eyes.on_arrival();
                 self.tp_checks = vec![10.0, 3.0];
+                // New region must learn walk/run again (LLAgent::sendWalkRun
+                // after RegionHandshake, llviewermessage.cpp). Without this
+                // Always run stays lit in Controls while the sim walks (#3041).
+                self.send(NetCommand::SetAlwaysRun(
+                    self.always_run || self.temp_run.is_some() || self.joystick.running,
+                ));
                 // (a border crossing leaves the camera where it is)
                 if !self.world.arrived_by_crossing {
                     self.camera.on_teleport_arrival(&self.settings.camera);
