@@ -43,6 +43,7 @@ pub(super) fn state(control: ControlGuard, capture: Option<EpochFence>) -> Worke
         control.source,
         PreviewEpochs::new(1, 1, 1, 1, 1).unwrap(),
         PreviewAccess {
+            capture_inactive: false,
             ready: true,
             active: capture.is_some(),
             activation: 1,
@@ -189,14 +190,16 @@ impl Owned {
                 PreviewCommand::Capture(Box::new(claim)),
                 Some(CaptureControlGuard {
                     control: self.control.clone(),
-                    activation: 1,
-                    viewport: HostedViewport {
-                        host_window: 1,
-                        rect: PhysicalRect {
-                            x: 0,
-                            y: 0,
-                            width: 640,
-                            height: 360,
+                    mode: crate::session_host::transport::preview_control::CaptureMode::Active {
+                        activation: 1,
+                        viewport: HostedViewport {
+                            host_window: 1,
+                            rect: PhysicalRect {
+                                x: 0,
+                                y: 0,
+                                width: 640,
+                                height: 360,
+                            },
                         },
                     },
                     witness: EpochFence::new(),
@@ -319,14 +322,16 @@ fn preview_io_owned_loopback_metadata_progresses_while_pixel_writer_is_explicitl
             PreviewCommand::Capture(Box::new(claim)),
             Some(CaptureControlGuard {
                 control: io.control.clone(),
-                activation: 1,
-                viewport: HostedViewport {
-                    host_window: 1,
-                    rect: PhysicalRect {
-                        x: 0,
-                        y: 0,
-                        width: 640,
-                        height: 360,
+                mode: crate::session_host::transport::preview_control::CaptureMode::Active {
+                    activation: 1,
+                    viewport: HostedViewport {
+                        host_window: 1,
+                        rect: PhysicalRect {
+                            x: 0,
+                            y: 0,
+                            width: 640,
+                            height: 360,
+                        },
                     },
                 },
                 witness: EpochFence::new(),
@@ -634,14 +639,16 @@ fn preview_io_owned_loopback_valid_mac_wrong_original_claim_keeps_cache_and_pend
             PreviewCommand::Capture(Box::new(claim)),
             Some(CaptureControlGuard {
                 control: io.control.clone(),
-                activation: 1,
-                viewport: HostedViewport {
-                    host_window: 1,
-                    rect: PhysicalRect {
-                        x: 0,
-                        y: 0,
-                        width: 640,
-                        height: 360,
+                mode: crate::session_host::transport::preview_control::CaptureMode::Active {
+                    activation: 1,
+                    viewport: HostedViewport {
+                        host_window: 1,
+                        rect: PhysicalRect {
+                            x: 0,
+                            y: 0,
+                            width: 640,
+                            height: 360,
+                        },
                     },
                 },
                 witness: EpochFence::new(),

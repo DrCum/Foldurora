@@ -5683,3 +5683,12 @@ catalogues and the existing synthetic inventory; no real profile IO or automatic
 play occurs. Source phases depend on the reviewed worker action helper and the
 combined hardened NativeDirectory extraction; author tests remain UNRUN until
 root integration. This is not full Legacy Board parity or native acceptance.
+
+### Native live inactive Monitor join (Foldurora)
+
+The explicit native Standby caller, reduced cold resources, original-crop sealed
+V5 export and owner-acknowledged backend retirement are documented in
+[the live Monitor integration](docs/FOLDURORA_LIVE_MONITORS_20261109.md). They
+supersede the historical disabled-caller notes for this integration branch.
+Native/Windows acceptance is separate; no active/input proof or MCP mutation
+capability is added.

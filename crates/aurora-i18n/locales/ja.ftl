@@ -13774,3 +13774,5 @@ workspaces-huds-pending = 保存したHUDの装着確認を待っています。
 workspaces-huds-unconfirmed = 一部のHUDは装着を確認できませんでした。再度切り替える前に装着品を確認してください。
 
 host-mcp-pending-manage = 承認待ちのリクエストがあります。キャラクター管理を開いてホスト MCP のリクエストを確認してください。
+
+host-monitor-live-inactive = 非アクティブなワールドの画像 · { $youngest }～{ $oldest } 秒前

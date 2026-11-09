@@ -290,8 +290,17 @@ impl CapturePublicationGuard {
     }
 }
 
+/// Render origin is sealed into queue metadata and survives map/publication.
+/// InactiveWorld never proves native presentation or an active grant.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CaptureKind {
+    ActiveViewport,
+    InactiveWorld,
+}
+
 #[derive(Clone)]
 pub struct CaptureRequest {
+    kind: CaptureKind,
     token: CaptureToken,
     boundary: CaptureBoundary,
     viewport: WorldViewport,
@@ -303,6 +312,9 @@ pub struct CaptureRequest {
 }
 
 impl CaptureRequest {
+    pub fn kind(&self) -> CaptureKind {
+        self.kind
+    }
     pub fn token(&self) -> CaptureToken {
         self.token
     }
@@ -542,14 +554,24 @@ impl CaptureQueue {
     }
 
     pub fn request(&mut self, viewport: WorldViewport, cap: CaptureCap, now: u64) -> Result<CaptureRequest, CaptureError> {
-        self.request_inner(viewport, cap, now, true)
+        self.request_inner(viewport, cap, now, true, CaptureKind::ActiveViewport)
     }
 
     /// The render-owner cache independently reserves physical pair credit.
     /// This path freezes metadata only and never reserves the same GPU pair
     /// again for every fresh request token. Pixel allocation remains separate.
     pub(crate) fn request_metadata(&mut self, viewport: WorldViewport, cap: CaptureCap, now: u64) -> Result<CaptureRequest, CaptureError> {
-        self.request_inner(viewport, cap, now, false)
+        self.request_inner(viewport, cap, now, false, CaptureKind::ActiveViewport)
+    }
+
+    #[cfg(feature = "monitor-prototype")]
+    pub(crate) fn request_inactive_metadata(
+        &mut self,
+        viewport: WorldViewport,
+        cap: CaptureCap,
+        now: u64,
+    ) -> Result<CaptureRequest, CaptureError> {
+        self.request_inner(viewport, cap, now, false, CaptureKind::InactiveWorld)
     }
 
     fn request_inner(
@@ -558,6 +580,7 @@ impl CaptureQueue {
         cap: CaptureCap,
         now: u64,
         reserve_gpu: bool,
+        kind: CaptureKind,
     ) -> Result<CaptureRequest, CaptureError> {
         self.clock(now)?;
         if self.epoch == 0 {
@@ -585,6 +608,7 @@ impl CaptureQueue {
             None
         };
         let request = CaptureRequest {
+            kind,
             token: CaptureToken {
                 instance: self.instance,
                 device: self.boundary.device_epoch,
@@ -772,6 +796,40 @@ impl CaptureQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(feature = "monitor-prototype")]
+    fn viewport_capture_inactive_origin_and_original_crop_survive_the_actual_map_queue() {
+        let budget = CaptureBudget::new(WORKER_CAPTURE_BYTES).unwrap();
+        let mut queue = queue(&budget);
+        let crop = WorldViewport {
+            x: 960,
+            y: 80,
+            width: 960,
+            height: 960,
+        };
+        let request = queue.request_inactive_metadata(crop, CaptureCap::Small, 10).unwrap();
+        assert_eq!(request.kind(), CaptureKind::InactiveWorld);
+        assert_eq!(request.layout().size(), (180, 180));
+        let callback = queue.begin_map(request.token(), boundary(), 17, 11).unwrap();
+        callback.complete(true);
+        queue
+            .finish_map(request.token(), boundary(), pixels(&budget, request.layout()), 12)
+            .unwrap();
+        let Some(CaptureOutcome::Ready(result)) = queue.take_result(13).unwrap() else {
+            panic!("real queue did not publish mapped bytes")
+        };
+        assert_eq!(result.request().kind(), CaptureKind::InactiveWorld);
+        assert_eq!(result.request().viewport(), crop);
+        assert_eq!(result.request().boundary(), boundary());
+        assert_eq!(result.frame(), 17);
+        assert!(queue.can_publish(&result, 13));
+        let active = queue.request(view(), CaptureCap::Small, 14).unwrap();
+        assert_eq!(active.kind(), CaptureKind::ActiveViewport);
+        assert_ne!(active.token(), result.request().token());
+        queue.invalidate().unwrap();
+        assert!(!queue.can_publish(&result, 14));
+    }
 
     #[test]
     fn viewport_capture_pool_withholds_worker_io_headroom_even_when_all_capture_credit_is_held() {

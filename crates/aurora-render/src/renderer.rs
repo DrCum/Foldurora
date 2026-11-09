@@ -1764,6 +1764,46 @@ struct XrWorld {
     runtime: openxr::Instance,
 }
 
+/// Cold allocation policy. External XR views still use Presentation; only the
+/// explicitly selected small Monitor backend uses the reduced resource plan.
+#[derive(Clone, Copy)]
+enum BackendPurpose {
+    Presentation,
+    #[cfg(feature = "monitor-prototype")]
+    Monitor,
+}
+impl BackendPurpose {
+    fn settings(self) -> RenderSettings {
+        match self {
+            Self::Presentation => RenderSettings::default(),
+            #[cfg(feature = "monitor-prototype")]
+            Self::Monitor => crate::monitor::reduced_settings(RenderSettings::default()),
+        }
+    }
+    fn shadows(self) -> (u32, u8) {
+        match self {
+            Self::Presentation => (2048, 2),
+            // Keep only the minimum valid shader binding, never a normal
+            // 4096-square cold atlas before the first shadow-disabled packet.
+            #[cfg(feature = "monitor-prototype")]
+            Self::Monitor => (512, 0),
+        }
+    }
+    fn samples(self, supported: &[u32]) -> u32 {
+        match self {
+            Self::Presentation => {
+                if supported.contains(&4) {
+                    4
+                } else {
+                    1
+                }
+            }
+            #[cfg(feature = "monitor-prototype")]
+            Self::Monitor => 1,
+        }
+    }
+}
+
 /// What the main thread's `Renderer` creates the backend from.
 #[derive(Clone)]
 pub(crate) struct BackendInit {
@@ -2719,6 +2759,25 @@ struct Ranges {
 impl Backend {
     /// Surface configuration, pipelines, targets and per-frame buffers.
     pub fn new(init: BackendInit) -> Result<Backend, RenderError> {
+        Self::new_with_purpose(init, BackendPurpose::Presentation)
+    }
+
+    #[cfg(feature = "monitor-prototype")]
+    pub(crate) fn new_monitor(init: BackendInit) -> Result<Backend, RenderError> {
+        if !init.external || init.viewport_capture.is_some() {
+            return Err(RenderError::Surface(
+                "Monitor backend requires an independent offscreen output".into(),
+            ));
+        }
+        #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+        if init.xr.is_some() {
+            return Err(RenderError::Surface("Monitor backend cannot own an XR session".into()));
+        }
+        Self::new_with_purpose(init, BackendPurpose::Monitor)
+    }
+
+    fn new_with_purpose(init: BackendInit, purpose: BackendPurpose) -> Result<Backend, RenderError> {
+        let settings = purpose.settings();
         #[cfg(feature = "monitor-prototype")]
         let monitor_seed = (!init.external).then(|| Box::new(init.clone()));
         #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
@@ -3029,10 +3088,10 @@ impl Backend {
             mk_frame_buffer("water exterior uniforms"),
             mk_frame_buffer("probe irradiance capture uniforms"),
         ];
-        let probes = crate::probes::Probes::new(&device, RenderSettings::default().probe_slots);
+        let probes = crate::probes::Probes::new(&device, settings.probe_slots);
 
-        let shadow_size = 2048u32;
-        let shadow_view = Self::make_shadow_atlas(&device, shadow_size, 2);
+        let (shadow_size, shadow_count) = purpose.shadows();
+        let shadow_view = Self::make_shadow_atlas(&device, shadow_size, shadow_count);
         let shadow_merge = crate::shadow_merge::ShadowMerge::new(&device, &shadow_view, shadow_size, SHADOW_FORMAT);
         let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("shadow"),
@@ -3131,8 +3190,7 @@ impl Backend {
                     && gbuf_features.flags.sample_count_supported(*n)
             })
             .collect();
-        let msaa_samples = if msaa_supported.contains(&4) { 4 } else { 1 };
-        let settings = RenderSettings::default();
+        let msaa_samples = purpose.samples(&msaa_supported);
         let bloom = crate::bloom::Bloom::new(&device, &post_layout);
         let pipelines = Self::make_pipelines(
             &device,
@@ -3290,7 +3348,7 @@ impl Backend {
             shadow_buffers,
             shadow_bind_groups,
             shadow_size,
-            shadow_count: 2,
+            shadow_count,
             shadow_merge,
             post_buffer,
             post_sampler,

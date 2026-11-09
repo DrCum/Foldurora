@@ -429,7 +429,7 @@ impl WorkerChannel {
             if old.policy.source() != state.policy.source() || old.policy.epochs() != state.policy.epochs() {
                 self.shared.retire();
             } else if old.policy.access().activation != state.policy.access().activation
-                || (old.policy.access().capture_active && !state.policy.access().capture_active)
+                || (old.policy.access().can_capture() && !state.policy.access().can_capture())
                 || old
                     .capture
                     .as_ref()
@@ -869,6 +869,7 @@ mod tests {
             source(1),
             denied.policy.epochs(),
             aurora_session::preview_image::PreviewAccess {
+                capture_inactive: false,
                 ready: false,
                 active: false,
                 capture_active: false,

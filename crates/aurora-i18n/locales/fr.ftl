@@ -13809,3 +13809,5 @@ workspaces-huds-pending = En attente de l’apparition des HUD enregistrés.
 workspaces-huds-unconfirmed = Certains HUD enregistrés ne sont pas confirmés. Vérifiez les objets attachés avant un autre changement.
 
 host-mcp-pending-manage = Des demandes attendent votre accord. Ouvrez la gestion des personnages pour les examiner.
+
+host-monitor-live-inactive = Image du monde inactif · il y a { $youngest }–{ $oldest } s

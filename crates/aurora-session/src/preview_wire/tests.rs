@@ -24,6 +24,7 @@ fn policy() -> PreviewPolicy {
         source(),
         PreviewEpochs::new(u64::MAX, u64::MAX, u64::MAX, u64::MAX, u64::MAX).unwrap(),
         PreviewAccess {
+            capture_inactive: false,
             ready: true,
             active: true,
             activation: u64::MAX,
@@ -91,6 +92,7 @@ fn preview_wire_maximal_closed_metadata_and_full_stamp_fit_fixed_storage_without
                 source(),
                 policy().epochs(),
                 crate::preview_image::PreviewAccess {
+                    capture_inactive: false,
                     capture_active: false,
                     ..policy().access()
                 },
@@ -325,6 +327,7 @@ fn preview_wire_v3_role_epoch_layout_and_capture_stop_are_closed_and_direction_b
         source(),
         policy().epochs(),
         crate::preview_image::PreviewAccess {
+            capture_inactive: false,
             capture_active: false,
             ..policy().access()
         },
@@ -398,7 +401,7 @@ fn preview_wire_v3_unavailable_retains_full_claim_and_rejects_old_request_only_s
     let old = serde_json::json!({"type":"unavailable","data":{"source":captured.source(),"connection":captured.connection(),"request":captured.request(),"reason":"busy"}});
     let old = serde_json::to_vec(&old).unwrap();
     assert!(decode_metadata(header(Lane::Metadata, Direction::WorkerToHost, &old, 0), &old).is_err());
-    for version in [1u16, 2, 3] {
+    for version in [1u16, 2, 3, 4] {
         let mut bytes = h.encode();
         bytes[4..6].copy_from_slice(&version.to_be_bytes());
         assert_eq!(Header::decode(&bytes), Err(WireError::Version));

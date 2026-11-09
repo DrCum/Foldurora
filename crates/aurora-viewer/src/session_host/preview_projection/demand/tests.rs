@@ -228,3 +228,31 @@ fn preview_host_capture_pacing_is_global_fair_and_never_accumulates_catchup_toke
     assert_eq!(ledger.due(&[a], later + Duration::from_millis(200)).unwrap().token, a);
     assert_eq!(ledger.held(), 20);
 }
+
+#[test]
+fn live_monitor_gpu_reservation_survives_visibility_eof_and_unacknowledged_stop_until_native_release() {
+    let now = Instant::now();
+    let mut ledger = Ledger::new();
+    for number in 0..4 {
+        accept(&mut ledger, token(number, 1, 1), option(PreviewRate::Half), now);
+    }
+    assert_eq!(ledger.view_bytes(), VIEW_BUDGET_BYTES);
+    assert!(ledger.offer(token(4, 1, 1), Some(option(PreviewRate::Half)), now).is_err());
+    let first = token(0, 1, 1);
+    ledger.visibility_lost(first.source().worker());
+    assert_eq!(ledger.view_bytes(), VIEW_BUDGET_BYTES);
+    let stop = ledger.offer(first, None, now).unwrap().unwrap();
+    ledger.admission(stop, true);
+    assert!(ledger.offer(token(4, 1, 1), Some(option(PreviewRate::Half)), now).is_err());
+    assert!(!ledger.stopped(first, stop.demand + 1));
+    assert_eq!(ledger.view_bytes(), VIEW_BUDGET_BYTES);
+    assert!(ledger.stopped(first, stop.demand));
+    let replacement = ledger.offer(token(4, 1, 1), Some(option(PreviewRate::Half)), now).unwrap().unwrap();
+    assert_eq!(ledger.view_bytes(), VIEW_BUDGET_BYTES);
+    ledger.admission(replacement, false);
+    assert_eq!(ledger.view_bytes(), VIEW_BUDGET_BYTES - VIEW_RESERVATION_BYTES);
+    ledger.lost(token(1, 1, 1).source().worker());
+    assert_eq!(ledger.view_bytes(), VIEW_BUDGET_BYTES - VIEW_RESERVATION_BYTES);
+    ledger.exited(token(1, 1, 1).source().worker());
+    assert_eq!(ledger.view_bytes(), VIEW_BUDGET_BYTES - 2 * VIEW_RESERVATION_BYTES);
+}

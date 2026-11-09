@@ -6,12 +6,21 @@ use crate::monitor::{Frame, Request, Targets};
 pub(super) struct View {
     backend: Backend,
     targets: Targets,
+    #[cfg(test)]
+    cold_resources: crate::monitor::ColdResources,
+    // All backend/target handles must drop before credit becomes available.
+    resources: crate::monitor::ResourceLease,
 }
 
 impl Backend {
     // Even a cancelled packet must replay its journal and streamed copies:
     // the scene mirrors have already marked those ranges sent. No image is drawn.
     fn retire_monitor_packet(&mut self, mut packet: FramePacket, request: Request) -> Spent {
+        if let Some(frame) = packet.viewport_capture.take()
+            && let Some(capture) = &self.viewport_capture
+        {
+            capture.shared.fail(&frame, crate::viewport_capture::CaptureError::Cancelled);
+        }
         if !self.lost.get() {
             packet.writes.replay(&mut TrackedSink {
                 queue: &self.queue,
@@ -34,7 +43,7 @@ impl Backend {
 
     pub(crate) fn render_monitor(&mut self, mut packet: FramePacket, request: Request) -> Spent {
         self.lost.poll(&self.device);
-        let size = request.config.dimensions();
+        let size = request.dimensions;
         if !request.epoch.current()
             || self.lost.get()
             || self.monitor_seed.is_none()
@@ -51,6 +60,9 @@ impl Backend {
             return self.retire_monitor_packet(packet, request);
         }
         if self.monitor_view.is_none() {
+            let Some(resources) = crate::monitor::acquire_resources() else {
+                return self.retire_monitor_packet(packet, request);
+            };
             let mut init = (**self.monitor_seed.as_ref().unwrap()).clone();
             init.external = true;
             init.width = size.0;
@@ -66,16 +78,31 @@ impl Backend {
             {
                 init.xr = None;
             }
-            match Backend::new(init) {
+            match Backend::new_monitor(init) {
                 Ok(backend) => {
+                    #[cfg(test)]
+                    let cold_resources = crate::monitor::ColdResources {
+                        samples: backend.msaa_samples,
+                        probe_slots: backend.probes.slots,
+                        shadow_size: backend.shadow_size,
+                        shadow_count: backend.shadow_count,
+                    };
                     self.monitor_view = Some(Box::new(View {
+                        resources,
                         backend,
+                        #[cfg(test)]
+                        cold_resources,
                         targets: Targets::new(&self.device, size, self.config.format),
                     }))
                 }
                 Err(error) => {
                     log::warn!("Monitor prototype backend unavailable: {error}");
-                    return self.retire_monitor_packet(packet, request);
+                    let spent = self.retire_monitor_packet(packet, request);
+                    // Constructor writes and any replay are now submitted.
+                    // Even a failed cold allocation keeps its lease until this
+                    // actual queue callback; never renew it on a new device.
+                    self.queue.on_submitted_work_done(move || drop(resources));
+                    return spent;
                 }
             }
         }
@@ -97,7 +124,7 @@ impl Backend {
         // presentation view. RLVa pixel effects on FrameParams remain intact.
         packet.ui = None;
         packet.capture = None;
-        packet.viewport_capture = None;
+        let viewport_capture = packet.viewport_capture.take();
         packet.hover = None;
         packet.picks.clear();
         packet.drawn.clear();
@@ -106,29 +133,34 @@ impl Backend {
         packet.motion_cut = true;
         packet.lists.strip_viewer_overlays();
         packet.params.probes = Default::default();
-        packet.settings.aa = AntiAliasing::None;
-        packet.settings.shadow_resolution = 0;
-        packet.settings.projector_shadow_limit = 0;
-        packet.settings.probe_slots = 1;
-        packet.settings.ssao = 0;
-        packet.settings.screen_indirect = false;
-        packet.settings.contact_shadows = false;
-        packet.settings.water_reflection_scale = 0.0;
-        packet.settings.mirror_scale = 0.0;
-        packet.settings.water_effects.enabled = false;
-        packet.settings.ssr = false;
-        packet.settings.occlusion = false;
-        packet.settings.render_scale_percent = 100;
+        packet.settings = crate::monitor::reduced_settings(packet.settings);
         let index = packet.index;
         let result = view.backend.render_view(packet);
         debug_assert!(!result.stats.presented);
+        if let Some(frame) = viewport_capture
+            && let Some(capture) = &mut self.viewport_capture
+        {
+            if result.rendered && request.epoch.current() && !self.lost.get() {
+                let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Monitor bounded export"),
+                });
+                capture.encode_inactive(&self.device, &self.queue, &mut encoder, &texture, frame, index);
+                crate::device_lost::submit_tracked(&self.lost, &self.queue, index, [encoder.finish()]);
+                capture.after_submit(&self.queue);
+            } else {
+                capture.shared.fail(&frame, crate::viewport_capture::CaptureError::Cancelled);
+            }
+        }
         let rendered = result.rendered;
         let frame = Frame {
+            _resources: Some(view.resources.clone()),
             texture,
             epoch: request.epoch.clone(),
             lost: self.lost.flag(),
             index,
             stats: result.stats,
+            #[cfg(test)]
+            cold_resources: Some(view.cold_resources),
         };
         // GPU completion, not render-thread return, publishes the one result.
         self.queue.on_submitted_work_done(move || {
@@ -136,6 +168,18 @@ impl Backend {
         });
         self.lost.poll(&self.device);
         result.spent
+    }
+
+    /// Called on the queue owner only after the frontend has observed the
+    /// actual completion callback and dropped the retired Lane result. A
+    /// remaining texture borrower keeps the reservation, never licenses reuse.
+    pub(crate) fn release_monitor(&mut self) -> bool {
+        self.lost.poll(&self.device);
+        if self.monitor_view.as_ref().is_some_and(|view| !view.targets.idle()) {
+            return false;
+        }
+        self.monitor_view = None;
+        true
     }
 
     pub(crate) fn poll_monitor(&mut self) {

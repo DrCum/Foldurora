@@ -495,6 +495,34 @@ impl WorkerBridge {
         facts.scope(Instant::now())
     }
 
+    /// Genuine managed Standby, with no promotion/drain/trim or native grant.
+    /// This is never an active presentation or input authority.
+    pub(crate) fn inactive_preview_authority(
+        &self,
+        window: &winit::window::Window,
+        renderer: &aurora_render::Renderer,
+    ) -> Option<InactivePreviewAuthority> {
+        let matches = self.window != 0 && native_window(window) == self.window && self.status.native_window == self.window;
+        let facts = self.native_authority(matches);
+        if self.guard.mode() != WorkerMode::Standby
+            || !matches!(self.gate, DisplayGate::Standby)
+            || facts.active
+            || facts.display_active
+            || facts.render_owned
+            || facts.input_owned
+            || facts.blocked
+            || self.native.trimming()
+            || self.native.prompt_open()
+            || renderer.viewport_capture_boundary().is_err()
+        {
+            return None;
+        }
+        Some(InactivePreviewAuthority {
+            scope: facts.scope(Instant::now())?,
+            boundary: renderer.viewport_capture_boundary().ok()?,
+        })
+    }
+
     /// Share Review's complete native grant gate, but do not require keyboard
     /// foreground: an Active world may render while an owned host tool has focus.
     /// Surface sampleability remains image-local and never affects world Grant.
@@ -1003,6 +1031,12 @@ pub(crate) struct PreviewAuthority {
     pub scope: PreviewScope,
     pub activation: u64,
     pub viewport: aurora_session::HostedViewport,
+    pub boundary: aurora_render::viewport_capture::CaptureBoundary,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct InactivePreviewAuthority {
+    pub scope: PreviewScope,
     pub boundary: aurora_render::viewport_capture::CaptureBoundary,
 }
 

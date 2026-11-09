@@ -9,7 +9,7 @@ use crate::{PreviewRate, PreviewSize};
 use serde::{Deserialize, Serialize};
 use std::io::{self, Write};
 
-pub const VERSION: u16 = 4;
+pub const VERSION: u16 = 5;
 pub const MAX_METADATA_BYTES: usize = 4096;
 pub const HEADER_BYTES: usize = 48;
 pub const TAG_BYTES: usize = 32;
@@ -278,7 +278,7 @@ impl Metadata {
                 if pixel_epoch == 0 || stop == 0 {
                     return Err(WireError::Sequence);
                 }
-                if policy.source() != source || policy.access().capture_active {
+                if policy.source() != source || policy.access().can_capture() {
                     return Err(WireError::Binding);
                 }
                 Ok(())

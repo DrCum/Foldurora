@@ -53,7 +53,7 @@ impl Source {
                 if self.observation.policy.is_some_and(|p| p.epochs() != policy.epochs()) {
                     return Err(Error::Expired);
                 }
-                if self.pixels.is_some() && (!policy.access().capture_active || !self.pair.has_pixels()) && self.suspension.is_none() {
+                if self.pixels.is_some() && (!policy.access().can_capture() || !self.pair.has_pixels()) && self.suspension.is_none() {
                     self.capture.revoke();
                     self.pending_capture = None;
                     self.frame = None;
@@ -91,7 +91,7 @@ impl Source {
                     return Err(Error::Binding);
                 }
                 if !policy.access().retain_last_active
-                    || policy.access().capture_active
+                    || policy.access().can_capture()
                     || self.observation.policy.is_some_and(|p| p.epochs() != policy.epochs())
                 {
                     return Err(Error::Binding);
@@ -528,7 +528,7 @@ pub(super) fn run(installation: InstallationId, host: HostId, shared: Arc<Shared
                         .policy
                         .zip(current)
                         .is_some_and(|(old, new)| old.epochs() == new.epochs() && new.access().retain_last_active);
-                    let retiring = p.policy != current || current.is_none_or(|p| !p.access().capture_active);
+                    let retiring = p.policy != current || current.is_none_or(|p| !p.access().can_capture());
                     if continuous && s.pixels.is_none() && s.suspension.is_none() {
                         let attached = if retiring {
                             s.pair.attach_retiring(auth)
@@ -696,6 +696,7 @@ mod tests {
                 source,
                 base.epochs(),
                 PreviewAccess {
+                    capture_inactive: false,
                     activation: 2,
                     ..base.access()
                 },
@@ -714,7 +715,7 @@ mod tests {
         assert_eq!(
             &host.challenge().as_slice()[4..6],
             &2u16.to_be_bytes(),
-            "auth schema remains V2 while image data is V4"
+            "auth schema remains V2 while image data is V5"
         );
         let mut worker = WorkerHandshake::new(scope, key.clone(), 0).unwrap();
         let proof = worker.answer(host.challenge().as_slice(), 1).unwrap();
@@ -736,14 +737,16 @@ mod tests {
         };
         let proof = CaptureControlGuard {
             control: control.clone(),
-            activation: 1,
-            viewport: aurora_session::HostedViewport {
-                host_window: 1,
-                rect: aurora_session::PhysicalRect {
-                    x: 0,
-                    y: 0,
-                    width: 640,
-                    height: 360,
+            mode: crate::session_host::transport::preview_control::CaptureMode::Active {
+                activation: 1,
+                viewport: aurora_session::HostedViewport {
+                    host_window: 1,
+                    rect: aurora_session::PhysicalRect {
+                        x: 0,
+                        y: 0,
+                        width: 640,
+                        height: 360,
+                    },
                 },
             },
             witness: EpochFence::new(),

@@ -22,7 +22,7 @@ pub(crate) struct WorkerState {
 }
 impl WorkerState {
     pub(super) fn capture_current(&self, now: Instant) -> bool {
-        self.current(now) && self.policy.access().capture_active && self.capture.as_ref().is_some_and(|c| c.current())
+        self.current(now) && self.policy.access().can_capture() && self.capture.as_ref().is_some_and(|c| c.current())
     }
     pub(super) fn current(&self, now: Instant) -> bool {
         self.native_observed_at
@@ -416,14 +416,16 @@ mod owned_admission_tests {
             pixels,
             original_capture: CaptureControlGuard {
                 control: control.clone(),
-                activation: 1,
-                viewport: HostedViewport {
-                    host_window: 1,
-                    rect: PhysicalRect {
-                        x: 0,
-                        y: 0,
-                        width: 640,
-                        height: 360,
+                mode: crate::session_host::transport::preview_control::CaptureMode::Active {
+                    activation: 1,
+                    viewport: HostedViewport {
+                        host_window: 1,
+                        rect: PhysicalRect {
+                            x: 0,
+                            y: 0,
+                            width: 640,
+                            height: 360,
+                        },
                     },
                 },
                 witness: EpochFence::new(),

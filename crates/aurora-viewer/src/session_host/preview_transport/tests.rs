@@ -55,6 +55,7 @@ pub(super) fn policy() -> PreviewPolicy {
         source(3),
         PreviewEpochs::new(1, 1, 1, 1, 1).unwrap(),
         PreviewAccess {
+            capture_inactive: false,
             ready: true,
             active: true,
             activation: 1,
@@ -547,6 +548,7 @@ fn preview_stream_metadata_revoke_overtakes_stalled_image_and_allowed_cannot_res
         source(3),
         PreviewEpochs::new(2, 2, 1, 1, 1).unwrap(),
         PreviewAccess {
+            capture_inactive: false,
             activation: 1,
             ..Default::default()
         },
@@ -619,6 +621,7 @@ fn preview_stream_normal_park_retains_only_already_source_admitted_history() {
         source(3),
         policy().epochs(),
         PreviewAccess {
+            capture_inactive: false,
             ready: true,
             active: false,
             activation: 2,
@@ -906,5 +909,56 @@ fn preview_v4_native_demand_receipt_fragmented_fake_io_preserves_authenticated_c
             assert!(original <= std::time::Instant::now());
             assert_eq!(h.budget.used(), 0, "metadata receipt cannot admit/allocate pixels");
         }
+    }
+}
+
+#[test]
+fn live_preview_stream_never_active_policy_roundtrips_fragmented_authenticated_pixels_then_revokes_them() {
+    for fragment in [1, 7, 4096] {
+        let mut h = Harness::new(fragment, fragment, PreviewSize::Small, false);
+        let p = policy();
+        let inactive = PreviewPolicy::new(
+            p.source(),
+            p.epochs(),
+            PreviewAccess {
+                active: false,
+                activation: 0,
+                capture_active: false,
+                capture_inactive: true,
+                ..p.access()
+            },
+        )
+        .unwrap();
+        h.images = SourceImages::new(source(3), h.budget.clone()).unwrap();
+        h.images.sync(inactive, 0).unwrap();
+        let geometry = h.stamp.geometry();
+        let claim = h.images.request_inactive(8, 1, geometry, 1).unwrap();
+        h.stamp = PreviewStamp::new(claim, 1, 1, 1, geometry).unwrap();
+        h.worker
+            .queue_metadata(Metadata::Policy {
+                connection: 8,
+                policy: inactive,
+            })
+            .unwrap();
+        let bytes = [19, 31, 57, 255].repeat(geometry.payload_bytes() / 4);
+        h.worker
+            .queue_pixels(UnadmittedPixels::copy_from(h.stamp, &bytes, &h.budget).unwrap())
+            .unwrap();
+        let received = h.receive();
+        assert_eq!(received.claim().kind(), aurora_session::preview_image::PreviewKind::LiveInactive);
+        let admitted = received.admit(&mut h.images, 10).unwrap();
+        assert_eq!(
+            admitted.image().stamp().kind(),
+            aurora_session::preview_image::PreviewKind::LiveInactive
+        );
+        assert_eq!(admitted.bytes(10).unwrap(), bytes.as_slice());
+        let denied = PreviewPolicy::new(
+            inactive.source(),
+            PreviewEpochs::new(2, 2, 1, 1, 1).unwrap(),
+            PreviewAccess::default(),
+        )
+        .unwrap();
+        h.images.sync(denied, 11).unwrap();
+        assert!(admitted.bytes(11).is_none());
     }
 }

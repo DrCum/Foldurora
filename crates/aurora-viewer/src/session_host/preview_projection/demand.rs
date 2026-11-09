@@ -8,6 +8,11 @@ use std::time::Duration;
 
 const RECEIPT_WAIT: Duration = Duration::from_secs(2);
 const HALF_FPS: u32 = 20;
+/// Conservative native view allocation credit, in addition to existing image
+/// pools. Pending/accepted/uncertain configurations keep it until a real native
+/// backend-release Stop receipt or owned process exit; pixels never release it.
+const VIEW_RESERVATION_BYTES: u64 = 128 * 1024 * 1024;
+const VIEW_BUDGET_BYTES: u64 = 512 * 1024 * 1024;
 
 fn configuration(options: Options) -> DemandConfiguration {
     DemandConfiguration {
@@ -115,6 +120,13 @@ impl Ledger {
     pub fn held(&self) -> u32 {
         self.entries.iter().map(Entry::held).sum()
     }
+    fn view_bytes(&self) -> u64 {
+        self.entries
+            .iter()
+            .filter(|entry| entry.accepted.is_some() || entry.pending.as_ref().is_some_and(|pending| pending.offer.desired.is_some()))
+            .count() as u64
+            * VIEW_RESERVATION_BYTES
+    }
     pub fn accepted(&self, token: ConnectionToken) -> Option<Accepted> {
         self.entries
             .iter()
@@ -163,7 +175,11 @@ impl Ledger {
         } else if desired.is_none() {
             return Ok(None);
         }
-        let old = entry.held();
+        let already_reserved = entry.accepted.is_some();
+        if desired.is_some() && !already_reserved && self.view_bytes().saturating_add(VIEW_RESERVATION_BYTES) > VIEW_BUDGET_BYTES {
+            return Err(PreviewError::Busy);
+        }
+        let old = self.entries[index].held();
         let requested = desired.map_or(0, |o| o.rate.half_fps());
         if self.held().saturating_sub(old).saturating_add(old.max(requested)) > HALF_FPS {
             return Err(PreviewError::Busy);

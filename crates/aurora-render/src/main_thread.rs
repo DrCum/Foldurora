@@ -171,6 +171,10 @@ fn scene_gpu(
 pub struct Renderer {
     #[cfg(feature = "monitor-prototype")]
     monitor: crate::monitor::Lane<crate::monitor::Frame>,
+    #[cfg(feature = "monitor-prototype")]
+    monitor_resources: bool,
+    #[cfg(feature = "monitor-prototype")]
+    monitor_release_pending: bool,
     /// Queue owner: dropped before the scene stores (after prototype revocation),
     /// so the render thread has left before those stores go.
     host: Host,
@@ -683,6 +687,10 @@ impl Renderer {
         Ok(Renderer {
             #[cfg(feature = "monitor-prototype")]
             monitor: Default::default(),
+            #[cfg(feature = "monitor-prototype")]
+            monitor_resources: false,
+            #[cfg(feature = "monitor-prototype")]
+            monitor_release_pending: false,
             host,
             vr,
             #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
@@ -1441,7 +1449,10 @@ impl Renderer {
         self.last_inv_vp = (params.proj * params.view).inverse();
         self.last_view = params.view;
         let index = self.frames;
-        let viewport_capture = self.viewport_capture_pending.take();
+        // Ordinary presentation can never consume an inactive offscreen claim.
+        let viewport_capture = self
+            .viewport_capture_pending
+            .take_if(|frame| frame.request.kind() == crate::viewport_capture::CaptureKind::ActiveViewport);
         if viewport_capture.is_some() {
             // A pre-frame Idle reply cannot certify GPU work about to leave
             // in this same request's actual packet.
@@ -1688,6 +1699,13 @@ impl Renderer {
             }
             #[cfg(feature = "monitor-prototype")]
             Done::MonitorPolled => {}
+            #[cfg(feature = "monitor-prototype")]
+            Done::MonitorReleased(released) => {
+                self.monitor_release_pending = false;
+                if released {
+                    self.monitor_resources = false;
+                }
+            }
             Done::SessionFence(reply) => self.session_fences.receive(reply),
             Done::DisposableTrim { ticket, applied } => {
                 if let Some((proof, _, answer)) = &mut self.disposable_trim
@@ -1856,17 +1874,53 @@ impl Renderer {
         viewport: crate::WorldViewport,
         cap: crate::viewport_capture::CaptureCap,
     ) -> Result<crate::viewport_capture::CaptureToken, crate::viewport_capture::CaptureError> {
+        self.request_capture_kind(viewport, cap, false)
+    }
+
+    /// One explicitly inactive offscreen request. Native source/lease/privacy
+    /// and aggregate admission must be checked by the App before every use.
+    #[cfg(feature = "monitor-prototype")]
+    pub fn request_inactive_capture(
+        &mut self,
+        viewport: crate::WorldViewport,
+        cap: crate::viewport_capture::CaptureCap,
+    ) -> Result<crate::viewport_capture::CaptureToken, crate::viewport_capture::CaptureError> {
+        let required = if self.monitor_resources { 64 } else { 256 } * 1024 * 1024;
+        if self
+            .video_memory
+            .read(&self.device)
+            .is_none_or(|video| video.budget.saturating_sub(video.usage) < required)
+        {
+            return Err(crate::viewport_capture::CaptureError::Capacity);
+        }
+        self.request_capture_kind(viewport, cap, true)
+    }
+
+    fn request_capture_kind(
+        &mut self,
+        viewport: crate::WorldViewport,
+        cap: crate::viewport_capture::CaptureCap,
+        inactive: bool,
+    ) -> Result<crate::viewport_capture::CaptureToken, crate::viewport_capture::CaptureError> {
         use crate::viewport_capture::CaptureError;
         let boundary = self.viewport_capture_boundary()?;
         if self.session_fences.pending() {
             return Err(CaptureError::Busy);
         }
         self.viewport_capture_retirement.available()?;
-        let frame = self
-            .viewport_capture
-            .as_ref()
-            .ok_or(CaptureError::Unsupported)?
-            .request(boundary, viewport, cap)?;
+        let shared = self.viewport_capture.as_ref().ok_or(CaptureError::Unsupported)?;
+        #[cfg(feature = "monitor-prototype")]
+        let frame = if inactive {
+            shared.request_inactive(boundary, viewport, cap)?
+        } else {
+            shared.request(boundary, viewport, cap)?
+        };
+        #[cfg(not(feature = "monitor-prototype"))]
+        let frame = if inactive {
+            return Err(CaptureError::Unsupported);
+        } else {
+            shared.request(boundary, viewport, cap)?
+        };
         let token = frame.request.token();
         if let Err(error) = self.viewport_capture_retirement.request(token) {
             self.invalidate_viewport_capture();

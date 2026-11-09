@@ -354,6 +354,8 @@ pub(crate) enum Job {
     Monitor(Box<FramePacket>, crate::monitor::Request),
     #[cfg(feature = "monitor-prototype")]
     PollMonitor,
+    #[cfg(feature = "monitor-prototype")]
+    ReleaseMonitor,
     /// Ordered after preceding frame packets. Every poll stays on the queue's
     /// owning render thread, including when ordinary frame pacing is disabled.
     SessionFence(u64),
@@ -376,6 +378,8 @@ pub(crate) enum Done {
     Monitor(Box<crate::packet::Spent>),
     #[cfg(feature = "monitor-prototype")]
     MonitorPolled,
+    #[cfg(feature = "monitor-prototype")]
+    MonitorReleased(bool),
     SessionFence(crate::session_fence::Reply),
     DisposableTrim {
         ticket: u64,
@@ -533,6 +537,8 @@ fn run(mut backend: Backend, worker: Worker<Job, Done>) -> Backend {
                 backend.poll_monitor();
                 Done::MonitorPolled
             }
+            #[cfg(feature = "monitor-prototype")]
+            Job::ReleaseMonitor => Done::MonitorReleased(backend.release_monitor()),
             Job::Pick { x, y } => Done::Pick(backend.pick_world(x, y)),
             Job::SessionFence(ticket) => Done::SessionFence(backend.session_fence(ticket)),
             Job::DisposableTrim(proof) => Done::DisposableTrim {

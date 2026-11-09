@@ -160,6 +160,7 @@ fn preview_fresh_pixel_epoch_attachment_keeps_old_unadmitted_arc_permanently_inv
         source(3),
         policy().epochs(),
         PreviewAccess {
+            capture_inactive: false,
             active: false,
             capture_active: false,
             activation: 2,
@@ -180,6 +181,7 @@ fn preview_fresh_pixel_epoch_attachment_keeps_old_unadmitted_arc_permanently_inv
         source(3),
         policy().epochs(),
         PreviewAccess {
+            capture_inactive: false,
             activation: 3,
             ..policy().access()
         },
@@ -250,4 +252,31 @@ fn preview_pixel_epoch_is_mac_bound_even_when_untrusted_auth_prefix_is_relabelle
     let mut proof = worker.answer(&challenge, 1).unwrap().as_slice().to_vec();
     proof[16..24].copy_from_slice(&1u64.to_be_bytes());
     assert!(host.accept(&proof, 2).is_err());
+}
+
+#[test]
+fn live_preview_captured_body_refuses_an_active_queue_result_even_when_every_geometry_field_matches() {
+    let (frame, _) = captured();
+    let p = policy();
+    let inactive = PreviewPolicy::new(
+        p.source(),
+        p.epochs(),
+        PreviewAccess {
+            active: false,
+            activation: 0,
+            capture_active: false,
+            capture_inactive: true,
+            ..p.access()
+        },
+    )
+    .unwrap();
+    let mut model = SourceImages::new(source(3), aurora_session::preview_image::ImageBudget::new(1024 * 1024).unwrap()).unwrap();
+    model.sync(inactive, 0).unwrap();
+    let geometry = PreviewGeometry::new([640, 360], [0, 0, 640, 360], aurora_session::PreviewSize::Small).unwrap();
+    let claim = model.request_inactive(8, 1, geometry, 1).unwrap();
+    let stamp = PreviewStamp::new(claim, 1, 1, 1, geometry).unwrap();
+    assert!(matches!(
+        super::captured::CapturedBody::fixture(stamp, frame, Arc::new(AtomicBool::new(true))),
+        Err(Error::Binding)
+    ));
 }

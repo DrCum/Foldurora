@@ -175,7 +175,15 @@ pub struct PreviewAccess {
     pub active: bool,
     pub activation: u64,
     pub capture_active: bool,
+    /// Explicit native inactive rendering eligibility, never implied by retention.
+    #[serde(default)]
+    pub capture_inactive: bool,
     pub retain_last_active: bool,
+}
+impl PreviewAccess {
+    pub fn can_capture(self) -> bool {
+        self.capture_active || self.capture_inactive
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -199,6 +207,7 @@ impl PreviewPolicy {
         if (access.active && (!access.ready || access.activation == 0))
             || (access.retain_last_active && !access.ready)
             || (access.capture_active && (!access.active || !access.retain_last_active))
+            || (access.capture_inactive && (!access.ready || access.active || !access.retain_last_active))
         {
             return Err(ImageError::Invalid);
         }
@@ -224,6 +233,12 @@ impl PreviewPolicy {
     }
     pub fn access(self) -> PreviewAccess {
         self.access
+    }
+    pub fn captures(self, kind: PreviewKind) -> bool {
+        match kind {
+            PreviewKind::LastActive => self.access.capture_active,
+            PreviewKind::LiveInactive => self.access.capture_inactive,
+        }
     }
 }
 impl TryFrom<PolicyFields> for PreviewPolicy {
@@ -338,12 +353,14 @@ pub enum PreviewFormat {
 #[serde(rename_all = "snake_case")]
 pub enum PreviewKind {
     LastActive,
+    LiveInactive,
 }
 
 /// This request association is issued by SourceImages, never by a pixel peer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "ClaimFields", into = "ClaimFields")]
 pub struct CaptureClaim {
+    kind: PreviewKind,
     source: PreviewSource,
     epochs: PreviewEpochs,
     activation: u64,
@@ -356,6 +373,7 @@ pub struct CaptureClaim {
 #[derive(Clone, Copy, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ClaimFields {
+    kind: PreviewKind,
     source: PreviewSource,
     epochs: PreviewEpochs,
     activation: u64,
@@ -366,6 +384,9 @@ struct ClaimFields {
     geometry: PreviewGeometry,
 }
 impl CaptureClaim {
+    pub fn kind(self) -> PreviewKind {
+        self.kind
+    }
     pub fn source(self) -> PreviewSource {
         self.source
     }
@@ -397,16 +418,21 @@ impl CaptureClaim {
         self.source == policy.source
             && self.epochs == policy.epochs
             && self.activation == policy.access.activation
-            && policy.access.capture_active
+            && policy.captures(self.kind)
     }
     fn valid(self) -> bool {
-        self.instance != 0 && self.activation != 0 && self.connection != 0 && self.demand != 0 && self.request != 0
+        self.instance != 0
+            && (self.kind == PreviewKind::LiveInactive || self.activation != 0)
+            && self.connection != 0
+            && self.demand != 0
+            && self.request != 0
     }
 }
 impl TryFrom<ClaimFields> for CaptureClaim {
     type Error = &'static str;
     fn try_from(value: ClaimFields) -> Result<Self, Self::Error> {
         let claim = Self {
+            kind: value.kind,
             source: value.source,
             epochs: value.epochs,
             activation: value.activation,
@@ -425,6 +451,7 @@ impl TryFrom<ClaimFields> for CaptureClaim {
 impl From<CaptureClaim> for ClaimFields {
     fn from(value: CaptureClaim) -> Self {
         Self {
+            kind: value.kind,
             source: value.source,
             epochs: value.epochs,
             activation: value.activation,
@@ -471,7 +498,7 @@ impl PreviewStamp {
             frame,
             geometry,
             format: PreviewFormat::Rgba8OpaqueSrgb,
-            kind: PreviewKind::LastActive,
+            kind: claim.kind,
         })
     }
     pub fn claim(self) -> CaptureClaim {
@@ -499,6 +526,9 @@ impl PreviewStamp {
 impl TryFrom<StampFields> for PreviewStamp {
     type Error = &'static str;
     fn try_from(value: StampFields) -> Result<Self, Self::Error> {
+        if value.kind != value.claim.kind || value.format != PreviewFormat::Rgba8OpaqueSrgb {
+            return Err("preview stamp kind or format does not match its claim");
+        }
         Self::new(value.claim, value.sequence, value.surface_epoch, value.frame, value.geometry).map_err(|_| "invalid preview stamp")
     }
 }
@@ -723,7 +753,9 @@ impl SourceImages {
             if policy.epochs != old.epochs {
                 self.purge()?;
             }
-            if policy.access.activation != old.access.activation || !policy.access.capture_active {
+            if policy.access.activation != old.access.activation
+                || self.pending.as_ref().is_some_and(|pending| !pending.claim.matches_policy(policy))
+            {
                 self.pending = None;
             }
         }
@@ -736,8 +768,27 @@ impl SourceImages {
     }
 
     pub fn request(&mut self, connection: u64, demand: u64, geometry: PreviewGeometry, now: u64) -> Result<CaptureClaim, ImageError> {
+        self.request_kind(PreviewKind::LastActive, connection, demand, geometry, now)
+    }
+    pub fn request_inactive(
+        &mut self,
+        connection: u64,
+        demand: u64,
+        geometry: PreviewGeometry,
+        now: u64,
+    ) -> Result<CaptureClaim, ImageError> {
+        self.request_kind(PreviewKind::LiveInactive, connection, demand, geometry, now)
+    }
+    fn request_kind(
+        &mut self,
+        kind: PreviewKind,
+        connection: u64,
+        demand: u64,
+        geometry: PreviewGeometry,
+        now: u64,
+    ) -> Result<CaptureClaim, ImageError> {
         self.tick(now)?;
-        let policy = self.policy.filter(|policy| policy.access.capture_active).ok_or(ImageError::Stale)?;
+        let policy = self.policy.filter(|policy| policy.captures(kind)).ok_or(ImageError::Stale)?;
         if self.retired || self.validity.expires.load(Ordering::Acquire) <= now {
             return Err(ImageError::Stale);
         }
@@ -762,6 +813,7 @@ impl SourceImages {
         self.connection = connection;
         self.demand = demand;
         let claim = CaptureClaim {
+            kind,
             source: self.source,
             epochs: policy.epochs,
             activation: policy.access.activation,
@@ -792,7 +844,10 @@ impl SourceImages {
     /// must have been reserved before the future IO layer allocates that body.
     pub fn admit(&mut self, stamp: PreviewStamp, credit: ImageCredit, now: u64) -> Result<AdmittedImage, ImageError> {
         self.tick(now)?;
-        let policy = self.policy.filter(|policy| policy.access.capture_active).ok_or(ImageError::Stale)?;
+        let policy = self
+            .policy
+            .filter(|policy| stamp.claim.matches_policy(*policy))
+            .ok_or(ImageError::Stale)?;
         let pending = self.pending.as_ref().ok_or(ImageError::Stale)?;
         if self.retired
             || self.validity.expires.load(Ordering::Acquire) <= now
@@ -953,6 +1008,7 @@ mod tests {
             source(id),
             epochs(1),
             PreviewAccess {
+                capture_inactive: false,
                 ready: true,
                 active: true,
                 activation: 7,
@@ -1060,6 +1116,7 @@ mod tests {
             source(1),
             epochs(1),
             PreviewAccess {
+                capture_inactive: false,
                 ready: true,
                 active: false,
                 activation: 8,
@@ -1322,6 +1379,7 @@ mod tests {
                 source(1),
                 old.epochs(),
                 PreviewAccess {
+                    capture_inactive: false,
                     activation: 6,
                     ..old.access()
                 },
@@ -1333,6 +1391,7 @@ mod tests {
                 source(1),
                 old.epochs(),
                 PreviewAccess {
+                    capture_inactive: false,
                     retain_last_active: false,
                     capture_active: false,
                     ..old.access()
@@ -1362,6 +1421,7 @@ mod tests {
             source(1),
             old.epochs(),
             PreviewAccess {
+                capture_inactive: false,
                 active: false,
                 capture_active: false,
                 ..old.access()
@@ -1396,5 +1456,149 @@ mod tests {
         images.sync_observed(replacement, 1000, 1000).unwrap();
         assert!(!held.current(1000));
         assert_eq!(images.policy, Some(replacement));
+    }
+    fn inactive_policy(activation: u64) -> PreviewPolicy {
+        PreviewPolicy::new(
+            source(1),
+            epochs(1),
+            PreviewAccess {
+                ready: true,
+                active: false,
+                activation,
+                capture_active: false,
+                capture_inactive: true,
+                retain_last_active: true,
+            },
+        )
+        .unwrap()
+    }
+    #[test]
+    fn live_preview_needs_explicit_inactive_eligibility_not_retained_history() {
+        let budget = ImageBudget::new(MAX_IMAGE_BYTES * 2).unwrap();
+        let mut images = model(&budget);
+        let held = admit(&mut images, &budget, 1, 1);
+        let old = policy(1);
+        let parked = PreviewPolicy::new(
+            source(1),
+            old.epochs(),
+            PreviewAccess {
+                active: false,
+                capture_active: false,
+                ..old.access()
+            },
+        )
+        .unwrap();
+        images.sync(parked, 3).unwrap();
+        assert!(held.current(3));
+        assert_eq!(images.request_inactive(1, 1, geometry(), 4), Err(ImageError::Stale));
+        images.sync(inactive_policy(7), 5).unwrap();
+        let claim = images.request_inactive(1, 1, geometry(), 6).unwrap();
+        assert_eq!(claim.kind(), PreviewKind::LiveInactive);
+        assert!(claim.matches_policy(inactive_policy(7)));
+        assert!(!claim.matches_policy(old));
+        assert_eq!(images.request(1, 1, geometry(), 6), Err(ImageError::Stale));
+        let mut invalid = old.access();
+        invalid.capture_inactive = true;
+        assert!(PreviewPolicy::new(source(1), epochs(1), invalid).is_err());
+    }
+    #[test]
+    fn live_preview_before_first_activation_has_no_fabricated_active_grant() {
+        let policy = inactive_policy(0);
+        let layout = PreviewLayout::new_inactive(source(1), epochs(1), 0, 1, 1, [1920, 1080], [100, 100, 1600, 900]).unwrap();
+        assert_eq!(layout.kind(), PreviewKind::LiveInactive);
+        assert!(layout.matches_policy(policy));
+        assert!(PreviewLayout::new(source(1), epochs(1), 0, 1, 1, [1920, 1080], [100, 100, 1600, 900]).is_err());
+        let budget = ImageBudget::new(MAX_IMAGE_BYTES).unwrap();
+        let mut images = SourceImages::new(source(1), budget.clone()).unwrap();
+        images.sync(policy, 0).unwrap();
+        let claim = images.request_inactive(1, 1, geometry(), 1).unwrap();
+        assert_eq!(claim.activation(), 0);
+        let stamp = PreviewStamp::new(claim, 1, 1, 0, geometry()).unwrap();
+        assert_eq!(stamp.kind(), PreviewKind::LiveInactive);
+        assert!(images.admit(stamp, budget.reserve(geometry()).unwrap(), 2).unwrap().current(3));
+    }
+    #[test]
+    fn live_preview_cannot_relabel_an_active_claim_or_mismatched_stamp() {
+        let budget = ImageBudget::new(MAX_IMAGE_BYTES).unwrap();
+        let mut images = SourceImages::new(source(1), budget.clone()).unwrap();
+        images.sync(inactive_policy(7), 0).unwrap();
+        let claim = images.request_inactive(1, 1, geometry(), 1).unwrap();
+        let original = PreviewStamp::new(claim, 1, 1, 0, geometry()).unwrap();
+        let mut wrong = serde_json::to_value(original).unwrap();
+        wrong["kind"] = serde_json::json!("last_active");
+        assert!(serde_json::from_value::<PreviewStamp>(wrong).is_err());
+        let mut wrong = serde_json::to_value(claim).unwrap();
+        wrong["kind"] = serde_json::json!("last_active");
+        let wrong: CaptureClaim = serde_json::from_value(wrong).unwrap();
+        assert!(!wrong.matches_policy(inactive_policy(7)));
+        assert_eq!(
+            images
+                .admit(
+                    PreviewStamp::new(wrong, 1, 1, 0, geometry()).unwrap(),
+                    budget.reserve(geometry()).unwrap(),
+                    2
+                )
+                .err(),
+            Some(ImageError::Stale)
+        );
+        assert!(
+            images.admit(original, budget.reserve(geometry()).unwrap(), 3).is_ok(),
+            "failed relabel cannot consume original pending claim"
+        );
+    }
+    #[test]
+    fn live_preview_revocation_cancels_pending_and_retires_borrowed_pixels_on_privacy_loss() {
+        let budget = ImageBudget::new(MAX_IMAGE_BYTES * 2).unwrap();
+        let mut images = SourceImages::new(source(1), budget.clone()).unwrap();
+        let live = inactive_policy(0);
+        images.sync(live, 0).unwrap();
+        let claim = images.request_inactive(1, 1, geometry(), 1).unwrap();
+        let held = images
+            .admit(
+                PreviewStamp::new(claim, 1, 1, 0, geometry()).unwrap(),
+                budget.reserve(geometry()).unwrap(),
+                2,
+            )
+            .unwrap();
+        let pending = images.request_inactive(1, 1, geometry(), 3).unwrap();
+        let revoked = PreviewPolicy::new(
+            source(1),
+            epochs(1),
+            PreviewAccess {
+                capture_inactive: false,
+                ..live.access()
+            },
+        )
+        .unwrap();
+        images.sync(revoked, 4).unwrap();
+        assert!(
+            images
+                .admit(
+                    PreviewStamp::new(pending, 2, 1, 1, geometry()).unwrap(),
+                    budget.reserve(geometry()).unwrap(),
+                    5
+                )
+                .is_err()
+        );
+        assert_eq!(images.request_inactive(1, 1, geometry(), 5), Err(ImageError::Stale));
+        let private = PreviewPolicy::new(
+            source(1),
+            epochs(2),
+            PreviewAccess {
+                ready: false,
+                retain_last_active: false,
+                ..revoked.access()
+            },
+        )
+        .unwrap();
+        images.sync(private, 6).unwrap();
+        assert!(!held.current(6));
+        assert_eq!(
+            budget.used(),
+            geometry().payload_bytes(),
+            "borrowed allocation remains charged until dropped"
+        );
+        drop(held);
+        assert_eq!(budget.used(), 0);
     }
 }

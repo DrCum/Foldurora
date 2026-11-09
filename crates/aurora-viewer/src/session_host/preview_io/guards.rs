@@ -217,13 +217,12 @@ impl CapturePermitGuard {
     }
 }
 
-/// The later Broker mints this only from exact accepted ActiveViewport+Granted
-/// control state. Its capture-only fence never gates already-admitted history.
+/// Broker-owned active grant or independently eligible inactive source. The
+/// explicit kind cannot cross lanes; its fence never gates admitted history.
 #[derive(Clone)]
 pub(crate) struct CaptureControlGuard {
     pub(super) control: ControlGuard,
-    pub(super) activation: u64,
-    pub(super) viewport: aurora_session::HostedViewport,
+    pub(super) mode: crate::session_host::transport::preview_control::CaptureMode,
     pub(super) witness: EpochFence,
 }
 impl CaptureControlGuard {
@@ -233,8 +232,7 @@ impl CaptureControlGuard {
         }
         Ok(Self {
             control: ControlGuard::from_host(token.source())?,
-            activation: token.activation(),
-            viewport: token.viewport(),
+            mode: token.mode(),
             witness: token.witness(),
         })
     }
@@ -244,21 +242,21 @@ impl CaptureControlGuard {
     pub fn source(&self) -> PreviewSource {
         self.control.source
     }
-    pub fn activation(&self) -> u64 {
-        self.activation
-    }
-    pub fn viewport(&self) -> aurora_session::HostedViewport {
-        self.viewport
-    }
 
     pub fn current(&self, claim: CaptureClaim, now: Instant) -> bool {
         self.control().current(now)
             && self.witness.current()
-            && self.activation() != 0
             && claim.source() == self.source()
-            && claim.activation() == self.activation()
-            && self.viewport().validate().is_ok()
-            && claim.geometry().source_size() == [self.viewport().rect.width, self.viewport().rect.height]
+            && claim.kind() == self.mode.kind()
+            && match self.mode {
+                crate::session_host::transport::preview_control::CaptureMode::Active { activation, viewport } => {
+                    activation != 0
+                        && claim.activation() == activation
+                        && viewport.validate().is_ok()
+                        && claim.geometry().source_size() == [viewport.rect.width, viewport.rect.height]
+                }
+                crate::session_host::transport::preview_control::CaptureMode::Inactive => true,
+            }
     }
 }
 
@@ -331,27 +329,69 @@ mod tests {
         let claim = images.request(1, 1, geometry, 1).unwrap();
         let mut active = CaptureControlGuard {
             control: c.clone(),
-            activation: 1,
-            viewport: aurora_session::HostedViewport {
-                host_window: 1,
-                rect: aurora_session::PhysicalRect {
-                    x: 0,
-                    y: 0,
-                    width: 640,
-                    height: 360,
+            mode: crate::session_host::transport::preview_control::CaptureMode::Active {
+                activation: 1,
+                viewport: aurora_session::HostedViewport {
+                    host_window: 1,
+                    rect: aurora_session::PhysicalRect {
+                        x: 0,
+                        y: 0,
+                        width: 640,
+                        height: 360,
+                    },
                 },
             },
             witness: EpochFence::new(),
         };
         assert!(active.current(claim, Instant::now()));
-        active.activation = 2;
+        let original = active.mode;
+        if let crate::session_host::transport::preview_control::CaptureMode::Active { activation, .. } = &mut active.mode {
+            *activation = 2;
+        }
         assert!(!active.current(claim, Instant::now()));
-        active.activation = 1;
+        active.mode = original;
         active.control.source = super::super::tests::source(2);
         assert!(!active.current(claim, Instant::now()));
         active.control = c;
         active.witness.revoke();
         assert!(!active.current(claim, Instant::now()));
+    }
+    #[test]
+    fn live_preview_io_inactive_guard_cannot_borrow_active_authority_or_revive_after_retirement() {
+        use aurora_session::preview_image::{ImageBudget, PreviewAccess, PreviewGeometry, PreviewPolicy, SourceImages};
+        let source = super::super::tests::source(3);
+        let control = super::super::tests::control(source);
+        let active = super::super::tests::state(control.clone(), Some(EpochFence::new())).policy;
+        let mut model = SourceImages::new(source, ImageBudget::new(1024 * 1024).unwrap()).unwrap();
+        model.sync(active, 0).unwrap();
+        let geometry = PreviewGeometry::new([640, 360], [0, 0, 640, 360], aurora_session::PreviewSize::Small).unwrap();
+        let active_claim = model.request(1, 1, geometry, 1).unwrap();
+        let guard = CaptureControlGuard {
+            control,
+            mode: crate::session_host::transport::preview_control::CaptureMode::Inactive,
+            witness: EpochFence::new(),
+        };
+        assert!(!guard.current(active_claim, Instant::now()));
+        let inactive = PreviewPolicy::new(
+            source,
+            active.epochs(),
+            PreviewAccess {
+                active: false,
+                activation: 0,
+                capture_active: false,
+                capture_inactive: true,
+                ..active.access()
+            },
+        )
+        .unwrap();
+        // A fresh never-activated domain keeps the active watermark monotonic.
+        let mut model = SourceImages::new(source, ImageBudget::new(1024 * 1024).unwrap()).unwrap();
+        model.sync(inactive, 0).unwrap();
+        let claim = model.request_inactive(1, 1, geometry, 1).unwrap();
+        assert!(guard.current(claim, Instant::now()));
+        guard.witness.revoke();
+        assert!(!guard.current(claim, Instant::now()));
+        assert!(!guard.current(active_claim, Instant::now()));
     }
 }
 

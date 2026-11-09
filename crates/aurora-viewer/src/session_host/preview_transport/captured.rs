@@ -35,7 +35,12 @@ impl CapturedBody {
         let b = r.boundary();
         let view = r.viewport();
         let g = stamp.geometry();
-        if stamp.frame() != frame.frame()
+        let kind = match r.kind() {
+            aurora_render::viewport_capture::CaptureKind::ActiveViewport => aurora_session::preview_image::PreviewKind::LastActive,
+            aurora_render::viewport_capture::CaptureKind::InactiveWorld => aurora_session::preview_image::PreviewKind::LiveInactive,
+        };
+        if stamp.kind() != kind
+            || stamp.frame() != frame.frame()
             || stamp.surface_epoch() != b.surface_epoch()
             || g.source_size() != [b.size().0, b.size().1]
             || g.rect() != [view.x, view.y, view.width, view.height]
