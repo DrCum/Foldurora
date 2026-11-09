@@ -595,6 +595,7 @@ impl OptionsUi {
 
 #[derive(Default)]
 pub struct OptionsResult {
+    pub open_assistant: bool,
     pub open_workspaces: bool,
     pub toggle_flycam: bool,
     pub reset_anti_spam: bool,

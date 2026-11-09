@@ -13,7 +13,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args == ["--help"] {
         println!(
-            "foldurora-mcp --installation <viewer-installation-id>\nStdio host MCP; host and profile authorization are required separately."
+            "foldurora-mcp --installation <viewer-installation-id>\nStdio MCP; host/profile and per-character enablement and permissions are separate."
         );
         return Ok(());
     }
@@ -26,9 +26,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     let installation = InstallationId::parse_hex(&args[1])?;
     let discovery = Discovery::production(installation)?;
+    let characters = Discovery::character(installation)?;
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?
-        .block_on(sdk::serve(discovery, tokio::io::stdin(), tokio::io::stdout()))?;
+        .block_on(sdk::serve_domains(
+            discovery,
+            Some(characters),
+            tokio::io::stdin(),
+            tokio::io::stdout(),
+        ))?;
     Ok(())
 }

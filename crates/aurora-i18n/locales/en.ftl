@@ -13617,3 +13617,136 @@ host-contacts-search = Search
 host-contacts-results = Results for: { $query }
 host-contacts-searching = Searching…
 host-contacts-search-failed = Search is unavailable or failed. Try again shortly. Friends remain available.
+
+# Independently authorized host MCP
+host-mcp-title = Host MCP
+host-mcp-help = Host access is separate from character assistants. All connections stay on this computer.
+host-mcp-enabled = Enable host MCP
+host-mcp-unavailable = Host MCP is unavailable. Access remains restricted.
+host-mcp-metadata = Metadata
+host-mcp-activate = Activate world
+host-mcp-background = Background mode
+host-mcp-monitors = Monitors
+host-mcp-open-login = Open manual login
+host-mcp-restart = Restart viewer
+host-mcp-logout = Log out
+host-mcp-detach = Detach viewer
+host-mcp-never = Never
+host-mcp-ask = Ask
+host-mcp-allow = Allow
+host-mcp-profile-help = Authorize each current profile separately. A new login requires a new authorization.
+host-mcp-profile-enabled = Authorize this current profile
+host-mcp-pending = Requests awaiting approval
+host-mcp-approval-help = Allow this exact request once? Source or permission changes cancel it.
+host-mcp-deny = Deny
+host-mcp-approve = Allow once
+
+host-mcp-monitor-open = Open monitor
+host-mcp-monitor-close = Close monitor
+host-mcp-monitors-open-all = Open all permitted monitors
+host-mcp-monitors-arrange = Arrange monitors
+host-mcp-cycle-configure = Configure cycling monitor
+host-mcp-cycle-pause = Pause cycling monitor
+host-mcp-cycle-next = Advance cycling monitor
+host-mcp-monitor-number = Monitor { $number }
+host-mcp-cycle-interval = Interval: { $seconds } seconds
+host-mcp-cycle-playing = Play
+host-mcp-cycle-paused = Pause
+host-mcp-warm = Warm
+host-mcp-economy = Economy
+
+### Character Local Assistant (separate from host MCP)
+assistant-title = Local Assistant (MCP)
+assistant-help = Connect tools to this character independently of controller access. Enablement ends when this login ends.
+assistant-open = Open Local Assistant
+assistant-enable = Enable for this login
+assistant-pause = Pause connections
+assistant-unavailable = The local connection is unavailable.
+assistant-no-session = Log in manually before enabling this character connection.
+assistant-readonly = Read-only preset
+assistant-ask-changes = Ask before changes
+assistant-private-read-help = Presets keep private data off. Enable each private read separately.
+assistant-requests = Requests awaiting your decision
+assistant-native-evidence = Native target and exact effects
+assistant-copy-command = Copy MCP connection command
+assistant-deny = Deny
+assistant-allow-once = Allow once
+assistant-never = Never
+assistant-ask = Ask
+assistant-allow = Allow
+assistant-perm-read = Read inventory and outfits
+assistant-perm-camera = Move camera and take pictures
+assistant-perm-create = Create folders and items
+assistant-perm-edit = Rename and edit details
+assistant-perm-move = Move and copy
+assistant-perm-trash = Trash (can be restored)
+assistant-perm-nocopy = Move no-copy items during a copy
+assistant-perm-wear = Wear and detach
+assistant-perm-workspace = Switch workspaces and layouts
+assistant-perm-links = Replace links
+assistant-perm-chat_read = Read Chat
+assistant-perm-chat_state = Manage Chat drafts and read state
+assistant-perm-chat_send_im = Send direct IMs
+assistant-perm-chat_send_group = Send group Chat
+assistant-perm-chat_send_conference = Send conference Chat
+assistant-perm-chat_send_nearby = Speak in Nearby Chat
+assistant-perm-friends_read = Read friends and online status
+assistant-perm-resident_search = Search residents
+assistant-perm-profile_read = Read resident profiles
+assistant-perm-notifications_read = Read viewer notifications
+assistant-perm-notification_review = Review native notifications
+assistant-perm-world_read = Read nearby world and media observations
+assistant-perm-gesture_read = Read gestures and playback state
+assistant-perm-gesture_play = Play and stop gestures
+assistant-perm-pose_read = Read poses and joint state
+assistant-perm-pose_edit = Edit your own pose
+assistant-perm-pose_save = Save pose presets
+assistant-perm-pose_share = Use owner-approved shared posing
+assistant-perm-content_edit = Edit notecard and script contents
+assistant-perm-preferences_read = Read curated viewer preferences
+assistant-perm-preferences_write = Change curated viewer preferences
+assistant-perm-build_edit = Edit owned world objects
+assistant-perm-build_rez = Rez world objects
+assistant-perm-inventory_permissions = Change inventory next-owner permissions
+assistant-perm-navigation_move = Move your avatar and change flight
+assistant-perm-navigation_teleport = Teleport your avatar
+assistant-perm-upload = Upload local files
+assistant-perm-task_inventory_read = Read owned object Contents
+assistant-perm-script_debug_read = Read script errors and owner output
+assistant-perm-task_inventory_write = Change owned object Contents
+assistant-perm-task_inventory_remove = Permanently remove object Contents
+assistant-perm-script_run = Start stop and reset object scripts
+assistant-perm-object_take = Take owned objects into inventory
+assistant-perm-object_interact = Touch objects and answer game dialogs
+assistant-perm-script_test = Run scoped object test recipes
+
+host-mcp-client-config = Client installation identity
+host-mcp-copy-args = Copy client arguments
+
+# Native owner-authoritative shared posing (separate from local photo consent).
+shared-pose-title = Shared posing
+shared-pose-enable = Enable native shared posing through the worn bridge
+shared-pose-consent-body = Sharing publishes your current Poser joints to nearby sharing peers. Accepting an editor lets them change reserved joints in this session. You can withdraw access at any time. Assistant approval cannot grant this permission.
+shared-pose-request = { $name } requests permission to edit your shared pose
+shared-pose-publish = Share the current native pose
+shared-pose-stop = Stop sharing and revoke editors
+shared-pose-request-edit = Request editing permission
+shared-pose-bridge-needed = Enable sharing and wear a ready bridge. Start the ordinary Poser before publishing.
+
+ui-options-tap-hold-run = Run while holding a second movement tap
+ui-options-tap-hold-run-help = Tap a movement key twice, then hold it to run until released.
+ui-options-selection-beam = Show selection beams
+ui-options-selection-beam-help = Show the particle beams sent by native object selection effects.
+
+workspaces-save-layout = Save viewport and bars
+workspaces-favorite = Add to favorites
+workspaces-unfavorite = Remove favorite
+
+workspaces-remember-graphics = Remember graphics
+workspaces-remember-camera = Remember camera
+workspaces-remember-huds = Remember worn HUDs
+
+workspaces-huds-pending = Waiting for saved HUDs to appear.
+workspaces-huds-unconfirmed = Some saved HUDs were not confirmed. Inspect attachments before trying another switch.
+
+host-mcp-pending-manage = Requests await approval. Open character management to review host MCP requests.

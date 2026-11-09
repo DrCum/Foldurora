@@ -103,6 +103,9 @@ pub struct Coordinator {
     entries: BTreeMap<WorkerId, Entry>,
     active: Option<Active>,
     pending: Option<Pending>,
+    /// Exact native restoration barrier: no promotion until actual restore ack
+    /// or trusted owned-process exit. Timeout is never permission to promote.
+    native_restore: Option<(Binding, u64)>,
     latest_viewport: Option<HostedViewport>,
     activation: u64,
     now: u64,
@@ -117,6 +120,7 @@ impl Coordinator {
             entries: BTreeMap::new(),
             active: None,
             pending: None,
+            native_restore: None,
             latest_viewport: None,
             activation: 0,
             now: 0,
@@ -130,7 +134,7 @@ impl Coordinator {
         self.active.map(|active| active.binding.worker.worker)
     }
     pub fn busy(&self) -> bool {
-        self.pending.is_some()
+        self.pending.is_some() || self.native_restore.is_some()
     }
     pub fn set_workspace_foreground(&mut self, foreground: bool) {
         self.foreground = foreground;
@@ -183,6 +187,9 @@ impl Coordinator {
             Vec::new()
         };
         self.entries.remove(&worker);
+        if self.native_restore.is_some_and(|(binding, _)| binding.worker.worker == worker) {
+            self.native_restore = None;
+        }
         effects
     }
 
@@ -206,6 +213,85 @@ impl Coordinator {
         Ok(envelope)
     }
 
+    /// Capability negotiation belongs to the concrete host adapter. This
+    /// operation shares the exact worker/session/lease/sequence ownership rules.
+    pub fn native_request(&mut self, worker: WorkerId, request: crate::native::NativeRequest, now_ms: u64) -> Result<Effect, Error> {
+        self.now = self.now.max(now_ms);
+        if self.busy() || request.id == 0 || request.action.finalization() || request.action == crate::native::NativeAction::RestoreExit {
+            return Err(Error::Busy);
+        }
+        let binding = self.entries.get(&worker).ok_or(Error::Unavailable)?.roster.binding;
+        if !self.ready(binding) {
+            return Err(Error::Unavailable);
+        }
+        if matches!(request.action, crate::native::NativeAction::Background(_)) && self.active() == Some(worker) {
+            return Err(Error::Invalid);
+        }
+        Ok(Effect::Send(self.send(worker, Command::Native(request))?))
+    }
+
+    /// Exact pending native finalization remains deliverable after its normal
+    /// window restore. This does not revive roster, render or input authority.
+    pub fn native_finalize(&mut self, binding: Binding, request: crate::native::NativeRequest) -> Result<Effect, Error> {
+        if request.id == 0
+            || !request.action.finalization()
+            || binding.session.is_none()
+            || self
+                .entries
+                .get(&binding.worker.worker)
+                .is_none_or(|entry| entry.roster.binding != binding)
+        {
+            return Err(Error::Binding);
+        }
+        Ok(Effect::Send(self.send(binding.worker.worker, Command::Native(request))?))
+    }
+
+    pub fn restore_native_exit(&mut self, binding: Binding, request: crate::native::NativeRequest) -> Result<Vec<Effect>, Error> {
+        if self.busy() {
+            return Err(Error::Busy);
+        }
+        if request.id == 0
+            || request.action != crate::native::NativeAction::RestoreExit
+            || self
+                .entries
+                .get(&binding.worker.worker)
+                .is_none_or(|entry| !entry.roster.live || entry.roster.binding != binding)
+            || binding.session.is_none()
+        {
+            return Err(Error::Binding);
+        }
+        let message = self.send(binding.worker.worker, Command::Native(request))?;
+        self.native_restore = Some((binding, message.sequence));
+        if self.active() == Some(binding.worker.worker) {
+            self.active = None;
+        }
+        self.entries.get_mut(&binding.worker.worker).ok_or(Error::Unavailable)?.roster.live = false;
+        Ok(vec![Effect::Send(message)])
+    }
+
+    /// A refused/uncertain staged restoration must still retire that exact
+    /// source through the ordinary restore path; never leave an untracked Active
+    /// worker while authorizing another peer. No other peer is detached.
+    pub fn finish_native_restore(&mut self, binding: Binding) -> Result<Effect, Error> {
+        if self.native_restore.is_some_and(|(source, _)| source != binding) || self.pending.is_some() {
+            return Err(Error::Busy);
+        }
+        if self
+            .entries
+            .get(&binding.worker.worker)
+            .is_none_or(|entry| entry.roster.binding != binding)
+        {
+            return Err(Error::Binding);
+        }
+        let message = self.send(binding.worker.worker, Command::Detach)?;
+        self.native_restore = Some((binding, message.sequence));
+        if self.active() == Some(binding.worker.worker) {
+            self.active = None;
+        }
+        self.entries.get_mut(&binding.worker.worker).ok_or(Error::Unavailable)?.roster.live = false;
+        Ok(Effect::Send(message))
+    }
+
     fn ready(&self, binding: Binding) -> bool {
         self.entries.get(&binding.worker.worker).is_some_and(|entry| {
             entry.roster.live
@@ -226,7 +312,7 @@ impl Coordinator {
         if let Some(viewport) = viewport {
             viewport.validate()?;
         }
-        if self.pending.is_some() {
+        if self.busy() {
             return Err(Error::Busy);
         }
         self.now = self.now.max(now_ms);
@@ -265,6 +351,9 @@ impl Coordinator {
     /// native event. Translation retains the render grant; resize earns a new
     /// GPU proof. Even a move away and back needs a fresh placement receipt.
     pub fn refresh_viewport(&mut self, worker: WorkerId, viewport: HostedViewport, now_ms: u64) -> Result<Vec<Effect>, Error> {
+        if self.native_restore.is_some() {
+            return Err(Error::Busy);
+        }
         viewport.validate()?;
         self.now = self.now.max(now_ms);
         let target = self.entries.get(&worker).ok_or(Error::Unavailable)?.roster.binding;
@@ -313,7 +402,7 @@ impl Coordinator {
     /// Park before launching another login/renderer. Only a fresh GPU-idle
     /// acknowledgment emits Parked; no timeout or refusal authorizes a launch.
     pub fn park_active(&mut self, now_ms: u64) -> Result<Vec<Effect>, Error> {
-        if self.pending.is_some() {
+        if self.busy() {
             return Err(Error::Busy);
         }
         self.now = self.now.max(now_ms);
@@ -349,6 +438,27 @@ impl Coordinator {
         if let Some(entry) = self.entries.get_mut(&worker) {
             entry.roster.live = false;
         }
+        Ok(vec![Effect::Send(message)])
+    }
+
+    /// Restore one native ordinary window for its user-confirmed exit prompt.
+    /// With no transaction in flight, unrelated parked peers are not participants.
+    /// The worker still drains GPU/input and acknowledges its ordinary restore.
+    pub fn restore_for_exit(&mut self, worker: WorkerId) -> Result<Vec<Effect>, Error> {
+        if self.busy() {
+            return Err(Error::Busy);
+        }
+        let entry = self.entries.get(&worker).ok_or(Error::Unavailable)?;
+        if !entry.roster.live {
+            return Err(Error::Unavailable);
+        }
+        let binding = entry.roster.binding;
+        let message = self.send(worker, Command::Detach)?;
+        self.native_restore = Some((binding, message.sequence));
+        if self.active() == Some(worker) {
+            self.active = None;
+        }
+        self.entries.get_mut(&worker).ok_or(Error::Unavailable)?.roster.live = false;
         Ok(vec![Effect::Send(message)])
     }
 
@@ -401,6 +511,17 @@ impl Coordinator {
         let entry = self.entries.get(&worker).ok_or(Error::Unavailable)?;
         if envelope.binding.worker != entry.roster.binding.worker || envelope.lease_epoch != entry.lease_epoch {
             return Err(Error::Binding);
+        }
+        if matches!(event, Event::Detached)
+            && self.native_restore == Some((envelope.binding, envelope.reply_to))
+            && envelope.sequence > entry.received
+        {
+            let entry = self.entries.get_mut(&worker).ok_or(Error::Unavailable)?;
+            entry.received = envelope.sequence;
+            entry.last_seen = self.now;
+            entry.roster.live = false;
+            self.native_restore = None;
+            return Ok(Vec::new());
         }
         if !entry.roster.live || envelope.sequence <= entry.received {
             return Err(Error::Stale);

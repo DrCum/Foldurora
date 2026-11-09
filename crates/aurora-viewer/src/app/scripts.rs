@@ -52,13 +52,13 @@ default
 }
 "#;
 
-struct ScriptInfo {
-    name: String,
-    handle: u64,
-    owner: Uuid,
-    asset: Uuid,
-    can_read: bool,
-    can_edit: bool,
+pub(super) struct ScriptInfo {
+    pub(super) name: String,
+    pub(super) handle: u64,
+    pub(super) owner: Uuid,
+    pub(super) asset: Uuid,
+    pub(super) can_read: bool,
+    pub(super) can_edit: bool,
 }
 
 fn permissions(mask: u32, library: bool) -> (bool, bool) {
@@ -450,7 +450,7 @@ impl App {
         }
     }
 
-    fn script_info(&self, target: ScriptTarget) -> Option<ScriptInfo> {
+    pub(super) fn script_info(&self, target: ScriptTarget) -> Option<ScriptInfo> {
         if target.object.is_nil() {
             let inv = &self.world.inventory;
             let it = inv.items.get(&target.item).filter(|it| it.asset_type == 10)?;
@@ -800,6 +800,95 @@ impl App {
             _ => return false,
         }
         true
+    }
+}
+
+impl App {
+    /// Same native script eligibility as the editor, without opening one.
+    pub(super) fn mcp_load_script(&mut self, request: Uuid, target: ScriptTarget) -> Result<(), ()> {
+        if self.world.rlva.has("viewscript") {
+            return Err(());
+        }
+        let info = self.script_info(target).filter(|info| info.can_read).ok_or(())?;
+        self.send(NetCommand::LoadScript {
+            request,
+            target,
+            handle: info.handle,
+            owner: info.owner,
+            asset: info.asset,
+        });
+        Ok(())
+    }
+    pub(super) fn mcp_save_agent_script(&mut self, request: Uuid, item: Uuid, expected_asset: Uuid, source: String) -> Result<(), ()> {
+        let target = ScriptTarget { object: Uuid::nil(), item };
+        let info = self
+            .script_info(target)
+            .filter(|info| info.can_edit && info.asset == expected_asset)
+            .ok_or(())?;
+        if self.world.rlva.has("viewscript") || self.script_editors.documents.iter().any(|d| d.target == target) {
+            return Err(());
+        }
+        self.send(NetCommand::SaveScript {
+            request,
+            target,
+            handle: info.handle,
+            options: aurora_net::scripts::ScriptOptions {
+                mono: true,
+                running: false,
+                experience: Uuid::nil(),
+            },
+            source,
+        });
+        Ok(())
+    }
+}
+
+impl App {
+    pub(super) fn mcp_load_script_metadata(&mut self, request: Uuid, target: ScriptTarget) -> Result<(), ()> {
+        let info = self.script_info(target).filter(|i| i.can_read).ok_or(())?;
+        if self.world.rlva.has("viewscript") {
+            return Err(());
+        }
+        self.send(NetCommand::LoadScriptExperiences {
+            request,
+            target,
+            handle: info.handle,
+        });
+        Ok(())
+    }
+    pub(super) fn mcp_save_task_script(
+        &mut self,
+        request: Uuid,
+        target: ScriptTarget,
+        expected_asset: Uuid,
+        experience: Uuid,
+        running: bool,
+        source: String,
+    ) -> Result<(), ()> {
+        let info = self
+            .script_info(target)
+            .filter(|i| i.can_edit && i.asset == expected_asset)
+            .ok_or(())?;
+        let idx = self.world.objects.index_of_uuid(&target.object).ok_or(())?;
+        if self.world.rlva.has("viewscript")
+            || !self.world.rlva_can_edit(idx)
+            || !self.build.contents_editable(&self.world, idx)
+            || self.script_editors.documents.iter().any(|d| d.target == target)
+        {
+            return Err(());
+        }
+        self.send(NetCommand::SaveScript {
+            request,
+            target,
+            handle: info.handle,
+            options: aurora_net::scripts::ScriptOptions {
+                mono: true,
+                running,
+                experience,
+            },
+            source,
+        });
+        Ok(())
     }
 }
 

@@ -80,6 +80,7 @@ pub(super) fn bounded_scale(scale: Vec3) -> Vec3 {
 
 #[derive(Clone)]
 pub(super) struct Session {
+    pub id: Uuid,
     pub base: Arc<Pose>,
     pub pose: Arc<Pose>,
     pub enabled: bool,
@@ -90,6 +91,7 @@ impl Session {
     pub fn new(pose: Pose) -> Self {
         let pose = Arc::new(pose);
         Self {
+            id: Uuid::new_v4(),
             base: pose.clone(),
             pose,
             enabled: true,

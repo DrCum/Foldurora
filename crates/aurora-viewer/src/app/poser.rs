@@ -150,6 +150,7 @@ impl App {
         // subject menu; there is no capability probe.
         for request in self.ik_editor.take_poser_requests() {
             match request {
+                crate::ik_edit::poser::Request::OpenSharing => self.world.shared_pose.ui_open = true,
                 crate::ik_edit::poser::Request::Ask(peer) => {
                     consent.request(&self.world, peer, Instant::now());
                 }
@@ -225,5 +226,6 @@ impl App {
                 });
         }
         self.world.poser_consent = consent;
+        super::mcp::show_native_shared_pose(self, ctx, p);
     }
 }

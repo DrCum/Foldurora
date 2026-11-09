@@ -117,6 +117,58 @@ impl MonitorManager {
     pub fn model(&self) -> &MonitorSet {
         &self.model
     }
+
+    /// Native MCP uses the same canonical model and edit flush as the buttons.
+    /// Cycling is paused before explicit navigation; no world activation occurs.
+    pub fn mcp_cycle(
+        &mut self,
+        scope: &[PreviewSource],
+        interval: Option<u32>,
+        playing: Option<bool>,
+        next: bool,
+        now: u64,
+        flush: &mut Flush<'_>,
+    ) -> Result<(), PreviewError> {
+        if self.failed_closed {
+            return Err(PreviewError::Stopped);
+        }
+        self.flush_all(flush);
+        if interval.is_some() || next {
+            self.model.set_cycle_scope(Some(scope.to_vec())).map_err(model_error)?;
+        }
+        if self.model.binding(View::Cycling).is_none() {
+            if interval.is_none() {
+                if next {
+                    return Err(PreviewError::Unavailable);
+                }
+                return self.model.pause().map_err(model_error);
+            }
+            self.model.open_cycler(now).map_err(model_error)?;
+            self.reconcile()?;
+        }
+        self.flush_all(flush);
+        if let Some(interval) = interval {
+            self.model.set_interval(interval, now).map_err(model_error)?;
+        }
+        if next || playing == Some(false) {
+            self.model.pause().map_err(model_error)?;
+        }
+        if next {
+            let navigation = self
+                .model
+                .capture_navigation(super::monitor_model::Direction::Next)
+                .ok_or(PreviewError::Unavailable)?;
+            self.model.navigate(navigation).map_err(model_error)?;
+        }
+        if playing == Some(true) {
+            self.model.play(now).map_err(model_error)?;
+        }
+        self.reconcile()
+    }
+    pub fn pause_mcp_cycle(&mut self) -> Result<(), PreviewError> {
+        self.model.pause().map_err(model_error)
+    }
+
     pub fn state(&self, view: View) -> State {
         self.entries[index(view)].state
     }
@@ -311,6 +363,7 @@ impl MonitorManager {
         Ok(view)
     }
     pub fn open_cycling(&mut self, now: u64, flush: &mut Flush<'_>) -> Result<View, PreviewError> {
+        self.model.set_cycle_scope(None).map_err(model_error)?;
         if self.failed_closed {
             return Err(PreviewError::Stopped);
         }
@@ -523,6 +576,7 @@ impl MonitorManager {
                 self.model.pause().map_err(model_error)?;
             }
             Command::Play => {
+                self.model.set_cycle_scope(None).map_err(model_error)?;
                 self.play(view, *binding, *base, now, flush)?;
             }
             Command::Interval(seconds) => {

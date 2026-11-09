@@ -112,10 +112,15 @@ struct WorkspacePreview {
 pub(crate) fn workspace_capture(ctx: &egui::Context) -> WorkspaceGeometry {
     let room = move_area(ctx);
     windows(ctx, |w| w.refresh_anchors(room));
+    workspace_snapshot(ctx)
+}
+/// The already-observed native layout, without refreshing window memory.
+pub(crate) fn workspace_snapshot(ctx: &egui::Context) -> WorkspaceGeometry {
+    let saved = ctx.data(|d| d.get_temp::<Windows>(Id::unique("window_layout")));
     std::array::from_fn(|i| {
         let role = crate::workspace::model::Role::ALL[i];
         let id = Id::unique(role.id());
-        let placed = windows(ctx, |w| w.placed.get(&id.value()).copied())?;
+        let placed = saved.as_ref()?.placed.get(&id.value()).copied()?;
         let size = super::widgets::workspace_expanded_size(ctx, role.id()).unwrap_or(placed.rect.size());
         let anchor = placed
             .anchor
@@ -130,6 +135,77 @@ pub(crate) fn workspace_apply(ctx: &egui::Context, geometry: &WorkspaceGeometry)
     let room = move_area(ctx);
     let screen = ctx.content_rect();
     workspace_apply_at(ctx, geometry, room, screen, true);
+}
+/// Read-only fitted geometry. No window memory, widget state, persistence,
+/// pointer, focus or live workspace preview is changed by this diagram.
+pub(crate) fn workspace_diagram(ctx: &egui::Context, geometry: &WorkspaceGeometry) -> [Option<Rect>; 4] {
+    let room = move_area(ctx);
+    std::array::from_fn(|i| {
+        let g = geometry[i]?;
+        let anchor = Anchor::from_workspace(g)?;
+        let requested = Vec2::from(g.size);
+        let size = requested.min(room.size()).max(Vec2::splat(1.0));
+        Some(Rect::from_min_size(
+            keep_title_in(room, anchor.position(room, requested), size, window_edges(ctx)),
+            size,
+        ))
+    })
+}
+pub(crate) fn workspace_adjusted(ctx: &egui::Context, geometry: &WorkspaceGeometry) -> usize {
+    let room = move_area(ctx);
+    let diagram = workspace_diagram(ctx, geometry);
+    geometry
+        .iter()
+        .zip(diagram)
+        .filter(|(g, r)| {
+            g.and_then(|g| Anchor::from_workspace(g).map(|a| Rect::from_min_size(a.position(room, Vec2::from(g.size)), Vec2::from(g.size))))
+                != *r
+        })
+        .count()
+}
+
+#[cfg(test)]
+mod workspace_diagram_tests {
+    use super::*;
+    #[test]
+    fn workspace_preview_diagram_never_mutates_native_window_memory() {
+        let mut frames = crate::ui::widgets::elide_tests::Frames::new();
+        frames.run(Vec::new(), |_| {});
+        let ctx = frames.ctx.clone();
+        let geometry = [Some(crate::workspace::model::Geometry {
+            point: 0,
+            offset: [-10000., -10000.],
+            size: [10000., 10000.],
+        }); 4];
+        let before = ctx
+            .data(|d| d.get_temp::<Windows>(Id::unique("window_layout")))
+            .map(|w| serde_json::to_value(w).unwrap());
+        let snapshot = workspace_snapshot(&ctx);
+        for _ in 0..3 {
+            let diagram = workspace_diagram(&ctx, &geometry);
+            assert!(diagram.iter().all(|r| r.is_some_and(|r| r.min.x.is_finite() && r.width() > 0.)));
+        }
+        assert_eq!(workspace_snapshot(&ctx), snapshot);
+        let after = ctx
+            .data(|d| d.get_temp::<Windows>(Id::unique("window_layout")))
+            .map(|w| serde_json::to_value(w).unwrap());
+        assert_eq!(before, after);
+        assert!(
+            ctx.data(|d| d.get_temp::<WorkspacePreview>(Id::unique("workspace_preview_baseline")))
+                .is_none()
+        );
+    }
+}
+pub(crate) fn workspace_restore_mask(ctx: &egui::Context, owned: [bool; 4]) {
+    ctx.data_mut(|d| {
+        let key = Id::unique("workspace_preview_baseline");
+        if let Some(mut p) = d.get_temp::<WorkspacePreview>(key) {
+            for (t, own) in p.touched.iter_mut().zip(owned) {
+                *t &= own;
+            }
+            d.insert_temp(key, p);
+        }
+    });
 }
 fn workspace_touch(ctx: &egui::Context, roles: [bool; 4]) {
     ctx.data_mut(|d| {

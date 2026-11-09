@@ -181,7 +181,9 @@ impl WorkerGuard {
         if envelope.binding.worker != self.identity || envelope.lease_epoch != self.lease_epoch {
             return Err(Error::Binding);
         }
-        if self.mode == WorkerMode::Detached || envelope.sequence <= self.sequence || now_ms < self.received {
+        let detached_finalization =
+            matches!(command, Command::Native(request) if request.action.finalization()) || matches!(command, Command::Detach);
+        if (self.mode == WorkerMode::Detached && !detached_finalization) || envelope.sequence <= self.sequence || now_ms < self.received {
             return Err(Error::Stale);
         }
         if command.session_bound() && envelope.binding.session != self.session
@@ -201,6 +203,24 @@ impl WorkerGuard {
         let mut rejected = false;
         match command {
             Command::Heartbeat { workspace_foreground } => self.foreground = *workspace_foreground,
+            Command::Native(request)
+                if self.session.is_some()
+                    && (matches!(self.mode, WorkerMode::Active | WorkerMode::Standby)
+                        || (self.mode == WorkerMode::Detached && request.action.finalization())) =>
+            {
+                if request.action == crate::native::NativeAction::RestoreExit {
+                    result.effects = self.detach();
+                    result.reply = Some(Reply {
+                        reply_to: envelope.sequence,
+                        event: Event::Detached,
+                    });
+                } else {
+                    result.reply = Some(Reply {
+                        reply_to: envelope.sequence,
+                        event: Event::NativeAccepted { request: request.id },
+                    });
+                }
+            }
             Command::Detach => {
                 result.effects = self.detach();
                 result.reply = Some(Reply {

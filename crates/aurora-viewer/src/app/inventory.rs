@@ -982,3 +982,25 @@ impl App {
         }
     }
 }
+
+impl App {
+    /// Correlated assistant use of the ordinary typed inventory submission.
+    /// Permission preparation remains with the closed native MCP adapter.
+    pub(super) fn mcp_submit_inventory_change(
+        &mut self,
+        request: Uuid,
+        mut change: aurora_net::inventory::operations::Mutation,
+    ) -> Result<(), ()> {
+        if self.inventory_ui.pending.is_some()
+            || self.appearance_ui.pending.is_some()
+            || !self.world.rlva_inventory_mutation_allowed(&change, Uuid::nil())
+        {
+            return Err(());
+        }
+        change.defer_folder_contents = true;
+        self.inventory_ui.begin_mutation(request, &change);
+        self.inventory_ui.pending_refresh.clone_from(&change.refresh);
+        self.send(NetCommand::EditInventory { request, change });
+        Ok(())
+    }
+}

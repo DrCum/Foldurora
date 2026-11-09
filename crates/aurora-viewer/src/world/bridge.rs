@@ -18,9 +18,10 @@ const OLD_SUBFOLDER: &str = "Bridge";
 pub const NAME: &str = "#Aurora Bridge v1.0";
 // Stable inventory/script names let upgrades replace the existing controller
 // instead of wearing two bridges with competing physics.
-const VERSION: &str = "1.41";
+const VERSION: &str = "1.42";
 /// The controller's and query script's owner-say tags, never shown in chat.
-const PRIVATE_TAGS: [&str; 7] = [
+const PRIVATE_TAGS: [&str; 8] = [
+    "<auroraSharedPose>",
     "<auroraBridge>",
     "<auroraBridgeQuery>",
     "<auroraPose>",
@@ -1391,6 +1392,30 @@ impl Bridge {
                             let mut portals = std::mem::take(&mut world.portals);
                             portals.receive(world, &chat.message, now, super::portals::unix_time());
                             world.portals = portals;
+                        }
+                        if chat.message.starts_with("<auroraSharedPose>")
+                            && self.available()
+                            && world
+                                .objects
+                                .index_of_uuid(&self.object)
+                                .and_then(|i| world.objects.get(i))
+                                .is_some_and(|o| Some(o.key.region) == world.main_region)
+                            && let Some(body) = chat
+                                .message
+                                .strip_prefix("<auroraSharedPose>")
+                                .and_then(|s| s.strip_suffix("</auroraSharedPose>"))
+                        {
+                            let mut fields = body.splitn(3, '|');
+                            if let (Some(peer), Some(sender), Some(packet)) = (fields.next(), fields.next(), fields.next())
+                                && let (Ok(peer), Ok(sender)) = (Uuid::parse_str(peer), Uuid::parse_str(sender))
+                                && !peer.is_nil()
+                                && !sender.is_nil()
+                                && peer != sender
+                            {
+                                let mut shared = std::mem::take(&mut world.shared_pose);
+                                shared.receive(world, peer, packet, now);
+                                world.shared_pose = shared;
+                            }
                         }
                         if chat.message.starts_with("<auroraPose>")
                             && self.available()

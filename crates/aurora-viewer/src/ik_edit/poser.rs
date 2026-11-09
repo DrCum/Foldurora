@@ -16,6 +16,7 @@ mod data;
 mod document;
 mod kinematics;
 mod overlay;
+pub(crate) mod rotation_preset;
 mod scale_gizmo;
 mod storage;
 mod subjects;
@@ -59,6 +60,7 @@ impl Default for Config {
 /// consent action.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Request {
+    OpenSharing,
     Ask(Uuid),
     Cancel(Uuid),
     OpenPrivacy,
@@ -137,6 +139,89 @@ pub(super) fn group(name: &str) -> usize {
     }
 }
 impl Editor {
+    /// Native owner snapshot for shared posing. Opening an assistant private
+    /// transaction never constructs this session or changes its history.
+    pub(crate) fn native_shared_pose(&self, world: &World) -> Option<(Uuid, crate::world::shared_pose::Pose)> {
+        if !self.poser.active {
+            return None;
+        }
+        let session = self.poser.sessions.get(&world.agent_id).filter(|s| s.enabled)?;
+        let rig = &world.avatar_lib.rig;
+        let mut pose = crate::world::shared_pose::Pose::new();
+        for (bone, name) in rig.canonical_names.iter().enumerate() {
+            let q = session.pose.rotations[bone].to_array();
+            let p = session.pose.positions[bone].to_array();
+            let s = session.pose.scales[bone].to_array();
+            pose.insert(
+                name.clone(),
+                crate::world::shared_pose::Joint {
+                    transform: [q[0], q[1], q[2], q[3], p[0], p[1], p[2], s[0], s[1], s[2]],
+                    priority: self.poser.priority.clamp(0, 7) as u8,
+                    enabled: true,
+                    world_locked: session.pose.locks.contains_key(&bone),
+                    mirrored: self.symmetry && self.mirrors.counterpart(bone).is_some(),
+                },
+            );
+        }
+        Some((session.id, pose))
+    }
+    /// Commit only exact owner-approved joint channels. Manual undo and other
+    /// joints remain owned by their original authoring path.
+    pub(crate) fn apply_shared_rotations(
+        &mut self,
+        world: &World,
+        before: &crate::world::shared_pose::Pose,
+        changes: &crate::world::shared_pose::Pose,
+    ) -> bool {
+        let Some((_, native)) = self.native_shared_pose(world) else {
+            return false;
+        };
+        if before.is_empty() || before.len() != changes.len() || before.iter().any(|(n, j)| native.get(n) != Some(j)) {
+            return false;
+        }
+        let rig = &world.avatar_lib.rig;
+        for (name, after) in changes {
+            if !rotation_preset::supported(name) {
+                return false;
+            }
+            let Some(bone) = rig.names.get(name).copied() else { return false };
+            let Some(original) = before.get(name) else { return false };
+            if original.world_locked
+                || original.mirrored
+                || !original.enabled
+                || after.transform[4..] != original.transform[4..]
+                || after.priority != original.priority
+                || after.enabled != original.enabled
+                || after.world_locked != original.world_locked
+                || after.mirrored != original.mirrored
+            {
+                return false;
+            }
+            for locked in native
+                .iter()
+                .filter(|(_, j)| j.world_locked)
+                .filter_map(|(n, _)| rig.names.get(n).copied())
+            {
+                let mut parent = rig.parent[locked];
+                while let Some(p) = parent {
+                    if p == bone {
+                        return false;
+                    }
+                    parent = rig.parent[p];
+                }
+            }
+        }
+        let Some(session) = self.poser.sessions.get_mut(&world.agent_id) else {
+            return false;
+        };
+        let pose = Arc::make_mut(&mut session.pose);
+        for (name, joint) in changes {
+            let Some(&bone) = rig.names.get(name) else { return false };
+            pose.rotations[bone] = Quat::from_array(joint.transform[..4].try_into().unwrap_or([0., 0., 0., 1.])).normalize();
+        }
+        self.refresh = true;
+        true
+    }
     pub(super) fn poser_edited(&self, bone: usize) -> bool {
         self.poser.active && self.poser.sessions.get(&self.poser.subject).is_some_and(|s| s.edited(bone))
     }
@@ -273,6 +358,22 @@ impl Editor {
                 continue;
             };
             match loaded {
+                storage::Loaded::Rotations(rotations, mode) => {
+                    let selective = matches!(mode, document::LoadMode::Selective | document::LoadMode::SelectiveRotations);
+                    let edited: Vec<_> = (0..world.avatar_lib.rig.len()).map(|bone| session.edited(bone)).collect();
+                    session.checkpoint();
+                    let pose = Arc::make_mut(&mut session.pose);
+                    for (name, q) in rotations {
+                        if let Some(&bone) = world.avatar_lib.rig.names.get(&name) {
+                            if selective && edited[bone] {
+                                continue;
+                            }
+                            pose.rotations[bone] = q;
+                            pose.origin[bone] = world.avatar_lib.rig.local_rot[bone];
+                            pose.locks.remove(&bone);
+                        }
+                    }
+                }
                 storage::Loaded::Pose(document, mode) => {
                     if document.apply(&world.avatar_lib.rig, session, mode, model) {
                         self.poser.name = document.name;

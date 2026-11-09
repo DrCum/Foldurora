@@ -208,12 +208,31 @@ impl Sidecar {
         self.send(json!({"jsonrpc":"2.0", "method":"notifications/initialized"}));
     }
 
+    fn tools(&mut self) -> Vec<Value> {
+        let mut tools = Vec::new();
+        let mut params = json!({});
+        loop {
+            let reply = self.rpc("tools/list", params);
+            let result = &reply["result"];
+            tools.extend(result["tools"].as_array().expect("tools page").iter().cloned());
+            if let Some(cursor) = result["nextCursor"].as_str() {
+                params = json!({"cursor":cursor});
+            } else {
+                break;
+            }
+            assert!(tools.len() <= 173);
+        }
+        tools
+    }
     fn tool(&mut self, name: &str, arguments: Value) -> Value {
         let response = self.rpc("tools/call", json!({"name":name, "arguments":arguments}));
         assert!(response.get("error").is_none(), "tool protocol error: {response}");
         let result = response["result"]["structuredContent"].clone();
         assert!(result.is_object(), "expected structured MCP tool result: {response}");
-        assert_ne!(result["status"], "queued", "private placeholder escaped onto actual stdout");
+        assert_ne!(
+            result["status"], "deferred_native",
+            "private placeholder escaped onto actual stdout"
+        );
         result
     }
 
@@ -311,9 +330,8 @@ fn synthetic_mcp_stdio_host_authority_end_to_end() {
     let mut sidecar = Sidecar::start(&fixture);
     sidecar.initialize("2025-11-25", "2025-11-25");
 
-    let tools = sidecar.rpc("tools/list", json!({}));
-    let tools = tools["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 4);
+    let tools = sidecar.tools();
+    assert_eq!(tools.len(), 173);
     for name in ["controller_list", "sessions_list", "session_status", "controller_operation_status"] {
         assert!(
             tools
@@ -435,8 +453,259 @@ fn synthetic_stdio_negotiates_older_protocol_and_unknown_version_fallback() {
         let mut sidecar = Sidecar::start(&fixture);
         sidecar.initialize(requested, expected);
         assert!(sidecar.rpc("ping", json!({})).get("result").is_some());
-        assert_eq!(sidecar.rpc("tools/list", json!({}))["result"]["tools"].as_array().unwrap().len(), 4);
+        assert_eq!(sidecar.tools().len(), 173);
         assert!(sidecar.close().success(), "negotiated session should close cleanly");
         sidecar.assert_redacted(&fixture);
     }
+}
+
+#[test]
+fn synthetic_character_stdio_native_approval_revocation_and_domain_isolation() {
+    use aurora_mcp::assistant::{
+        permissions::{Class, Configuration, Level},
+        runtime::{Runtime, ViewerRequest},
+        tools::Tool,
+    };
+    use aurora_mcp::wire::{HostHandler, HostRequest};
+    let fixture = Fixture::new();
+    let discovery = Discovery::character_fixture(&fixture.data.join("auroraviewer/session-host/assistant"), fixture.installation).unwrap();
+    let runtime = Arc::new(Runtime::default());
+    let binding = fixture.projection(1, 1).binding.unwrap();
+    runtime.observe(Some(binding), true);
+    runtime.capabilities([Tool::InventoryGet, Tool::InventoryRename, Tool::CameraSnapshot]);
+    let mut configuration = Configuration::default();
+    configuration.permissions.set(Class::Edit, Level::Ask).unwrap();
+    configuration.permissions.set(Class::Camera, Level::Allow).unwrap();
+    runtime.configure(configuration.clone()).unwrap();
+    // Only an explicitly enabled character publishes a descriptor. Host remains disabled.
+    assert!(Server::start(discovery.clone(), false, runtime.clone()).is_err());
+    let service = Server::start(discovery.clone(), true, runtime.clone()).unwrap();
+    let viewer = service.instance();
+    runtime.enable(binding, viewer).unwrap();
+    let mut sidecar = Sidecar::start(&fixture);
+    sidecar.initialize("2025-11-25", "2025-11-25");
+    assert_eq!(sidecar.tool("controller_list", json!({}))["controllers"], json!([]));
+    assert_eq!(
+        sidecar.tool("viewer_list", json!({}))["viewers"],
+        json!([{"viewer_session":viewer}])
+    );
+    let info = sidecar.tool("viewer_status", json!({"viewer_session":viewer}));
+    assert_eq!(info["ready"], true);
+    assert_eq!(info["permissions"]["levels"]["chat_read"], "never");
+    let denied = sidecar.tool("chat_history", json!({"viewer_session":viewer,"conversation_id":"nearby"}));
+    assert_eq!(denied["error_code"], "unsupported_capability");
+    let read = sidecar.tool(
+        "inventory_get",
+        json!({"viewer_session":viewer,"id":uuid::Uuid::new_v4().to_string()}),
+    );
+    let read_id = read["request_id"].as_str().unwrap();
+    runtime.prepared(read_id, &[], false).unwrap();
+    runtime
+        .execute(read_id, |_| json!({"status":"ok","item":{"name":"Synthetic safe item"}}))
+        .unwrap();
+    assert_eq!(
+        sidecar.tool("assistant_operation_status", json!({"viewer_session":viewer,"request_id":read_id}))["result"]["item"]["name"],
+        "Synthetic safe item"
+    );
+    // Full image access remains bounded on the real protocol and transport;
+    // only the original authenticated operation can retrieve opaque chunks.
+    let image = sidecar.tool("camera_snapshot", json!({"viewer_session":viewer}));
+    let image_request = image["request_id"].as_str().unwrap().to_owned();
+    runtime.prepared(&image_request, &[], false).unwrap();
+    let capture = runtime.ready().into_iter().find(|c| c.request_id == image_request).unwrap();
+    runtime.execute(&image_request, |_| json!({"status":"submitted"})).unwrap();
+    let artifact = uuid::Uuid::new_v4();
+    let bytes: Vec<u8> = (0..10_000).map(|n| (n % 251) as u8).collect();
+    runtime.install_artifact(&capture, artifact, bytes.clone()).unwrap();
+    let preview = vec![255, 216, 1, 2, 3, 255, 217];
+    runtime.install_camera_preview(&capture, artifact, 64, 48, preview.clone()).unwrap();
+    runtime
+        .complete(
+            &capture,
+            json!({"artifact_id":artifact.to_string(),"bytes":bytes.len(),"inline_preview_available":true}),
+        )
+        .unwrap();
+    let rendered = sidecar.rpc(
+        "tools/call",
+        json!({"name":"assistant_operation_status","arguments":{"viewer_session":viewer,"request_id":image_request}}),
+    );
+    let images: Vec<_> = rendered["result"]["content"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|b| b["type"] == "image")
+        .collect();
+    assert_eq!(images.len(), 1);
+    assert_eq!(images[0]["mimeType"], "image/jpeg");
+    assert_eq!(images[0]["data"], "/9gBAgP/2Q==");
+    assert!(!rendered["result"]["structuredContent"].to_string().contains("/9gBAgP/2Q=="));
+    assert!(
+        rendered["result"]["content"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|b| b["type"] == "text")
+            .all(|b| !b.to_string().contains("/9gBAgP/2Q=="))
+    );
+    assert!(serde_json::to_vec(&rendered).unwrap().len() < MESSAGE_LIMIT);
+    let mut assembled = Vec::new();
+    for offset in [0, 8192] {
+        let chunk = sidecar.tool(
+            "camera_artifact_read",
+            json!({"viewer_session":viewer,"request_id":image_request,"artifact_id":artifact.to_string(),"offset":offset,"length":8192}),
+        );
+        assert_eq!(chunk["encoding"], "hex");
+        let text = chunk["data"].as_str().unwrap();
+        for pair in text.as_bytes().as_chunks::<2>().0 {
+            assembled.push(u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap());
+        }
+    }
+    assert_eq!(assembled, bytes);
+    let mut other = Sidecar::start(&fixture);
+    other.initialize("2025-11-25", "2025-11-25");
+    let denied_image = other.rpc(
+        "tools/call",
+        json!({"name":"assistant_operation_status","arguments":{"viewer_session":viewer,"request_id":image_request}}),
+    );
+    assert!(!denied_image.to_string().contains("/9gBAgP/2Q=="));
+    assert_eq!(
+        other.tool(
+            "camera_artifact_read",
+            json!({"viewer_session":viewer,"request_id":image_request,"artifact_id":artifact.to_string(),"offset":0,"length":1})
+        )["error_code"],
+        "artifact_unavailable"
+    );
+    assert!(other.close().success());
+    let malformed=sidecar.rpc("tools/call",json!({"name":"camera_artifact_read","arguments":{"viewer_session":viewer,"request_id":image_request,"artifact_id":artifact.to_string(),"offset":0,"length":8193}}));
+    assert!(malformed.get("error").is_some());
+    configuration.permissions.set(Class::Camera, Level::Never).unwrap();
+    runtime.configure(configuration.clone()).unwrap();
+    let denied_image = sidecar.rpc(
+        "tools/call",
+        json!({"name":"assistant_operation_status","arguments":{"viewer_session":viewer,"request_id":image_request}}),
+    );
+    assert!(!denied_image.to_string().contains("/9gBAgP/2Q=="));
+    assert_eq!(
+        sidecar.tool(
+            "camera_artifact_read",
+            json!({"viewer_session":viewer,"request_id":image_request,"artifact_id":artifact.to_string(),"offset":0,"length":1})
+        )["error_code"],
+        "artifact_unavailable"
+    );
+    let ask = sidecar.tool(
+        "inventory_rename",
+        json!({"viewer_session":viewer,"id":uuid::Uuid::new_v4().to_string(),"name":"Synthetic rename"}),
+    );
+    let id = ask["request_id"].as_str().unwrap().to_owned();
+    runtime.prepared(&id, &[], false).unwrap();
+    assert_eq!(
+        sidecar.tool("assistant_operation_status", json!({"viewer_session":viewer,"request_id":id}))["status"],
+        "pending_approval"
+    );
+    assert!(runtime.ready().is_empty());
+    assert_eq!(
+        sidecar.tool("confirm_action", json!({"viewer_session":viewer}))["error_code"],
+        "native_approval_required"
+    );
+    assert!(runtime.execute(&id, |_| panic!("remote polling never approves")).is_err());
+    runtime.resolve(&id, true).unwrap();
+    let capture = runtime.ready().pop().unwrap();
+    runtime.execute(&id, |_| json!({"status":"submitted"})).unwrap();
+    assert_eq!(
+        sidecar.tool("assistant_operation_status", json!({"viewer_session":viewer,"request_id":id}))["status"],
+        "submitted"
+    );
+    configuration.permissions.set(Class::Edit, Level::Never).unwrap();
+    runtime.configure(configuration).unwrap();
+    assert!(!runtime.capture_current(&capture));
+    assert!(runtime.complete(&capture, json!({"private":"must never escape"})).is_err());
+    assert_eq!(
+        sidecar.tool("assistant_operation_status", json!({"viewer_session":viewer,"request_id":id}))["error_code"],
+        "source_changed"
+    );
+    // Endpoint cross-use cannot select another authority domain.
+    assert_eq!(
+        HostHandler::request(&*runtime, 9, HostRequest::SessionsList)["error_code"],
+        "wrong_authority_domain"
+    );
+    let mut direct = discovery.connect(viewer).unwrap();
+    assert_eq!(
+        direct.call(HostRequest::SessionsList).unwrap()["error_code"],
+        "wrong_authority_domain"
+    );
+    drop(direct);
+    let replacement = fixture.projection(1, 2).binding.unwrap();
+    runtime.observe(Some(replacement), true);
+    assert_eq!(
+        sidecar.tool("viewer_status", json!({"viewer_session":viewer}))["error_code"],
+        "viewer_unavailable"
+    );
+    runtime.enable(replacement, viewer).unwrap();
+    let pending = sidecar.tool(
+        "inventory_get",
+        json!({"viewer_session":viewer,"id":uuid::Uuid::new_v4().to_string()}),
+    );
+    let pending_id = pending["request_id"].as_str().unwrap();
+    assert!(runtime.has_operation(pending_id));
+    assert!(sidecar.close().success());
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while runtime.has_operation(pending_id) {
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(
+        runtime.request(
+            1,
+            ViewerRequest::Status {
+                viewer_session: fixture.host
+            }
+        )["error_code"],
+        "viewer_unavailable"
+    );
+    sidecar.assert_redacted(&fixture);
+    let output = String::from_utf8_lossy(&sidecar.transcript);
+    for sentinel in ["must never escape", "access_token", "session_id", "/home/", "chat sentinel"] {
+        assert!(!output.contains(sentinel));
+    }
+    drop(service);
+    assert!(discovery.list().unwrap().is_empty());
+}
+
+#[test]
+fn synthetic_five_character_connections_and_retired_endpoint_replacement() {
+    use aurora_mcp::assistant::{runtime::Runtime, tools::Tool};
+    let fixture = Fixture::new();
+    let discovery = Discovery::character_fixture(&fixture.data.join("auroraviewer/session-host/assistant"), fixture.installation).unwrap();
+    let mut sources = Vec::new();
+    for profile in 1..=5 {
+        let runtime = Arc::new(Runtime::default());
+        let binding = fixture.projection(profile, 1).binding.unwrap();
+        runtime.observe(Some(binding), true);
+        runtime.capabilities([Tool::InventoryGet]);
+        let service = Server::start(discovery.clone(), true, runtime.clone()).unwrap();
+        runtime.enable(binding, service.instance()).unwrap();
+        sources.push((runtime, service));
+    }
+    let mut sidecar = Sidecar::start(&fixture);
+    sidecar.initialize("2025-11-25", "2025-11-25");
+    for (_, service) in &sources {
+        assert_eq!(
+            sidecar.tool("viewer_status", json!({"viewer_session":service.instance()}))["status"],
+            "ok"
+        );
+    }
+    let (_, old) = sources.remove(0);
+    drop(old);
+    let replacement = Arc::new(Runtime::default());
+    let binding = fixture.projection(1, 2).binding.unwrap();
+    replacement.observe(Some(binding), true);
+    let service = Server::start(discovery.clone(), true, replacement.clone()).unwrap();
+    replacement.enable(binding, service.instance()).unwrap();
+    assert_eq!(
+        sidecar.tool("viewer_status", json!({"viewer_session":service.instance()}))["status"],
+        "ok"
+    );
+    assert_eq!(sidecar.tool("viewer_list", json!({}))["viewers"].as_array().unwrap().len(), 5);
+    assert!(sidecar.close().success());
+    sidecar.assert_redacted(&fixture);
 }

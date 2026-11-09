@@ -145,6 +145,13 @@ impl Frame {
     }
 }
 
+/// Read the effective shaped skeleton without opening or taking ownership of
+/// the native authoring tools (FSPoserAnimator::captureAssistantPose).
+pub(crate) fn observed_rotations(world: &World, target: Uuid) -> Option<Vec<Quat>> {
+    let frame = Frame::subject(world, target)?;
+    authoring::local_pose(&world.avatar_lib.rig, &frame).map(|(pose, _)| pose.rotations)
+}
+
 /// Prim scale deliberately does not enter: LSL's position offset is metric.
 #[cfg(test)]
 pub fn offsets(joint: Mat4, contact: Vec3, target_p: Vec3, target_q: Quat) -> Option<(Vec3, Quat)> {

@@ -1558,6 +1558,7 @@ pub(crate) struct Backend {
     /// Set only after queue.present issued a surface presentation, never from
     /// a queued frame's statistics or an external capture/XR target.
     session_presented: Option<(u64, u64)>,
+    trim_proof: Option<crate::session_fence::SessionCompletion>,
     session_fences: crate::session_fence::GpuFences,
     viewport_capture: Option<crate::viewport_capture_gpu::GpuCapture>,
     external: bool,
@@ -3320,6 +3321,7 @@ impl Backend {
             frame_index: 0,
             session_surface_epoch: 1,
             session_presented: None,
+            trim_proof: None,
             session_fences: crate::session_fence::GpuFences::default(),
             viewport_capture: viewport_capture.map(crate::viewport_capture_gpu::GpuCapture::new),
             anim_clock,
@@ -5751,6 +5753,7 @@ impl Backend {
     }
 
     pub fn render(&mut self, mut packet: FramePacket) -> FrameResult {
+        self.trim_proof = None;
         self.maintain_viewport_capture();
         let capture_unavailable = self.external;
         #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
@@ -9092,7 +9095,29 @@ impl Backend {
         if self.lost.get() {
             return Reply::Failed(ticket, SessionFenceError::RendererFailed);
         }
-        self.session_fences.poll(ticket)
+        let reply = self.session_fences.poll(ticket);
+        if let Reply::Complete(proof) = reply {
+            self.trim_proof = Some(proof);
+        }
+        reply
+    }
+
+    /// Economy releases only lazily recreated presentation buffers, after the
+    /// actual GPU queue has completed and before another frame can use them.
+    /// Geometry, textures, records, pipelines and saved quality remain intact.
+    pub fn trim_disposable(&mut self, proof: crate::session_fence::SessionCompletion) -> bool {
+        if self.trim_proof != Some(proof) || proof.surface_epoch != self.session_surface_epoch {
+            return false;
+        }
+        self.trim_proof = None;
+        self.ui_blur = None;
+        if let Some(glass) = self.ui_glass.take() {
+            glass.free(&mut self.egui);
+        }
+        self.selection = None;
+        self.hud_selection = None;
+        self.dof = None;
+        true
     }
 
     /// Run the callbacks of the GPU work already finished, without waiting:

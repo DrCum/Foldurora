@@ -2,7 +2,7 @@
 
 use aurora_llsd::Llsd;
 use aurora_net::inventory::{FolderContents, InvFolder, InvItem, parse_skeleton};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use uuid::Uuid;
 #[cfg(test)]
 #[path = "inventory/tests.rs"]
@@ -58,6 +58,9 @@ pub struct Inventory {
     pub held: Option<Vec<Uuid>>,
     /// Bumped whenever folders or items change (cached views rebuild).
     pub generation: u64,
+    // A bounded journal of native model changes. Unknown/oversized generations
+    // deliberately produce a resync gap rather than an incomplete change list.
+    pub(crate) change_journal: VecDeque<(u64, Option<Vec<Uuid>>)>,
     /// Link originals the server answered do not exist, or still unreadable
     /// after `ITEM_FETCH_ATTEMPTS`: broken links, which outfits skip instead
     /// of waiting for them (LLViewerInventoryItem::getIsBrokenLink).
@@ -90,6 +93,49 @@ fn first_id(v: &Llsd, key: &str) -> Uuid {
 }
 
 impl Inventory {
+    fn bump_generation(&mut self) {
+        self.generation = self.generation.saturating_add(1);
+        while self.change_journal.len() >= 128 {
+            self.change_journal.pop_front();
+        }
+        self.change_journal.push_back((self.generation, None));
+    }
+    fn note_changes(&mut self, ids: impl IntoIterator<Item = Uuid>) {
+        let ids: Vec<_> = ids.into_iter().take(129).collect();
+        if let Some((generation, rows)) = self.change_journal.back_mut()
+            && *generation == self.generation
+            && ids.len() <= 128
+        {
+            *rows = Some(ids);
+        }
+    }
+    /// IDs changed after a native generation. The bool marks an unavoidable
+    /// resync gap; callers must not present a partial journal as complete.
+    pub fn changes_since(&self, since: u64) -> (Vec<(u64, Uuid)>, bool) {
+        if since == self.generation {
+            return (Vec::new(), false);
+        }
+        if since > self.generation {
+            return (Vec::new(), true);
+        }
+        let mut expected = since.saturating_add(1);
+        let mut result = Vec::new();
+        for (generation, rows) in self.change_journal.iter().filter(|(generation, _)| *generation > since) {
+            if *generation != expected {
+                return (Vec::new(), true);
+            }
+            let Some(rows) = rows else { return (Vec::new(), true) };
+            if result.len().saturating_add(rows.len()) > 128 {
+                return (Vec::new(), true);
+            }
+            result.extend(rows.iter().map(|id| (*generation, *id)));
+            expected = expected.saturating_add(1);
+        }
+        if expected != self.generation.saturating_add(1) {
+            return (Vec::new(), true);
+        }
+        (result, false)
+    }
     pub fn can_preview(&self, asset_type: i32) -> bool {
         self.rlva_preview_mask
             & match asset_type {
@@ -124,7 +170,8 @@ impl Inventory {
             if let Some(folder) = self.folders.get_mut(&item.parent) {
                 folder.items.retain(|other| *other != id);
             }
-            self.generation += 1;
+            self.bump_generation();
+            self.note_changes([id]);
         }
     }
     pub fn from_login(raw: &Llsd) -> Inventory {
@@ -237,7 +284,23 @@ impl Inventory {
     }
 
     pub fn apply(&mut self, contents: Vec<FolderContents>) {
-        self.generation += 1;
+        self.bump_generation();
+        let journal = contents
+            .iter()
+            .flat_map(|c| {
+                std::iter::once(c.folder_id)
+                    .chain(c.folders.iter().map(|f| f.id))
+                    .chain(c.items.iter().map(|i| i.id))
+                    .chain(
+                        self.folders
+                            .get(&c.folder_id)
+                            .into_iter()
+                            .flat_map(|f| f.children.iter().chain(&f.items).copied()),
+                    )
+            })
+            .take(129)
+            .collect::<Vec<_>>();
+        self.note_changes(journal);
         let mut refreshed: HashMap<Uuid, HashSet<Uuid>> = HashMap::new();
         for mut c in contents {
             // Inventory versions advance as copies arrive (Firestorm's
@@ -350,7 +413,8 @@ impl Inventory {
     }
 
     fn add_items_inner(&mut self, items: Vec<InvItem>) {
-        self.generation += 1;
+        self.bump_generation();
+        self.note_changes(items.iter().map(|i| i.id));
         for mut it in items {
             self.preserve_favorite(&mut it);
             calling_card_target(&mut it);
@@ -383,6 +447,12 @@ impl Inventory {
     /// apply server changes immediately, and advance each loaded parent's
     /// version once per update. Repeated records do not advance it again.
     pub fn server_updated(&mut self, folders: Vec<InvFolder>, mut items: Vec<InvItem>) {
+        let journal = folders
+            .iter()
+            .map(|f| f.id)
+            .chain(items.iter().map(|i| i.id))
+            .take(129)
+            .collect::<Vec<_>>();
         items.retain(|item| !item.id.is_nil());
         for item in &mut items {
             self.preserve_favorite(item);
@@ -445,7 +515,8 @@ impl Inventory {
         for id in resort {
             self.sort_children(id);
         }
-        self.generation += 1;
+        self.bump_generation();
+        self.note_changes(journal);
     }
 
     /// Partial/UDP records lack favorite metadata. Preserve what AIS already
@@ -473,7 +544,8 @@ impl Inventory {
                     let version = folder.version.saturating_add(known_descendants.min(i32::MAX as usize) as i32);
                     existing.info.version = existing.info.version.max(version);
                     existing.state = FetchState::Fetched;
-                    self.generation += 1;
+                    self.bump_generation();
+                    self.note_changes([folder.id]);
                 }
                 continue;
             }
@@ -492,7 +564,8 @@ impl Inventory {
 
     /// The server answered that these items do not exist.
     pub fn items_missing(&mut self, ids: Vec<Uuid>) {
-        self.generation += 1;
+        self.bump_generation();
+        self.note_changes(ids.iter().copied());
         for id in ids {
             self.item_failures.remove(&id);
             self.item_retries.remove(&id);
@@ -502,7 +575,8 @@ impl Inventory {
 
     /// These item reads failed: asked again, up to `ITEM_FETCH_ATTEMPTS`.
     pub fn items_failed(&mut self, ids: &[Uuid]) {
-        self.generation += 1;
+        self.bump_generation();
+        self.note_changes(ids.iter().copied());
         for id in ids {
             let attempts = self.item_failures.entry(*id).or_insert(0);
             *attempts += 1;
@@ -522,7 +596,8 @@ impl Inventory {
     }
 
     pub fn failed(&mut self, folders: &[Uuid]) {
-        self.generation += 1;
+        self.bump_generation();
+        self.note_changes(folders.iter().copied());
         for id in folders {
             if let Some(f) = self.folders.get_mut(id) {
                 f.state = FetchState::Failed;
@@ -564,6 +639,12 @@ impl Inventory {
                 break;
             }
         }
+        let journal = removed
+            .iter()
+            .copied()
+            .chain(self.items.iter().filter_map(|(id, it)| removed.contains(&it.parent).then_some(*id)))
+            .take(129)
+            .collect::<Vec<_>>();
         self.items.retain(|id, it| !removed.contains(id) && !removed.contains(&it.parent));
         self.repaired_parents
             .retain(|id, parent| self.items.contains_key(id) && !removed.contains(parent));
@@ -575,7 +656,8 @@ impl Inventory {
             .retain(|id| self.repaired_folder_parents.contains_key(id));
         self.folders.retain(|id, _| !removed.contains(id));
         self.sort_all();
-        self.generation += 1;
+        self.bump_generation();
+        self.note_changes(journal);
     }
 
     /// Write fetched folders and their items (LLInventoryModel::saveToFile).
@@ -671,7 +753,7 @@ impl Inventory {
             }
             valid += 1;
         }
-        self.generation += 1;
+        self.bump_generation();
         valid
     }
 
@@ -1149,5 +1231,49 @@ mod tests {
         assert!(read_cache(&path).is_none());
         std::fs::remove_file(&path).expect("synthetic cache cleanup");
         assert!(read_cache_in_background(path).recv().expect("one answer").is_none());
+    }
+}
+
+#[cfg(test)]
+mod mcp_change_journal_tests {
+    use super::*;
+    #[test]
+    fn native_update_and_delete_are_observable_without_synthetic_acknowledgements() {
+        let mut inv = Inventory::default();
+        let id = Uuid::from_u128(310);
+        inv.add_items(vec![InvItem {
+            id,
+            name: "synthetic item".into(),
+            ..Default::default()
+        }]);
+        let (rows, gap) = inv.changes_since(0);
+        assert!(!gap);
+        assert_eq!(rows, vec![(1, id)]);
+        inv.remove(&[id]);
+        let (rows, gap) = inv.changes_since(1);
+        assert!(!gap);
+        assert_eq!(rows, vec![(2, id)]);
+        assert!(!inv.items.contains_key(&id));
+    }
+    #[test]
+    fn unknown_oversized_and_expired_journal_cursors_require_resync() {
+        let mut inv = Inventory::default();
+        inv.add_items(
+            (1..=129)
+                .map(|n| InvItem {
+                    id: Uuid::from_u128(n),
+                    ..Default::default()
+                })
+                .collect(),
+        );
+        assert!(inv.changes_since(0).1);
+        let start = inv.generation;
+        for _ in 0..129 {
+            inv.add_items(Vec::new());
+        }
+        assert!(inv.changes_since(start).1);
+        assert!(!inv.changes_since(inv.generation).1);
+        inv.bump_generation();
+        assert!(inv.changes_since(inv.generation - 1).1);
     }
 }

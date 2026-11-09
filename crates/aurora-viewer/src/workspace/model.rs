@@ -80,9 +80,14 @@ pub(crate) struct Layout {
     pub geometry: [Option<Geometry>; 4],
     pub viewport: Viewport,
     pub bars: Bars,
+    #[serde(default)]
+    pub context: super::context::Context,
 }
 impl Layout {
     pub(crate) fn validate(&self) -> Result<(), &'static str> {
+        if !self.context.validate() {
+            return Err("context");
+        }
         for g in self.geometry.iter().flatten() {
             if g.point >= 8
                 || g.offset.iter().any(|v| !v.is_finite() || v.abs() > 32768.0)
@@ -118,6 +123,31 @@ pub(crate) struct Record {
     pub id: Uuid,
     pub name: String,
     pub layout: Layout,
+    #[serde(default)]
+    pub kind: Kind,
+    #[serde(default)]
+    pub favorite: bool,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum Kind {
+    #[default]
+    Workspace,
+    Layout,
+}
+impl Layout {
+    pub fn components(&self) -> u16 {
+        1 | if self.geometry[0].is_some() { 2 } else { 0 }
+            | if self.geometry[1].is_some() || self.geometry[2].is_some() {
+                4
+            } else {
+                0
+            }
+            | if self.geometry[3].is_some() { 8 } else { 0 }
+            | if self.context.graphics.is_some() { 16 } else { 0 }
+            | if self.context.camera.is_some() { 32 } else { 0 }
+            | if !self.context.huds.is_empty() { 64 } else { 0 }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -165,6 +195,11 @@ impl Catalogue {
                 return Err("record");
             }
             r.layout.validate()?;
+            if r.kind == Kind::Layout
+                && (r.layout.geometry.iter().any(Option::is_some) || r.layout.context != super::context::Context::default())
+            {
+                return Err("layout_kind");
+            }
         }
         Ok(())
     }
@@ -194,6 +229,7 @@ mod tests {
     use super::*;
     fn layout() -> Layout {
         Layout {
+            context: Default::default(),
             geometry: [Some(Geometry {
                 point: 7,
                 offset: [-32768.0, 32768.0],
@@ -219,6 +255,8 @@ mod tests {
         let mut c = Catalogue::empty(Uuid::new_v4(), "f".repeat(64));
         for n in 0..LIMIT {
             c.records.push(Record {
+                kind: crate::workspace::model::Kind::Workspace,
+                favorite: false,
                 id: Uuid::new_v4(),
                 name: format!("{n:02}{}", "\\\"".repeat(31)),
                 layout: layout(),
@@ -234,6 +272,8 @@ mod tests {
     fn workspace_unknown_schema_fields_identity_duplicates_and_nonfinite_geometry_fail_closed() {
         let mut c = Catalogue::empty(Uuid::new_v4(), "a".repeat(64));
         c.records.push(Record {
+            kind: crate::workspace::model::Kind::Workspace,
+            favorite: false,
             id: Uuid::new_v4(),
             name: "Desk".into(),
             layout: layout(),
@@ -295,11 +335,15 @@ mod tests {
         let mut c = Catalogue::empty(Uuid::new_v4(), "a".repeat(64));
         let id = Uuid::new_v4();
         c.records.push(Record {
+            kind: crate::workspace::model::Kind::Workspace,
+            favorite: false,
             id,
             name: "Desk".into(),
             layout: layout(),
         });
         c.records.push(Record {
+            kind: crate::workspace::model::Kind::Workspace,
+            favorite: false,
             id: Uuid::new_v4(),
             name: "Other".into(),
             layout: layout(),

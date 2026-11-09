@@ -10,6 +10,7 @@
 pub mod chat;
 mod coordinator;
 mod identity;
+pub mod native;
 mod preview;
 pub mod preview_image;
 pub mod preview_wire;

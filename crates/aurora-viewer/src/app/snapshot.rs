@@ -60,6 +60,8 @@ const DEFAULT_TARGET_BYTES: u64 = 1_600_000_000;
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum Purpose {
     Preview,
+    /// Exact source-bound assistant capture; never opens a save/upload dialog.
+    Assistant(Uuid),
     /// To a file; Some: the one chosen in "Save as".
     Save(Option<PathBuf>),
     /// Freeze frame: kept, shown, saved by "Take the photo".
@@ -492,6 +494,11 @@ impl Default for Snapshots {
     }
 }
 
+/// A delegated character capture cannot include a composite host interface.
+pub(super) fn assistant_ui_capture<T>(interface: bool, composite_host: bool, capture: impl FnOnce() -> T) -> Result<T, ()> {
+    if interface && composite_host { Err(()) } else { Ok(capture()) }
+}
+
 impl App {
     /// At the start of a frame: the instant the world shows while a photo
     /// is drawn in several parts, the first part's from its frame to the
@@ -546,6 +553,15 @@ impl App {
 
     /// Before a frame is laid out: the photo frame it carries, if any.
     pub(super) fn photo_frame(&mut self, renderer: &mut Renderer) -> Option<PhotoFrame> {
+        if let Some(id) = self.snapshots.job.as_ref().and_then(|j| match j.purpose {
+            Purpose::Assistant(id) => Some(id),
+            _ => None,
+        }) && !super::mcp::snapshot_current(self, id)
+        {
+            self.snapshots.job = None;
+            renderer.drop_snapshot();
+            return None;
+        }
         self.photo_validate_canvas(renderer, self.egui_ctx.pixels_per_point());
         let s = &mut self.snapshots;
         s.capturing = None;
@@ -788,6 +804,7 @@ impl App {
                 let image = egui::ColorImage::from_rgba_unmultiplied([job.size.0 as usize, job.size.1 as usize], &job.pixels);
                 self.snapshots.preview = Some(self.egui_ctx.load_texture("photo_preview", image, egui::TextureOptions::LINEAR));
             }
+            Purpose::Assistant(id) => super::mcp::snapshot_pixels(self, id, job.size, job.pixels),
             Purpose::Hold => {
                 let side = renderer.size().0.max(renderer.size().1);
                 self.photo_hold_pixels(job.size, job.pixels, job.cutout, side);
@@ -1174,11 +1191,72 @@ impl App {
         }
     }
 
+    /// Bounded assistant-only shutter. It freezes its native canvas and output
+    /// settings without changing Preferences, photo UI state or destinations.
+    pub(super) fn photo_assistant_job(
+        &mut self,
+        id: Uuid,
+        size: (u32, u32),
+        interface: bool,
+        huds: bool,
+        viewport_only: bool,
+        renderer: &Renderer,
+    ) -> Result<(), ()> {
+        assistant_ui_capture(interface, self.host_session.is_some(), || {
+            if self.photo_busy() || size.0 < 64 || size.1 < 64 || size.0 > 2048 || size.1 > 2048 {
+                return Err(());
+            }
+            let native = renderer.size();
+            let source = if viewport_only {
+                self.photo_scene_for_size(native, false)
+            } else {
+                crate::world_viewport::PhotoScene::new(native, aurora_render::WorldViewport::full(native))
+            };
+            if interface && !snapshot::same_proportions(size, native) {
+                return Err(());
+            }
+            let tiles = self.photo_tiles_from(renderer, size, source);
+            if tiles.len() != 1 {
+                return Err(());
+            }
+            self.snapshots.job = Some(Job {
+                purpose: Purpose::Assistant(id),
+                size,
+                tiles,
+                next: 0,
+                asked: false,
+                waited: 0,
+                waiting: None,
+                pixels: Vec::new(),
+                interface,
+                huds,
+                started: Instant::now(),
+                supersample: 1,
+                cutout: false,
+                looks: Vec::new(),
+                focus: None,
+                photo: size,
+                hold: None,
+                context: ContextPass::plan(size, 1, self.settings.ssao > 0),
+                source,
+                ui_scale: self.egui_ctx.pixels_per_point(),
+            });
+            Ok(())
+        })
+        .and_then(|result| result)
+    }
+
     /// DPI/zoom can change inside the egui pass, after `photo_frame`. Check
     /// again before handing its meshes to the renderer. Desktop position is
     /// irrelevant; only the client canvas, scene rectangle and UI scale matter.
     pub(super) fn photo_validate_canvas(&mut self, renderer: &mut Renderer, ui_scale: f32) {
-        let source = self.photo_scene_for_size(renderer.size(), renderer.vr_engaged());
+        let source = if self.snapshots.job.as_ref().is_some_and(|j| {
+            matches!(j.purpose, Purpose::Assistant(_)) && j.source.view == aurora_render::WorldViewport::full(j.source.native)
+        }) {
+            crate::world_viewport::PhotoScene::new(renderer.size(), aurora_render::WorldViewport::full(renderer.size()))
+        } else {
+            self.photo_scene_for_size(renderer.size(), renderer.vr_engaged())
+        };
         if self
             .snapshots
             .job
@@ -3132,6 +3210,16 @@ fn env_view<'a>(
 #[cfg(test)]
 mod canvas_tests {
     use super::*;
+    #[test]
+    fn delegated_ui_capture_never_runs_in_composite_host_context() {
+        let mut captures = 0;
+        assert!(assistant_ui_capture(true, true, || captures += 1).is_err());
+        assert_eq!(captures, 0);
+        assert!(assistant_ui_capture(true, false, || captures += 1).is_ok());
+        assert_eq!(captures, 1);
+        assert!(assistant_ui_capture(false, true, || captures += 1).is_ok());
+        assert_eq!(captures, 2);
+    }
     use crate::world_viewport::PhotoScene;
     use aurora_render::WorldViewport;
 

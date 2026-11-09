@@ -812,6 +812,7 @@ pub struct Scene {
     pub pause_all_skeletons: bool,
     pub ik_edit: ik::EditRequest,
     pub poser: HashMap<Uuid, Arc<crate::ik_edit::poser::SubjectPose>>,
+    pub(crate) assistant_rotations: HashMap<Uuid, Arc<std::collections::BTreeMap<usize, Quat>>>,
     /// Follow receipt clocks instead of the Legacy Viewer's activation / pause clock.
     pub synchronize_animations: bool,
     pub ground_avatar_feet: bool,
@@ -1474,6 +1475,7 @@ impl Scene {
             pause_all_skeletons: false,
             ik_edit: ik::EditRequest::default(),
             poser: HashMap::new(),
+            assistant_rotations: HashMap::new(),
             synchronize_animations: false,
             ground_avatar_feet: false,
             ground_feet_while_moving: false,
@@ -5220,6 +5222,7 @@ impl Scene {
                 world.avatar_models.insert(owner, model);
             }
             motions.poser = self.poser.get(&owner).zip(model).map(|(pose, model)| (pose.clone(), model));
+            motions.assistant_rotations = self.assistant_rotations.get(&owner).cloned();
             motions.sitting = !control && world.objects.get(idx).is_some_and(|o| o.parent_id != 0);
             let preview = if owner == world.agent_id && !self.ik_edit.active {
                 world.animation_preview_clock
@@ -5512,6 +5515,9 @@ impl Scene {
 
     /// Last rendered shape/pose, including mesh joint overrides, for framing.
     pub fn joint_world(&self, world: &World, id: &Uuid, name: &str, now: Instant) -> Option<Vec3> {
+        Self::joint_position(world, id, name, now)
+    }
+    pub(crate) fn joint_position(world: &World, id: &Uuid, name: &str, now: Instant) -> Option<Vec3> {
         let index = world.objects.index_of_uuid(id)?;
         let (position, rotation, _) = Self::object_transform(world, index, now, 0)?;
         let rig = &world.avatar_lib.rig;

@@ -13578,3 +13578,136 @@ host-contacts-search = 検索
 host-contacts-results = 「{ $query }」の検索結果
 host-contacts-searching = 検索中…
 host-contacts-search-failed = 検索できませんでした。しばらくしてから再試行してください。フレンド一覧は引き続き利用できます。
+
+# Independently authorized host MCP
+host-mcp-title = ホスト MCP
+host-mcp-help = ホストへのアクセスとキャラクターのアシスタントは別々です。接続はこのコンピューター内に限定されます。
+host-mcp-enabled = ホスト MCP を有効にする
+host-mcp-unavailable = ホスト MCP を利用できません。アクセスは制限されたままです。
+host-mcp-metadata = メタデータ
+host-mcp-activate = ワールドの切り替え
+host-mcp-background = バックグラウンドモード
+host-mcp-monitors = モニター
+host-mcp-open-login = 手動ログインを開く
+host-mcp-restart = ビューアーの再起動
+host-mcp-logout = ログアウト
+host-mcp-detach = ビューアーの切り離し
+host-mcp-never = 禁止
+host-mcp-ask = 確認
+host-mcp-allow = 許可
+host-mcp-profile-help = 現在の各プロフィールを個別に許可してください。再ログインには新しい許可が必要です。
+host-mcp-profile-enabled = 現在のプロフィールを許可する
+host-mcp-pending = 承認待ちのリクエスト
+host-mcp-approval-help = このリクエストを一度だけ許可しますか？ 接続元や権限が変わると取り消されます。
+host-mcp-deny = 拒否
+host-mcp-approve = 一度だけ許可
+
+host-mcp-monitor-open = モニターを開く
+host-mcp-monitor-close = モニターを閉じる
+host-mcp-monitors-open-all = 許可された全モニターを開く
+host-mcp-monitors-arrange = モニターを整列
+host-mcp-cycle-configure = 巡回モニターの設定
+host-mcp-cycle-pause = 巡回モニターを一時停止
+host-mcp-cycle-next = 巡回モニターを次へ
+host-mcp-monitor-number = モニター { $number }
+host-mcp-cycle-interval = 間隔: { $seconds } 秒
+host-mcp-cycle-playing = 再生
+host-mcp-cycle-paused = 一時停止
+host-mcp-warm = ウォーム
+host-mcp-economy = 省電力
+
+### Character Local Assistant (separate from host MCP)
+assistant-title = ローカルアシスタント（MCP）
+assistant-help = コントローラーの権限とは別に、このキャラクターにツールを接続します。有効化は現在のログイン終了時までです。
+assistant-open = ローカルアシスタントを開く
+assistant-enable = 現在のログインで有効にする
+assistant-pause = 接続を一時停止
+assistant-unavailable = ローカル接続を利用できません。
+assistant-no-session = このキャラクターの接続を有効にするには、手動でログインしてください。
+assistant-readonly = 読み取り専用
+assistant-ask-changes = 変更前に確認
+assistant-private-read-help = プリセットでは非公開データへのアクセスは無効です。各読み取り権限を個別に許可してください。
+assistant-requests = 承認待ちのリクエスト
+assistant-native-evidence = ネイティブの対象と正確な効果
+assistant-copy-command = MCP 接続コマンドをコピー
+assistant-deny = 拒否
+assistant-allow-once = 今回のみ許可
+assistant-never = 許可しない
+assistant-ask = 確認する
+assistant-allow = 許可する
+assistant-perm-read = インベントリとアウトフィットの読み取り
+assistant-perm-camera = カメラ移動と写真撮影
+assistant-perm-create = フォルダーとアイテムの作成
+assistant-perm-edit = 名前と詳細の編集
+assistant-perm-move = 移動とコピー
+assistant-perm-trash = ゴミ箱への移動（復元可能）
+assistant-perm-nocopy = コピー中のコピー不可アイテムの移動
+assistant-perm-wear = 装着と取り外し
+assistant-perm-workspace = ワークスペースとレイアウトの切り替え
+assistant-perm-links = リンクの置き換え
+assistant-perm-chat_read = チャットの読み取り
+assistant-perm-chat_state = 下書きと既読状態の管理
+assistant-perm-chat_send_im = 個人IMの送信
+assistant-perm-chat_send_group = グループチャットの送信
+assistant-perm-chat_send_conference = 会議チャットの送信
+assistant-perm-chat_send_nearby = 近隣チャットでの発言
+assistant-perm-friends_read = フレンドとオンライン状態の読み取り
+assistant-perm-resident_search = 住人の検索
+assistant-perm-profile_read = 住人プロフィールの読み取り
+assistant-perm-notifications_read = 通知の読み取り
+assistant-perm-notification_review = ネイティブ通知の確認
+assistant-perm-world_read = 周辺のワールドとメディアの読み取り
+assistant-perm-gesture_read = ジェスチャーと再生状態の読み取り
+assistant-perm-gesture_play = ジェスチャーの再生と停止
+assistant-perm-pose_read = ポーズと関節状態の読み取り
+assistant-perm-pose_edit = 自分のポーズの編集
+assistant-perm-pose_save = ポーズの保存
+assistant-perm-pose_share = 承認された共有ポーズの使用
+assistant-perm-content_edit = ノートカードとスクリプト内容の編集
+assistant-perm-preferences_read = 許可対象の設定の読み取り
+assistant-perm-preferences_write = 許可対象の設定の変更
+assistant-perm-build_edit = 所有オブジェクトの編集
+assistant-perm-build_rez = ワールドへのオブジェクト作成
+assistant-perm-inventory_permissions = 次の所有者の権限の変更
+assistant-perm-navigation_move = アバターの移動と飛行の変更
+assistant-perm-navigation_teleport = アバターのテレポート
+assistant-perm-upload = ローカルファイルのアップロード
+assistant-perm-task_inventory_read = 所有オブジェクトの中身の読み取り
+assistant-perm-script_debug_read = スクリプトエラーと出力の読み取り
+assistant-perm-task_inventory_write = 所有オブジェクトの中身の変更
+assistant-perm-task_inventory_remove = オブジェクト内アイテムの完全削除
+assistant-perm-script_run = オブジェクト内スクリプトの開始・停止・リセット
+assistant-perm-object_take = 所有オブジェクトの取得
+assistant-perm-object_interact = オブジェクトへのタッチとダイアログ回答
+assistant-perm-script_test = 範囲を限定したテストの実行
+
+host-mcp-client-config = クライアントのインストール識別子
+host-mcp-copy-args = クライアント引数をコピー
+
+# ローカル写真用の同意とは別の、所有者が管理する共有ポーズ。
+shared-pose-title = ポーズの共有
+shared-pose-enable = 装着中のブリッジでポーズ共有を有効にする
+shared-pose-consent-body = 共有すると、現在のポーザーの関節が近くの共有参加者に公開されます。編集者を承認すると、このセッションの予約済み関節を変更できます。許可はいつでも取り消せます。アシスタントの承認でこの許可を与えることはできません。
+shared-pose-request = { $name } が共有ポーズの編集許可を求めています
+shared-pose-publish = 現在のポーズを共有
+shared-pose-stop = 共有を停止して編集許可を取り消す
+shared-pose-request-edit = 編集許可を求める
+shared-pose-bridge-needed = 共有を有効にし、準備済みブリッジを装着してください。公開前に通常のポーザーを開始してください。
+
+ui-options-tap-hold-run = 移動キーを2回押して長押しすると走る
+ui-options-tap-hold-run-help = 移動キーを2回押し、2回目を離すまで長押しすると走ります。
+ui-options-selection-beam = 選択ビームを表示
+ui-options-selection-beam-help = オブジェクト選択のネイティブエフェクトが送信する粒子ビームを表示します。
+
+workspaces-save-layout = 表示領域とバーを保存
+workspaces-favorite = お気に入りに追加
+workspaces-unfavorite = お気に入りから削除
+
+workspaces-remember-graphics = グラフィック設定を記憶
+workspaces-remember-camera = カメラ設定を記憶
+workspaces-remember-huds = 装着中のHUDを記憶
+
+workspaces-huds-pending = 保存したHUDの装着確認を待っています。
+workspaces-huds-unconfirmed = 一部のHUDは装着を確認できませんでした。再度切り替える前に装着品を確認してください。
+
+host-mcp-pending-manage = 承認待ちのリクエストがあります。キャラクター管理を開いてホスト MCP のリクエストを確認してください。
