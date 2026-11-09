@@ -348,17 +348,24 @@ fn delete_shortcut_retains_confirmation_worn_and_selected_item_guards() {
                 selection: selection.iter().copied().collect(),
                 ..Default::default()
             };
-            frames.run(
-                vec![egui::Event::Key {
-                    key,
-                    physical_key: None,
-                    pressed: true,
-                    repeat,
-                    modifiers,
-                }],
-                |ui| delete::shortcut(ui, &inv, &mut st, &prefs, &facts),
+            let press = |repeat| egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat,
+                modifiers,
+            };
+            if repeat {
+                // egui derives repeats from keys_down, not the supplied flag:
+                // first hold the key outside the list, then deliver its repeat.
+                frames.run(vec![press(false)], |_| {});
+            }
+            frames.run(vec![press(repeat)], |ui| delete::shortcut(ui, &inv, &mut st, &prefs, &facts));
+            assert_eq!(
+                st.dialog.is_some(),
+                allowed && fresh,
+                "selection={selection:?}, modifiers={modifiers:?}, repeat={repeat}"
             );
-            assert_eq!(st.dialog.is_some(), allowed && fresh);
             if let Some(EditDialog::Delete(ids, purge)) = &st.dialog {
                 assert_eq!(ids, &selection);
                 assert!(!purge, "this is a move-to-trash confirmation");
