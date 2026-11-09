@@ -12,7 +12,7 @@ use crate::workspace::{
 use uuid::Uuid;
 
 impl App {
-    fn workspace_source(&self) -> Option<Source> {
+    pub(super) fn workspace_source(&self) -> Option<Source> {
         if matches!(self.screen, Screen::Login) || self.world.agent_id.is_nil() {
             return None;
         }
@@ -53,7 +53,7 @@ impl App {
             hosted,
         })
     }
-    fn workspace_permit(&self, renderer: &Renderer, window: &Window) -> bool {
+    pub(super) fn workspace_permit(&self, renderer: &Renderer, window: &Window) -> bool {
         let size = window.inner_size();
         let canvas = self.egui_ctx.viewport_rect().size() * self.egui_ctx.pixels_per_point();
         if !matches!(self.screen, Screen::World)
@@ -164,7 +164,15 @@ impl App {
         } else {
             None
         };
+        let additional_inventory = if groups.additional_inventory {
+            self.workspace_inventory_capture(groups.additional_folders)
+                .or_else(|_| self.workspace_inventory_capture(false))
+                .ok()
+        } else {
+            None
+        };
         Some(Layout {
+            additional_inventory,
             inventory_expanded,
             huds,
             inventory_folder,
@@ -193,8 +201,13 @@ impl App {
                 camera: c.capture_camera,
                 background: c.capture_background,
                 huds: c.capture_huds,
+                additional_inventory: c.capture_additional_inventory,
+                additional_folders: c.capture_additional_inventory && c.remember_folders,
             });
         let mut layout = self.workspace_capture(groups).ok_or(Status::CameraUnavailable)?;
+        if groups.additional_inventory {
+            layout.additional_inventory = Some(self.workspace_inventory_capture(groups.additional_folders)?);
+        }
         if groups.inventory {
             layout.inventory_expanded = self.workspace_capture_expanded()?;
         }
@@ -256,6 +269,9 @@ impl App {
             self.workspaces.advance();
         }
         self.workspaces.permit = permit;
+        if !permit {
+            self.workspaces.inventory_pending = None;
+        }
         let camera_revoked =
             self.workspaces.preview.as_ref().is_some_and(|p| p.baseline.camera.is_some()) && !self.workspace_camera_allowed();
         if (self.panels.settings || !permit || camera_revoked) && self.workspaces.preview.is_some() {
@@ -391,6 +407,7 @@ impl App {
             return;
         }
         if matches!(action.command, Command::Cancel) {
+            self.workspaces.inventory_pending = None;
             self.workspace_huds.retire();
             if self.workspaces.preview.is_some() {
                 self.workspace_cancel_preview(true);
@@ -413,6 +430,7 @@ impl App {
             self.workspace_huds.retire();
         }
         self.workspace_huds_prepare(renderer, window);
+        self.workspaces.inventory_pending = None;
         self.workspaces.cancel_startup();
         let commit = matches!(&action.command, Command::Switch(_));
         let rename = match &action.command {
@@ -652,6 +670,17 @@ impl App {
                 }
                 self.workspace_save_definitions(next);
             }
+            Command::CaptureAdditionalInventory(capture) => {
+                if self.workspaces.preview.is_some() {
+                    return;
+                }
+                let mut next = self.workspaces.catalogue.clone().expect("ready workspace catalogue");
+                next.capture_additional_inventory = capture;
+                if !capture && let Some(last) = &mut next.last_layout {
+                    last.additional_inventory = None;
+                }
+                self.workspace_save_definitions(next);
+            }
             Command::CaptureHuds(capture) => {
                 if self.workspaces.preview.is_some() {
                     return;
@@ -742,11 +771,15 @@ impl App {
             p.room = Some(room);
             self.workspaces.placement = Some(p);
         } else if p.commit {
+            let extra = p.layout.additional_inventory.clone();
             let huds = p.layout.huds.clone();
             let background = p.layout.background;
             let folder_restored = self.workspace_restore_folder(p.layout.inventory_folder);
             let expanded_restored = self.workspace_restore_expanded(p.layout.inventory_expanded.as_ref());
             self.workspaces.finish_placement(p);
+            if let Some(extra) = extra {
+                self.workspace_inventory_restore(extra, renderer, window);
+            }
             if let Some(huds) = huds {
                 self.workspace_huds_offer(&huds, renderer, window);
             }
@@ -784,6 +817,7 @@ impl App {
             }
         }
         self.workspace_huds_tick(renderer, window);
+        self.workspace_inventory_tick(renderer, window);
     }
     pub(super) fn workspace_modified(&mut self) -> bool {
         let now = std::time::Instant::now();
@@ -819,7 +853,7 @@ impl App {
         modified
     }
 
-    fn workspace_expanded_source(&self) -> bool {
+    pub(super) fn workspace_expanded_source(&self) -> bool {
         self.workspaces.source.as_ref().is_some_and(|source| {
             Some(source) == self.workspace_source().as_ref()
                 && self

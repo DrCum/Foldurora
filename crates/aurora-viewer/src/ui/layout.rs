@@ -112,16 +112,22 @@ struct WorkspacePreview {
 pub(crate) fn workspace_capture(ctx: &egui::Context) -> WorkspaceGeometry {
     let room = move_area(ctx);
     windows(ctx, |w| w.refresh_anchors(room));
-    std::array::from_fn(|i| {
-        let role = crate::workspace::model::Role::ALL[i];
-        let id = Id::unique(role.id());
-        let placed = windows(ctx, |w| w.placed.get(&id.value()).copied())?;
-        let size = super::widgets::workspace_expanded_size(ctx, role.id()).unwrap_or(placed.rect.size());
-        let anchor = placed
-            .anchor
-            .unwrap_or_else(|| Anchor::nearest(placed.room.unwrap_or(placed.screen), placed.rect));
-        Some(anchor.workspace(size))
-    })
+    std::array::from_fn(|i| workspace_named_capture_at(ctx, crate::workspace::model::Role::ALL[i].id()))
+}
+/// Native fixed-role callers only; serialized workspace data never chooses IDs.
+pub(crate) fn workspace_named_capture(ctx: &egui::Context, name: &str) -> Option<crate::workspace::model::Geometry> {
+    let room = move_area(ctx);
+    windows(ctx, |w| w.refresh_anchors(room));
+    workspace_named_capture_at(ctx, name)
+}
+fn workspace_named_capture_at(ctx: &egui::Context, name: &str) -> Option<crate::workspace::model::Geometry> {
+    let id = Id::unique(name);
+    let placed = windows(ctx, |w| w.placed.get(&id.value()).copied())?;
+    let size = super::widgets::workspace_expanded_size(ctx, name).unwrap_or(placed.rect.size());
+    let anchor = placed
+        .anchor
+        .unwrap_or_else(|| Anchor::nearest(placed.room.unwrap_or(placed.screen), placed.rect));
+    Some(anchor.workspace(size))
 }
 
 /// Geometry only: no visibility, minimization, keyboard focus or editor data.
@@ -191,38 +197,54 @@ pub(crate) fn workspace_cancel_gesture(ctx: &egui::Context) {
 }
 fn workspace_apply_at(ctx: &egui::Context, geometry: &WorkspaceGeometry, room: Rect, screen: Rect, constrain: bool) {
     for (i, g) in geometry.iter().enumerate() {
-        let Some(g) = g else { continue };
-        let Some(anchor) = Anchor::from_workspace(*g) else { continue };
-        let role = crate::workspace::model::Role::ALL[i];
-        let id = Id::unique(role.id());
-        let size = Vec2::from(g.size);
-        let requested = Rect::from_min_size(anchor.position(room, size), size);
-        let rect = if constrain {
-            let size = size.min(room.size()).max(Vec2::splat(1.0));
-            Rect::from_min_size(keep_title_in(room, requested.min, size, window_edges(ctx)), size)
-        } else {
-            requested
-        };
-        windows(ctx, |w| {
-            w.placed.insert(
-                id.value(),
-                Placed {
-                    rect,
-                    screen,
-                    room: Some(room),
-                    anchor: Some(anchor),
-                },
-            );
-            w.live.followed = None;
-            w.live.moved = None;
-            w.live.resized = None;
-            w.live.places.insert(id.value(), rect.min);
-            w.live.settle.remove(&id.value());
-            w.live.reanchor.remove(&id.value());
-            w.live.reanchor_after_show.remove(&id.value());
-        });
-        super::widgets::workspace_place(ctx, role.id(), rect.min, size);
+        if let Some(g) = g {
+            workspace_named_apply_at(ctx, crate::workspace::model::Role::ALL[i].id(), *g, room, screen, constrain);
+        }
     }
+}
+pub(crate) fn workspace_named_apply(ctx: &egui::Context, name: &str, g: crate::workspace::model::Geometry) {
+    if !g.valid() {
+        return;
+    }
+    workspace_named_apply_at(ctx, name, g, move_area(ctx), ctx.content_rect(), true);
+}
+fn workspace_named_apply_at(
+    ctx: &egui::Context,
+    name: &str,
+    g: crate::workspace::model::Geometry,
+    room: Rect,
+    screen: Rect,
+    constrain: bool,
+) {
+    let Some(anchor) = Anchor::from_workspace(g) else { return };
+    let id = Id::unique(name);
+    let size = Vec2::from(g.size);
+    let requested = Rect::from_min_size(anchor.position(room, size), size);
+    let rect = if constrain {
+        let size = size.min(room.size()).max(Vec2::splat(1.0));
+        Rect::from_min_size(keep_title_in(room, requested.min, size, window_edges(ctx)), size)
+    } else {
+        requested
+    };
+    windows(ctx, |w| {
+        w.placed.insert(
+            id.value(),
+            Placed {
+                rect,
+                screen,
+                room: Some(room),
+                anchor: Some(anchor),
+            },
+        );
+        w.live.followed = None;
+        w.live.moved = None;
+        w.live.resized = None;
+        w.live.places.insert(id.value(), rect.min);
+        w.live.settle.remove(&id.value());
+        w.live.reanchor.remove(&id.value());
+        w.live.reanchor_after_show.remove(&id.value());
+    });
+    super::widgets::workspace_place(ctx, name, rect.min, size);
 }
 
 /// A generation barrier supersedes snapshots already queued before a preview.

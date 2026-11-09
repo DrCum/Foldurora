@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 /// A folder and every ancestor must already be fetched. A freshly expanded
 /// unknown branch would otherwise make PlainTree's normal lazy loader fetch it.
-fn fetched_path(inv: &Inventory, id: Uuid, mask: MaskRead<'_>) -> bool {
+pub(crate) fn fetched_path(inv: &Inventory, id: Uuid, mask: MaskRead<'_>) -> bool {
     if !folder_jump::current_folder(inv, id, Some(mask)) {
         return false;
     }
@@ -44,9 +44,8 @@ pub(crate) fn restorable(inv: &Inventory, wanted: &ExpandedFolders, mask: MaskRe
     mask.for_inventory(inv) && mask.revision().is_some() && wanted.refs().iter().all(|id| fetched_path(inv, *id, mask))
 }
 impl InventoryUi {
-    fn workspace_plain(&self) -> bool {
-        self.is_main()
-            && self.scope.is_nil()
+    fn workspace_plain_owner(&self) -> bool {
+        self.scope.is_nil()
             && self.tab == 0
             && !self.result_view()
             && !self.aurora.is_some_and(|frame| frame.explorer)
@@ -54,6 +53,9 @@ impl InventoryUi {
             && self.dialog.is_none()
             && self.progress.is_none()
             && self.expand_all.is_none()
+    }
+    fn workspace_plain(&self) -> bool {
+        self.is_main() && self.workspace_plain_owner()
     }
     /// None means another view, not a valid empty expansion snapshot.
     pub(crate) fn workspace_expanded_refs(&self) -> Option<Vec<Uuid>> {
@@ -65,6 +67,10 @@ impl InventoryUi {
         if !self.workspace_plain() {
             return false;
         }
+        self.workspace_apply_expanded(wanted, current);
+        true
+    }
+    fn workspace_apply_expanded(&mut self, wanted: &ExpandedFolders, current: &ExpandedFolders) {
         for id in current.refs() {
             self.plain.set_open(*id, wanted.refs().contains(id));
         }
@@ -72,7 +78,116 @@ impl InventoryUi {
         // Stop a preceding reveal from reopening folders excluded explicitly by
         // this snapshot. Selection/edit/search data and keyboard focus stay put.
         self.reveal_path.retain(|id| wanted.refs().contains(id));
+    }
+}
+
+/// Fixed native identity; never deserialize an arbitrary window/owner selector.
+pub(crate) fn additional_owner() -> Uuid {
+    super::ADDITIONAL_WINDOW
+}
+pub(crate) fn additional_name() -> String {
+    super::floater_id(super::ADDITIONAL_WINDOW)
+}
+impl InventoryUi {
+    fn workspace_additional_unambiguous(&self) -> bool {
+        let mut windows = self.windows.iter().filter(|w| w.additional);
+        match (windows.next(), windows.next()) {
+            (None, None) => true,
+            (Some(w), None) => {
+                w.id == additional_owner() && w.root.is_nil() && (w.state.ui_id.is_nil() || w.state.ui_id == additional_owner())
+            }
+            _ => false,
+        }
+    }
+    pub(crate) fn workspace_additional_state(&self) -> Option<&InventoryUi> {
+        if !self.workspace_additional_unambiguous() {
+            return None;
+        }
+        self.windows
+            .iter()
+            .find(|w| w.additional && w.id == additional_owner())
+            .map(|w| w.state.as_ref())
+    }
+    pub(crate) fn workspace_additional_state_mut(&mut self) -> Option<&mut InventoryUi> {
+        if !self.workspace_additional_unambiguous() {
+            return None;
+        }
+        self.windows
+            .iter_mut()
+            .find(|w| w.additional && w.id == additional_owner())
+            .map(|w| w.state.as_mut())
+    }
+    pub(crate) fn workspace_additional_open(&self) -> Option<bool> {
+        self.workspace_additional_unambiguous().then(|| self.additional_open())
+    }
+    fn workspace_dependencies(&self) -> bool {
+        self.rename.is_some()
+            || self.preview.is_some()
+            || self.dialog.is_some()
+            || self.move_to.is_some()
+            || self.thumbnail.item.is_some()
+            || self.bulk_permissions.active()
+            || self.share_picker.open
+            || self.property_edit.is_some()
+            || self.attachment_preview.is_some()
+            || self.save_pending
+            || self.content_save.is_some()
+            || self.progress.is_some()
+            || self.pending.is_some()
+            || self.filters_open
+            || self.preferences_open
+            || self.default_permissions_open
+            || self.folder_color.is_some()
+            || !self.windows.is_empty()
+    }
+    /// Caller independently checks actual source/native/RLVa permission. This
+    /// wrapper preserves dependent state instead of silently destroying it.
+    pub(crate) fn workspace_additional_visibility(&mut self, ctx: &egui::Context, visible: bool, minimized: bool) -> bool {
+        if !self.workspace_additional_unambiguous() || self.workspace_additional_state().is_some_and(Self::workspace_dependencies) {
+            return false;
+        }
+        let name = additional_name();
+        if visible {
+            if !self.additional_open() {
+                self.open_additional_window(ctx);
+            }
+            if minimized {
+                // Native open may have queued Expand. A saved minimized state
+                // must win on the next paint without expand/minimize churn.
+                ctx.data_mut(|d| d.remove_temp::<bool>(egui::Id::unique(&name).with(crate::ui::widgets::EXPAND)));
+                crate::ui::widgets::minimize_floater(ctx, &name);
+            } else if crate::ui::widgets::floater_minimized(ctx, &name) {
+                crate::ui::widgets::expand_floater(ctx, &name);
+            }
+        } else {
+            self.close_additional_window();
+        }
         true
+    }
+    pub(crate) fn workspace_additional_expanded_refs(&self) -> Option<Vec<Uuid>> {
+        let state = self.workspace_additional_state()?;
+        (state.ui_id == additional_owner() && state.workspace_plain_owner()).then(|| state.plain.workspace_open())
+    }
+    pub(crate) fn workspace_restore_additional_expanded(&mut self, wanted: &ExpandedFolders, current: &ExpandedFolders) -> bool {
+        let Some(state) = self.workspace_additional_state_mut() else {
+            return false;
+        };
+        if state.ui_id != additional_owner() || !state.workspace_plain_owner() {
+            return false;
+        }
+        state.workspace_apply_expanded(wanted, current);
+        true
+    }
+}
+
+impl InventoryUi {
+    pub(crate) fn workspace_additional_idle(&self) -> bool {
+        self.workspace_additional_state()
+            .is_some_and(|state| !state.workspace_dependencies())
+    }
+    pub(crate) fn workspace_additional_untouched(&self) -> bool {
+        self.workspace_additional_state()
+            .is_some_and(|state| !state.workspace_dependencies() && state.selected.is_none() && state.search.is_empty() && state.tab == 0)
     }
 }
 
@@ -186,5 +301,79 @@ mod tests {
             !restorable(&world.inventory, &visible, read.mask()),
             "no expansion may initiate an ancestor fetch"
         );
+    }
+    #[test]
+    fn workspace_additional_window_uses_one_native_role_and_never_drops_dependents_or_partial_windows() {
+        let ctx = egui::Context::default();
+        let mut st = InventoryUi::default();
+        st.open_folder_window(id(2));
+        assert!(st.workspace_additional_visibility(&ctx, true, false));
+        assert_eq!(st.windows.len(), 2);
+        assert_eq!(st.workspace_additional_open(), Some(true));
+        st.workspace_additional_state_mut().unwrap().preview = Some(id(50));
+        assert!(!st.workspace_additional_visibility(&ctx, false, false));
+        assert!(st.workspace_additional_open().unwrap());
+        st.workspace_additional_state_mut().unwrap().preview = None;
+        assert!(st.workspace_additional_visibility(&ctx, false, false));
+        assert!(st.windows.iter().find(|w| !w.additional).unwrap().open);
+        st.windows.iter_mut().find(|w| w.additional).unwrap().id = id(900);
+        assert!(st.workspace_additional_open().is_none());
+        assert!(!st.workspace_additional_visibility(&ctx, true, false));
+        assert_eq!(st.windows.len(), 2, "never create another owner as an ambiguity fallback");
+    }
+    #[test]
+    fn workspace_additional_expansion_requires_its_original_painted_owner_and_keeps_main_state() {
+        let ctx = egui::Context::default();
+        let mut st = InventoryUi::default();
+        st.plain.open_all([id(1), id(99)]);
+        assert!(st.workspace_additional_visibility(&ctx, true, false));
+        assert!(
+            st.workspace_additional_expanded_refs().is_none(),
+            "no unpainted owner fallback to main"
+        );
+        let state = st.workspace_additional_state_mut().unwrap();
+        state.ui_id = additional_owner();
+        state.plain.open_all([id(1), id(2)]);
+        let wanted = ExpandedFolders::try_from(vec![id(1), id(3)]).unwrap();
+        let current = ExpandedFolders::try_from(vec![id(1), id(2)]).unwrap();
+        assert!(st.workspace_restore_additional_expanded(&wanted, &current));
+        assert!(st.plain.is_open(id(99)) && !st.plain.is_open(id(3)));
+        let state = st.workspace_additional_state().unwrap();
+        assert!(state.plain.is_open(id(3)) && !state.plain.is_open(id(2)));
+    }
+    #[test]
+    fn workspace_additional_minimized_state_survives_native_next_paint_without_latent_close() {
+        let ctx = egui::Context::default();
+        let p = crate::theme::Theme::default().palette();
+        let mut st = InventoryUi::default();
+        let name = additional_name();
+        let paint = |st: &mut InventoryUi| {
+            let mut open = st.additional_open();
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 700.0))),
+                    ..Default::default()
+                },
+                |ui| {
+                    crate::ui::widgets::Floater::new(&name, "Inventory", egui::pos2(50.0, 60.0), egui::vec2(320.0, 240.0))
+                        .silent()
+                        .show(ui.ctx(), &p, &mut open, |ui| {
+                            ui.label("Owned native role");
+                        });
+                },
+            );
+            out.textures_delta.clear();
+            st.windows.iter_mut().find(|w| w.additional).unwrap().open = open;
+        };
+        assert!(st.workspace_additional_visibility(&ctx, true, true));
+        paint(&mut st);
+        paint(&mut st);
+        assert!(crate::ui::widgets::floater_minimized(&ctx, &name));
+        assert!(st.workspace_additional_visibility(&ctx, false, false));
+        assert!(st.workspace_additional_visibility(&ctx, true, false));
+        paint(&mut st);
+        paint(&mut st);
+        assert!(st.additional_open());
+        assert!(!crate::ui::widgets::floater_minimized(&ctx, &name));
     }
 }

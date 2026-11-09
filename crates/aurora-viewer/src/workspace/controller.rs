@@ -1,5 +1,5 @@
 use super::{
-    model::{Background, Catalogue, HudRef, Layout, Startup},
+    model::{Background, Catalogue, HudRef, InventoryWindow, Layout, Startup},
     store::Lane,
 };
 use uuid::Uuid;
@@ -39,6 +39,7 @@ pub(crate) enum Command {
     CaptureBackground(bool),
     Background(Background),
     CaptureHuds(bool),
+    CaptureAdditionalInventory(bool),
     SelectHud(HudRef, bool),
     ClearHuds,
     ReviewHuds(Uuid),
@@ -61,6 +62,7 @@ pub(crate) enum Status {
     Previewing,
     FolderUnavailable,
     ExpandedUnavailable,
+    InventoryWindowUnavailable,
     CameraUnavailable,
     HudUnavailable,
 }
@@ -78,6 +80,33 @@ pub(crate) struct Placement {
     pub room: Option<egui::Rect>,
     pub previous: Option<(Layout, Option<Uuid>)>,
     pub restore_absence: bool,
+}
+pub(crate) struct InventoryPending {
+    pub source: Source,
+    pub binding: u64,
+    pub rules: (u64, bool),
+    pub metadata: crate::world::inventory_archive::Revision,
+    pub wanted: InventoryWindow,
+    pub passes: u8,
+    pub fresh: bool,
+    pub deadline: std::time::Instant,
+}
+impl InventoryPending {
+    pub(crate) fn current(
+        &self,
+        source: Option<&Source>,
+        binding: u64,
+        rules: (u64, bool),
+        metadata: Option<crate::world::inventory_archive::Revision>,
+        now: std::time::Instant,
+    ) -> bool {
+        source == Some(&self.source)
+            && binding == self.binding
+            && rules == self.rules
+            && metadata == Some(self.metadata)
+            && now < self.deadline
+            && self.passes < 3
+    }
 }
 pub(crate) struct Pending {
     pub source: Source,
@@ -109,6 +138,7 @@ pub(crate) struct Controller {
     pub startup_source: Option<Source>,
     pub last_observed: Option<(Layout, std::time::Instant)>,
     pub last_sample: Option<std::time::Instant>,
+    pub inventory_pending: Option<InventoryPending>,
     pub modified_sample: Option<(u64, std::time::Instant, bool)>,
 }
 impl Default for Controller {
@@ -134,6 +164,7 @@ impl Default for Controller {
             startup_source: None,
             last_observed: None,
             last_sample: None,
+            inventory_pending: None,
             modified_sample: None,
         }
     }
@@ -159,6 +190,7 @@ impl Controller {
         self.source = source;
         self.last_observed = None;
         self.last_sample = None;
+        self.inventory_pending = None;
         self.modified_sample = None;
         self.catalogue = None;
         self.persisted = false;
@@ -225,6 +257,25 @@ impl Controller {
             .map_or_else(|| current.baseline_for(&layout), |p| p.baseline.clone());
         if baseline.inventory_folder.is_none() && layout.inventory_folder.is_some() {
             baseline.inventory_folder = current.inventory_folder;
+        }
+        if layout.additional_inventory.is_some() {
+            if let Some(old) = &mut baseline.additional_inventory {
+                if let Some(current) = current.additional_inventory {
+                    if old.geometry.is_none() {
+                        old.geometry = current.geometry;
+                    }
+                    if old.visible && !old.minimized {
+                        if old.folder.is_none() {
+                            old.folder = current.folder;
+                        }
+                        if old.expanded.is_none() {
+                            old.expanded = current.expanded;
+                        }
+                    }
+                }
+            } else {
+                baseline.additional_inventory = current.additional_inventory;
+            }
         }
         if baseline.inventory_expanded.is_none() && layout.inventory_expanded.is_some() {
             baseline.inventory_expanded = current.inventory_expanded;
@@ -561,6 +612,7 @@ mod tests {
         Layout {
             inventory_folder: None,
             inventory_expanded: None,
+            additional_inventory: None,
             graphics: None,
             camera: None,
             background: None,
@@ -858,5 +910,79 @@ mod tests {
         assert!(c.last_sample.is_none());
         assert!(c.modified_sample.is_none());
         assert!(c.sample_last(now + Duration::from_millis(252), false));
+    }
+    #[test]
+    fn workspace_additional_preview_scope_never_invents_hidden_folder_navigation() {
+        let mut c = Controller::default();
+        let mut original = layout(1.0);
+        original.additional_inventory = Some(InventoryWindow {
+            visible: false,
+            minimized: false,
+            geometry: None,
+            folder: None,
+            expanded: None,
+        });
+        let mut target = layout(2.0);
+        target.additional_inventory = Some(InventoryWindow {
+            visible: true,
+            minimized: false,
+            geometry: None,
+            folder: None,
+            expanded: None,
+        });
+        let id = Uuid::new_v4();
+        c.begin_preview(target.clone(), id, original, false);
+        let mut current = target.clone();
+        current.additional_inventory.as_mut().unwrap().folder = Some(Uuid::new_v4());
+        target.additional_inventory = current.additional_inventory.clone();
+        let baseline = c.begin_preview(target, id, current, true);
+        assert!(baseline.validate().is_ok());
+        let window = baseline.additional_inventory.unwrap();
+        assert!(!window.visible && window.folder.is_none());
+        let placement = c.placement.take().unwrap();
+        c.finish_placement(placement);
+        assert!(c.previous.as_ref().unwrap().0.validate().is_ok());
+    }
+    #[test]
+    fn workspace_additional_pending_requires_exact_native_scope_and_never_extends_its_deadline() {
+        use std::time::{Duration, Instant};
+        let world = crate::world::inventory_archive::tests::native_fixture_world();
+        let archive = crate::world::inventory_archive::controller::testing::native_loaded(&world, &[]);
+        let metadata = archive.metadata_revision(&world).unwrap();
+        let source = Source {
+            agent: world.agent_id,
+            login: world.login.as_ref().unwrap().session_id,
+            grid: archive.native_grid(&world).unwrap().namespace(),
+            hosted: None,
+        };
+        let now = Instant::now();
+        let mut pending = InventoryPending {
+            source: source.clone(),
+            binding: 1,
+            rules: (5, true),
+            metadata,
+            wanted: InventoryWindow {
+                visible: true,
+                minimized: false,
+                geometry: None,
+                folder: None,
+                expanded: None,
+            },
+            passes: 0,
+            fresh: true,
+            deadline: now + Duration::from_secs(2),
+        };
+        assert!(pending.current(Some(&source), 1, (5, true), Some(metadata), now));
+        assert!(!pending.current(None, 1, (5, true), Some(metadata), now));
+        let mut other = source.clone();
+        other.login = Uuid::new_v4();
+        assert!(!pending.current(Some(&other), 1, (5, true), Some(metadata), now));
+        assert!(!pending.current(Some(&source), 2, (5, true), Some(metadata), now));
+        assert!(!pending.current(Some(&source), 1, (6, true), Some(metadata), now));
+        assert!(!pending.current(Some(&source), 1, (5, false), Some(metadata), now));
+        assert!(!pending.current(Some(&source), 1, (5, true), None, now));
+        assert!(!pending.current(Some(&source), 1, (5, true), Some(metadata), now + Duration::from_secs(2)));
+        pending.passes = 3;
+        assert!(!pending.current(Some(&source), 1, (5, true), Some(metadata), now));
     }
 }

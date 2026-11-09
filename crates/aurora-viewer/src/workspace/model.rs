@@ -5,6 +5,8 @@ mod background;
 pub(crate) use background::Background;
 mod camera;
 pub(crate) use camera::CameraContext;
+mod inventory_window;
+pub(crate) use inventory_window::InventoryWindow;
 mod folders;
 pub(crate) use folders::{ExpandedFolders, MAX_EXPANDED};
 mod huds;
@@ -19,6 +21,8 @@ pub(crate) struct CaptureGroups {
     pub camera: bool,
     pub background: bool,
     pub huds: bool,
+    pub additional_inventory: bool,
+    pub additional_folders: bool,
 }
 
 pub(crate) const LIMIT: usize = 32;
@@ -50,6 +54,13 @@ pub(crate) struct Geometry {
     pub point: u8,
     pub offset: [f32; 2],
     pub size: [f32; 2],
+}
+impl Geometry {
+    pub(crate) fn valid(self) -> bool {
+        self.point < 8
+            && self.offset.iter().all(|v| v.is_finite() && v.abs() <= 32768.0)
+            && self.size.iter().all(|v| v.is_finite() && (32.0..=16384.0).contains(v))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -105,6 +116,8 @@ pub(crate) struct Layout {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inventory_expanded: Option<ExpandedFolders>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub additional_inventory: Option<InventoryWindow>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub graphics: Option<Graphics>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub camera: Option<CameraContext>,
@@ -124,13 +137,11 @@ impl Layout {
         if self.inventory_folder.is_some_and(|id| id.is_nil()) {
             return Err("inventory folder");
         }
-        for g in self.geometry.iter().flatten() {
-            if g.point >= 8
-                || g.offset.iter().any(|v| !v.is_finite() || v.abs() > 32768.0)
-                || g.size.iter().any(|v| !v.is_finite() || !(32.0..=16384.0).contains(v))
-            {
-                return Err("geometry");
-            }
+        if let Some(window) = &self.additional_inventory {
+            window.validate()?;
+        }
+        if self.geometry.iter().flatten().any(|g| !g.valid()) {
+            return Err("geometry");
         }
         let v = &self.viewport;
         if [v.left, v.right, v.top, v.bottom]
@@ -159,6 +170,11 @@ impl Layout {
     }
     pub(crate) fn baseline_for(&self, target: &Self) -> Self {
         let mut baseline = self.clone();
+        baseline.additional_inventory = self
+            .additional_inventory
+            .as_ref()
+            .zip(target.additional_inventory.as_ref())
+            .map(|(live, wanted)| live.baseline_for(wanted));
         if target.inventory_folder.is_none() {
             baseline.inventory_folder = None;
         }
@@ -183,6 +199,11 @@ impl Layout {
         self.geometry == current.geometry
             && self.viewport == current.viewport
             && self.bars == current.bars
+            && self
+                .additional_inventory
+                .as_ref()
+                .zip(current.additional_inventory.as_ref())
+                .is_none_or(|(a, b)| a.matches(b))
             && self
                 .inventory_folder
                 .zip(current.inventory_folder)
@@ -211,6 +232,8 @@ impl Layout {
             camera: self.camera.is_some(),
             background: self.background.is_some(),
             huds: self.huds.is_some(),
+            additional_inventory: self.additional_inventory.is_some(),
+            additional_folders: self.additional_inventory.as_ref().is_some_and(InventoryWindow::has_folders),
         }
     }
 }
@@ -249,6 +272,8 @@ pub(crate) struct Catalogue {
     pub capture_background: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub capture_huds: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub capture_additional_inventory: bool,
     #[serde(default, skip_serializing_if = "HudSet::is_empty")]
     pub selected_huds: HudSet,
     #[serde(default, skip_serializing_if = "Background::is_black")]
@@ -297,6 +322,7 @@ impl Catalogue {
             capture_camera: false,
             capture_background: false,
             capture_huds: false,
+            capture_additional_inventory: false,
             selected_huds: HudSet::default(),
             background: Background::Black {},
         }
@@ -383,6 +409,7 @@ mod tests {
         Layout {
             inventory_folder: None,
             inventory_expanded: None,
+            additional_inventory: None,
             graphics: None,
             camera: None,
             background: None,
