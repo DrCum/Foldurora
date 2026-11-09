@@ -1,6 +1,15 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+mod graphics;
+pub(crate) use graphics::Graphics;
+
+#[derive(Clone, Copy, Default)]
+pub(crate) struct CaptureGroups {
+    pub inventory: bool,
+    pub graphics: bool,
+}
+
 pub(crate) const LIMIT: usize = 32;
 pub(crate) const MAX_FILE: usize = 256 * 1024;
 
@@ -82,9 +91,14 @@ pub(crate) struct Layout {
     pub bars: Bars,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inventory_folder: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub graphics: Option<Graphics>,
 }
 impl Layout {
     pub(crate) fn validate(&self) -> Result<(), &'static str> {
+        if let Some(graphics) = &self.graphics {
+            graphics.validate()?;
+        }
         if self.inventory_folder.is_some_and(|id| id.is_nil()) {
             return Err("inventory folder");
         }
@@ -114,11 +128,17 @@ impl Layout {
         settings.classic_bars = self.bars.classic;
         settings.place_bar_stretch = self.bars.stretch;
         settings.place_bar_rights_text = self.bars.rights_text;
+        if let Some(graphics) = &self.graphics {
+            graphics.apply(settings);
+        }
     }
     pub(crate) fn baseline_for(&self, target: &Self) -> Self {
         let mut baseline = self.clone();
         if target.inventory_folder.is_none() {
             baseline.inventory_folder = None;
+        }
+        if target.graphics.is_none() {
+            baseline.graphics = None;
         }
         baseline
     }
@@ -130,6 +150,13 @@ impl Layout {
                 .inventory_folder
                 .zip(current.inventory_folder)
                 .is_none_or(|(saved, live)| saved == live)
+            && self.graphics.as_ref().is_none_or(|saved| current.graphics.as_ref() == Some(saved))
+    }
+    pub(crate) fn groups(&self) -> CaptureGroups {
+        CaptureGroups {
+            inventory: self.inventory_folder.is_some(),
+            graphics: self.graphics.is_some(),
+        }
     }
 }
 
@@ -159,6 +186,8 @@ pub(crate) struct Catalogue {
     pub show_favorites: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub remember_folders: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub capture_graphics: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -199,6 +228,7 @@ impl Catalogue {
             last_layout: None,
             show_favorites: false,
             remember_folders: false,
+            capture_graphics: false,
         }
     }
     pub(crate) fn validate(&self) -> Result<(), &'static str> {
@@ -274,6 +304,7 @@ mod tests {
     fn layout() -> Layout {
         Layout {
             inventory_folder: None,
+            graphics: None,
             geometry: [Some(Geometry {
                 point: 7,
                 offset: [-32768.0, 32768.0],
@@ -488,5 +519,27 @@ mod tests {
         assert_eq!(loaded.records[0].layout.inventory_folder, Some(folder));
         assert!(loaded.remember_folders);
         assert!(Catalogue::decode(&b, Uuid::new_v4(), &c.grid).is_err());
+    }
+    #[test]
+    fn workspace_graphics_preview_save_projection_and_cancel_preserve_unrelated_preferences() {
+        let mut settings = crate::settings::Settings::default();
+        crate::graphics_presets::Preset::Potato.apply(&mut settings);
+        let quality = crate::graphics_presets::saved::Saved::capture(&settings);
+        let mut baseline = layout();
+        baseline.graphics = Some(Graphics::capture(&settings));
+        let mut high = settings.clone();
+        crate::graphics_presets::Preset::High.apply(&mut high);
+        let mut candidate = baseline.clone();
+        candidate.graphics = Some(Graphics::capture(&high));
+        settings.workspace_held = Some(baseline.clone());
+        candidate.settings(&mut settings, false);
+        settings.fps_limit = 73;
+        let saved = settings.to_saved();
+        assert_eq!(crate::graphics_presets::saved::Saved::capture(&saved), quality);
+        assert_eq!(saved.fps_limit, 73);
+        assert_ne!(crate::graphics_presets::saved::Saved::capture(&settings), quality);
+        baseline.settings(&mut settings, false);
+        assert_eq!(crate::graphics_presets::saved::Saved::capture(&settings), quality);
+        assert_eq!(settings.fps_limit, 73);
     }
 }

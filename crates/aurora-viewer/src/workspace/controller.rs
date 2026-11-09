@@ -33,6 +33,7 @@ pub(crate) enum Command {
     Startup(Startup),
     ShowFavorites(bool),
     RememberFolders(bool),
+    CaptureGraphics(bool),
 }
 #[derive(Clone, Debug)]
 pub(crate) struct Action {
@@ -157,6 +158,9 @@ impl Controller {
             .map_or_else(|| current.baseline_for(&layout), |p| p.baseline.clone());
         if baseline.inventory_folder.is_none() && layout.inventory_folder.is_some() {
             baseline.inventory_folder = current.inventory_folder;
+        }
+        if baseline.graphics.is_none() && layout.graphics.is_some() {
+            baseline.graphics = current.graphics;
         }
         let previous = commit.then(|| {
             (
@@ -475,6 +479,7 @@ mod tests {
         let s = crate::settings::Settings::default();
         Layout {
             inventory_folder: None,
+            graphics: None,
             geometry: [Some(super::super::model::Geometry {
                 point: 0,
                 offset: [left, 0.0],
@@ -600,5 +605,20 @@ mod tests {
         let placement = c.placement.take().unwrap();
         c.finish_placement(placement);
         assert_eq!(c.previous.as_ref().unwrap().0.inventory_folder, live.inventory_folder);
+    }
+    #[test]
+    fn workspace_graphics_preview_union_keeps_rollback_but_previous_uses_final_switch_scope() {
+        let mut c = Controller::default();
+        let mut live = layout(0.0);
+        live.graphics = Some(super::super::model::Graphics::capture(&crate::settings::Settings::default()));
+        let mut target = layout(10.0);
+        target.graphics = live.graphics.clone();
+        let baseline = c.begin_preview(target, Uuid::new_v4(), live.clone(), false);
+        assert_eq!(baseline.graphics, live.graphics);
+        c.begin_preview(layout(20.0), Uuid::new_v4(), live.clone(), true);
+        assert_eq!(c.preview.as_ref().unwrap().baseline.graphics, live.graphics);
+        let p = c.placement.take().unwrap();
+        c.finish_placement(p);
+        assert!(c.previous.as_ref().unwrap().0.graphics.is_none());
     }
 }

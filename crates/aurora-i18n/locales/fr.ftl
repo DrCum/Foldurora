@@ -13626,3 +13626,4 @@ workspaces-startup-named = Enregistré : { $name }
 
 workspaces-remember-folders = Mémoriser le dossier principal de l’inventaire (restauré à l’application)
 workspaces-folder-unavailable = Le dossier n’a pas été restauré. Ouvrez l’inventaire et réessayez.
+workspaces-capture-graphics = Mémoriser les réglages graphiques actuels

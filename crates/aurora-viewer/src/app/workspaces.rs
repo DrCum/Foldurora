@@ -3,7 +3,7 @@
 use super::{App, Renderer, Screen, Window, ui};
 use crate::workspace::{
     controller::{Action, Command, Pending, Source, Status},
-    model::{Bars, Catalogue, LIMIT, Layout, Record, Startup, Viewport, valid_name},
+    model::{Bars, CaptureGroups, Catalogue, Graphics, LIMIT, Layout, Record, Startup, Viewport, valid_name},
     store::{Lane, Request},
 };
 use uuid::Uuid;
@@ -84,13 +84,15 @@ impl App {
             None => true,
         }
     }
-    fn workspace_capture(&mut self, include_folder: bool) -> Layout {
-        let folder = include_folder
+    fn workspace_capture(&mut self, groups: CaptureGroups) -> Layout {
+        let folder = groups
+            .inventory
             .then(|| self.inventory_ui.workspace_folder(&self.world.inventory))
             .flatten();
         let inventory_folder = folder.filter(|id| self.workspace_folder_allowed(*id));
         Layout {
             inventory_folder,
+            graphics: groups.graphics.then(|| Graphics::capture(&self.settings)),
             geometry: ui::layout::workspace_capture(&self.egui_ctx),
             viewport: Viewport::from(&self.settings.world_viewport),
             bars: Bars {
@@ -101,8 +103,15 @@ impl App {
         }
     }
     fn workspace_capture_for_save(&mut self) -> Layout {
-        let include = self.workspaces.catalogue.as_ref().is_some_and(|c| c.remember_folders);
-        self.workspace_capture(include)
+        let groups = self
+            .workspaces
+            .catalogue
+            .as_ref()
+            .map_or(CaptureGroups::default(), |c| CaptureGroups {
+                inventory: c.remember_folders,
+                graphics: c.capture_graphics,
+            });
+        self.workspace_capture(groups)
     }
     pub(super) fn workspace_cancel_preview(&mut self, restore_geometry: bool) {
         let Some(p) = self.workspaces.preview.take() else { return };
@@ -310,9 +319,14 @@ impl App {
                 if layout.validate().is_err() {
                     return;
                 }
-                let current = self.workspace_capture(layout.inventory_folder.is_some());
-                if self.workspaces.preview.is_some() {
+                let current = self.workspace_capture(layout.groups());
+                if current.validate().is_err() {
+                    self.workspaces.status = Status::Invalid;
+                    return;
+                }
+                if let Some(preview) = &self.workspaces.preview {
                     ui::layout::workspace_restore(&self.egui_ctx);
+                    preview.baseline.settings(&mut self.settings, self.host_session.is_some());
                 }
                 let baseline = self.workspaces.begin_preview(layout, id, current, commit);
                 self.settings.workspace_held = Some(baseline.clone());
@@ -327,12 +341,16 @@ impl App {
                 self.egui_ctx.input_mut(|i| i.pointer = Default::default());
             }
             Command::Previous => {
-                let include = self
+                let groups = self
                     .workspaces
                     .previous
                     .as_ref()
-                    .is_some_and(|(layout, _)| layout.inventory_folder.is_some());
-                let current = self.workspace_capture(include);
+                    .map_or(CaptureGroups::default(), |(layout, _)| layout.groups());
+                let current = self.workspace_capture(groups);
+                if current.validate().is_err() {
+                    self.workspaces.status = Status::Invalid;
+                    return;
+                }
                 let Some(baseline) = self.workspaces.begin_previous(current) else {
                     return;
                 };
@@ -455,6 +473,17 @@ impl App {
                 }
                 self.workspace_save_definitions(next);
             }
+            Command::CaptureGraphics(capture) => {
+                if self.workspaces.preview.is_some() {
+                    return;
+                }
+                let mut next = self.workspaces.catalogue.clone().expect("ready workspace catalogue");
+                next.capture_graphics = capture;
+                if !capture && let Some(last) = &mut next.last_layout {
+                    last.graphics = None;
+                }
+                self.workspace_save_definitions(next);
+            }
             Command::Cancel | Command::Retry => {}
         }
         self.egui_ctx.request_repaint();
@@ -520,10 +549,17 @@ impl App {
             .active
             .and_then(|id| self.workspaces.record(id))
             .map(|r| r.layout.clone());
-        let Some(saved) = saved else {
+        let Some(mut saved) = saved else {
             return false;
         };
-        !saved.matches(&self.workspace_capture(saved.inventory_folder.is_some()))
+        let graphics_match = saved
+            .graphics
+            .as_ref()
+            .is_none_or(|graphics| graphics.matches_settings(&self.settings));
+        // Ordinary frames compare the typed allowlist; no JSON decode/default
+        // Settings construction belongs in the recurring modified indicator.
+        saved.graphics = None;
+        !graphics_match || !saved.matches(&self.workspace_capture(saved.groups()))
     }
 
     fn workspace_restore_folder(&mut self, folder: Option<Uuid>) -> bool {
@@ -596,7 +632,11 @@ impl App {
         if layout.validate().is_err() {
             return;
         }
-        let current = self.workspace_capture(layout.inventory_folder.is_some());
+        let current = self.workspace_capture(layout.groups());
+        if current.validate().is_err() {
+            self.workspaces.status = Status::Invalid;
+            return;
+        }
         let baseline = self.workspaces.begin_preview(layout, id.unwrap_or(Uuid::nil()), current, true);
         if id.is_none() {
             self.workspaces.placement.as_mut().expect("startup placement").active = None;
