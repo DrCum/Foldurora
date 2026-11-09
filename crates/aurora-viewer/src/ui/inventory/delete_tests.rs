@@ -304,3 +304,75 @@ fn measure() {
         );
     }
 }
+
+#[test]
+fn the_backspace_key_deletes_on_a_mac_only() {
+    use super::delete::deletes;
+    assert!(deletes(egui::Key::Delete, false));
+    assert!(deletes(egui::Key::Delete, true));
+    assert!(!deletes(egui::Key::Backspace, false));
+    assert!(deletes(egui::Key::Backspace, true), "the Mac key labelled Delete");
+    assert!(!deletes(egui::Key::A, true));
+}
+
+#[test]
+fn delete_shortcut_retains_confirmation_worn_and_selected_item_guards() {
+    use crate::ui::widgets::elide_tests::Frames;
+    let mut inv = received();
+    inv.items.get_mut(&id(31)).unwrap().owner_mask = 0;
+    let parent = inv.items[&id(31)].parent;
+    let prefs = InventoryPreferences::default();
+    let facts = Facts {
+        worn: HashSet::from([id(30)]),
+        ..Default::default()
+    };
+    let key = if cfg!(target_os = "macos") {
+        egui::Key::Backspace
+    } else {
+        egui::Key::Delete
+    };
+    for (selection, allowed) in [
+        (vec![id(31)], true),
+        (vec![id(20), id(31)], false),
+        (vec![id(30)], false),
+        (vec![id(ROOT)], false),
+        (vec![id(999)], false),
+    ] {
+        for (modifiers, repeat, fresh) in [
+            (egui::Modifiers::NONE, false, true),
+            (egui::Modifiers::CTRL, false, false),
+            (egui::Modifiers::NONE, true, false),
+        ] {
+            let mut frames = Frames::new();
+            let mut st = InventoryUi {
+                selection: selection.iter().copied().collect(),
+                ..Default::default()
+            };
+            let press = |repeat| egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat,
+                modifiers,
+            };
+            if repeat {
+                // egui derives repeats from keys_down, not the supplied flag:
+                // first hold the key outside the list, then deliver its repeat.
+                frames.run(vec![press(false)], |_| {});
+            }
+            frames.run(vec![press(repeat)], |ui| delete::shortcut(ui, &inv, &mut st, &prefs, &facts));
+            assert_eq!(
+                st.dialog.is_some(),
+                allowed && fresh,
+                "selection={selection:?}, modifiers={modifiers:?}, repeat={repeat}"
+            );
+            if let Some(EditDialog::Delete(ids, purge)) = &st.dialog {
+                assert_eq!(ids, &selection);
+                assert!(!purge, "this is a move-to-trash confirmation");
+            }
+            assert_eq!(st.selection, selection.iter().copied().collect::<HashSet<_>>());
+            assert!(st.pending.is_none(), "a key press never performs deletion before confirmation");
+            assert_eq!(inv.items[&id(31)].parent, parent);
+        }
+    }
+}

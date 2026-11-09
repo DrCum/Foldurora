@@ -3,6 +3,352 @@ use crate::keybinds::{Action, Input};
 use crate::ui::widgets::elide_tests::Frames;
 use winit::keyboard::KeyCode;
 
+/// The real Preferences window, including its footer, modal and Undo bar.
+fn reset_frame(
+    frames: &mut Frames,
+    s: &mut Settings,
+    st: &mut OptionsUi,
+    open: &mut bool,
+    events: Vec<egui::Event>,
+) -> (Vec<crate::ui::widgets::elide_tests::Text>, OptionsResult) {
+    let theme = crate::theme::Theme::default();
+    theme.apply(&frames.ctx, 1.0);
+    let p = theme.palette();
+    let mut result = OptionsResult::default();
+    let texts = frames.run(events, |ui| result = show(ui.ctx(), &p, &Icons::default(), s, st, open));
+    (texts, result)
+}
+
+fn reset_button(texts: &[crate::ui::widgets::elide_tests::Text], label: &str) -> egui::Pos2 {
+    crate::ui::widgets::elide_tests::painted(texts, label).rect.center()
+}
+
+fn reset_undo(frames: &mut Frames, s: &mut Settings, st: &mut OptionsUi, open: &mut bool, texts: &[crate::ui::widgets::elide_tests::Text]) {
+    // Undo is a right-aligned Label. In egui 0.37 TextShape::pos is its
+    // right-hand galley anchor; Frames' generic Text.rect assumes a left
+    // anchor. Aim inside the actual glyphs, rather than beyond the label.
+    let text = crate::ui::widgets::elide_tests::painted(texts, aurora_i18n::tr!("money-tracker-undo"));
+    let at = text.rect.left_center() - egui::vec2(text.rect.width() * 0.5, 0.0);
+    assert!(
+        frames.ctx.viewport(|v| v
+            .this_pass
+            .widgets
+            .layers()
+            .flat_map(|(_, ws)| ws)
+            .any(|w| w.enabled && w.sense.senses_click() && w.interact_rect.contains(at) && w.rect.width() <= text.rect.width() + 1.0)),
+        "the pointer targets the interactive Undo label"
+    );
+    let mut trace = Vec::new();
+    for events in click(at) {
+        let texts = reset_frame(frames, s, st, open, events).0;
+        let widgets = frames.ctx.viewport(|v| {
+            v.this_pass
+                .widgets
+                .layers()
+                .flat_map(|(_, ws)| ws)
+                .filter(|w| w.rect.contains(at) && w.sense.senses_click())
+                .copied()
+                .collect::<Vec<_>>()
+        });
+        trace.push(format!(
+            "at {at:?}, Undo {:?}, modal {:?}, layer {:?}, widgets {widgets:?}",
+            texts
+                .iter()
+                .find(|t| t.source == aurora_i18n::tr!("money-tracker-undo"))
+                .map(|t| t.rect),
+            frames.ctx.memory(|m| m.top_modal_layer()),
+            frames.ctx.layer_id_at(at)
+        ));
+    }
+    assert!(st.undo.is_none(), "Undo click: {}", trace.join("\n"));
+}
+
+#[test]
+fn preferences_reset_footer_only_opens_the_requested_confirmation() {
+    for ask in [ResetAsk::Page(Page::Graphics), ResetAsk::All] {
+        let mut frames = Frames::new();
+        let mut s = Settings {
+            draw_distance: 250.0,
+            ..Default::default()
+        };
+        let before = serde_json::to_value(&s).unwrap();
+        let mut st = OptionsUi::default();
+        st.open(Page::Graphics, 0);
+        let mut open = true;
+        let mut texts = Vec::new();
+        for _ in 0..4 {
+            texts = reset_frame(&mut frames, &mut s, &mut st, &mut open, vec![]).0;
+        }
+        let label = match ask {
+            ResetAsk::Page(page) => aurora_i18n::tr!("ui-options-reset-page", page = page.name()),
+            _ => aurora_i18n::tr!("ui-options-reset-everything-2").to_string(),
+        };
+        for events in click(reset_button(&texts, &label)) {
+            reset_frame(&mut frames, &mut s, &mut st, &mut open, events);
+        }
+        assert_eq!(st.confirm_reset, Some(ask));
+        assert!(st.reset_confirmed.is_none() && st.undo.is_none());
+        assert_eq!(serde_json::to_value(&s).unwrap(), before);
+    }
+}
+
+#[test]
+fn preferences_reset_cancel_escape_outside_and_window_close_leave_settings_alone() {
+    for ask in [ResetAsk::Page(Page::Graphics), ResetAsk::Modified, ResetAsk::All] {
+        for cancel in 0..4 {
+            let mut frames = Frames::new();
+            let mut s = Settings {
+                draw_distance: 250.0,
+                ..Default::default()
+            };
+            let before = serde_json::to_value(&s).unwrap();
+            let mut st = OptionsUi {
+                confirm_reset: Some(ask),
+                ..Default::default()
+            };
+            let mut open = true;
+            let mut texts = Vec::new();
+            for _ in 0..4 {
+                texts = reset_frame(&mut frames, &mut s, &mut st, &mut open, vec![]).0;
+            }
+            match cancel {
+                0 | 2 => {
+                    let at = if cancel == 0 {
+                        reset_button(&texts, aurora_i18n::tr!("common-cancel"))
+                    } else {
+                        egui::pos2(5.0, 5.0)
+                    };
+                    for events in click(at) {
+                        reset_frame(&mut frames, &mut s, &mut st, &mut open, events);
+                    }
+                }
+                1 => {
+                    reset_frame(
+                        &mut frames,
+                        &mut s,
+                        &mut st,
+                        &mut open,
+                        vec![egui::Event::Key {
+                            key: egui::Key::Escape,
+                            physical_key: None,
+                            pressed: true,
+                            repeat: false,
+                            modifiers: egui::Modifiers::NONE,
+                        }],
+                    );
+                }
+                _ => {
+                    open = false;
+                    reset_frame(&mut frames, &mut s, &mut st, &mut open, vec![]);
+                }
+            }
+            assert!(st.confirm_reset.is_none(), "{ask:?}, cancellation {cancel}");
+            assert_eq!(open, cancel != 3, "only closing the window dismisses Preferences");
+            assert!(st.reset_confirmed.is_none() && st.undo.is_none());
+            reset_frame(&mut frames, &mut s, &mut st, &mut open, vec![]);
+            assert_eq!(serde_json::to_value(&s).unwrap(), before);
+        }
+    }
+}
+
+#[test]
+fn preferences_reset_confirmation_keeps_the_requested_page_and_runs_once_with_undo() {
+    for ask in [ResetAsk::Page(Page::Graphics), ResetAsk::Modified, ResetAsk::All] {
+        let mut frames = Frames::new();
+        let mut s = Settings {
+            draw_distance: 250.0,
+            ui_scale: 1.35,
+            username: "Synthetic Resident".into(),
+            remember_username: true,
+            grid: crate::settings::GridChoice::Custom,
+            custom_login_uri: "https://grid.invalid/login".into(),
+            start_region: "Synthetic region".into(),
+            window_width: 1234,
+            ..Default::default()
+        };
+        s.graphics_saved
+            .insert("Synthetic preset".into(), crate::graphics_presets::saved::Saved::capture(&s));
+        let before = serde_json::to_value(&s).unwrap();
+        let mut st = OptionsUi {
+            confirm_reset: Some(ask),
+            ..Default::default()
+        };
+        // A different page can be opened by an external Preferences shortcut.
+        // The dialog still names, and must reset, its captured Graphics page.
+        st.open(Page::Sound, 0);
+        let mut open = true;
+        let mut texts = Vec::new();
+        for _ in 0..4 {
+            texts = reset_frame(&mut frames, &mut s, &mut st, &mut open, vec![]).0;
+        }
+        for events in click(reset_button(&texts, aurora_i18n::tr!("ui-options-reset-confirm")))
+            .into_iter()
+            .take(3)
+        {
+            reset_frame(&mut frames, &mut s, &mut st, &mut open, events);
+        }
+        assert_eq!(st.reset_confirmed, Some(ask));
+        assert!(st.confirm_reset.is_none() && st.undo.is_none());
+        assert_eq!(serde_json::to_value(&s).unwrap(), before, "confirmation queues the next body pass");
+        let (mut texts, result) = reset_frame(&mut frames, &mut s, &mut st, &mut open, vec![]);
+        assert!(result.changed);
+        assert_eq!(s.draw_distance, Settings::default().draw_distance);
+        assert_eq!(
+            s.ui_scale,
+            if matches!(ask, ResetAsk::Page(_)) {
+                1.35
+            } else {
+                Settings::default().ui_scale
+            }
+        );
+        assert_eq!(s.username, "Synthetic Resident");
+        assert!(s.remember_username);
+        assert!(matches!(s.grid, crate::settings::GridChoice::Custom));
+        assert_eq!(s.custom_login_uri, "https://grid.invalid/login");
+        assert_eq!(s.start_region, "Synthetic region");
+        assert_eq!(s.window_width, 1234);
+        assert!(s.graphics_saved.contains_key("Synthetic preset"));
+        assert!(st.reset_confirmed.is_none());
+        let shown = st.undo.as_ref().expect("reset offers Undo").shown;
+        for _ in 0..3 {
+            texts = reset_frame(&mut frames, &mut s, &mut st, &mut open, vec![]).0;
+            assert_eq!(st.undo.as_ref().unwrap().shown, shown, "the reset runs once");
+        }
+        reset_undo(&mut frames, &mut s, &mut st, &mut open, &texts);
+        assert_eq!(serde_json::to_value(&s).unwrap(), before, "Undo restores the snapshot");
+    }
+}
+
+#[test]
+fn preferences_reset_existing_demo_undo_still_responds() {
+    let mut frames = Frames::new();
+    let mut s = Settings::default();
+    let mut st = OptionsUi {
+        demo_reset: true,
+        ..Default::default()
+    };
+    st.open(Page::Sound, 0);
+    let mut open = true;
+    let mut texts = Vec::new();
+    for _ in 0..8 {
+        texts = reset_frame(&mut frames, &mut s, &mut st, &mut open, vec![]).0;
+    }
+    assert!(st.undo.is_some());
+    reset_undo(&mut frames, &mut s, &mut st, &mut open, &texts);
+}
+
+#[test]
+fn preferences_reset_modified_button_asks_before_changing_any_row() {
+    let mut frames = Frames::new();
+    let mut s = Settings {
+        draw_distance: 250.0,
+        ..Default::default()
+    };
+    let mut st = OptionsUi {
+        modified_view: true,
+        ..Default::default()
+    };
+    let mut open = true;
+    let mut texts = Vec::new();
+    for _ in 0..4 {
+        texts = reset_frame(&mut frames, &mut s, &mut st, &mut open, vec![]).0;
+    }
+    for events in click(reset_button(&texts, aurora_i18n::tr!("ui-options-modified-reset-all"))) {
+        reset_frame(&mut frames, &mut s, &mut st, &mut open, events);
+    }
+    assert_eq!(st.confirm_reset, Some(ResetAsk::Modified));
+    assert!(st.undo.is_none());
+    assert_eq!(s.draw_distance, 250.0);
+}
+
+#[test]
+fn preferences_reset_dialogs_keep_the_footer_and_actions_visible() {
+    let capture_path = std::env::var_os("AURORA_CAPTURE").map(std::path::PathBuf::from);
+    for (name, ask) in [
+        ("page", ResetAsk::Page(Page::Graphics)),
+        ("all", ResetAsk::All),
+        ("modified", ResetAsk::Modified),
+    ] {
+        let ctx = egui::Context::default();
+        let mut theme = crate::theme::Theme::default();
+        if capture_path.is_some() {
+            theme.panel_alpha = 255;
+        }
+        theme.apply(&ctx, 1.0);
+        let p = theme.palette();
+        let mut s = Settings {
+            draw_distance: 250.0,
+            ..Default::default()
+        };
+        let mut st = OptionsUi {
+            confirm_reset: Some(ask),
+            modified_view: ask == ResetAsk::Modified,
+            ..Default::default()
+        };
+        st.open(Page::Graphics, 0);
+        st.modified_view = ask == ResetAsk::Modified;
+        let mut open = true;
+        let mut painter = crate::crash::software::Painter::default();
+        let mut pixels = vec![0; 1280 * 900];
+        for frame in 0..12 {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1280.0, 900.0))),
+                    time: Some(frame as f64 / 60.0),
+                    ..Default::default()
+                },
+                |ui| {
+                    show(ui.ctx(), &p, &Icons::default(), &mut s, &mut st, &mut open);
+                },
+            );
+            assert!(ctx.memory(|m| m.top_modal_layer()).is_some());
+            for label in [
+                aurora_i18n::tr!("ui-options-reset-confirm"),
+                aurora_i18n::tr!("common-cancel"),
+                aurora_i18n::tr!("ui-options-reset-everything-2"),
+            ] {
+                assert!(
+                    output
+                        .shapes
+                        .iter()
+                        .any(|shape| matches!(&shape.shape, egui::Shape::Text(t) if t.galley.text() == label)),
+                    "{label} is painted"
+                );
+            }
+            if capture_path.is_some() {
+                let primitives = ctx.tessellate(output.shapes.clone(), output.pixels_per_point);
+                assert!(primitives.iter().all(|p| matches!(p.primitive, egui::epaint::Primitive::Mesh(_))));
+                painter.paint(
+                    &mut pixels,
+                    [1280, 900],
+                    &primitives,
+                    &output.textures_delta,
+                    output.pixels_per_point,
+                    p.panel,
+                );
+            }
+            output.textures_delta.clear();
+        }
+        if let Some(path) = &capture_path {
+            let stem = path.file_stem().unwrap().to_string_lossy();
+            let rgba: Vec<u8> = pixels
+                .iter()
+                .flat_map(|p| [(*p >> 16) as u8, (*p >> 8) as u8, *p as u8, 255])
+                .collect();
+            image::save_buffer(
+                path.with_file_name(format!("{stem}-{name}.png")),
+                &rgba,
+                1280,
+                900,
+                image::ColorType::Rgba8,
+            )
+            .unwrap();
+        }
+        assert_eq!(s.draw_distance, 250.0);
+        assert!(st.undo.is_none());
+    }
+}
+
 #[test]
 fn opening_preferences_focuses_search_without_taking_it_back() {
     let mut frames = Frames::new();
@@ -1409,6 +1755,55 @@ fn preferences_keep_their_height_when_text_size_changes() {
                 }
             }
         }
+    }
+}
+
+#[test]
+fn system_font_popup_width_stays_fixed_across_ui_scales() {
+    let theme = crate::theme::Theme::default();
+    let mut widths = Vec::new();
+    for font_scale in [1.0, 1.25, 1.5] {
+        for pixels_per_point in [1.0, 1.25, 1.5] {
+            let mut frames = Frames::new();
+            let ctx = frames.ctx.clone();
+            let p = theme.palette();
+            theme.apply(&ctx, font_scale);
+            ctx.set_pixels_per_point(pixels_per_point);
+            let mut settings = Settings::default();
+            let mut state = OptionsUi {
+                page: Page::Appearance,
+                demo_font_list: Some(false),
+                system_fonts: Some(
+                    (0..40)
+                        .map(|n| crate::ui::fonts::SystemFont {
+                            name: format!("System font {n:02} with a very long sample name"),
+                            path: std::path::PathBuf::from(format!("/font/{n}")),
+                        })
+                        .collect(),
+                ),
+                ..Default::default()
+            };
+            let mut open = true;
+            for _ in 0..120 {
+                frames.run(Vec::new(), |ui| {
+                    show(ui.ctx(), &p, &Icons::default(), &mut settings, &mut state, &mut open);
+                });
+                let id = ctx.data(|data| data.get_temp::<egui::Id>(egui::Id::unique("font-list-popup-test-id")));
+                let popup = ctx.memory(|m| id.and_then(|id| m.area_rect(id))).expect("font popup area");
+                widths.push((font_scale, pixels_per_point, popup.width()));
+            }
+        }
+    }
+    for group in widths.as_chunks::<120>().0 {
+        let first = group[2].2;
+        assert!(
+            group[3..].iter().all(|(_, _, width)| (width - first).abs() < 0.5),
+            "popup grew at font scale {:?}, pixels per point {:?}: {:?} -> {:?}",
+            group[0].0,
+            group[0].1,
+            group[2].2,
+            group[119].2
+        );
     }
 }
 

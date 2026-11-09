@@ -1,5 +1,14 @@
 # Aurora Viewer — task tracking
 
+- Foldurora queued upstream integration (2026-11-09 UTC), separate from frozen
+  workspace candidate da8ee12fd: PR18 media475df44e, PR19 sound65da1dfb,
+  PR26 Preferences16071c7d and PR32 controls0d2d1ae9. Source reviewed and full
+  non-TASKS patches applied with three-way checks; existing tracking retained.
+  Preserve parcel-music rebuffering, current font search, native ownership/
+  confirmations and all private-store/host/workspace safeguards. No browser
+  file-picker stage or deferred upstream implementation is imported. Combined
+  focused checks and later Windows validation remain required; no merge/release.
+
 - Foldurora Contacts/removal integration (2026-11-09 UTC): preserve frozen
   Contacts8aa03f97, whose format/qualified Linux lint passed and unfiltered group
   suite measured8961passed/18failed/61ignored,33 summaries, zero filtered.
