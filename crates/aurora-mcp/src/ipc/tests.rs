@@ -119,7 +119,8 @@ fn wrong_secret_and_stale_incarnation_are_refused() {
     let mut client = fixture.discovery.connect(server.instance()).unwrap();
     let mut replacement = wire.clone();
     replacement.secret = "a".repeat(64);
-    std::fs::write(fixture.discovery.path(wire.instance), serde_json::to_vec(&replacement).unwrap()).unwrap();
+    replace_fixture_descriptor(&fixture.discovery, &replacement);
+    assert!(fixture.discovery.read(wire.instance).unwrap() == replacement);
     assert!(client.call(HostRequest::SessionsList).is_err());
     drop(server);
     assert!(
@@ -127,6 +128,77 @@ fn wrong_secret_and_stale_incarnation_are_refused() {
         "old service must preserve a replacement descriptor"
     );
     assert_eq!(handler.calls.load(Ordering::Relaxed), 0);
+}
+
+/// A fully published synthetic replacement, not an in-place truncation raced
+/// against the live listener's strict read/delete/no-write Windows handles.
+/// The replacement keeps the production private creator and validation path.
+fn replace_fixture_descriptor(discovery: &Discovery, wire: &DescriptorWire) {
+    discovery.checked().unwrap();
+    let staged = discovery.root.join(format!("fixture-replacement-{}", Uuid::new_v4().simple()));
+    let mut file = platform::create_private_file(&staged).unwrap();
+    file.write_all(&serde_json::to_vec(wire).unwrap()).unwrap();
+    file.sync_all().unwrap();
+    drop(file);
+    std::fs::rename(staged, discovery.path(wire.instance)).unwrap();
+}
+fn synthetic_wire(discovery: &Discovery) -> DescriptorWire {
+    DescriptorWire {
+        version: 1,
+        installation: discovery.installation,
+        instance: HostId::from_bytes(*Uuid::new_v4().as_bytes()).unwrap(),
+        secret: "1".repeat(64),
+    }
+}
+fn publish_fixture_file(discovery: &Discovery, wire: &DescriptorWire) -> platform::FileIdentity {
+    let mut file = platform::create_private_file(&discovery.path(wire.instance)).unwrap();
+    file.write_all(&serde_json::to_vec(wire).unwrap()).unwrap();
+    file.sync_all().unwrap();
+    platform::file_identity(&file).unwrap()
+}
+#[test]
+fn descriptor_atomic_replacement_preserves_open_reader_and_validates_private_successor() {
+    let fixture = Fixture::new();
+    let wire = synthetic_wire(&fixture.discovery);
+    let original = publish_fixture_file(&fixture.discovery, &wire);
+    let mut reader = platform::open_read(&fixture.discovery.path(wire.instance)).unwrap();
+    #[cfg(windows)]
+    {
+        // This deliberately held actual reader identifies OUR conflict. It is
+        // not evidence identifying the handle from the old Windows failure.
+        let error = std::fs::write(fixture.discovery.path(wire.instance), b"must not replace").unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(32));
+        assert!(fixture.discovery.read(wire.instance).unwrap() == wire);
+    }
+    let mut replacement = wire.clone();
+    replacement.secret = "a".repeat(64);
+    replace_fixture_descriptor(&fixture.discovery, &replacement);
+    assert!(fixture.discovery.read(wire.instance).unwrap() == replacement);
+    assert!(platform::path_identity(&fixture.discovery.path(wire.instance)).unwrap() != original);
+    let mut bytes = Vec::new();
+    reader.read_to_end(&mut bytes).unwrap();
+    assert!(serde_json::from_slice::<DescriptorWire>(&bytes).unwrap() == wire);
+}
+#[test]
+fn original_publication_cleanup_preserves_changed_descriptor_with_the_same_file_identity() {
+    let fixture = Fixture::new();
+    let wire = synthetic_wire(&fixture.discovery);
+    let identity = publish_fixture_file(&fixture.discovery, &wire);
+    let publication = Publication {
+        discovery: fixture.discovery.clone(),
+        instance: wire.instance,
+        identity,
+        wire: Some(wire.clone()),
+    };
+    let mut replacement = wire.clone();
+    replacement.secret = "a".repeat(64);
+    // No listener/reader thread in this case. Exercise the distinct cleanup
+    // wire-content guard after the file-identity guard succeeds, without races.
+    std::fs::write(fixture.discovery.path(wire.instance), serde_json::to_vec(&replacement).unwrap()).unwrap();
+    assert!(platform::path_identity(&fixture.discovery.path(wire.instance)).unwrap() == identity);
+    assert!(fixture.discovery.read(wire.instance).unwrap() == replacement);
+    drop(publication);
+    assert!(fixture.discovery.read(wire.instance).unwrap() == replacement);
 }
 
 #[test]
