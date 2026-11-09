@@ -1,0 +1,24 @@
+   Compiling aurora-render v0.1.0 (/workspace/work/monitor-foundation/crates/aurora-render)
+    Finished `ci` profile [unoptimized] target(s) in 9.62s
+     Running unittests src/lib.rs (/workspace/Foldurora/target/ci/deps/aurora_render-2d44ace34a6b6e66)
+
+running 10 tests
+test monitor::tests::monitor_cadences_drop_missed_ticks_without_catchup ... ok
+test monitor::tests::monitor_busy_worker_does_not_prepare_scene_or_consume_uploads ... ok
+test monitor::tests::monitor_borrowed_queue_handle_never_closes_owner_but_cannot_outlive_its_authority ... ok
+test monitor::tests::monitor_cancelled_before_submission_and_after_callback_never_delivers ... ok
+test monitor::tests::monitor_character_lifetimes_and_close_are_isolated ... ok
+test monitor::tests::monitor_hidden_minimized_closed_and_promotion_keep_drain_reservation ... ok
+test monitor::tests::monitor_resize_invalidates_old_frames_and_does_not_accelerate_rate ... ok
+test render_thread::tests::monitor_reservation_under_contention_does_not_prepare_or_consume_previous_result ... ok
+test monitor::tests::monitor_small_gpu_targets_are_persistent_bounded_and_have_no_readback_usage ... ok
+Error [GENERAL | xrEnumerateInstanceExtensionProperties | OpenXR-Loader] : RuntimeManifestFile::FindManifestFiles - failed to determine active runtime file path for this environment
+Error [GENERAL | xrEnumerateInstanceExtensionProperties | OpenXR-Loader] : RuntimeInterface::LoadRuntimes - unknown error
+Error [GENERAL | xrEnumerateInstanceExtensionProperties | OpenXR-Loader] : RuntimeInterface::LoadRuntimes - failed to load a runtime
+Error [GENERAL | xrEnumerateInstanceExtensionProperties | OpenXR-Loader] : Failed to find default runtime with RuntimeInterface::LoadRuntime()
+Error [GENERAL | xrEnumerateInstanceExtensionProperties | OpenXR-Loader] : Failed querying extension properties
+test monitor::tests::monitor_world_packets_keep_surface_size_and_never_prove_presentation has been running for over 60 seconds
+test monitor::tests::monitor_world_packets_keep_surface_size_and_never_prove_presentation ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 465 filtered out; finished in 85.48s
+

@@ -1,0 +1,224 @@
+   Compiling cfg-if v1.0.5
+   Compiling bitflags v2.13.2
+   Compiling find-msvc-tools v0.1.15
+   Compiling shlex v2.0.1
+   Compiling num-traits v0.2.19
+   Compiling bytemuck v1.25.2
+   Compiling cc v1.10.0
+   Compiling libm v0.2.16
+   Compiling smallvec v1.16.2
+   Compiling log v0.4.34
+   Compiling once_cell v1.21.4
+   Compiling libloading v0.8.9
+   Compiling thiserror v2.0.21
+   Compiling arrayvec v0.7.8
+   Compiling foldhash v0.2.0
+   Compiling dlib v0.5.3
+   Compiling rustix v1.1.5
+   Compiling wayland-sys v0.31.11
+   Compiling linux-raw-sys v0.12.1
+   Compiling hashbrown v0.17.1
+   Compiling equivalent v1.0.2
+   Compiling zerocopy v0.8.62
+   Compiling scopeguard v1.2.0
+   Compiling wayland-backend v0.3.17
+   Compiling memchr v2.8.3
+   Compiling downcast-rs v1.2.1
+   Compiling scoped-tls v1.0.1
+   Compiling wayland-client v0.31.15
+   Compiling allocator-api2 v0.2.21
+   Compiling quick-xml v0.41.0
+   Compiling hashbrown v0.16.1
+   Compiling indexmap v2.14.2
+   Compiling wayland-scanner v0.31.11
+   Compiling static_assertions v1.1.0
+   Compiling rustc-hash v1.1.0
+   Compiling naga-types v30.0.1 (https://github.com/Aurora-Viewer/wgpu?rev=3bad1916ef435277b8edb3252941020a09779ce9#3bad1916)
+   Compiling parking_lot_core v0.9.12
+   Compiling lock_api v0.4.14
+   Compiling raw-window-handle v0.6.2
+   Compiling getrandom v0.4.3
+   Compiling unicode-width v0.2.2
+   Compiling crossbeam-utils v0.8.23
+   Compiling bit-vec v0.9.1
+   Compiling codespan-reporting v0.13.1
+   Compiling bit-set v0.10.0
+   Compiling parking_lot v0.12.5
+   Compiling ordered-float v5.5.0
+   Compiling polycool v0.4.0
+   Compiling spirv v0.4.0+sdk-1.4.341.0
+   Compiling rustix v0.38.44
+   Compiling getrandom v0.3.4
+   Compiling half v2.7.1
+   Compiling profiling v1.0.18
+   Compiling thiserror v1.0.69
+   Compiling simd-adler32 v0.3.10
+   Compiling slab v0.4.12
+   Compiling ahash v0.8.12
+   Compiling kurbo v0.13.1
+   Compiling ash v0.38.0+1.3.281
+   Compiling naga v30.0.1 (https://github.com/Aurora-Viewer/wgpu?rev=3bad1916ef435277b8edb3252941020a09779ce9#3bad1916)
+   Compiling wgpu-types v30.0.1 (https://github.com/Aurora-Viewer/wgpu?rev=3bad1916ef435277b8edb3252941020a09779ce9#3bad1916)
+   Compiling ogg_next_sys v0.1.5
+   Compiling euclid v0.22.14
+   Compiling thiserror-impl v1.0.69
+   Compiling color v0.3.3
+   Compiling font-types v0.12.6
+   Compiling linebender_resource_handle v0.1.1
+   Compiling presser v0.3.1
+   Compiling adler2 v2.0.1
+   Compiling crossbeam-epoch v0.9.21
+   Compiling linux-raw-sys v0.4.15
+   Compiling crc32fast v1.5.2
+   Compiling peniko v0.6.1
+   Compiling read-fonts v0.41.0
+   Compiling guillotiere v0.7.0
+   Compiling wayland-protocols v0.32.13
+   Compiling wgpu-naga-bridge v30.0.1 (https://github.com/Aurora-Viewer/wgpu?rev=3bad1916ef435277b8edb3252941020a09779ce9#3bad1916)
+   Compiling gpu-allocator v0.28.0
+   Compiling khronos-egl v6.0.0
+   Compiling polling v3.11.0
+   Compiling approx v0.5.1
+   Compiling safe_arch v1.2.0
+   Compiling heapless v0.8.0
+   Compiling renderdoc-sys v1.1.0
+   Compiling byteorder v1.5.0
+   Compiling crossbeam-deque v0.8.8
+   Compiling either v1.19.0
+   Compiling glow v0.17.0
+   Compiling fearless_simd v0.4.1
+   Compiling hash32 v0.3.1
+   Compiling wide v1.7.1
+   Compiling wgpu-hal v30.0.1 (https://github.com/Aurora-Viewer/wgpu?rev=3bad1916ef435277b8edb3252941020a09779ce9#3bad1916)
+   Compiling calloop v0.13.0
+   Compiling miniz_oxide v0.9.1
+   Compiling vello_common v0.2.0
+   Compiling uuid v1.29.0
+   Compiling ring v0.17.14
+   Compiling openjpeg-sys v1.0.12
+   Compiling aotuv_lancer_vorbis_sys v0.1.6
+   Compiling num-complex v0.4.6
+   Compiling emath v0.37.0
+   Compiling serde_core v1.0.229
+   Compiling xkeysym v0.2.1
+   Compiling cursor-icon v1.2.0
+   Compiling arrayref v0.3.9
+   Compiling xcursor v0.3.11
+   Compiling strict-num v0.1.1
+   Compiling stable_deref_trait v1.2.1
+   Compiling rayon-core v1.13.0
+   Compiling ttf-parser v0.25.1
+   Compiling smithay-client-toolkit v0.19.2
+   Compiling zmij v1.0.23
+   Compiling simba v0.10.2
+   Compiling tiny-skia-path v0.11.4
+   Compiling wayland-cursor v0.31.14
+   Compiling wayland-csd-frame v0.3.0
+   Compiling ecolor v0.37.0
+   Compiling owned_ttf_parser v0.25.1
+   Compiling wgpu-core-deps-windows-linux-android v30.0.1 (https://github.com/Aurora-Viewer/wgpu?rev=3bad1916ef435277b8edb3252941020a09779ce9#3bad1916)
+   Compiling vello_cpu v0.2.0
+   Compiling flate2 v1.1.10
+   Compiling calloop-wayland-source v0.3.0
+   Compiling wayland-protocols-wlr v0.3.12
+   Compiling unicode-general-category v1.1.0
+   Compiling glam v0.33.12
+   Compiling skrifa v0.44.0
+   Compiling harfrust v0.12.0
+   Compiling miniz_oxide v0.8.9
+   Compiling fdeflate v0.3.7
+   Compiling meshopt v0.7.0
+   Compiling x11-dl v2.21.0
+   Compiling memmap2 v0.9.12
+   Compiling pxfm v0.1.30
+   Compiling iana-time-zone v0.1.65
+   Compiling epaint_default_fonts v0.37.0
+   Compiling zune-core v0.5.3
+   Compiling serde_json v1.0.154
+   Compiling unicode-segmentation v1.13.3
+   Compiling robust v1.2.0
+   Compiling ab_glyph_rasterizer v0.1.10
+   Compiling self_cell v1.3.0
+   Compiling unicode-properties v0.1.4
+   Compiling nohash-hasher v0.2.0
+   Compiling spade v2.15.1
+   Compiling epaint v0.37.0
+   Compiling ab_glyph v0.2.32
+   Compiling zune-jpeg v0.5.15
+   Compiling moxcms v0.8.1
+   Compiling chrono v0.4.45
+   Compiling png v0.18.1
+   Compiling glamx v0.3.1
+   Compiling wgpu-core v30.0.1 (https://github.com/Aurora-Viewer/wgpu?rev=3bad1916ef435277b8edb3252941020a09779ce9#3bad1916)
+   Compiling tiny-skia v0.11.4
+   Compiling rstar v0.13.0
+   Compiling gethostname v1.1.0
+   Compiling lock_api v0.5.0
+   Compiling aurora-assets v0.1.0 (/workspace/work/monitor-foundation/crates/aurora-assets)
+   Compiling float-cmp v0.10.0
+   Compiling winit v0.30.13
+   Compiling ena v0.14.4
+   Compiling parking_lot_core v0.10.0
+   Compiling getrandom v0.2.17
+   Compiling errno v0.3.14
+   Compiling num-derive v0.5.1
+   Compiling x11rb-protocol v0.13.2
+   Compiling downcast-rs v2.0.2
+   Compiling pin-project-lite v0.2.17
+   Compiling untrusted v0.9.0
+   Compiling rustc-hash v2.1.3
+   Compiling as-raw-xcb-connection v1.0.1
+   Compiling tracing-core v0.1.36
+   Compiling byteorder-lite v0.1.0
+   Compiling itoa v1.0.18
+   Compiling tinyvec v1.13.3
+   Compiling base64 v0.23.1
+   Compiling vorbis_rs v0.5.6
+   Compiling aurora-llsd v0.1.0 (/workspace/work/monitor-foundation/crates/aurora-llsd)
+   Compiling image v0.25.10
+   Compiling wgpu v30.0.1 (https://github.com/Aurora-Viewer/wgpu?rev=3bad1916ef435277b8edb3252941020a09779ce9#3bad1916)
+   Compiling tracing v0.1.44
+   Compiling parry3d v0.31.1
+   Compiling type-map v0.5.1
+   Compiling parking_lot v0.13.0
+   Compiling sctk-adwaita v0.10.1
+   Compiling rayon v1.12.0
+   Compiling x11rb v0.13.2
+   Compiling openxr-sys v0.14.0
+   Compiling xkbcommon-dl v0.4.2
+   Compiling accesskit v0.25.1
+   Compiling wayland-protocols-plasma v0.3.12
+   Compiling itertools v0.15.0
+   Compiling crossbeam-channel v0.5.17
+   Compiling glam v0.34.1
+   Compiling libloading v0.9.0
+   Compiling smol_str v0.2.2
+   Compiling web-time v1.1.0
+   Compiling percent-encoding v2.3.2
+   Compiling dpi v0.1.2
+   Compiling egui-wgpu v0.37.0
+   Compiling egui v0.37.0
+   Compiling openxr v0.22.0
+   Compiling intel_tex_2 v0.5.0
+   Compiling bcdec_rs v0.2.1
+   Compiling pollster v1.0.1
+   Compiling aurora-render v0.1.0 (/workspace/work/monitor-foundation/crates/aurora-render)
+error[E0599]: no associated function or constant named `default` found for struct `types::FrameParams` in the current scope
+    --> crates/aurora-render/src/monitor/tests.rs:269:54
+     |
+ 269 |                 let mut params = crate::FrameParams::default();
+     |                                                      ^^^^^^^ associated function or constant not found in `types::FrameParams`
+     |
+    ::: crates/aurora-render/src/types.rs:1277:1
+     |
+1277 | pub struct FrameParams {
+     | ---------------------- associated function or constant `default` not found for this struct
+     |
+     = help: items from traits can only be used if the trait is implemented and in scope
+     = note: the following traits define an item `default`, perhaps you need to implement one of them:
+             candidate #1: `harfrust::hb::cache::AtomicStorage`
+             candidate #2: `std::default::Default`
+             candidate #3: `tinyvec::array::Array`
+
+For more information about this error, try `rustc --explain E0599`.
+error: could not compile `aurora-render` (lib test) due to 1 previous error
