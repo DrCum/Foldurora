@@ -13594,3 +13594,6 @@ workspaces-folder-unavailable = フォルダーを復元できませんでした
 workspaces-capture-graphics = 現在のグラフィック設定を記憶
 workspaces-capture-camera = アバター基準のカメラ設定を記憶
 workspaces-camera-unavailable = カメラの復元には制限のないアバタービューが必要です。そのビューに戻って再試行してください。
+workspaces-capture-background = ワークスペースの背景を記憶
+workspaces-background-solid = 単色を使用
+workspaces-background-black = 黒い背景

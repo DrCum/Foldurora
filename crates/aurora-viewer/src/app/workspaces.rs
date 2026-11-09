@@ -3,7 +3,7 @@
 use super::{App, Renderer, Screen, Window, ui};
 use crate::workspace::{
     controller::{Action, Command, Pending, Source, Status},
-    model::{Bars, CameraContext, CaptureGroups, Catalogue, Graphics, LIMIT, Layout, Record, Startup, Viewport, valid_name},
+    model::{Background, Bars, CameraContext, CaptureGroups, Catalogue, Graphics, LIMIT, Layout, Record, Startup, Viewport, valid_name},
     store::{Lane, Request},
 };
 use uuid::Uuid;
@@ -84,6 +84,24 @@ impl App {
             None => true,
         }
     }
+    pub(super) fn workspace_background(&self) -> Background {
+        if !matches!(self.screen, Screen::World)
+            || self.capture.is_some()
+            || self.panels.snapshot
+            || self.snapshots.capturing.is_some()
+            || self.snapshots.ui.full_frame
+            || self.snapshots.ui.freeze
+            || (self.interface.hidden && !self.camera.mouselook())
+            || self
+                .workspaces
+                .source
+                .as_ref()
+                .is_none_or(|s| Some(s) != self.workspace_source().as_ref())
+        {
+            return Background::Black {};
+        }
+        self.workspaces.background()
+    }
     fn workspace_camera_allowed(&self) -> bool {
         matches!(self.screen, Screen::World)
             && self
@@ -132,6 +150,7 @@ impl App {
         let inventory_folder = folder.filter(|id| self.workspace_folder_allowed(*id));
         Some(Layout {
             inventory_folder,
+            background: groups.background.then(|| self.workspaces.background()),
             camera: groups
                 .camera
                 .then(|| CameraContext::capture(&self.settings.camera, self.camera.zoom_fraction())),
@@ -154,6 +173,7 @@ impl App {
                 inventory: c.remember_folders,
                 graphics: c.capture_graphics,
                 camera: c.capture_camera,
+                background: c.capture_background,
             });
         self.workspace_capture(groups)
     }
@@ -221,12 +241,7 @@ impl App {
         if let Ok(Some(reply)) = polled {
             self.workspaces.accept_reply(reply);
         }
-        if (self.workspace_ui.open || self.workspaces.startup_waiting)
-            && self.workspaces.permit
-            && self.workspaces.pending.is_none()
-            && self.workspaces.catalogue.is_none()
-            && !matches!(self.workspaces.status, Status::Error)
-        {
+        if self.workspaces.needs_catalogue() {
             self.workspace_io(None, None);
         }
         if self.workspaces.pending.is_some() && self.workspaces.permit {
@@ -524,6 +539,25 @@ impl App {
                 }
                 self.workspace_save_definitions(next);
             }
+            Command::Background(background) => {
+                if self.workspaces.preview.is_some() {
+                    return;
+                }
+                let mut next = self.workspaces.catalogue.clone().expect("ready workspace catalogue");
+                next.background = background;
+                self.workspace_save_definitions(next);
+            }
+            Command::CaptureBackground(capture) => {
+                if self.workspaces.preview.is_some() {
+                    return;
+                }
+                let mut next = self.workspaces.catalogue.clone().expect("ready workspace catalogue");
+                next.capture_background = capture;
+                if !capture && let Some(last) = &mut next.last_layout {
+                    last.background = None;
+                }
+                self.workspace_save_definitions(next);
+            }
             Command::CaptureCamera(capture) => {
                 if self.workspaces.preview.is_some() {
                     return;
@@ -580,8 +614,16 @@ impl App {
             p.room = Some(room);
             self.workspaces.placement = Some(p);
         } else if p.commit {
+            let background = p.layout.background;
             let folder_restored = self.workspace_restore_folder(p.layout.inventory_folder);
             self.workspaces.finish_placement(p);
+            if let Some(background) = background
+                && let Some(mut catalogue) = self.workspaces.catalogue.clone()
+                && catalogue.background != background
+            {
+                catalogue.background = background;
+                self.workspace_save_definitions(catalogue);
+            }
             if !folder_restored {
                 self.workspaces.status = Status::FolderUnavailable;
             }

@@ -11007,6 +11007,11 @@ impl App {
             ui::layout::begin_canvas(ui.ctx(), false);
             let source = self.photo_scene_for_size((w, h), gfx.renderer.vr_engaged());
             ui::layout::set_world_canvas(ui.ctx(), Some(source.logical_rect(ui.ctx().viewport_rect())));
+            if !gfx.renderer.vr_engaged() {
+                let canvas = ui.ctx().viewport_rect();
+                let rendered = crate::world_viewport::PhotoScene::new((w, h), viewport).logical_rect(canvas);
+                ui::workspace_background::paint(ui.ctx(), canvas, rendered, self.workspace_background());
+            }
             let bounds = self.effective_viewport_settings().toolbar_rect((w, h), ui.ctx().viewport_rect());
             if ui::layout::set_toolbar_canvas(ui.ctx(), bounds) {
                 self.interface.last_room = None;

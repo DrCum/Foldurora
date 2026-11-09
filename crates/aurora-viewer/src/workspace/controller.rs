@@ -1,5 +1,5 @@
 use super::{
-    model::{Catalogue, Layout, Startup},
+    model::{Background, Catalogue, Layout, Startup},
     store::Lane,
 };
 use uuid::Uuid;
@@ -35,6 +35,8 @@ pub(crate) enum Command {
     RememberFolders(bool),
     CaptureGraphics(bool),
     CaptureCamera(bool),
+    CaptureBackground(bool),
+    Background(Background),
 }
 #[derive(Clone, Debug)]
 pub(crate) struct Action {
@@ -58,6 +60,7 @@ pub(crate) struct Preview {
     pub baseline: Layout,
     pub active: Option<Uuid>,
     pub candidate: Uuid,
+    background: Option<Background>,
 }
 pub(crate) struct Placement {
     pub layout: Layout,
@@ -153,6 +156,41 @@ impl Controller {
         self.status = Status::Unavailable;
         self.advance();
     }
+    /// Persistent workspace presentation needs the private catalogue after a
+    /// source gap too, even when startup was already consumed for this login.
+    pub(crate) fn needs_catalogue(&self) -> bool {
+        self.permit
+            && !self.exhausted
+            && self.source.is_some()
+            && self.pending.is_none()
+            && self.catalogue.is_none()
+            && self.status != Status::Error
+    }
+    /// Current account-only choice, a valid pending write, or a reversible
+    /// staged target. No source/foreign/stale pending data can color this view.
+    pub(crate) fn background(&self) -> Background {
+        let Some(source) = &self.source else {
+            return Background::Black {};
+        };
+        let Some(catalogue) = self
+            .catalogue
+            .as_ref()
+            .filter(|c| c.account == source.agent && c.grid == source.grid)
+        else {
+            return Background::Black {};
+        };
+        let committed = self
+            .pending
+            .as_ref()
+            .filter(|p| p.binding == self.binding && &p.source == source && p.writing)
+            .and_then(|p| p.expected.as_ref())
+            .filter(|c| c.account == source.agent && c.grid == source.grid)
+            .map_or(catalogue.background, |c| c.background);
+        if let Some(preview) = &self.preview {
+            return preview.background.unwrap_or(committed);
+        }
+        committed
+    }
     pub(crate) fn begin_preview(&mut self, layout: Layout, id: Uuid, current: Layout, commit: bool) -> Layout {
         let mut baseline = self
             .preview
@@ -160,6 +198,9 @@ impl Controller {
             .map_or_else(|| current.baseline_for(&layout), |p| p.baseline.clone());
         if baseline.inventory_folder.is_none() && layout.inventory_folder.is_some() {
             baseline.inventory_folder = current.inventory_folder;
+        }
+        if baseline.background.is_none() && layout.background.is_some() {
+            baseline.background = current.background;
         }
         if baseline.camera.is_none() && layout.camera.is_some() {
             baseline.camera = current.camera;
@@ -178,6 +219,7 @@ impl Controller {
             baseline: baseline.clone(),
             active,
             candidate: id,
+            background: layout.background,
         });
         self.placement = Some(Placement {
             layout,
@@ -201,6 +243,7 @@ impl Controller {
             baseline: current.clone(),
             active: self.active,
             candidate: active.unwrap_or(Uuid::nil()),
+            background: layout.background,
         });
         self.placement = Some(Placement {
             layout,
@@ -486,6 +529,7 @@ mod tests {
             inventory_folder: None,
             graphics: None,
             camera: None,
+            background: None,
             geometry: [Some(super::super::model::Geometry {
                 point: 0,
                 offset: [left, 0.0],
@@ -643,5 +687,101 @@ mod tests {
         let placement = c.placement.take().unwrap();
         c.finish_placement(placement);
         assert!(c.previous.as_ref().unwrap().0.camera.is_none());
+    }
+    #[test]
+    fn workspace_background_preview_keeps_committed_choice_and_source_loss_hides_it() {
+        let source = source();
+        let mut catalogue = Catalogue::empty(source.agent, source.grid.clone());
+        let committed = Background::Solid { rgb: [10, 20, 30] };
+        let candidate = Background::Solid { rgb: [40, 50, 60] };
+        catalogue.background = committed;
+        let mut c = Controller {
+            source: Some(source),
+            catalogue: Some(catalogue),
+            ..Default::default()
+        };
+        let mut live = layout(0.0);
+        live.background = Some(committed);
+        let mut target = layout(10.0);
+        target.background = Some(candidate);
+        c.begin_preview(target, Uuid::new_v4(), live, false);
+        assert_eq!(c.background(), candidate);
+        assert_eq!(c.catalogue.as_ref().unwrap().background, committed);
+        c.preview = None;
+        c.placement = None;
+        assert_eq!(c.background(), committed);
+        c.bind(None);
+        assert_eq!(c.background(), Background::Black {});
+    }
+    #[test]
+    fn workspace_background_pending_choice_requires_exact_binding_and_account() {
+        let source = source();
+        let catalogue = Catalogue::empty(source.agent, source.grid.clone());
+        let mut next = catalogue.clone();
+        next.background = Background::Solid { rgb: [10, 20, 30] };
+        let mut c = Controller {
+            source: Some(source.clone()),
+            catalogue: Some(catalogue),
+            ..Default::default()
+        };
+        c.pending = Some(Pending {
+            source,
+            binding: c.binding,
+            operation: 1,
+            active: None,
+            writing: true,
+            expected: Some(next),
+        });
+        assert_eq!(c.background(), Background::Solid { rgb: [10, 20, 30] });
+        c.pending.as_mut().unwrap().binding += 1;
+        assert_eq!(c.background(), Background::Black {});
+        c.pending.as_mut().unwrap().binding = c.binding;
+        c.pending.as_mut().unwrap().expected.as_mut().unwrap().account = Uuid::new_v4();
+        assert_eq!(c.background(), Background::Black {});
+    }
+    #[test]
+    fn workspace_source_gap_reloads_presentation_without_replaying_consumed_startup() {
+        let source = source();
+        let mut c = Controller::default();
+        c.bind(Some(source.clone()));
+        c.cancel_startup();
+        c.bind(None);
+        assert!(!c.needs_catalogue());
+        c.bind(Some(source.clone()));
+        c.permit = true;
+        assert!(!c.startup_waiting);
+        assert!(c.needs_catalogue());
+        c.status = Status::Error;
+        assert!(!c.needs_catalogue(), "no repeated failed IO each frame");
+        c.status = Status::Ready;
+        c.catalogue = Some(Catalogue::empty(source.agent, source.grid));
+        assert!(!c.needs_catalogue());
+    }
+    #[test]
+    fn workspace_background_previous_keeps_scoped_target_instead_of_old_record_lookup() {
+        let source = source();
+        let mut catalogue = Catalogue::empty(source.agent, source.grid.clone());
+        let old = Uuid::new_v4();
+        catalogue.background = Background::Solid { rgb: [10, 20, 30] };
+        let mut record_layout = layout(0.0);
+        record_layout.background = Some(Background::Solid { rgb: [40, 50, 60] });
+        catalogue.records.push(super::super::model::Record {
+            id: old,
+            name: "Old".into(),
+            layout: record_layout,
+        });
+        let expected = catalogue.background;
+        let mut c = Controller {
+            source: Some(source),
+            catalogue: Some(catalogue),
+            previous: Some((layout(0.0), Some(old))),
+            ..Default::default()
+        };
+        c.begin_previous(layout(10.0));
+        assert_eq!(
+            c.background(),
+            expected,
+            "geometry-only Previous must not borrow that record's old context"
+        );
     }
 }
