@@ -65,6 +65,9 @@ mod land_net;
 #[path = "session_offline.rs"]
 mod offline_net;
 
+#[path = "session_contact_search.rs"]
+mod contact_search_net;
+
 /// Directory search: queries, replies, event and group details (search.rs).
 #[path = "session_search.rs"]
 mod search_net;
@@ -1601,6 +1604,7 @@ impl Session<'_> {
         if self.on_object_action_command(&c)
             || self.on_social_command(&c)
             || self.on_offline_command(&c)
+            || self.on_contact_search_command(&c)
             || self.on_search_command(&c)
             || self.on_groups_command(&c)
         {
@@ -3031,7 +3035,8 @@ impl Session<'_> {
             | NetCommand::ChatSession { .. }
             | NetCommand::Call { .. } => {}
             // handled by on_offline_command
-            NetCommand::RequestOfflineMessages
+            NetCommand::ContactSearch { .. }
+            | NetCommand::RequestOfflineMessages
             | NetCommand::RequestOfflineMessagesLegacy
             | NetCommand::AnswerOfflineFriendship { .. }
             | NetCommand::AnswerOfflineGroupInvite { .. } => {}

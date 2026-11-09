@@ -813,6 +813,13 @@ pub enum NetEvent {
     },
     /// Public FSData contact flags, captured for the original native SL login.
     /// Failure preserves already loaded policy; it is never an empty update.
+    /// Original-login scoped host resident search; never the query-only native
+    /// picker callback. The request UUID is local and cannot be a grid command.
+    ContactSearch {
+        source: LoginSource,
+        request: Uuid,
+        result: Result<crate::contact_search::Results, crate::contact_search::Error>,
+    },
     ContactPolicy {
         source: LoginSource,
         feed: crate::contact_policy::Feed,
@@ -1541,6 +1548,11 @@ pub enum NetCommand {
     /// Ask for the instant messages kept while we were offline, once after
     /// login (LLIMProcessing::requestOfflineMessages: the ReadOfflineMsgs
     /// capability, else RetrieveInstantMessages).
+    ContactSearch {
+        source: LoginSource,
+        request: Uuid,
+        query: String,
+    },
     RequestOfflineMessages,
     /// The same by the RetrieveInstantMessages message only (after
     /// `NetEvent::OfflineMessagesFailed`).

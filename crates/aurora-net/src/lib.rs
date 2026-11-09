@@ -10,6 +10,7 @@ pub mod caps;
 mod chat_reply;
 pub mod circuit;
 pub mod contact_policy;
+pub mod contact_search;
 pub mod currency;
 pub mod estate;
 pub mod experience;
