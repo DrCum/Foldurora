@@ -13632,3 +13632,4 @@ workspaces-camera-unavailable = La restauration de caméra nécessite une vue av
 workspaces-capture-background = Mémoriser le fond de l’espace de travail
 workspaces-background-solid = Utiliser la couleur unie
 workspaces-background-black = Fond noir
+workspaces-update = Actualiser la sélection

@@ -22,6 +22,7 @@ pub(crate) struct Ticket {
 #[derive(Clone, Debug)]
 pub(crate) enum Command {
     Save(String),
+    Update(Uuid),
     Rename(Uuid, String),
     Delete(Uuid),
     Preview(Uuid),

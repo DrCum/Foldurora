@@ -332,6 +332,7 @@ impl App {
     pub(super) fn workspace_action(&mut self, action: Action, renderer: &Renderer, window: &Window) {
         let target = match &action.command {
             Command::Rename(id, _)
+            | Command::Update(id)
             | Command::Delete(id)
             | Command::Preview(id)
             | Command::Switch(id)
@@ -470,6 +471,21 @@ impl App {
                 };
                 next.revision = revision;
                 self.workspace_io(Some(next), active);
+            }
+            Command::Update(id) => {
+                if self.workspaces.preview.is_some() {
+                    return;
+                }
+                let Some(layout) = self.workspace_capture_for_save() else {
+                    self.workspaces.status = Status::CameraUnavailable;
+                    return;
+                };
+                let mut next = self.workspaces.catalogue.clone().expect("ready workspace catalogue");
+                if next.update_layout(id, layout).is_err() {
+                    self.workspaces.status = Status::Invalid;
+                    return;
+                }
+                self.workspace_save_with_active(next, Some(id));
             }
             Command::Delete(id) => {
                 if self.workspaces.preview.is_some() {
@@ -700,7 +716,10 @@ impl App {
         }
     }
 
-    fn workspace_save_definitions(&mut self, mut next: Catalogue) {
+    fn workspace_save_definitions(&mut self, next: Catalogue) {
+        self.workspace_save_with_active(next, self.workspaces.active);
+    }
+    fn workspace_save_with_active(&mut self, mut next: Catalogue, active: Option<Uuid>) {
         let Some(revision) = (if self.workspaces.persisted {
             next.revision.checked_add(1)
         } else {
@@ -711,7 +730,7 @@ impl App {
         };
         next.revision = revision;
         if next.validate().is_ok() {
-            self.workspace_io(Some(next), self.workspaces.active);
+            self.workspace_io(Some(next), active);
         }
     }
 
