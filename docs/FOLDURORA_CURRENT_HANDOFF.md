@@ -18,7 +18,7 @@ Current frozen combined candidate:
   startup/favorites PR20 and integrated disabled renderer PR21.
 - Source/remote tree verified. No package/version/full runtime result yet.
 - Source worktree `/workspace/work/workspace-folders-20261109` is now on the
-  separate `feat/workspace-hud-restore-v2-20261109` branch for the next slice;
+  separate `feat/workspace-expanded-folders-20261109` branch for the next slice;
   all frozen branch heads and Git objects remain preserved.
 
 Full Windows request, byte-verified,12791bytes, SHA256
@@ -72,7 +72,7 @@ candidate rerun.
   Profile Copy's exclusive tests were retired with the approved removal, not
   passed. The old Linux terrain/software-GPU failure remains unresolved.
 
-Cloud has32GB fixed disk, about268MiB free. Full viewer test linking is resource-
+Cloud has32GB fixed disk, about260MiB free. Full viewer test linking is resource-
 blocked; no new full Linux run is claimed. Only idle reproducible caches have
 been reclaimed; source, binaries, profiles and needed evidence remain. Current
 receipts/logs are under `/workspace/scratch/workspace-{folders,graphics,camera,
@@ -108,19 +108,35 @@ model/UI cases compile, not run locally. Future requirements1160, no new full
 build request. Earlier Save/Update wording did not establish an Update action;
 the missing action was found and implemented in this slice.
 
-Active HUD WIP is based on bd6e, on the separate v2 branch above. Untracked
-`crates/aurora-viewer/src/workspace/model/huds.rs` contains a bounded private
-HudRef/HudSet DTO. Three exact-source model cases passed before the is_empty
-addition. Uncommitted model/Layout/Catalogue/Previous wiring and a readonly
-workspace/huds.rs projection now exist; the projection module is undeclared,
-App capture constructors and UI/review/restore remain unwired. WIP is NOT viewer-
-compiled and currently needs those new constructor fields before checking.
-No HUD feature/runtime/compiled-viewer claim; preserve all six modified/new files.
-Plan: `/workspace/scratch/workspace-hud-restore-v2-20261109/PLAN.md`. Reuse native
-additive appearance transactions (one pending transaction, serial bounded lane),
-own ordinary archive visibility, source/lock/capacity rechecks and one explicit
-workspace review. No direct rez commands, replacement/detach or automatic wear
-from Preview/startup. Inspect item completeness/native limits before coding.
+Reviewed additive HUD restoration is published/frozen at
+`48d6b4099aa143956ae62321525dcd16a26dccb6`, tree
+`9a84502cc549cf047e697746b5dacb7248db401a`, branch
+`feat/workspace-hud-restore-v2-20261109`, draft PR27
+https://github.com/DrCum/Foldurora/pull/27. Actual source/remote tree verified.
+Formatting, qualified real-viewer all-target Clippy0, six exact-source DTO/lane
+cases,13 localization and unchanged full-tree appearance scan1/0/0 pass. Eight
+additional genuine World/model/controller/UI cases compile but are UNRUN.
+The first5/1 lane run, three development type/borrow errors and format diff remain
+preserved. No full Linux link, new Windows package or native/human pass is claimed.
+Future combined Windows requirements1174 (14 new cases), private scratch only.
+Current5f990 request stays1150 and is already running; no competing request.
+
+HUDs are opt-in private item/point references, freshly ordinary/archive/RLVa-
+qualified, no assets/names persisted. Preview never wears. Committed switches,
+Previous and startup require explicit one-shot review; native additive batches
+serialize by point and finish only on observed wear under one30-second deadline.
+Source/focus/resize/recovery/policy loss or manager close retires future work.
+Existing worn items stay; unavailable references conservatively refuse the whole
+request. Native COF/capacity/final send checks remain. Documentation:
+`docs/FOLDURORA_WORKSPACE_HUDS_20261109.md`. Receipts and development negatives:
+`/workspace/scratch/workspace-hud-restore-v2-20261109/`.
+
+The next source slice is bounded expanded Inventory-folder restoration, on the
+separate branch above, not a change to any frozen build. Inspection/plan is in
+`/workspace/scratch/workspace-expanded-folders-20261109/PLAN.md`. Reuse actual
+owner-local main plain-tree state, a single borrowed ordinary Ready mask and
+loaded/Fetched folders; avoid hidden windows, fetches and recurring tree scans.
+Extra Inventory windows and image/per-display backgrounds remain unfinished.
 
 ## Roadmap and next actions
 
@@ -133,9 +149,9 @@ from Preview/startup. Inspect item completeness/native limits before coding.
 2. **Advanced workspaces:** startup/favorites implemented; optional graphics and
    avatar-relative camera contexts implemented; folder restoration covers only
    loaded visible ordinary main Inventory. Additional windows/expanded trees,
-   HUD restore/review, additional Inventory state and image/per-display
-   backgrounds remain incomplete. Solid padding colors are implemented in the
-   subsequent source slice above; active next work is guarded HUD restoration. Named-preset lookup beyond current
+   additional Inventory state and image/per-display backgrounds remain incomplete.
+   HUD restore/review is implemented in the subsequent source slice, not yet native accepted. Solid padding colors are implemented in the
+   subsequent source slice above; active next work is bounded expanded-folder restoration. Named-preset lookup beyond current
    snapshots and free/world/object/photo camera anchors remain intentional
    differences, not silently full Folderstorm parity.
 3. Fixed-slot actions, aliases/accents/alerts, session sets, restart/recovery,
@@ -145,7 +161,7 @@ from Preview/startup. Inspect item completeness/native limits before coding.
    applying. PR11–16 already integrated; do not duplicate. Refresh upstream head.
 5. Automatic read policies and offer/permission/notification Attention remain.
 Newly observed upstream PR26 (Preferences reset confirmation) head
-6560c020435b61d1b226a2372ef8a91b8580d1b3 is queued for phase4 review, not
+16071c7d9f53d65214b34a8f18e6f0453e0313e3 is queued for phase4 review, not
 integrated. No functional MCP PR was in the latest actual open-PR collection.
 
 Latest feature-boundary PR search found no functional MCP PR; PR20/21 references
