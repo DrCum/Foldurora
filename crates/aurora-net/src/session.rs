@@ -7,6 +7,9 @@ mod abuse_reports;
 mod account;
 mod appearance_queue;
 mod asset_imports;
+mod assistant_inventory;
+mod assistant_take;
+mod assistant_upload;
 mod attach_queue;
 mod build_cmds;
 mod currency;
@@ -25,6 +28,7 @@ mod scripts;
 mod sim_requests;
 mod slm_net;
 mod task_notecard;
+mod teleport_cancel;
 mod terrain_raw;
 mod wearable_save;
 
@@ -132,6 +136,7 @@ impl ParcelVoice {
 }
 
 struct Sim {
+    incarnation: Uuid,
     circuit: Circuit,
     handle: RegionHandle,
     region_id: Uuid,
@@ -175,6 +180,7 @@ struct Sim {
 impl Sim {
     fn new(addr: SocketAddr, handle: RegionHandle) -> Sim {
         Sim {
+            incarnation: Uuid::new_v4(),
             circuit: Circuit::new(addr),
             handle,
             region_id: Uuid::nil(),
@@ -331,6 +337,8 @@ struct Session<'a> {
     agent_parcel: Option<Arc<ParcelInfo>>,
     /// Teleport by region name waiting for its MapBlockReply (lowercase name, position).
     pending_named_tp: Option<(String, Uuid)>,
+    teleport_cancel: teleport_cancel::Ledger,
+    assistant_takes: assistant_take::Pending,
     /// Object cache of each region, its files read and written off this
     /// loop (session/object_cache.rs).
     object_cache: object_cache::ObjectCaches,
@@ -352,6 +360,7 @@ struct Session<'a> {
     inventory_previews: inventory_preview::Previews,
     script_transfers: scripts::ScriptTransfers,
     inventory_callbacks: HashMap<u32, (Instant, bool)>,
+    assistant_creates: HashMap<u32, asset_imports::AssistantCreate>,
     inventory_copies: inventory_copies::Pending,
     attach_queue: attach_queue::AttachQueue,
     inventory_merchant_pending: bool,
@@ -524,6 +533,8 @@ pub(crate) async fn run_session(sh: &Shared, req: LoginRequest, cmd_rx: &mut mps
         login_arrival: true,
         agent_parcel: None,
         pending_named_tp: None,
+        teleport_cancel: teleport_cancel::Ledger::default(),
+        assistant_takes: Default::default(),
         object_cache,
         throttle: Throttle::new(sh.bandwidth_kbps.load(Ordering::Relaxed) as f32, Instant::now()).counting_from(packets_counted(&sh.stats)),
         social: Default::default(),
@@ -537,6 +548,7 @@ pub(crate) async fn run_session(sh: &Shared, req: LoginRequest, cmd_rx: &mut mps
         inventory_previews: Default::default(),
         script_transfers: Default::default(),
         inventory_callbacks: HashMap::new(),
+        assistant_creates: HashMap::new(),
         inventory_copies: inventory_copies::Pending::default(),
         attach_queue: Default::default(),
         notecard_copy_tx,
@@ -1601,6 +1613,36 @@ impl Session<'_> {
     // -------------------------------------------------------------- commands
 
     fn on_command(&mut self, c: NetCommand) {
+        if let NetCommand::AssistantTakeObject {
+            source,
+            request,
+            handle,
+            object,
+            local_id,
+            destination,
+            copy,
+        } = &c
+        {
+            self.assistant_take(source.clone(), *request, *handle, *object, *local_id, *destination, *copy);
+            return;
+        }
+        let tracked_teleport = if let NetCommand::TrackedTeleport { request, .. } = &c {
+            Some(*request)
+        } else {
+            None
+        };
+        if matches!(
+            &c,
+            NetCommand::TrackedTeleport { .. }
+                | NetCommand::TeleportTo { .. }
+                | NetCommand::TeleportHome
+                | NetCommand::TeleportLandmark(_)
+                | NetCommand::TeleportToRegion { .. }
+                | NetCommand::AcceptLure { .. }
+        ) {
+            let circuit = self.main.and_then(|addr| self.sims.get(&addr).map(|sim| (addr, sim.incarnation)));
+            self.teleport_cancel.begin(tracked_teleport, circuit);
+        }
         if self.on_object_action_command(&c)
             || self.on_social_command(&c)
             || self.on_offline_command(&c)
@@ -1611,6 +1653,7 @@ impl Session<'_> {
             return;
         }
         match c {
+            NetCommand::AssistantTakeObject { .. } => unreachable!("closed take dispatched above"),
             NetCommand::UpdateAgentLanguage => self.update_agent_language(),
             NetCommand::SetHoverHeight { region, request, value } => self.set_hover_height(region, request, value),
             NetCommand::SetMaturityPreference(maturity) => self.set_maturity_preference(maturity),
@@ -1627,6 +1670,7 @@ impl Session<'_> {
             NetCommand::FetchLslSyntax { id, cache_dir } => self.fetch_lsl_syntax(id, cache_dir),
             NetCommand::Login(_) => log::warn!("already logged in"),
             NetCommand::Logout => {
+                self.retire_assistant_uploads();
                 if self.logout_started.is_none() {
                     // LLAppViewer::requestQuit: a last report, then the logout
                     if self.agent_moved {
@@ -1724,7 +1768,10 @@ impl Session<'_> {
                 log::info!("Sending estate request 'restart' (-1: cancel)");
                 self.send_main(&m, true);
             }
-            NetCommand::TeleportTo { handle, position, look_at } => {
+            NetCommand::TeleportTo { handle, position, look_at }
+            | NetCommand::TrackedTeleport {
+                handle, position, look_at, ..
+            } => {
                 let mut m = TeleportLocationRequest::default();
                 m.agent_data.agent_id = self.agent_id();
                 m.agent_data.session_id = self.session_id();
@@ -1737,6 +1784,15 @@ impl Session<'_> {
                     || format!("TeleportLocationRequest sent (region {})", transition::grid(handle)),
                     &self.sh.stats,
                 );
+            }
+            NetCommand::TeleportCancel { request } => {
+                let circuit = self.main.and_then(|addr| self.sims.get(&addr).map(|sim| (addr, sim.incarnation)));
+                if let Some(addr) = self.teleport_cancel.cancel(request, circuit) {
+                    let mut message = TeleportCancel::default();
+                    message.info.agent_id = self.agent_id();
+                    message.info.session_id = self.session_id();
+                    self.send(addr, &message, true);
+                }
             }
             NetCommand::TeleportToRegion { request, name, .. } => {
                 // LLWorldMapMessage::sendNamedRegionRequest: the reply gives the grid position
@@ -1805,6 +1861,36 @@ impl Session<'_> {
                 m.agent_data.session_id = self.session_id();
                 m.transaction_block.transaction_id = transaction;
                 self.send_main(&m, true);
+            }
+            NetCommand::AssistantDialogReply {
+                source,
+                request,
+                circuit,
+                region,
+                sender,
+                object,
+                channel,
+                index,
+                label,
+            } => {
+                let accepted = source.matches_login(&self.login, self.agent_id())
+                    && self
+                        .sims
+                        .get(&sender)
+                        .is_some_and(|sim| sim.incarnation == circuit && sim.handle == region)
+                    && label.len() <= 250
+                    && !label.contains('\0');
+                if accepted {
+                    let mut m = ScriptDialogReply::default();
+                    m.agent_data.agent_id = self.agent_id();
+                    m.agent_data.session_id = self.session_id();
+                    m.data.object_id = object;
+                    m.data.chat_channel = channel;
+                    m.data.button_index = index;
+                    m.data.button_label = str_field(&label);
+                    self.send(sender, &m, true);
+                }
+                emit(self.sh, NetEvent::AssistantDialogSubmitted { source, request, accepted });
             }
             NetCommand::ScriptDialogReply {
                 sender,
@@ -2185,6 +2271,23 @@ impl Session<'_> {
                     .push(pointat_effect(self.agent_id(), effect, target, offset, kind, duration));
                 self.send_main(&m, false);
             }
+            NetCommand::SelectionBeam {
+                effect,
+                target,
+                position,
+                color,
+                duration,
+            } => {
+                if position.iter().any(|v| !v.is_finite()) || !duration.is_finite() || !(0.0..=60.0).contains(&duration) {
+                    return;
+                }
+                let mut m = ViewerEffect::default();
+                m.agent_data.agent_id = self.agent_id();
+                m.agent_data.session_id = self.session_id();
+                m.effect
+                    .push(selection_beam_effect(self.agent_id(), effect, target, position, color, duration));
+                self.send_main(&m, false);
+            }
             NetCommand::ResetSkeleton {
                 effect,
                 target,
@@ -2306,6 +2409,19 @@ impl Session<'_> {
                 );
             }
             NetCommand::FetchInventory { folders, owner, library } => self.fetch_inventory(folders, owner, library),
+            NetCommand::CreateAssistantInventoryLink { request, parent, link } => {
+                self.create_assistant_inventory_link(request, parent, link)
+            }
+            NetCommand::ReadAssistantLandmark { request, item } => self.read_assistant_landmark(request, *item),
+            NetCommand::FetchAssistantInventoryFolder {
+                request,
+                parent,
+                owner,
+                library,
+            } => self.fetch_assistant_inventory_folder(request, parent, owner, library),
+            NetCommand::FetchAssistantInventoryItems { request, items, owner } => {
+                self.fetch_assistant_inventory_items(request, items, owner)
+            }
             NetCommand::FetchInventoryTree {
                 request,
                 parent,
@@ -2482,6 +2598,106 @@ impl Session<'_> {
                 });
             }
             NetCommand::UploadAsset { request, upload } => self.import_asset(request, upload),
+            NetCommand::PrepareAssistantThumbnail {
+                source,
+                request,
+                item,
+                folder,
+                parent,
+                data,
+            } => {
+                if source.matches_login(&self.login, self.agent_id()) {
+                    self.prepare_assistant_thumbnail(request, item, folder, parent, data);
+                } else {
+                    emit(
+                        self.sh,
+                        NetEvent::AssistantUploadReady {
+                            request,
+                            result: Err(crate::inventory::upload::Error::Unavailable),
+                        },
+                    );
+                }
+            }
+            NetCommand::VerifyAssistantSnapshotTexture { source, request, approved } => {
+                if source.matches_login(&self.login, self.agent_id()) {
+                    self.verify_assistant_upload(request, approved, true);
+                }
+            }
+            NetCommand::AssignAssistantUploadThumbnail {
+                source,
+                request,
+                item,
+                folder,
+                parent,
+                approved,
+            } => {
+                if source.matches_login(&self.login, self.agent_id()) {
+                    self.assign_assistant_upload_thumbnail(request, item, folder, parent, approved);
+                }
+            }
+            NetCommand::PatchAssistantThumbnail { source, request, approved } => {
+                if source.matches_login(&self.login, self.agent_id()) {
+                    self.patch_assistant_thumbnail(request, approved);
+                }
+            }
+            NetCommand::VerifyAssistantThumbnail { source, request, approved } => {
+                if source.matches_login(&self.login, self.agent_id()) {
+                    self.verify_assistant_thumbnail(request, approved);
+                }
+            }
+            NetCommand::PrepareAssistantUpload { source, request, upload } => {
+                if source.matches_login(&self.login, self.agent_id()) {
+                    self.prepare_assistant_upload(request, upload)
+                } else {
+                    emit(
+                        self.sh,
+                        NetEvent::AssistantUploadReady {
+                            request,
+                            result: Err(crate::inventory::upload::Error::Unavailable),
+                        },
+                    )
+                }
+            }
+            NetCommand::FinishAssistantUpload { source, request, approved } => {
+                if source.matches_login(&self.login, self.agent_id()) {
+                    self.finish_assistant_upload(request, approved)
+                } else {
+                    emit(
+                        self.sh,
+                        NetEvent::AssistantUploadCommitted {
+                            request,
+                            result: Err(crate::inventory::upload::Error::Unavailable),
+                        },
+                    )
+                }
+            }
+            NetCommand::VerifyAssistantUpload { source, request, approved } => {
+                if source.matches_login(&self.login, self.agent_id()) {
+                    self.verify_assistant_upload(request, approved, false)
+                } else {
+                    emit(
+                        self.sh,
+                        NetEvent::AssistantUploadVerified {
+                            source,
+                            request,
+                            result: Err(crate::inventory::upload::Error::Unavailable),
+                        },
+                    )
+                }
+            }
+            NetCommand::CreateAssistantUploadFolder { source, request, folder } => {
+                if source.matches_login(&self.login, self.agent_id()) {
+                    self.create_assistant_upload_folder(request, folder)
+                } else {
+                    emit(
+                        self.sh,
+                        NetEvent::AssistantUploadFolderCreated {
+                            request,
+                            result: Err("stale_upload_source".into()),
+                        },
+                    )
+                }
+            }
             NetCommand::QuoteMesh { request, upload } => self.quote_mesh(request, upload),
             NetCommand::UploadMesh { request, token } => self.upload_mesh(request, token),
             NetCommand::DiscardMeshQuote(token) => self.discard_mesh_quote(token),
@@ -2788,6 +3004,38 @@ impl Session<'_> {
                 permissions,
             } => {
                 self.create_notecard_item(request, parent, name, data, permissions);
+            }
+            NetCommand::FinishAssistantInventoryItem { request, approved } => self.finish_assistant_inventory_item(request, approved),
+            NetCommand::CreateAssistantInventoryItem {
+                request,
+                parent,
+                kind,
+                name,
+                description,
+                wearable_data,
+                permissions,
+            } => {
+                if let crate::inventory::operations::NewItem::Wearable(kind) = kind {
+                    self.create_assistant_wearable(
+                        request,
+                        parent,
+                        kind,
+                        name,
+                        description,
+                        wearable_data.unwrap_or_default(),
+                        permissions,
+                    );
+                } else if wearable_data.is_none() {
+                    self.create_assistant_inventory_item(request, parent, kind, name, description, permissions);
+                } else {
+                    emit(
+                        self.sh,
+                        NetEvent::AssistantInventoryCreated {
+                            request,
+                            result: Err("Unexpected native creation payload".into()),
+                        },
+                    );
+                }
             }
             NetCommand::CreateInventoryItem {
                 parent,
@@ -3836,6 +4084,9 @@ impl Session<'_> {
                 }
             }
             "TeleportFinish" => {
+                if self.main == Some(e.sim) {
+                    self.teleport_cancel.retire();
+                }
                 let info = &b["Info"][0];
                 transition::step(|| {
                     format!(
@@ -3889,6 +4140,9 @@ impl Session<'_> {
                 self.on_land_stat_reply(sim, b);
             }
             "TeleportFailed" => {
+                if self.main == Some(e.sim) {
+                    self.teleport_cancel.retire();
+                }
                 let reason = b["Info"][0]["Reason"].as_str().to_owned();
                 transition::end(
                     Some(transition::Kind::Teleport),
@@ -3952,6 +4206,7 @@ impl Session<'_> {
     }
 
     fn switch_region(&mut self, handle: RegionHandle, ip: Option<Ipv4Addr>, port: u16, seed: String, size: (u32, u32)) {
+        self.teleport_cancel.retire();
         let Some(ip) = ip else {
             log::warn!("region switch without IP");
             return;
@@ -4254,8 +4509,12 @@ impl Session<'_> {
         } else if id == ObjectPropertiesFamily::ID {
             let m: ObjectPropertiesFamily = pkt.decode()?;
             emit(self.sh, NetEvent::ObjectProperties(vec![build_cmds::parse_family(&m)]));
+        } else if id == DeRezAck::ID {
+            let m: DeRezAck = pkt.decode()?;
+            self.assistant_take_ack(from, m.transaction_data.transaction_id, m.transaction_data.success);
         } else if id == KillObject::ID {
             let m: KillObject = pkt.decode()?;
+            self.assistant_take_removed(from, &m.object_data.iter().map(|o| o.id).collect::<Vec<_>>());
             crate::probe::objects(crate::probe::ObjectKind::Killed, m.object_data.len());
             emit(
                 self.sh,
@@ -4300,15 +4559,20 @@ impl Session<'_> {
             let owner_id = m.owner_data.first().map_or(Uuid::nil(), |o| o.owner_id);
             emit(
                 self.sh,
-                NetEvent::ScriptDialog {
+                NetEvent::AssistantDialogObserved {
+                    source: LoginSource::from_login(&self.login),
+                    circuit: self.sims.get(&from).map_or(Uuid::nil(), |sim| sim.incarnation),
+                    region: self.handle_of(from),
                     sender: from,
-                    object_id: d.object_id,
-                    object_name: field_str(&d.object_name),
-                    owner_name: owner.trim().to_owned(),
-                    owner_id,
-                    message: field_str(&d.message),
-                    channel: d.chat_channel,
-                    buttons: m.buttons.iter().map(|b| field_str(&b.button_label)).collect(),
+                    dialog: crate::types::NativeDialog {
+                        object: d.object_id,
+                        name: field_str(&d.object_name),
+                        owner_name: owner.trim().to_owned(),
+                        owner: owner_id,
+                        message: field_str(&d.message),
+                        channel: d.chat_channel,
+                        buttons: m.buttons.iter().map(|b| field_str(&b.button_label)).collect(),
+                    },
                 },
             );
         } else if id == SaveAssetIntoInventory::ID {
@@ -4618,6 +4882,9 @@ impl Session<'_> {
                 transition::step(|| format!("RegionHandshake from region {}, reply sent", transition::grid(self.handle_of(from))));
             }
         } else if id == AgentMovementComplete::ID {
+            if self.main == Some(from) {
+                self.teleport_cancel.retire();
+            }
             let m: AgentMovementComplete = pkt.decode()?;
             transition::step(|| format!("AgentMovementComplete from region {}", transition::grid(m.data.region_handle)));
             // (a crossing settles in a few seconds; a teleport ends when the
@@ -5008,7 +5275,7 @@ impl Session<'_> {
                     .collect::<Vec<_>>(),
             );
             if let Some(parameter) = m.param_list.first() {
-                self.on_inventory_generic(m.agent_data.agent_id, &m.method_data.method, &parameter.parameter);
+                self.on_inventory_generic(from, m.agent_data.agent_id, &m.method_data.method, &parameter.parameter);
             }
         } else if id == LargeGenericMessage::ID {
             let m: LargeGenericMessage = pkt.decode()?;
@@ -5023,17 +5290,18 @@ impl Session<'_> {
                     .collect::<Vec<_>>(),
             );
             if let Some(parameter) = m.param_list.first() {
-                self.on_inventory_generic(m.agent_data.agent_id, &m.method_data.method, &parameter.parameter);
+                self.on_inventory_generic(from, m.agent_data.agent_id, &m.method_data.method, &parameter.parameter);
             }
         } else if id == UpdateCreateInventoryItem::ID {
             let m: UpdateCreateInventoryItem = pkt.decode()?;
             if m.agent_data.agent_id == self.agent_id() {
                 let mut created = Vec::new();
-                let items = m
+                let items: Vec<_> = m
                     .inventory_data
                     .iter()
                     .map(|it| {
                         let item = crate::inventory::operations::item_from_udp(it);
+                        self.assistant_inventory_created(it.callback_id, &item);
                         self.asset_created(it.callback_id, &item);
                         self.accept_inventory_copy(it.callback_id, &item);
                         if let Some((editor, notecard, open)) = self.notecard_copies.remove(&it.callback_id) {
@@ -5057,9 +5325,10 @@ impl Session<'_> {
                     self.sh,
                     NetEvent::InventoryUpdated {
                         folders: Vec::new(),
-                        items,
+                        items: items.clone(),
                     },
                 );
+                self.assistant_take_items(from, m.agent_data.transaction_id, m.agent_data.sim_approved, &items);
                 for item in created {
                     emit(self.sh, NetEvent::InventoryCreated(item));
                 }
@@ -5068,7 +5337,7 @@ impl Session<'_> {
             let m: BulkUpdateInventory = pkt.decode()?;
             if m.agent_data.agent_id == self.agent_id() {
                 let mut created = Vec::new();
-                let items = m
+                let items: Vec<_> = m
                     .item_data
                     .iter()
                     .map(|it| {
@@ -5101,6 +5370,7 @@ impl Session<'_> {
                         if new {
                             created.push(item.clone());
                         }
+                        self.assistant_inventory_created(it.callback_id, &item);
                         self.asset_created(it.callback_id, &item);
                         if let Some((editor, notecard, open)) = self.notecard_copies.remove(&it.callback_id) {
                             emit(
@@ -5130,7 +5400,21 @@ impl Session<'_> {
                     })
                     .collect();
                 let delivered = folders.iter().map(|folder: &crate::inventory::InvFolder| folder.id).collect();
-                emit(self.sh, NetEvent::InventoryUpdated { folders, items });
+                emit(
+                    self.sh,
+                    NetEvent::InventoryUpdated {
+                        folders,
+                        items: items.clone(),
+                    },
+                );
+                self.assistant_take_inventory(
+                    from,
+                    assistant_take::InventoryObservation {
+                        transaction: m.agent_data.transaction_id,
+                        kind: assistant_take::InventoryKind::Bulk,
+                    },
+                    &items,
+                );
                 if !m.agent_data.transaction_id.is_nil() {
                     emit(
                         self.sh,
@@ -5203,6 +5487,12 @@ impl Session<'_> {
                 },
             );
         } else if id == TeleportStart::ID {
+            let message: TeleportStart = pkt.decode()?;
+            if self.main == Some(from)
+                && let Some(sim) = self.sims.get(&from)
+            {
+                self.teleport_cancel.started((from, sim.incarnation), message.info.teleport_flags);
+            }
             if transition::current() == Some(transition::Kind::Teleport) {
                 transition::step(|| "TeleportStart".to_string());
             } else {
@@ -5223,6 +5513,9 @@ impl Session<'_> {
                 },
             );
         } else if id == TeleportFailed::ID {
+            if self.main == Some(from) {
+                self.teleport_cancel.retire();
+            }
             let m: TeleportFailed = pkt.decode()?;
             transition::end(
                 Some(transition::Kind::Teleport),
@@ -5298,6 +5591,18 @@ impl Session<'_> {
                             animations,
                         },
                     );
+                } else if let Some((source, target, position, color)) = parse_selection_beam(e) {
+                    emit(
+                        self.sh,
+                        NetEvent::SelectionBeam {
+                            effect: e.id,
+                            source,
+                            target,
+                            position,
+                            color,
+                            duration: e.duration,
+                        },
+                    );
                 }
             }
         } else if id == SoundTrigger::ID {
@@ -5353,6 +5658,9 @@ impl Session<'_> {
                 ),
             );
         } else if id == TeleportLocal::ID {
+            if self.main == Some(from) {
+                self.teleport_cancel.retire();
+            }
             let m: TeleportLocal = pkt.decode()?;
             transition::step(|| "TeleportLocal (inside the region)".to_string());
             transition::arrived(Duration::from_secs(2));
@@ -5671,6 +5979,44 @@ mod script_teleport_tests {
 fn parse_lookat(e: &msgs::viewer_effect::Effect) -> Option<(uuid::Uuid, uuid::Uuid, [f64; 3], u8)> {
     parse_attention(e, HUD_EFFECT_LOOKAT)
 }
+fn selection_beam_effect(
+    agent: uuid::Uuid,
+    effect: uuid::Uuid,
+    target: uuid::Uuid,
+    position: [f64; 3],
+    color: [u8; 4],
+    duration: f32,
+) -> msgs::viewer_effect::Effect {
+    let mut type_data = Vec::with_capacity(56);
+    type_data.extend_from_slice(agent.as_bytes());
+    type_data.extend_from_slice(target.as_bytes());
+    for v in position {
+        type_data.extend_from_slice(&v.to_le_bytes());
+    }
+    msgs::viewer_effect::Effect {
+        id: effect,
+        agent_id: agent,
+        type_: 7,
+        duration,
+        color: color.to_vec(),
+        type_data,
+    }
+}
+fn parse_selection_beam(e: &msgs::viewer_effect::Effect) -> Option<(uuid::Uuid, uuid::Uuid, [f64; 3], [u8; 4])> {
+    if e.type_ != 7 || e.type_data.len() != 56 || e.color.len() != 4 || !e.duration.is_finite() || !(0.0..=60.).contains(&e.duration) {
+        return None;
+    }
+    let source = uuid::Uuid::from_slice(&e.type_data[..16]).ok()?;
+    let target = uuid::Uuid::from_slice(&e.type_data[16..32]).ok()?;
+    let mut position = [0.; 3];
+    for (i, v) in position.iter_mut().enumerate() {
+        *v = f64::from_le_bytes(e.type_data[32 + i * 8..40 + i * 8].try_into().ok()?);
+        if !v.is_finite() {
+            return None;
+        }
+    }
+    Some((source, target, position, e.color.as_slice().try_into().ok()?))
+}
 
 fn pointat_effect(
     agent: uuid::Uuid,
@@ -5716,6 +6062,21 @@ const RESET_SKELETON_PKT_SIZE: usize = 17;
 #[cfg(test)]
 mod pointat_tests {
     use super::*;
+    #[test]
+    fn native_selection_beam_uses_only_type_seven_exact_finite_payload() {
+        let source = uuid::Uuid::new_v4();
+        let target = uuid::Uuid::new_v4();
+        let mut e = selection_beam_effect(source, uuid::Uuid::new_v4(), target, [1., 2., 3.], [1, 2, 3, 4], 1.);
+        assert_eq!(e.type_data.len(), 56);
+        assert_eq!(parse_selection_beam(&e), Some((source, target, [1., 2., 3.], [1, 2, 3, 4])));
+        e.type_ = 1;
+        assert!(parse_selection_beam(&e).is_none());
+        e.type_ = 7;
+        e.type_data[32..40].copy_from_slice(&f64::NAN.to_le_bytes());
+        assert!(parse_selection_beam(&e).is_none());
+        e.type_data.pop();
+        assert!(parse_selection_beam(&e).is_none());
+    }
 
     #[test]
     fn pointat_roundtrip_matches_the_legacy_packet_and_rejects_bad_data() {
@@ -6334,6 +6695,8 @@ mod event_queue_tests {
             login_arrival: false,
             agent_parcel: None,
             pending_named_tp: None,
+            teleport_cancel: teleport_cancel::Ledger::default(),
+            assistant_takes: Default::default(),
             object_cache: object_cache::ObjectCaches::new(None).0,
             throttle: crate::throttle::Throttle::new(crate::throttle::DEFAULT_KBPS, Instant::now()),
             social: Default::default(),
@@ -6347,6 +6710,7 @@ mod event_queue_tests {
             inventory_previews: Default::default(),
             script_transfers: Default::default(),
             inventory_callbacks: HashMap::new(),
+            assistant_creates: HashMap::new(),
             inventory_copies: inventory_copies::Pending::default(),
             attach_queue: Default::default(),
             inventory_merchant_pending: false,
@@ -6677,6 +7041,8 @@ mod script_dialog_tests {
             login_arrival: false,
             agent_parcel: None,
             pending_named_tp: None,
+            teleport_cancel: teleport_cancel::Ledger::default(),
+            assistant_takes: Default::default(),
             object_cache: super::object_cache::ObjectCaches::new(None).0,
             throttle: crate::throttle::Throttle::new(crate::throttle::DEFAULT_KBPS, Instant::now()),
             social: Default::default(),
@@ -6690,6 +7056,7 @@ mod script_dialog_tests {
             inventory_previews: Default::default(),
             script_transfers: Default::default(),
             inventory_callbacks: HashMap::new(),
+            assistant_creates: HashMap::new(),
             inventory_copies: super::inventory_copies::Pending::default(),
             attach_queue: Default::default(),
             inventory_merchant_pending: false,
@@ -7011,17 +7378,16 @@ mod script_dialog_tests {
                 session
                     .dispatch(origin_addr, &parse_packet(&bytes).expect("menu packet"))
                     .expect("dispatch menu");
-                let NetEvent::ScriptDialog {
-                    sender,
-                    object_id,
-                    owner_id,
+                let NetEvent::AssistantDialogObserved { sender, dialog, .. } = received.try_recv().expect("menu event").1 else {
+                    panic!("script menu")
+                };
+                let NativeDialog {
+                    object: object_id,
+                    owner: owner_id,
                     channel: received_channel,
                     buttons,
                     ..
-                } = received.try_recv().expect("menu event").1
-                else {
-                    panic!("script menu")
-                };
+                } = dialog;
                 assert_eq!(sender, origin_addr);
                 assert_eq!((object_id, received_channel), (object, channel));
                 assert_eq!(owner_id, owner.unwrap_or_default());
@@ -7153,6 +7519,364 @@ mod script_dialog_tests {
             assert!(parts.iter().all(|p| p.len() <= 1023 && p.ends_with("word")), "{im}");
             assert_eq!(parts.join(" "), words);
             assert!(main.try_recv_from(&mut large).is_err(), "three parts only");
+        }
+    }
+    #[tokio::test]
+    async fn assistant_take_packets_and_callbacks_require_exact_transaction_login_and_circuit() {
+        let sock = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let sim = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let other = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let addr = sim.local_addr().unwrap();
+        let foreign = other.local_addr().unwrap();
+        let (events, received) = crossbeam_channel::unbounded();
+        let sh = test_shared(events);
+        let mut session = test_session(
+            &sh,
+            sock.clone(),
+            [(addr, Sim::new(addr, 10)), (foreign, Sim::new(foreign, 20))].into(),
+            addr,
+        );
+        sock.writable().await.unwrap();
+        let source = LoginSource::from_login(&session.login);
+        let request = Uuid::new_v4();
+        let destination = Uuid::new_v4();
+        session.on_command(NetCommand::AssistantTakeObject {
+            source: source.clone(),
+            request,
+            handle: 10,
+            object: Uuid::new_v4(),
+            local_id: 17,
+            destination,
+            copy: true,
+        });
+        assert!(
+            matches!(received.try_recv().unwrap().1,NetEvent::AssistantTake{request:id,progress:NativeTakeProgress::Submitted{..},..}if id==request)
+        );
+        let mut bytes = [0; 2048];
+        let (size, _) = tokio::time::timeout(Duration::from_secs(2), sim.recv_from(&mut bytes))
+            .await
+            .unwrap()
+            .unwrap();
+        let message: DeRezObject = parse_packet(&bytes[..size]).unwrap().decode().unwrap();
+        assert_eq!(message.agent_block.transaction_id, request);
+        assert_eq!(message.agent_block.destination_id, destination);
+        assert_eq!(message.agent_block.destination, crate::build::derez::ACQUIRE_TO_AGENT_INVENTORY);
+        assert_eq!(message.object_data[0].object_local_id, 17);
+        session.assistant_take_ack(foreign, request, true);
+        session.assistant_take_ack(addr, Uuid::new_v4(), true);
+        assert!(received.try_recv().is_err());
+        session.assistant_take_ack(addr, request, true);
+        assert!(
+            matches!(received.try_recv().unwrap().1,NetEvent::AssistantTake{request:id,progress:NativeTakeProgress::Ack(true),..}if id==request)
+        );
+        session.assistant_take_items(addr, Uuid::new_v4(), true, &[]);
+        assert!(received.try_recv().is_err());
+        session.assistant_take_removed(addr, &[99]);
+        assert!(received.try_recv().is_err());
+        session.assistant_take_removed(addr, &[17]);
+        assert!(
+            matches!(received.try_recv().unwrap().1,NetEvent::AssistantTake{request:id,progress:NativeTakeProgress::Removed,..}if id==request)
+        );
+        session.sims.insert(addr, Sim::new(addr, 10));
+        session.assistant_take_ack(addr, request, true);
+        session.assistant_take_items(addr, request, true, &[]);
+        assert!(received.try_recv().is_err());
+        let next = Uuid::new_v4();
+        session.on_command(NetCommand::AssistantTakeObject {
+            source,
+            request: next,
+            handle: 10,
+            object: Uuid::new_v4(),
+            local_id: 18,
+            destination,
+            copy: false,
+        });
+        received.try_recv().unwrap();
+        session.login = test_login(addr.port());
+        session.assistant_take_ack(addr, next, true);
+        assert!(
+            received.try_recv().is_err(),
+            "numeric session equality cannot revive an old login Arc"
+        );
+    }
+    #[tokio::test]
+    async fn assistant_dialog_circuit_reuse_rejects_stale_reply_without_sending() {
+        let sock = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let sim = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let addr = sim.local_addr().unwrap();
+        let (events, received) = crossbeam_channel::unbounded();
+        let sh = test_shared(events);
+        let mut session = test_session(&sh, sock.clone(), [(addr, Sim::new(addr, 10))].into(), addr);
+        sock.writable().await.unwrap();
+        let old = session.sims[&addr].incarnation;
+        let source = LoginSource::from_login(&session.login);
+        session.sims.insert(addr, Sim::new(addr, 10));
+        let request = Uuid::new_v4();
+        session.on_command(NetCommand::AssistantDialogReply {
+            source,
+            request,
+            circuit: old,
+            region: 10,
+            sender: addr,
+            object: Uuid::new_v4(),
+            channel: -42,
+            index: 0,
+            label: "exact".into(),
+        });
+        assert!(matches!(received.try_recv().unwrap().1,NetEvent::AssistantDialogSubmitted{request:id,accepted:false,..}if id==request));
+        let mut bytes = [0; 2048];
+        assert!(sim.try_recv_from(&mut bytes).is_err());
+    }
+    fn take_inventory_document(agent: Uuid, transaction: Uuid, item: Uuid, destination: Uuid) -> Llsd {
+        aurora_llsd::llsd_map! {"transaction_id"=>transaction,"item_data"=>Llsd::Array(vec![aurora_llsd::llsd_map! {
+            "agent_id"=>agent,"item_id"=>item,"parent_id"=>destination,"type"=>6,
+            "permissions"=>aurora_llsd::llsd_map! {"owner_id"=>agent}
+        }])}
+    }
+    fn take_inventory_eq(
+        address: SocketAddr,
+        agent: Uuid,
+        transaction: Uuid,
+        item: Uuid,
+        destination: Uuid,
+        name: &str,
+        approval: Option<bool>,
+    ) -> EqEvent {
+        use aurora_llsd::llsd_map;
+        let mut agent_data = llsd_map! {"AgentID"=>agent,"TransactionID"=>transaction};
+        if let Some(value) = approval {
+            agent_data.insert("SimApproved", Llsd::Boolean(value));
+        }
+        let generic = matches!(name, "GenericMessage" | "LargeGenericMessage");
+        let mut body = llsd_map! {"AgentData"=>Llsd::Array(vec![agent_data])};
+        if generic {
+            body.insert(
+                "MethodData",
+                Llsd::Array(vec![llsd_map! {"Method"=>Llsd::Binary(b"BulkUpdateInventory\0".to_vec())}]),
+            );
+            body.insert("ParamList",Llsd::Array(vec![llsd_map!{"Parameter"=>Llsd::Binary(aurora_llsd::to_binary(&take_inventory_document(agent,transaction,item,destination)))}]));
+        } else {
+            body.insert(
+                if name == "BulkUpdateInventory" {
+                    "ItemData"
+                } else {
+                    "InventoryData"
+                },
+                Llsd::Array(vec![llsd_map! {
+                    "ItemID"=>item,"FolderID"=>destination,"OwnerID"=>agent,"Type"=>6,"InvType"=>6
+                }]),
+            );
+        }
+        EqEvent {
+            sim: address,
+            message: name.into(),
+            body,
+        }
+    }
+    fn take_inventory_udp(
+        session: &mut Session<'_>,
+        address: SocketAddr,
+        agent: Uuid,
+        transaction: Uuid,
+        item: Uuid,
+        destination: Uuid,
+        name: &str,
+    ) {
+        let mut bytes = Vec::new();
+        match name {
+            "UpdateCreateInventoryItem" => {
+                let mut m = UpdateCreateInventoryItem::default();
+                m.agent_data.agent_id = agent;
+                m.agent_data.transaction_id = transaction;
+                m.agent_data.sim_approved = true;
+                m.inventory_data.push(msgs::update_create_inventory_item::InventoryData {
+                    item_id: item,
+                    folder_id: destination,
+                    owner_id: agent,
+                    type_: 6,
+                    inv_type: 6,
+                    ..Default::default()
+                });
+                aurora_msg::build_packet(&m, 1, true, false, &[], &mut bytes);
+            }
+            "BulkUpdateInventory" => {
+                let mut m = BulkUpdateInventory::default();
+                m.agent_data.agent_id = agent;
+                m.agent_data.transaction_id = transaction;
+                m.item_data.push(msgs::bulk_update_inventory::ItemData {
+                    item_id: item,
+                    folder_id: destination,
+                    owner_id: agent,
+                    type_: 6,
+                    inv_type: 6,
+                    ..Default::default()
+                });
+                aurora_msg::build_packet(&m, 1, true, false, &[], &mut bytes);
+            }
+            name => {
+                let parameter = aurora_llsd::to_binary(&take_inventory_document(agent, transaction, item, destination));
+                if name == "GenericMessage" {
+                    assert!(parameter.len() <= 255);
+                    let mut m = GenericMessage::default();
+                    m.agent_data.agent_id = agent;
+                    m.method_data.method = b"BulkUpdateInventory\0".to_vec();
+                    m.param_list.push(msgs::generic_message::ParamList { parameter });
+                    aurora_msg::build_packet(&m, 1, true, false, &[], &mut bytes);
+                } else {
+                    let mut m = LargeGenericMessage::default();
+                    m.agent_data.agent_id = agent;
+                    m.method_data.method = b"BulkUpdateInventory\0".to_vec();
+                    m.param_list.push(msgs::large_generic_message::ParamList { parameter });
+                    aurora_msg::build_packet(&m, 1, true, false, &[], &mut bytes);
+                }
+            }
+        }
+        session.dispatch(address, &parse_packet(&bytes).unwrap()).unwrap();
+    }
+    #[tokio::test]
+    async fn assistant_take_inventory_evidence_covers_udp_eq_bulk_and_generic_without_changing_delivery() {
+        let sock = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let sim = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let address = sim.local_addr().unwrap();
+        let (events, received) = crossbeam_channel::unbounded();
+        let sh = test_shared(events);
+        let mut session = test_session(&sh, sock.clone(), [(address, Sim::new(address, 10))].into(), address);
+        sock.writable().await.unwrap();
+        for eq in [false, true] {
+            for name in [
+                "UpdateCreateInventoryItem",
+                "BulkUpdateInventory",
+                "GenericMessage",
+                "LargeGenericMessage",
+            ] {
+                let transaction = Uuid::new_v4();
+                let item = Uuid::new_v4();
+                let destination = Uuid::new_v4();
+                let agent = session.agent_id();
+                session.on_command(NetCommand::AssistantTakeObject {
+                    source: LoginSource::from_login(&session.login),
+                    request: transaction,
+                    handle: 10,
+                    object: Uuid::new_v4(),
+                    local_id: 17,
+                    destination,
+                    copy: true,
+                });
+                received.try_recv().unwrap();
+                if eq {
+                    session.on_eq_event(take_inventory_eq(address, agent, transaction, item, destination, name, Some(true)));
+                } else {
+                    take_inventory_udp(&mut session, address, agent, transaction, item, destination, name);
+                }
+                let events = received.try_iter().map(|(_, e)| e).collect::<Vec<_>>();
+                let updated = events
+                    .iter()
+                    .position(|e| matches!(e,NetEvent::InventoryUpdated{items,..}if items.iter().any(|i|i.id==item)))
+                    .expect("ordinary inventory applies");
+                let observed=events.iter().position(|e|matches!(e,NetEvent::AssistantTake{request,progress:NativeTakeProgress::Items(items),..}if *request==transaction && items.len()==1 && items[0].id==item && items[0].owner==agent && items[0].parent==destination)).expect("exact Take items observed");
+                assert!(updated < observed, "native cache must precede private receipt evidence");
+                assert_eq!(
+                    events.iter().any(|e| matches!(e, NetEvent::InventoryDelivery { .. })),
+                    name != "UpdateCreateInventoryItem",
+                    "ordinary Create delivery semantics unchanged"
+                );
+                assert!(
+                    !events.iter().any(|e| matches!(
+                        e,
+                        NetEvent::AssistantTake {
+                            progress: NativeTakeProgress::Ack(_),
+                            ..
+                        }
+                    )),
+                    "item evidence is never an invented acknowledgement"
+                );
+            }
+        }
+    }
+    #[tokio::test]
+    async fn assistant_take_eq_evidence_requires_raw_transaction_explicit_create_approval_and_original_source() {
+        let sock = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let sim = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let other = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let address = sim.local_addr().unwrap();
+        let foreign = other.local_addr().unwrap();
+        let (events, received) = crossbeam_channel::unbounded();
+        let sh = test_shared(events);
+        let mut session = test_session(
+            &sh,
+            sock.clone(),
+            [(address, Sim::new(address, 10)), (foreign, Sim::new(foreign, 20))].into(),
+            address,
+        );
+        sock.writable().await.unwrap();
+        for fault in 0..8 {
+            let request = Uuid::new_v4();
+            let destination = Uuid::new_v4();
+            let item = Uuid::new_v4();
+            let agent = session.agent_id();
+            session.on_command(NetCommand::AssistantTakeObject {
+                source: LoginSource::from_login(&session.login),
+                request,
+                handle: 10,
+                object: Uuid::new_v4(),
+                local_id: 17,
+                destination,
+                copy: true,
+            });
+            received.try_recv().unwrap();
+            let transaction = match fault {
+                0 => Uuid::nil(),
+                1 => Uuid::new_v4(),
+                _ => request,
+            };
+            let approval = match fault {
+                2 => None,
+                3 => Some(false),
+                _ => Some(true),
+            };
+            if fault == 5 {
+                session.sims.insert(address, Sim::new(address, 10));
+            }
+            if fault == 6 {
+                session.login = test_login(address.port());
+            }
+            let sender = if fault == 4 { foreign } else { address };
+            let recipient = if fault == 7 { Uuid::new_v4() } else { agent };
+            session.on_eq_event(take_inventory_eq(
+                sender,
+                recipient,
+                transaction,
+                item,
+                destination,
+                "UpdateCreateInventoryItem",
+                approval,
+            ));
+            let events = received.try_iter().map(|(_, e)| e).collect::<Vec<_>>();
+            assert!(
+                !events.iter().any(|e| matches!(
+                    e,
+                    NetEvent::AssistantTake {
+                        progress: NativeTakeProgress::Items(_),
+                        ..
+                    }
+                )),
+                "fault {fault} must not provide positive item evidence"
+            );
+            assert_eq!(
+                events.iter().any(|e| matches!(
+                    e,
+                    NetEvent::AssistantTake {
+                        progress: NativeTakeProgress::Rejected,
+                        ..
+                    }
+                )),
+                fault == 3,
+                "only explicit negative Create approval is a native rejection"
+            );
+            assert!(
+                !events.iter().any(|e| matches!(e, NetEvent::InventoryDelivery { .. })),
+                "private raw transaction must not add an ordinary Create delivery"
+            );
         }
     }
 }

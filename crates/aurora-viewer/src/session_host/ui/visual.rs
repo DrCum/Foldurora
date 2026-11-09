@@ -188,7 +188,7 @@ impl Frames {
         raw.viewports.entry(raw.viewport_id).or_default().native_pixels_per_point = Some(self.scale);
         let palette = self.theme.palette();
         let mut action = None;
-        let output = self.context.run_ui(raw, |ui| {
+        let mut output = self.context.run_ui(raw, |ui| {
             let shown = self.host.show(ui, &palette, snapshot, true, Some(self.hosted), false);
             self.world = shown.world;
             action = action.take().or(shown.action);
@@ -212,6 +212,7 @@ impl Frames {
             output.pixels_per_point,
             palette.panel,
         );
+        output.textures_delta.clear();
         action
     }
 
@@ -451,4 +452,193 @@ fn compact_host_cpu_visual_fixture() {
     });
     std::fs::write(directory.join("manifest.json"), serde_json::to_vec_pretty(&manifest).unwrap()).unwrap();
     println!("CPU compact-host visual captures: {}", directory.display());
+}
+
+/// Full shared HostUi path: discovery, frozen source review and native choices.
+#[test]
+#[ignore = "explicit isolated CPU capture; set AURORA_MCP_VISUAL_DIR and AURORA_MCP_VISUAL_LANGUAGE"]
+fn host_mcp_cpu_visual_fixture() {
+    use crate::ui::test_cpu::{Environment, Frames as CpuFrames, enter, pointer, rect_json};
+    use aurora_mcp::authority::{
+        ApprovalDecision, Authority, AuthorityLevel, MetadataLabel, PermissionLevels, ProfileId, ProfilePhase, ProfileProjection,
+    };
+    use aurora_mcp::wire::{HostAction, HostHandler, HostRequest, HostTarget, PermissionClass};
+    let env = Environment::new("host");
+    let mut snapshot = fixture_snapshot();
+    let mut host = HostUi::default();
+    let mut frames = CpuFrames::new([1240, 900]);
+    let hosted = snapshot.active;
+    let draw = |frames: &mut CpuFrames, host: &mut HostUi, snapshot: &HostSnapshot, events| {
+        if let Some(authority) = &snapshot.mcp.authority {
+            // The real host continually publishes its current native model.
+            // Renew that same model, never the approval lifetime or its grant.
+            authority
+                .publish(
+                    snapshot
+                        .workers
+                        .iter()
+                        .enumerate()
+                        .map(|(i, worker)| ProfileProjection {
+                            id: ProfileId::new(i as u8 + 1).unwrap(),
+                            label: MetadataLabel::new(&worker.label).unwrap(),
+                            phase: ProfilePhase::Starting,
+                            binding: Some(worker.binding),
+                            native_display: None,
+                        })
+                        .collect(),
+                )
+                .unwrap();
+        }
+        frames.draw(events, |ui, p, _| host.show(ui, p, snapshot, true, hosted, false).action)
+    };
+    host.management_open = true;
+    // Default disabled is the real production state; no Publication or listener.
+    for _ in 0..4 {
+        assert!(draw(&mut frames, &mut host, &snapshot, vec![]).is_none());
+    }
+    assert!(!snapshot.mcp.preferences.enabled);
+    let panel = frames.rect(Id::unique("host_mcp_panel_header"));
+    for pressed in [true, false] {
+        assert!(draw(&mut frames, &mut host, &snapshot, pointer(panel.center(), pressed)).is_none());
+    }
+    for _ in 0..4 {
+        assert!(draw(&mut frames, &mut host, &snapshot, vec![]).is_none());
+    }
+    assert!(frames.has_text(aurora_i18n::tr!("host-mcp-enabled")));
+    frames.capture(
+        &env.directory,
+        "01-default-disabled",
+        json!({"enabled":false,"current_profile_grants":0}),
+    );
+    host.management_open = false;
+    let installation = snapshot.workers[0].binding.worker.installation;
+    let authority = Arc::new(Authority::new(installation, snapshot.workers[0].binding.worker.host));
+    let projections: Vec<_> = snapshot
+        .workers
+        .iter()
+        .enumerate()
+        .map(|(i, w)| ProfileProjection {
+            id: ProfileId::new(i as u8 + 1).unwrap(),
+            label: MetadataLabel::new(&w.label).unwrap(),
+            phase: ProfilePhase::Starting,
+            binding: Some(w.binding),
+            native_display: None,
+        })
+        .collect();
+    authority.publish(projections.clone()).unwrap();
+    let mut permissions = PermissionLevels::default();
+    permissions.set(PermissionClass::Metadata, AuthorityLevel::Allow);
+    permissions.set(PermissionClass::Detach, AuthorityLevel::Ask);
+    authority.configure_permissions(true, permissions).unwrap();
+    authority.support_actions(vec![HostAction::Detach]).unwrap();
+    for projection in &projections {
+        authority
+            .grant_permissions(authority.ticket(projection.id).unwrap(), permissions)
+            .unwrap();
+    }
+    let row = authority.request(1, HostRequest::SessionsList)["sessions"][0].clone();
+    let target = HostTarget {
+        profile_id: row["profile_id"].as_str().unwrap().into(),
+        profile_revision: row["profile_revision"].as_u64().unwrap(),
+        session_ref: row["session_ref"].as_str().map(str::to_owned),
+    };
+    let denied = uuid::Uuid::from_u128(100).to_string();
+    let allowed = uuid::Uuid::from_u128(101).to_string();
+    for id in [&denied, &allowed] {
+        let result = authority.request(
+            1,
+            HostRequest::Action {
+                request_id: id.clone(),
+                action: HostAction::Detach,
+                target: Some(target.clone()),
+                monitor_revision: None,
+            },
+        );
+        assert_eq!(result["status"], "pending");
+    }
+    snapshot.mcp.preferences = super::super::mcp::Preferences {
+        enabled: true,
+        permissions,
+    };
+    snapshot.mcp.authority = Some(authority.clone());
+    snapshot.mcp.profiles = authority.profile_access().unwrap();
+    snapshot.mcp.pending = authority.pending_approvals().unwrap();
+    for _ in 0..4 {
+        assert!(draw(&mut frames, &mut host, &snapshot, vec![]).is_none());
+    }
+    let manage = frames.rect(Id::unique("host_manage"));
+    assert!(draw(&mut frames, &mut host, &snapshot, vec![Event::PointerMoved(manage.center())]).is_none());
+    for _ in 0..9 {
+        assert!(draw(&mut frames, &mut host, &snapshot, vec![]).is_none());
+    }
+    assert!(
+        frames.has_text(aurora_i18n::tr!("host-mcp-pending-manage")),
+        "pending Manage tooltip must explain where to review"
+    );
+    frames.capture(
+        &env.directory,
+        "02-pending-discovery",
+        json!({"pending":2,"management_open":false,"manage":rect_json(manage)}),
+    );
+    for pressed in [true, false] {
+        assert!(draw(&mut frames, &mut host, &snapshot, pointer(manage.center(), pressed)).is_none());
+    }
+    assert!(host.management_open);
+    for _ in 0..4 {
+        assert!(draw(&mut frames, &mut host, &snapshot, vec![]).is_none());
+    }
+    let deny = frames.rect(Id::unique(("host_mcp_deny", &denied)));
+    let allow = frames.rect(Id::unique(("host_mcp_allow", &denied)));
+    assert!(deny.left() < allow.left(), "Deny precedes Allow once");
+    let policies: f32 = frames
+        .context
+        .data(|data| data.get_temp(egui::Id::unique("host_mcp_policy_start")))
+        .unwrap();
+    assert!(
+        deny.bottom() < policies,
+        "approval controls precede all eight policies and five profile grants"
+    );
+    let _ = frames.text_center(aurora_i18n::tr!("host-mcp-deny"));
+    for pressed in [true, false] {
+        assert!(draw(&mut frames, &mut host, &snapshot, enter(pressed)).is_none());
+    }
+    assert!(authority.ready_actions().unwrap().is_empty(), "Enter cannot approve");
+    frames.capture(
+        &env.directory,
+        "03-pending-review",
+        json!({"pending":2,"deny":rect_json(deny),"allow":rect_json(allow),"profile_count":5,"no_default_enter":true}),
+    );
+    for (id, decision, key) in [
+        (&denied, ApprovalDecision::Deny, "host_mcp_deny"),
+        (&allowed, ApprovalDecision::AllowOnce, "host_mcp_allow"),
+    ] {
+        authority.publish(projections.clone()).unwrap();
+        snapshot.mcp.pending = authority.pending_approvals().unwrap();
+        for _ in 0..4 {
+            assert!(draw(&mut frames, &mut host, &snapshot, vec![]).is_none());
+        }
+        let at = frames.rect(Id::unique((key, id))).center();
+        let mut command = None;
+        for pressed in [true, false] {
+            if let Some(Action::Mcp(next)) = draw(&mut frames, &mut host, &snapshot, pointer(at, pressed)) {
+                assert!(command.is_none());
+                command = Some(next);
+            }
+        }
+        assert_eq!(command, Some(super::super::mcp::UiCommand::Resolve(id.clone(), decision)));
+        authority.publish(projections.clone()).unwrap();
+        if let Some(super::super::mcp::UiCommand::Resolve(id, decision)) = command {
+            authority.resolve(&id, decision).unwrap();
+        }
+    }
+    let ready = authority.ready_actions().unwrap();
+    assert_eq!(ready.len(), 1);
+    assert_eq!(ready[0].request_id, allowed);
+    assert!(authority.pending_approvals().unwrap().is_empty());
+    let receipts = json!({"denied":authority.request(1,HostRequest::OperationStatus {request_id:denied}),"allowed":authority.request(1,HostRequest::OperationStatus {request_id:allowed}),"native_dispatch":false});
+    std::fs::write(
+        env.directory.join("pointer-outcomes.json"),
+        serde_json::to_vec_pretty(&receipts).unwrap(),
+    )
+    .unwrap();
 }

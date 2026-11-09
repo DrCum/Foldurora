@@ -480,3 +480,6 @@ mod tests {
         assert!(settings.show_minimap && !settings.show_chat);
     }
 }
+
+#[cfg(test)]
+pub(crate) mod test_cpu;

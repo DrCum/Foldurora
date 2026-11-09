@@ -1,10 +1,13 @@
-// Aurora LSL Bridge query and posing-consent services v1.41: the Legacy Viewer's getZOffsets
+// Aurora LSL Bridge query and posing-consent services v1.42: the Legacy Viewer's getZOffsets
 // and getScriptInfo equivalents (fsradar.cpp, fs_resources/EBEDD1D2-*.lsltxt,
 // originally LGPL 2.1). A separate script beside the movement controller:
 // Mono gives each script its own 64 KB, and a query can never halt Movelock.
 // It has its own HTTP-in URL and token, and never touches physics.
 string FOLDER = "__FOLDER__";
-string VERSION = "1.41";
+string VERSION = "1.42";
+integer SHARED_POSE_CHANNEL = -1847659327;
+integer gSharedPoseListener;
+integer gSharedPoseEnabled;
 string gURL;
 key gToken;
 key gURLRequest;
@@ -37,6 +40,9 @@ requestURL() {
     gURLRequest = llRequestSecureURL();
 }
 initialize() {
+    llListenRemove(gSharedPoseListener);
+    gSharedPoseListener = 0;
+    gSharedPoseEnabled = FALSE;
     gPaired = FALSE;
     gNextHello = 0.0;
     gOwner = llGetOwner();
@@ -53,7 +59,25 @@ initialize() {
     requestURL();
 }
 query(key request, string kind, string targets) {
-    if (kind == "portal") {
+    if (kind == "sharedenable") {
+        if (targets != "0" && targets != "1") { llHTTPResponse(request, 400, "invalid"); return; }
+        llListenRemove(gSharedPoseListener);
+        gSharedPoseListener = 0;
+        gSharedPoseEnabled = targets == "1";
+        if (gSharedPoseEnabled) gSharedPoseListener = llListen(SHARED_POSE_CHANNEL, "", NULL_KEY, "");
+        llHTTPResponse(request, 200, "[]");
+    } else if (kind == "shared") {
+        key target = (key)llGetSubString(targets, 0, 35);
+        string packet = llDeleteSubString(targets, 0, 36);
+        if (!gSharedPoseEnabled || !llGetAttached() || llGetSubString(targets, 36, 36) != ","
+            || (!validKey(target) && llGetSubString(targets, 0, 35) != (string)NULL_KEY)
+            || llStringLength(packet) > 800 || llGetSubString(packet, 0, 4) != "FSP1:") {
+            llHTTPResponse(request, 400, "invalid"); return;
+        }
+        if (target) llRegionSayTo(target, SHARED_POSE_CHANNEL, packet);
+        else llRegionSay(SHARED_POSE_CHANNEL, packet);
+        llHTTPResponse(request, 200, "[]");
+    } else if (kind == "portal") {
         // The viewer validates the typed, base64 invitation. The script only
         // authenticates its sender and relays bounded region-local data.
         key target = (key)llGetSubString(targets, 0, 35);
@@ -134,12 +158,20 @@ query(key request, string kind, string targets) {
 
 default {
     // Login restores script globals before attach; revoke old pairing at once.
-    on_rez(integer start) { gPaired = FALSE; }
+    on_rez(integer start) {
+        gPaired = FALSE;
+        gSharedPoseEnabled = FALSE;
+        llListenRemove(gSharedPoseListener);
+        gSharedPoseListener = 0;
+    }
     state_entry() { if (llGetAttached()) initialize(); }
     attach(key wearer) {
         if (wearer) initialize();
         else {
             gPaired = FALSE;
+            gSharedPoseEnabled = FALSE;
+            llListenRemove(gSharedPoseListener);
+            gSharedPoseListener = 0;
             llListenRemove(gListener);
             llListenRemove(gPoseListener);
             gPoseListener = 0;
@@ -163,6 +195,16 @@ default {
         }
     }
     listen(integer channel, string name, key sender, string message) {
+        if (channel == SHARED_POSE_CHANNEL) {
+            if (!gSharedPoseEnabled || !gPaired || !llGetAttached() || llStringLength(message) > 800
+                || llGetSubString(message, 0, 4) != "FSP1:") return;
+            key peer = llGetOwnerKey(sender);
+            if (!validKey(peer) || peer == sender || peer == gOwner) return;
+            list attached = llGetObjectDetails(sender, [OBJECT_ATTACHED_POINT]);
+            if (llGetListLength(attached) != 1 || llList2Integer(attached, 0) <= 0) return;
+            llOwnerSay("<auroraSharedPose>" + (string)peer + "|" + (string)sender + "|" + message + "</auroraSharedPose>");
+            return;
+        }
         if (channel == PORTAL_CHANNEL) {
             if (!llGetAttached() || !gPaired || llStringLength(message) > 648
                 || llGetSubString(message, 0, 7) != "portal2|") return;
@@ -225,7 +267,7 @@ default {
             if (!gPaired) { llHTTPResponse(request, 403, "unpaired"); return; }
             // llGetHTTPHeader cannot read custom headers: authenticate the
             // bounded body, query|token|kind|targets, read in place.
-            if (llStringLength(body) > 768 || llGetSubString(body, 0, 42) != "query|" + (string)gToken + "|") {
+            if (llStringLength(body) > 960 || llGetSubString(body, 0, 42) != "query|" + (string)gToken + "|") {
                 llHTTPResponse(request, 403, "denied"); return;
             }
             body = llDeleteSubString(body, 0, 42);

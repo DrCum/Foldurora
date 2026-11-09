@@ -27,6 +27,9 @@ pub enum Policy {
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct Preferences {
+    /// Explicit native opt-in for owner-authoritative FSP1 sharing. Photo
+    /// consent and assistant permissions never enable this preference.
+    pub sharing_enabled: bool,
     pub policy: Policy,
     pub blocked: HashSet<Uuid>,
 }

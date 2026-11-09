@@ -462,3 +462,25 @@ fn monitor_invalid_catalogue_clock_and_identifier_exhaustion_fail_closed() {
     assert!(model.binding(view).is_none() && !model.validate(held));
     assert_eq!(model.sync(&all(), order(), None), Err(Error::Exhausted));
 }
+
+#[test]
+fn mcp_cycling_scope_excludes_unapproved_sources_and_replacement_logins() {
+    let mut model = fixture(Some(5));
+    model.set_cycle_scope(Some(vec![source(2).preview(), source(4).preview()])).unwrap();
+    model.open_cycler(0).unwrap();
+    assert_eq!(model.binding(View::Cycling).unwrap().source, source(2));
+    let next = model.capture_navigation(Direction::Next).unwrap();
+    assert_eq!(next.target(), source(4));
+    model.navigate(next).unwrap();
+    model.play(1).unwrap();
+    model.tick(20_000).unwrap();
+    assert_eq!(model.binding(View::Cycling).unwrap().source, source(2));
+    let mut changed = all();
+    changed[1].chat.session.generation += 1;
+    changed[1].preview = PreviewSource::new(changed[1].chat.worker, changed[1].chat.session, changed[1].chat.lease_epoch).unwrap();
+    model.sync(&changed, order(), Some(source(5).preview())).unwrap();
+    model.play(20_001).unwrap();
+    assert_eq!(model.binding(View::Cycling).unwrap().source, source(4));
+    model.set_cycle_scope(None).unwrap();
+    assert!(model.capture_navigation(Direction::Next).is_some());
+}

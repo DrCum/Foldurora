@@ -8,7 +8,12 @@
 
 use crate::wire::{ClientId, HostHandler, HostRequest, error};
 use aurora_session::{Binding, HostId, InstallationId};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+mod actions;
+pub use actions::{
+    ActionExecution, ActionResult, ActiveOwner, HostOwnership, MonitorProjection, MonitorSnapshot, PermissionLevels, ProfileAccess,
+    ReadyAction,
+};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -22,7 +27,8 @@ pub const SNAPSHOT_FRESHNESS: Duration = Duration::from_secs(5);
 pub const APPROVAL_TIMEOUT: Duration = Duration::from_secs(70);
 const RECEIPT_RETENTION: Duration = Duration::from_secs(10 * 60);
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AuthorityLevel {
     #[default]
     Never,
@@ -137,6 +143,8 @@ pub enum ApprovalDecision {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ReadKind {
+    Action,
+    MonitorList,
     SessionsList,
     SessionStatus,
 }
@@ -145,6 +153,7 @@ pub enum ReadKind {
 /// exists. Display the captured profiles and kind before allowing this read.
 #[derive(Clone, Debug)]
 pub struct PendingApproval {
+    pub action: Option<crate::wire::HostAction>,
     pub request_id: String,
     pub kind: ReadKind,
     pub profiles: Vec<ProfileTicket>,
@@ -203,6 +212,7 @@ struct Operation {
 }
 
 struct State {
+    actions: actions::ActionState,
     installation: InstallationId,
     host: HostId,
     policy: HostPolicy,
@@ -221,6 +231,7 @@ pub struct Authority(Mutex<State>);
 impl Authority {
     pub fn new(installation: InstallationId, host: HostId) -> Self {
         Self(Mutex::new(State {
+            actions: actions::ActionState::default(),
             installation,
             host,
             policy: HostPolicy::default(),
@@ -249,6 +260,7 @@ impl Authority {
                 client.refs.clear();
             }
             if !policy.enabled {
+                state.actions.grants.clear();
                 state.profiles.values_mut().for_each(|profile| profile.grant = None);
             }
         }
@@ -292,16 +304,20 @@ impl Authority {
             }
         }
         if state.updated.is_some() && !state.fresh(now) {
+            state.bump_policy()?;
+            state.actions.grants.clear();
             state.profiles.values_mut().for_each(|profile| profile.grant = None);
             state.invalidate_operations("source_stale", now);
             state.clients.values_mut().for_each(|client| client.refs.clear());
         }
         let removed: Vec<_> = state.profiles.keys().filter(|id| !next.contains_key(id)).copied().collect();
         for id in removed {
+            state.cancel_native(id);
             state.revoke_profile(id, now);
             state.profiles.remove(&id);
         }
         for (id, projection) in next {
+            state.replace_native_source(id, projection.binding);
             if let Some(current) = state.profiles.get_mut(&id)
                 && current.projection.binding == projection.binding
                 && (projection.binding.is_some() || current.projection.phase == projection.phase)
@@ -349,6 +365,7 @@ impl Authority {
         }
         let grant = ProfileGrant { ticket, metadata, actions };
         if state.profiles.get(&ticket.profile).and_then(|profile| profile.grant) != Some(grant) {
+            state.cancel_native(ticket.profile);
             state.revoke_profile(ticket.profile, now);
             let Some(profile) = state.profiles.get_mut(&ticket.profile) else {
                 return Err(AuthorityError::StaleSource);
@@ -359,7 +376,9 @@ impl Authority {
     }
 
     pub fn revoke(&self, profile: ProfileId) -> Result<(), AuthorityError> {
-        self.lock()?.revoke_profile(profile, Instant::now());
+        let mut state = self.lock()?;
+        state.cancel_native(profile);
+        state.revoke_profile(profile, Instant::now());
         Ok(())
     }
 
@@ -369,6 +388,7 @@ impl Authority {
         let mut state = self.lock()?;
         state.policy.enabled = false;
         state.updated = None;
+        state.actions.grants.clear();
         state.bump_policy()?;
         state.profiles.values_mut().for_each(|profile| profile.grant = None);
         state.invalidate_operations("host_disabled", Instant::now());
@@ -380,17 +400,20 @@ impl Authority {
         let mut state = self.lock()?;
         let now = Instant::now();
         state.prune(now);
-        Ok(state
+        let mut pending: Vec<_> = state
             .operations
             .iter()
             .filter(|(_, operation)| matches!(operation.outcome, Outcome::Pending) && state.valid_capture(&operation.capture, now))
             .map(|(id, operation)| PendingApproval {
+                action: None,
                 request_id: id.clone(),
                 kind: operation.capture.kind,
                 profiles: operation.capture.profiles.clone(),
                 expires_in: APPROVAL_TIMEOUT.saturating_sub(now.saturating_duration_since(operation.created)),
             })
-            .collect())
+            .collect();
+        pending.extend(state.action_pending(now));
+        Ok(pending)
     }
 
     /// Called only after a real local approval decision. This records the
@@ -399,6 +422,9 @@ impl Authority {
         let mut state = self.lock()?;
         let now = Instant::now();
         state.prune(now);
+        if !state.operations.contains_key(request_id) {
+            return state.action_resolve(request_id, decision, now);
+        }
         let operation = state.operations.get(request_id).ok_or(AuthorityError::UnknownOperation)?;
         if !matches!(operation.outcome, Outcome::Pending) {
             return Err(AuthorityError::FinalOperation);
@@ -436,6 +462,7 @@ impl State {
     }
 
     fn invalidate_operations(&mut self, reason: &'static str, now: Instant) {
+        self.action_invalidate(None, reason, now);
         for operation in self.operations.values_mut() {
             if matches!(operation.outcome, Outcome::Pending | Outcome::Approved) {
                 operation.outcome = Outcome::Denied(reason);
@@ -445,6 +472,8 @@ impl State {
     }
 
     fn revoke_profile(&mut self, id: ProfileId, now: Instant) {
+        self.actions.grants.remove(&id);
+        self.action_invalidate(Some(id), "access_revoked", now);
         if let Some(profile) = self.profiles.get_mut(&id) {
             profile.grant = None;
         }
@@ -490,6 +519,7 @@ impl State {
     }
 
     fn prune(&mut self, now: Instant) {
+        self.action_prune(now);
         for operation in self.operations.values_mut() {
             if now.saturating_duration_since(operation.created) >= APPROVAL_TIMEOUT
                 && matches!(operation.outcome, Outcome::Pending | Outcome::Approved)
@@ -523,8 +553,23 @@ impl State {
         if !self.register(client) {
             return error("capacity");
         }
+        if let HostRequest::Action {
+            request_id,
+            target,
+            monitor_revision,
+            action,
+        } = request
+        {
+            return self.action_request(client, request_id, target, monitor_revision, action, now);
+        }
+        if matches!(request, HostRequest::MonitorList) {
+            return self.monitor_list(client, now);
+        }
         if let HostRequest::OperationStatus { request_id } = request {
             return self.operation_status(client, &request_id, now);
+        }
+        if let HostRequest::OperationCancel { request_id } = request {
+            return self.cancel_owned_operation(client, &request_id, now);
         }
         if !self.policy.enabled {
             return error("host_disabled");
@@ -573,7 +618,7 @@ impl State {
                 }
                 (ReadKind::SessionStatus, vec![ticket])
             }
-            HostRequest::OperationStatus { .. } => return error("invalid_request"),
+            _ => return error("invalid_request"),
         };
         let needs_approval = self.policy.metadata == AuthorityLevel::Ask
             || profiles.iter().any(|ticket| {
@@ -587,7 +632,7 @@ impl State {
             policy_revision: self.policy_revision,
         };
         if needs_approval {
-            if self.operations.len() >= MAX_OPERATIONS {
+            if self.operations.len() + self.actions.operations.len() >= MAX_OPERATIONS {
                 return error("capacity");
             }
             let request_id = uuid::Uuid::new_v4().to_string();
@@ -608,6 +653,9 @@ impl State {
     }
 
     fn operation_status(&mut self, client: ClientId, id: &str, now: Instant) -> Value {
+        if !self.operations.contains_key(id) {
+            return self.action_status(client, id, now);
+        }
         let Some(operation) = self.operations.get(id).filter(|operation| operation.client == client) else {
             return error("unknown_operation");
         };
@@ -636,6 +684,9 @@ impl State {
     fn deliver(&mut self, client: ClientId, capture: &ReadCapture, now: Instant) -> Value {
         if !self.valid_capture(capture, now) {
             return error("access_revoked");
+        }
+        if capture.kind == ReadKind::MonitorList {
+            return self.deliver_monitors(capture);
         }
         let mut rows = Vec::with_capacity(capture.profiles.len());
         for ticket in &capture.profiles {
@@ -670,6 +721,7 @@ impl State {
             rows.push(row);
         }
         match capture.kind {
+            ReadKind::Action | ReadKind::MonitorList => error("unsupported_action"),
             ReadKind::SessionsList => json!({ "status": "ok", "sessions": rows }),
             ReadKind::SessionStatus => match rows.into_iter().next() {
                 Some(row) => json!({ "status": "ok", "session": row }),
@@ -691,6 +743,7 @@ impl HostHandler for Authority {
         if let Ok(mut state) = self.lock() {
             state.clients.remove(&client);
             state.operations.retain(|_, operation| operation.client != client);
+            state.actions.operations.retain(|_, operation| operation.client != client);
         }
     }
 }

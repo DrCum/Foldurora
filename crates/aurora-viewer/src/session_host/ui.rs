@@ -13,6 +13,7 @@ use egui::{Id, Rect, RichText, TextEdit, vec2};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Action {
+    Mcp(super::mcp::UiCommand),
     OpenLogin(Option<AccountKey>, Option<SlotId>),
     RenameSlot(SlotId, SlotLabel),
     Activate(WorkerId),
@@ -112,7 +113,30 @@ impl HostUi {
                             .char_limit(128),
                     );
                     ui.add_space(8.0);
-                    self.slot_management(ui, p, snapshot, closing);
+                    if snapshot.mcp.pending.is_empty() {
+                        self.slot_management(ui, p, snapshot, closing);
+                    }
+                    let mcp_panel = egui::CollapsingHeader::new(aurora_i18n::tr!("host-mcp-title"))
+                        .id_salt("host_mcp_panel")
+                        .open((!snapshot.mcp.pending.is_empty()).then_some(true))
+                        .show(ui, |ui| {
+                            egui::ScrollArea::vertical()
+                                .id_salt("host_mcp_scroll")
+                                .max_height((ui.available_height() * 0.55).max(140.0))
+                                .show(ui, |ui| {
+                                    if let Some(command) = super::mcp_ui::show(ui, p, &snapshot.mcp) {
+                                        action = Some(Action::Mcp(command));
+                                    }
+                                });
+                        });
+                    #[cfg(test)]
+                    ui.ctx()
+                        .data_mut(|data| data.insert_temp(Id::unique("host_mcp_panel_header"), mcp_panel.header_response.rect));
+                    #[cfg(not(test))]
+                    let _ = mcp_panel;
+                    if !snapshot.mcp.pending.is_empty() {
+                        self.slot_management(ui, p, snapshot, closing);
+                    }
                     if ui
                         .add_enabled(
                             !closing && !snapshot.stopped,
@@ -519,12 +543,18 @@ impl HostUi {
                     }
                 }
             });
-            let attention = snapshot.registry_error.is_some() || snapshot.error.is_some() || self.notice.is_some_and(Notice::is_error);
+            let pending_approval = !snapshot.mcp.pending.is_empty();
+            let attention = pending_approval
+                || snapshot.registry_error.is_some()
+                || snapshot.error.is_some()
+                || self.notice.is_some_and(Notice::is_error);
             let manage = compact_button(
                 ui,
                 p,
                 "settings-filled",
-                if self.management_open {
+                if pending_approval {
+                    aurora_i18n::tr!("host-mcp-pending-manage")
+                } else if self.management_open {
                     aurora_i18n::tr!("host-manage-hide")
                 } else {
                     aurora_i18n::tr!("host-manage")
@@ -915,7 +945,8 @@ fn matches(label: &str, grid: &str, query: &str) -> bool {
 /// The IO thread may publish a fresh Arc for unchanged receipts. Only visible
 /// changes should repaint the full software surface, including on a large host.
 pub(super) fn same_snapshot(a: &HostSnapshot, b: &HostSnapshot) -> bool {
-    a.attention_preferences == b.attention_preferences
+    a.mcp.same(&b.mcp)
+        && a.attention_preferences == b.attention_preferences
         && a.slots == b.slots
         && a.registry_error == b.registry_error
         && a.stopped == b.stopped

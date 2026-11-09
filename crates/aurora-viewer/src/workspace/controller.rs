@@ -2,7 +2,30 @@ use super::{
     model::{Catalogue, Layout},
     store::Lane,
 };
+use std::{collections::BTreeSet, time::Instant};
 use uuid::Uuid;
+pub(crate) struct NativeHuds {
+    pub source: Source,
+    pub scope: Option<crate::session_host::worker::action::NativeActionScope>,
+    pub deadline: Instant,
+    pub items: Vec<super::context::Hud>,
+    pub submitted: BTreeSet<Uuid>,
+    pub request: Option<Uuid>,
+    pub item: Option<Uuid>,
+    pub starting: bool,
+}
+impl NativeHuds {
+    pub fn accepts(&self, source: Option<&Source>, active: bool, scope: bool, now: Instant) -> bool {
+        source == Some(&self.source) && active && scope && now < self.deadline
+    }
+}
+#[derive(Clone, Debug, serde::Serialize)]
+pub(crate) struct HudReport {
+    pub complete: bool,
+    pub confirmed: usize,
+    pub unconfirmed: usize,
+    pub reason: &'static str,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Source {
@@ -22,6 +45,9 @@ pub(crate) struct Ticket {
 #[derive(Clone, Debug)]
 pub(crate) enum Command {
     Save(String),
+    SaveLayout(String),
+    SaveContext(String, super::context::Capture),
+    Favorite(Uuid, bool),
     Rename(Uuid, String),
     Delete(Uuid),
     Preview(Uuid),
@@ -70,6 +96,12 @@ pub(crate) struct Pending {
 }
 
 pub(crate) struct Controller {
+    pub assistant: Option<Uuid>,
+    pub assistant_expected: Option<Layout>,
+    pub assistant_cancelled: bool,
+    pub context_dirty: bool,
+    pub native_huds: Option<NativeHuds>,
+    pub native_hud_report: Option<HudReport>,
     pub instance: Uuid,
     pub binding: u64,
     pub revision: u64,
@@ -90,6 +122,12 @@ pub(crate) struct Controller {
 impl Default for Controller {
     fn default() -> Self {
         Self {
+            assistant: None,
+            assistant_expected: None,
+            assistant_cancelled: false,
+            context_dirty: false,
+            native_huds: None,
+            native_hud_report: None,
             instance: Uuid::new_v4(),
             binding: 1,
             revision: 1,
@@ -124,6 +162,11 @@ impl Controller {
         self.active = None;
         self.previous = None;
         self.preview = None;
+        self.assistant = None;
+        self.assistant_expected = None;
+        self.assistant_cancelled = false;
+        self.native_huds = None;
+        self.native_hud_report = None;
         self.placement = None;
         self.permit = false;
         self.status = Status::Unavailable;
@@ -225,8 +268,10 @@ impl Controller {
         })
     }
     pub(crate) fn accepts(&self, t: &Ticket) -> bool {
-        self.permit
-            && !self.exhausted
+        self.permit && self.source_accepts(t)
+    }
+    pub(crate) fn source_accepts(&self, t: &Ticket) -> bool {
+        !self.exhausted
             && self.ticket().is_some_and(|mut expected| {
                 expected.record = t.record;
                 expected == *t
@@ -245,7 +290,13 @@ impl Controller {
         }
     }
     pub(crate) fn ready(&self) -> bool {
-        self.permit && !self.exhausted && self.pending.is_none() && self.catalogue.is_some() && self.placement.is_none()
+        self.permit
+            && !self.exhausted
+            && self.pending.is_none()
+            && self.catalogue.is_some()
+            && self.placement.is_none()
+            && self.assistant.is_none()
+            && self.native_huds.is_none()
     }
     pub(crate) fn record(&self, id: Uuid) -> Option<&super::model::Record> {
         self.catalogue.as_ref()?.records.iter().find(|r| r.id == id)
@@ -262,6 +313,39 @@ mod tests {
             grid: "c".repeat(64),
             hosted: None,
         }
+    }
+    #[test]
+    fn native_workspace_hud_queue_retains_original_source_scope_and_deadline() {
+        let now = Instant::now();
+        let source = source();
+        let pending = NativeHuds {
+            source: source.clone(),
+            scope: None,
+            deadline: now + std::time::Duration::from_secs(15),
+            items: Vec::new(),
+            submitted: BTreeSet::new(),
+            request: None,
+            item: None,
+            starting: false,
+        };
+        assert!(pending.accepts(Some(&source), true, true, now));
+        let mut changed = source.clone();
+        changed.login = Uuid::new_v4();
+        assert!(!pending.accepts(Some(&changed), true, true, now));
+        assert!(!pending.accepts(Some(&source), false, true, now));
+        assert!(!pending.accepts(Some(&source), true, false, now));
+        assert!(
+            !pending.accepts(Some(&source), true, true, now + std::time::Duration::from_secs(15)),
+            "a fresh current grant cannot renew this queue's deadline"
+        );
+        let c = Controller {
+            source: Some(source.clone()),
+            permit: true,
+            catalogue: Some(Catalogue::empty(source.agent, source.grid.clone())),
+            native_huds: Some(pending),
+            ..Default::default()
+        };
+        assert!(!c.ready(), "pending native HUD callbacks keep another switch from starting");
     }
     #[test]
     fn workspace_tickets_are_full_capture_nonreused_and_consumed_once() {
@@ -420,6 +504,7 @@ mod tests {
     fn layout(left: f32) -> Layout {
         let s = crate::settings::Settings::default();
         Layout {
+            context: Default::default(),
             geometry: [Some(super::super::model::Geometry {
                 point: 0,
                 offset: [left, 0.0],

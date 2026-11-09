@@ -44,10 +44,35 @@ impl App {
             self.release_host_input();
         }
         self.pump_host_display(&mut bridge, effects);
+        let display = (phase == Phase::Online
+            && !self.world.rlva.has("shownames")
+            && !self.world.rlva.has("showloc")
+            && self.world.rlva_can_name(self.world.agent_id))
+        .then(|| aurora_session::native::PermittedDisplay {
+            account: label(&self.settings.username),
+            grid: label(&grid_label(&uri, &self.settings.grids)),
+        });
+        if phase == Phase::Login {
+            bridge.native_logged_out();
+        }
+        bridge.observe_native(display);
+        let request_exit = bridge.take_native_exit();
         self.host_session = Some(bridge);
+        if request_exit {
+            self.request_exit();
+        }
         // The bridge is restored before policy observation: take() above is
         // a temporary borrow, never a source disappearance.
         self.tick_host_preview();
+    }
+
+    pub(super) fn native_host_exit_choice(&mut self, outcome: aurora_session::native::NativeOutcome) {
+        if let Some(bridge) = &mut self.host_session
+            && bridge.native_exit_prompt()
+        {
+            bridge.native_exit_choice(outcome);
+            bridge.observe_native(None);
+        }
     }
 
     fn pump_host_display(&mut self, bridge: &mut crate::session_host::worker::WorkerBridge, effects: aurora_session::WorkerEffects) {

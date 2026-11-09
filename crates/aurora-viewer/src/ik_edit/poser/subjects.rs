@@ -309,6 +309,9 @@ impl Editor {
             }
         }
         menu::separator(ui, p);
+        if menu::item(ui, p, "users", aurora_i18n::text("shared-pose-title")) {
+            self.poser.requests.push(Request::OpenSharing);
+        }
         if menu::item(ui, p, "lock-filled", aurora_i18n::text("poser-privacy")) {
             self.poser.requests.push(Request::OpenPrivacy);
         }

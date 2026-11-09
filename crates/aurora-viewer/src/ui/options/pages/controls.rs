@@ -11,6 +11,11 @@ pub fn page(cx: &mut Cx) {
         cx.slider(tr!("ui-options-sensitivity"), "", &field!(mouse_sensitivity), 0.1..=5.0, "×");
         cx.toggle(tr!("ui-options-invert-vertical-axis"), "", &field!(invert_mouse));
         cx.toggle(
+            tr!("ui-options-selection-beam"),
+            tr!("ui-options-selection-beam-help"),
+            &field!(selection_beam),
+        );
+        cx.toggle(
             tr!("ui-options-world-mouse-walk"),
             tr!("ui-options-world-mouse-walk-help"),
             &field!(world_mouse_walk),
@@ -32,6 +37,11 @@ pub fn page(cx: &mut Cx) {
         );
     });
     cx.group(tr!("ui-options-keyboard"), |cx| {
+        cx.toggle(
+            tr!("ui-options-tap-hold-run"),
+            tr!("ui-options-tap-hold-run-help"),
+            &field!(tap_hold_run),
+        );
         cx.toggle(
             tr!("ui-options-arrows-strafe"),
             tr!("ui-options-left-right-strafe-instead-of-turning-shift-reverses-this"),

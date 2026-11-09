@@ -12,6 +12,7 @@ pub(crate) struct WorkspaceUi {
     selection_epoch: u64,
     selection_observed: Option<Uuid>,
     selection_exhausted: bool,
+    capture: crate::workspace::context::Capture,
 }
 impl Default for WorkspaceUi {
     fn default() -> Self {
@@ -24,6 +25,7 @@ impl Default for WorkspaceUi {
             selection_epoch: 1,
             selection_observed: None,
             selection_exhausted: false,
+            capture: Default::default(),
         }
     }
 }
@@ -94,6 +96,13 @@ impl WorkspaceUi {
                     Status::Ready => tr!("workspaces-ready"),
                 };
                 ui.label(status);
+                if let Some(report) = &c.native_hud_report {
+                    if c.native_huds.is_some() {
+                        ui.label(tr!("workspaces-huds-pending"));
+                    } else if !report.complete {
+                        ui.label(tr!("workspaces-huds-unconfirmed"));
+                    }
+                }
                 if let Some(r) = c.preview.as_ref().map(|p| p.candidate).or(c.active).and_then(|id| c.record(id)) {
                     ui.label(tr!(
                         "workspaces-current",
@@ -125,15 +134,45 @@ impl WorkspaceUi {
                         .char_limit(64)
                         .hint_text(tr!("workspaces-name")),
                 );
+                ui.horizontal_wrapped(|ui| {
+                    ui.checkbox(&mut self.capture.graphics, tr!("workspaces-remember-graphics"));
+                    ui.checkbox(&mut self.capture.camera, tr!("workspaces-remember-camera"));
+                    ui.checkbox(&mut self.capture.huds, tr!("workspaces-remember-huds"));
+                });
                 ui.push_id(("workspace_selection_controls", selection_scope), |ui| {
                     ui.horizontal_wrapped(|ui| {
                         if ui
                             .add_enabled(enabled && c.preview.is_none(), egui::Button::new(tr!("workspaces-save")))
                             .clicked()
                         {
-                            command = Some(Command::Save(self.name.trim().to_owned()));
+                            let name = self.name.trim().to_owned();
+                            command = Some(if self.capture.graphics || self.capture.camera || self.capture.huds {
+                                Command::SaveContext(name, self.capture)
+                            } else {
+                                Command::Save(name)
+                            });
+                        }
+                        if ui
+                            .add_enabled(enabled && c.preview.is_none(), egui::Button::new(tr!("workspaces-save-layout")))
+                            .clicked()
+                        {
+                            command = Some(Command::SaveLayout(self.name.trim().to_owned()));
                         }
                         if let Some(id) = self.selected.filter(|id| c.record(*id).is_some()) {
+                            if let Some(record) = c.record(id)
+                                && ui
+                                    .add_enabled(
+                                        enabled && c.preview.is_none(),
+                                        egui::Button::new(if record.favorite {
+                                            tr!("workspaces-unfavorite")
+                                        } else {
+                                            tr!("workspaces-favorite")
+                                        }),
+                                    )
+                                    .clicked()
+                            {
+                                command = Some(Command::Favorite(id, !record.favorite));
+                            }
                             if ui
                                 .add_enabled(enabled && c.preview.is_none(), egui::Button::new(tr!("workspaces-rename")))
                                 .clicked()
@@ -158,7 +197,10 @@ impl WorkspaceUi {
                             }
                         }
                         if ui
-                            .add_enabled(ticket.is_some() && c.preview.is_some(), egui::Button::new(tr!("workspaces-cancel")))
+                            .add_enabled(
+                                ticket.is_some() && (c.preview.is_some() || c.native_huds.is_some()),
+                                egui::Button::new(tr!("workspaces-cancel")),
+                            )
                             .clicked()
                         {
                             command = Some(Command::Cancel);
@@ -214,7 +256,9 @@ impl WorkspaceUi {
         let ticket = ticket?;
         let command = command?;
         let target = match &command {
-            Command::Rename(id, _) | Command::Delete(id) | Command::Preview(id) | Command::Switch(id) => Some(*id),
+            Command::Rename(id, _) | Command::Delete(id) | Command::Preview(id) | Command::Switch(id) | Command::Favorite(id, _) => {
+                Some(*id)
+            }
             _ => None,
         };
         if target.is_some() && target != ticket.record {
@@ -241,6 +285,7 @@ mod tests {
         };
         let s = crate::settings::Settings::default();
         let layout = Layout {
+            context: Default::default(),
             geometry: [None; 4],
             viewport: (&s.world_viewport).into(),
             bars: Bars {
@@ -252,6 +297,8 @@ mod tests {
         let id = Uuid::new_v4();
         let mut catalogue = Catalogue::empty(source.agent, source.grid.clone());
         catalogue.records.push(Record {
+            kind: crate::workspace::model::Kind::Workspace,
+            favorite: false,
             id,
             name: "Desk".into(),
             layout,
@@ -374,6 +421,8 @@ mod tests {
                 let b = Uuid::new_v4();
                 let layout = c.record(a).unwrap().layout.clone();
                 c.catalogue.as_mut().unwrap().records.push(Record {
+                    kind: crate::workspace::model::Kind::Workspace,
+                    favorite: false,
                     id: b,
                     name: "Other".into(),
                     layout,
@@ -459,6 +508,8 @@ mod tests {
         let b = Uuid::new_v4();
         let layout = c.record(a).unwrap().layout.clone();
         c.catalogue.as_mut().unwrap().records.push(Record {
+            kind: crate::workspace::model::Kind::Workspace,
+            favorite: false,
             id: b,
             name: "Other".into(),
             layout,

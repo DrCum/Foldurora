@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 pub mod area_search;
 pub mod backup;
+pub(crate) mod curated;
 mod hover_height;
 mod presentation;
 mod saver;
@@ -422,6 +423,8 @@ const FORMER_LOOK_AT_UNLIMITED: f32 = 64.0;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
+    /// Per-profile policy only. Enabling a character connection is session-only.
+    pub local_assistant: aurora_mcp::assistant::permissions::Configuration,
     pub update_mode: crate::updater::Mode,
     /// Stable releases only, or also the betas built every night
     /// (Preferences › Language and updates).
@@ -674,6 +677,10 @@ pub struct Settings {
     /// Loading / teleport screens show the last view, blurred.
     pub loading_backdrop: bool,
     pub mouse_sensitivity: f32,
+    /// Native TapTapHoldRun, shared by ordinary input and curated preferences.
+    pub tap_hold_run: bool,
+    /// Render native selection ViewerEffect beams locally.
+    pub selection_beam: bool,
     pub window_width: u32,
     pub window_height: u32,
     /// Last window position (outer, physical pixels) and maximized state
@@ -1118,6 +1125,12 @@ pub struct Settings {
     /// Workspace-local live Preview; unrelated saves/backup retain committed fields.
     #[serde(skip)]
     pub(crate) workspace_held: Option<crate::workspace::model::Layout>,
+    #[serde(skip)]
+    pub(crate) workspace_context_held: Option<crate::workspace::context::Held>,
+    #[serde(skip)]
+    pub(crate) curated_held: Option<curated::Held>,
+    #[serde(skip)]
+    pub(crate) curated_saved: curated::Saved,
     /// About Land as Firestorm's nine tabs (`ui/land`) instead of the
     /// overview and the settings grouped by intent (`ui/land/aurora`).
     pub classic_about_land: bool,
@@ -1743,6 +1756,7 @@ impl AudioSettings {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
+            local_assistant: Default::default(),
             update_mode: crate::updater::Mode::Ask,
             update_channel: aurora_updater::feed::Channel::Stable,
             ignored_update: String::new(),
@@ -1867,6 +1881,8 @@ impl Default for Settings {
             dof: Default::default(),
             loading_backdrop: true,
             mouse_sensitivity: 1.0,
+            tap_hold_run: true,
+            selection_beam: true,
             window_width: 1600,
             window_height: 900,
             window_x: None,
@@ -2023,6 +2039,9 @@ impl Default for Settings {
             photo_window: PhotoWindowStyle::Aurora,
             photo_held: None,
             workspace_held: None,
+            workspace_context_held: None,
+            curated_held: None,
+            curated_saved: curated::Saved::default(),
             classic_about_land: false,
             classic_search: false,
             classic_region_estate: false,
@@ -2386,6 +2405,7 @@ impl Settings {
     /// Migrated and bounded, remembering a newer build's file to save over.
     fn finished(self, newer: Option<(serde_json::Value, Vec<String>)>) -> Settings {
         let mut s = self.sanitized();
+        s.curated_saved.record(&s);
         if let Some((theirs, kept)) = newer
             && let Ok(loaded) = serde_json::to_value(&s)
         {
@@ -2803,6 +2823,7 @@ impl Settings {
     /// (settings/saver.rs): the frame thread does not wait for the disk.
     pub fn save(&self) {
         let copy = self.to_saved();
+        self.curated_saved.record(&copy);
         let path = Self::path();
         saver::get().queue(Box::new(move || {
             if let Some(dir) = path.parent()
@@ -2829,6 +2850,12 @@ impl Settings {
         let mut copy = self.clone();
         if let Some(held) = copy.workspace_held.take() {
             held.settings(&mut copy, false);
+        }
+        if let Some(held) = copy.workspace_context_held.take() {
+            held.project(&mut copy);
+        }
+        if let Some(held) = copy.curated_held.take() {
+            held.project(&mut copy);
         }
         copy.remember_hover_account();
         if let Some(mut held) = copy.photo_held.take() {

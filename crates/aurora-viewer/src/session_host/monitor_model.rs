@@ -197,6 +197,7 @@ pub(super) struct MonitorSet {
     input: u64,
     exhausted: bool,
     sources: Vec<Source>,
+    cycle_scope: Option<Vec<PreviewSource>>,
     order: [SlotId; MAX_WORKERS],
     active: Option<PreviewSource>,
     bindings: [Option<Binding>; 5],
@@ -219,6 +220,7 @@ impl MonitorSet {
             input: 0,
             exhausted: false,
             sources: Vec::new(),
+            cycle_scope: None,
             // The constructor range is exactly SlotId's five supported values.
             order: std::array::from_fn(|index| SlotId::try_from(index as u8).expect("bounded stable slot")),
             active: None,
@@ -230,6 +232,26 @@ impl MonitorSet {
             due: None,
             last_clock: None,
         })
+    }
+
+    pub fn cycle_scope(&self) -> Option<&[PreviewSource]> {
+        self.cycle_scope.as_deref()
+    }
+    pub fn set_cycle_scope(&mut self, scope: Option<Vec<PreviewSource>>) -> Result<(), Error> {
+        if scope
+            .as_ref()
+            .is_some_and(|scope| scope.len() > MAX_WORKERS || scope.iter().enumerate().any(|(i, source)| scope[..i].contains(source)))
+        {
+            return Err(Error::Invalid);
+        }
+        if self.cycle_scope != scope {
+            self.cancel_input()?;
+            self.cycle_scope = scope;
+        }
+        Ok(())
+    }
+    fn cycle_allowed(&self, source: PreviewSource) -> bool {
+        self.cycle_scope.as_ref().is_none_or(|scope| scope.contains(&source))
     }
 
     fn fail_closed(&mut self) {
@@ -464,11 +486,12 @@ impl MonitorSet {
             .unwrap_or(if direction == Direction::Next { MAX_WORKERS - 1 } else { 0 });
         for _ in 0..MAX_WORKERS {
             at = (at + step) % MAX_WORKERS;
-            if let Some(source) = self
-                .sources
-                .iter()
-                .find(|source| source.slot == self.order[at] && source.available && Some(source.preview) != self.active)
-            {
+            if let Some(source) = self.sources.iter().find(|source| {
+                source.slot == self.order[at]
+                    && source.available
+                    && Some(source.preview) != self.active
+                    && self.cycle_allowed(source.preview)
+            }) {
                 return Some(*source);
             }
         }
@@ -484,7 +507,10 @@ impl MonitorSet {
     }
 
     pub fn validate_navigation(&self, navigation: Navigation) -> bool {
-        self.origin_current(navigation.origin) && self.current(navigation.target) && Some(navigation.target.preview) != self.active
+        self.origin_current(navigation.origin)
+            && self.current(navigation.target)
+            && Some(navigation.target.preview) != self.active
+            && self.cycle_allowed(navigation.target.preview)
     }
 
     pub fn navigate(&mut self, navigation: Navigation) -> Result<Option<Changed>, Error> {
@@ -547,12 +573,14 @@ impl MonitorSet {
         let old = self.binding(View::Cycling).ok_or(Error::Unavailable)?;
         let due = self.deadline(now)?;
         self.cancel_input()?;
-        let changed = if old.enabled && self.current(old.source) && Some(old.source.preview) != self.active {
-            None
-        } else {
-            let source = self.next(Some(old.source.slot), Direction::Next).ok_or(Error::Unavailable)?;
-            self.select_cycle(source)?
-        };
+        let changed =
+            if old.enabled && self.current(old.source) && Some(old.source.preview) != self.active && self.cycle_allowed(old.source.preview)
+            {
+                None
+            } else {
+                let source = self.next(Some(old.source.slot), Direction::Next).ok_or(Error::Unavailable)?;
+                self.select_cycle(source)?
+            };
         self.playing = true;
         self.due = Some(due);
         Ok(changed)
@@ -573,7 +601,10 @@ impl MonitorSet {
     }
 
     fn cycle_current(&self, binding: Binding) -> bool {
-        binding.enabled && self.current(binding.source) && Some(binding.source.preview) != self.active
+        binding.enabled
+            && self.current(binding.source)
+            && Some(binding.source.preview) != self.active
+            && self.cycle_allowed(binding.source.preview)
     }
     fn cycle_due(&self, now: u64) -> bool {
         self.playing

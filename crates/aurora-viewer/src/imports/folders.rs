@@ -159,6 +159,13 @@ impl Imports {
             }
         }
         for entry in self.entries.iter_mut().filter(|entry| !entry.local) {
+            if let Some(fixed) = &entry.assistant_destination {
+                if fixed.current(prefs, inventory) {
+                    entry.folder = fixed.folder();
+                    continue;
+                }
+                entry.assistant_destination = None;
+            }
             if changed && let Some(Source::Mesh(draft)) = &mut entry.source {
                 draft.invalidate_quote();
                 entry.preview_generation += 1;
@@ -187,7 +194,10 @@ impl Imports {
                 .entries
                 .iter()
                 .filter(|entry| self.choice.accepts(entry) && entry.selected && matches!(entry.status, Status::Ready))
-                .all(|entry| entry.upload_path.as_ref().is_some_and(|path| valid_path(path)))
+                .all(|entry| {
+                    entry.assistant_destination.is_some() && rules::destination(&world.inventory, entry.folder)
+                        || entry.upload_path.as_ref().is_some_and(|path| valid_path(path))
+                })
     }
 
     pub fn sync_folder_plan(&mut self, world: &crate::world::World) {
@@ -195,7 +205,7 @@ impl Imports {
             self.folders.destination = world.inventory.root;
         }
         let mut mode_changed = false;
-        for entry in self.entries.iter_mut().filter(|e| !e.local) {
+        for entry in self.entries.iter_mut().filter(|e| !e.local && e.assistant_destination.is_none()) {
             let previous_folder = entry.folder;
             let was_managed = entry.upload_path.is_some();
             if self.folders.active() && entry.upload_path.is_none() {
@@ -240,6 +250,9 @@ impl Imports {
                     .iter()
                     .filter(|e| self.choice.accepts(e) && e.selected && matches!(e.status, Status::Ready))
                     .all(|e| {
+                        if e.assistant_destination.is_some() {
+                            return rules::destination(&world.inventory, e.folder);
+                        }
                         e.upload_path.as_ref().is_some_and(|path| {
                             valid_path(path)
                                 && self.folders.resolved(path, &world.inventory) == Some(e.folder)
@@ -263,6 +276,9 @@ impl Imports {
             .iter()
             .filter(|e| self.choice.accepts(e) && e.selected && matches!(e.status, Status::Ready))
         {
+            if entry.assistant_destination.is_some() {
+                continue;
+            }
             let Some(path) = &entry.upload_path else { return };
             if !valid_path(path) {
                 self.message = aurora_i18n::tr!("import-folders-invalid-path").into();

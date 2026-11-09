@@ -4,7 +4,7 @@
 // read-only queries run in query.lsl, so a busy region cannot halt Movelock
 // with a Stack-Heap Collision. Keep new services out of this script.
 string FOLDER = "__FOLDER__";
-string VERSION = "1.41";
+string VERSION = "1.42";
 string gURL;
 key gToken;
 key gURLRequest;

@@ -30,6 +30,217 @@ fn flush_view(
 }
 
 impl Shell {
+    fn publish_mcp_monitors(&self, authority: &aurora_mcp::authority::Authority) -> Result<(), aurora_mcp::authority::AuthorityError> {
+        use aurora_mcp::authority::{MonitorProjection, MonitorSnapshot};
+        let profiles = authority.profile_access()?;
+        let mut monitors = Vec::new();
+        for view in View::ALL {
+            let Some(binding) = self.monitors.model().binding(view) else {
+                continue;
+            };
+            let source = binding.source.chat().binding();
+            let Some(profile) = profiles.iter().find(|profile| profile.ticket.binding == Some(source)) else {
+                return Err(aurora_mcp::authority::AuthorityError::StaleSource);
+            };
+            monitors.push(MonitorProjection {
+                monitor: (index(view) + 1) as u8,
+                source: profile.ticket,
+                incarnation: binding.incarnation,
+                visible: binding.visible,
+                enabled: binding.enabled,
+            });
+        }
+        let eligible = self
+            .ui
+            .monitor_sources
+            .iter()
+            .filter(|(_, source)| Some(source.worker().worker) != self.snapshot.active)
+            .filter_map(|(_, source)| {
+                profiles
+                    .iter()
+                    .find(|profile| {
+                        profile.ticket.binding
+                            == Some(aurora_session::Binding {
+                                worker: source.worker(),
+                                session: Some(source.session()),
+                            })
+                    })
+                    .map(|profile| profile.ticket)
+            })
+            .collect();
+        authority.publish_monitors(MonitorSnapshot {
+            eligible,
+            monitors,
+            playing: self.monitors.model().playing(),
+            interval_seconds: self.monitors.model().interval(),
+        })?;
+        Ok(())
+    }
+
+    fn mcp_monitor_actions(&mut self, event_loop: &ActiveEventLoop, blocked: bool) {
+        use aurora_mcp::{
+            authority::ActionResult,
+            wire::{HostAction, PermissionClass},
+        };
+        let Some(authority) = self.snapshot.mcp.authority.clone() else {
+            return;
+        };
+        if self.publish_mcp_monitors(&authority).is_err() || blocked {
+            return;
+        }
+        for queued in authority
+            .ready_actions()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|action| action.action.class() == PermissionClass::Monitors)
+            .take(16)
+        {
+            let _ = authority.execute_action(&queued.request_id, |action| {
+                let result = (|| -> Result<(), PreviewError> {
+                    let now = self.monitor_time();
+                    let cycle_scope: Vec<_> = self
+                        .ui
+                        .monitor_sources
+                        .iter()
+                        .filter(|(_, source)| {
+                            Some(source.worker().worker) != self.snapshot.active
+                                && action.profiles.iter().any(|ticket| {
+                                    ticket.binding
+                                        == Some(aurora_session::Binding {
+                                            worker: source.worker(),
+                                            session: Some(source.session()),
+                                        })
+                                })
+                        })
+                        .map(|(_, source)| *source)
+                        .collect();
+                    match &action.action {
+                        HostAction::MonitorOpen => {
+                            let ticket = action.profiles.first().ok_or(PreviewError::Unavailable)?;
+                            let source = self
+                                .ui
+                                .monitor_sources
+                                .iter()
+                                .find(|(slot, source)| {
+                                    slot.number() == ticket.profile.number()
+                                        && ticket.binding
+                                            == Some(aurora_session::Binding {
+                                                worker: source.worker(),
+                                                session: Some(source.session()),
+                                            })
+                                })
+                                .map(|(_, source)| *source)
+                                .ok_or(PreviewError::Stale)?;
+                            let windows = &mut self.monitor_windows;
+                            let chat = &mut self.shared_chat;
+                            self.monitors.open(source, &mut |view, binding, state| {
+                                flush_view(windows, chat, event_loop, view, binding, state)
+                            })?;
+                        }
+                        HostAction::MonitorClose { monitor } => {
+                            let view = *View::ALL
+                                .get(usize::from(*monitor).saturating_sub(1))
+                                .ok_or(PreviewError::Invalid)?;
+                            let windows = &mut self.monitor_windows;
+                            let chat = &mut self.shared_chat;
+                            self.monitors.close(view, &mut |view, binding, state| {
+                                flush_view(windows, chat, event_loop, view, binding, state)
+                            })?;
+                            if let Some(mut window) = self.monitor_windows[index(view)].take() {
+                                window.retire(&mut self.shared_chat);
+                            }
+                        }
+                        HostAction::MonitorsOpenAll => {
+                            let sources: Vec<_> = self
+                                .ui
+                                .monitor_sources
+                                .iter()
+                                .filter(|(_, source)| {
+                                    action.profiles.iter().any(|ticket| {
+                                        ticket.binding
+                                            == Some(aurora_session::Binding {
+                                                worker: source.worker(),
+                                                session: Some(source.session()),
+                                            })
+                                    })
+                                })
+                                .map(|(_, source)| *source)
+                                .collect();
+                            let windows = &mut self.monitor_windows;
+                            let chat = &mut self.shared_chat;
+                            for source in sources {
+                                if Some(source.worker().worker) == self.snapshot.active {
+                                    continue;
+                                }
+                                self.monitors.open(source, &mut |view, binding, state| {
+                                    flush_view(windows, chat, event_loop, view, binding, state)
+                                })?;
+                            }
+                        }
+                        HostAction::MonitorsArrange => {
+                            let monitor = self
+                                .surface
+                                .as_ref()
+                                .and_then(|surface| surface.window.current_monitor())
+                                .ok_or(PreviewError::Unavailable)?;
+                            let origin = monitor.position();
+                            let size = monitor.size();
+                            for (index, window) in self.monitor_windows.iter_mut().flatten().enumerate() {
+                                let x = i64::from(origin.x) + i64::from(size.width) * (index % 2) as i64 / 2;
+                                let y = i64::from(origin.y) + i64::from(size.height) * (index / 2) as i64 / 3;
+                                window
+                                    .arrange(
+                                        event_loop,
+                                        [
+                                            i32::try_from(x).map_err(|_| PreviewError::Invalid)?,
+                                            i32::try_from(y).map_err(|_| PreviewError::Invalid)?,
+                                        ],
+                                        &mut self.shared_chat,
+                                    )
+                                    .map_err(|_| PreviewError::Unavailable)?;
+                            }
+                        }
+                        HostAction::MonitorCycleConfigure { interval_seconds, playing } => {
+                            let windows = &mut self.monitor_windows;
+                            let chat = &mut self.shared_chat;
+                            self.monitors.mcp_cycle(
+                                &cycle_scope,
+                                Some(*interval_seconds),
+                                Some(*playing),
+                                false,
+                                now,
+                                &mut |view, binding, state| flush_view(windows, chat, event_loop, view, binding, state),
+                            )?;
+                        }
+                        HostAction::MonitorCyclePause | HostAction::MonitorCycleNext => {
+                            let windows = &mut self.monitor_windows;
+                            let chat = &mut self.shared_chat;
+                            self.monitors.mcp_cycle(
+                                &cycle_scope,
+                                None,
+                                Some(false),
+                                matches!(action.action, HostAction::MonitorCycleNext),
+                                now,
+                                &mut |view, binding, state| flush_view(windows, chat, event_loop, view, binding, state),
+                            )?;
+                        }
+                        _ => return Err(PreviewError::Unsupported),
+                    }
+                    self.publish_monitors(event_loop)?;
+                    Ok(())
+                })();
+                match result {
+                    Ok(()) => ActionResult::Submitted,
+                    Err(_) => ActionResult::RejectedNative,
+                }
+            });
+            // The first action changes the canonical set; following approvals
+            // must observe/reapprove that new set rather than reuse old targets.
+            if self.publish_mcp_monitors(&authority).is_err() {
+                break;
+            }
+        }
+    }
     fn monitor_time(&self) -> u64 {
         self.monitor_started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
     }
@@ -534,6 +745,39 @@ impl Shell {
             || self.monitor_windows[index(View::Cycling)]
                 .as_ref()
                 .is_some_and(MonitorWindow::timer_busy);
+        if let Some(scope) = self.monitors.model().cycle_scope() {
+            let current = self
+                .snapshot
+                .mcp
+                .authority
+                .as_ref()
+                .and_then(|authority| {
+                    let global = authority.policy().ok()?.enabled
+                        && authority.permission_levels().ok()?.get(aurora_mcp::wire::PermissionClass::Monitors)
+                            != aurora_mcp::authority::AuthorityLevel::Never;
+                    let profiles = authority.profile_access().ok()?;
+                    Some(
+                        global
+                            && scope.iter().all(|source| {
+                                profiles.iter().any(|profile| {
+                                    profile.ticket.binding
+                                        == Some(aurora_session::Binding {
+                                            worker: source.worker(),
+                                            session: Some(source.session()),
+                                        })
+                                        && profile.permissions.is_some_and(|permissions| {
+                                            permissions.get(aurora_mcp::wire::PermissionClass::Monitors)
+                                                != aurora_mcp::authority::AuthorityLevel::Never
+                                        })
+                                })
+                            }),
+                    )
+                })
+                .unwrap_or(false);
+            if !current {
+                let _ = self.monitors.pause_mcp_cycle();
+            }
+        }
         let time = self.monitor_time();
         let windows = &mut self.monitor_windows;
         let chat = &mut self.shared_chat;
@@ -553,6 +797,7 @@ impl Shell {
                 next = Some(next.map_or(due, |old: Instant| old.min(due)));
             }
         }
+        self.mcp_monitor_actions(event_loop, blocked || !fresh);
         if let Err(error) = self.publish_monitors(event_loop) {
             self.monitor_error(error);
         }

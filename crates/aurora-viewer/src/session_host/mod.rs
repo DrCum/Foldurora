@@ -13,6 +13,7 @@ mod chat_ui;
 mod chat_window;
 mod diagnostics;
 mod mcp;
+mod mcp_ui;
 // Ordinary Inventory chooser observes the same native activation-key fence.
 pub(crate) use chat_window::enter_release::EnterRelease;
 // Real host/window front; Root promotes its existing prerequisite modules only
@@ -197,6 +198,61 @@ struct Shell {
 }
 
 impl Shell {
+    /// Remote presentation commands enter through the same covered native GUI
+    /// admission as ordinary host buttons. The broker revalidates the original
+    /// exact source again after this bounded queue, before beginning its fences.
+    fn mcp_presentation_actions(&mut self) {
+        use aurora_mcp::{authority::ActionResult, wire::HostAction};
+        if self.closing.is_some()
+            || self.snapshot.stopped
+            || self.ui.modal_open()
+            || self.transition.waiting()
+            || self.geometry_dirty
+            || self.layout_dirty
+        {
+            return;
+        }
+        let Some(authority) = self.snapshot.mcp.authority.clone() else {
+            return;
+        };
+        let viewport = self.surface.as_ref().and_then(|surface| {
+            (surface.window.is_visible() == Some(true) && surface.window.is_minimized() == Some(false))
+                .then(|| surface.viewport(self.world, self.context.pixels_per_point()))
+                .flatten()
+        });
+        for action in authority
+            .ready_actions()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|action| {
+                matches!(
+                    action.action,
+                    HostAction::Activate | HostAction::OpenLogin | HostAction::Detach | HostAction::Logout | HostAction::Restart
+                )
+            })
+            .take(1)
+        {
+            let _ = authority.execute_action(&action.request_id, |action| {
+                if matches!(action.action, HostAction::Activate) && viewport.is_none() {
+                    return ActionResult::Unavailable;
+                }
+                self.close_region();
+                self.request_repaint();
+                if self.closing.is_some() {
+                    return ActionResult::Unavailable;
+                }
+                match self.controller.mcp_execute(action.request_id.clone(), viewport) {
+                    Ok(request) => {
+                        self.transition.sent(request);
+                        self.request_repaint();
+                        ActionResult::Submitted
+                    }
+                    Err(_) => ActionResult::RejectedNative,
+                }
+            });
+        }
+    }
+
     fn request_repaint(&mut self) {
         self.repaint = Some(Instant::now());
     }
@@ -206,6 +262,7 @@ impl Shell {
             return;
         }
         let result = match action.clone() {
+            Action::Mcp(command) => self.controller.mcp(command),
             #[cfg(windows)]
             Action::OpenMonitor(source) => {
                 self.open_monitor(event_loop, Some(source));
@@ -258,7 +315,7 @@ impl Shell {
                 // The broker's pending row can name the old renderer while
                 // the requested target is also a transaction participant.
                 Action::Detach(worker) => self.snapshot.active == Some(worker) || self.snapshot.pending.is_some(),
-                Action::OpenChat(_) | Action::OpenAttention | Action::RenameSlot(_, _) | Action::Close => false,
+                Action::Mcp(_) | Action::OpenChat(_) | Action::OpenAttention | Action::RenameSlot(_, _) | Action::Close => false,
                 #[cfg(windows)]
                 Action::OpenMonitor(_) | Action::OpenCyclingMonitor | Action::ResumeCyclingMonitor(_) => false,
             };
@@ -854,6 +911,7 @@ impl ApplicationHandler for Shell {
             return;
         }
         let mut next = self.next_poll;
+        self.mcp_presentation_actions();
         #[cfg(windows)]
         if let Some(due) = self.poll_monitors(event_loop, now, native_poll || self.chat_changed) {
             next = next.min(due);

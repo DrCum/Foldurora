@@ -33,6 +33,7 @@ DISCOVERY = private_channel(ROOT)
 LEGACY_DISCOVERY = -184735219
 LEGACY_CONTROL = -190018106
 IK_CHANNEL = -190018107
+SHARED_POSE_CHANNEL = -1847659327
 OBJECT_ROOT = 18
 REGION = 256
 REGION_START = 1024
@@ -237,7 +238,7 @@ class BridgeScripts(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(sim.messages, [])
                 await sim.probe()
                 self.assertEqual(len(sim.messages), 1)
-                self.assertIn("1.41|", sim.messages[0])
+                self.assertIn("1.42|", sim.messages[0])
                 await sim.probe()
                 self.assertEqual(len(sim.messages), 1, "duplicate probes must be throttled")
 
@@ -446,6 +447,56 @@ class BridgeScripts(unittest.IsolatedAsyncioTestCase):
         await sim.event("listen", IK_CHANNEL, "", OTHER, "auroraIKAvailable|test")
         self.assertEqual(sim.messages, [])
         self.assertEqual(sim.broadcasts, [])
+
+    async def test_shared_pose_requires_explicit_authenticated_enable_and_resets_on_login(self):
+        sim = Simulator("query.lsl")
+        await sim.start()
+        await sim.grant()
+        await sim.probe()
+        packet = f"FSP1:{ROOT}:0:1:QQ=="
+        async def query(kind, data, token=None):
+            await sim.event("http_request", OTHER, "POST", f"query|{token or sim.script.gToken}|{kind}|{data}")
+        await query("shared", f"{OTHER},{packet}")
+        self.assertEqual(sim.responses[-1][1], 400)
+        self.assertEqual(sim.broadcasts, [])
+        await query("sharedenable", "1", ROOT)
+        self.assertNotEqual(sim.responses[-1][1], 200)
+        self.assertFalse(sim.script.gSharedPoseEnabled)
+        await query("sharedenable", "1")
+        self.assertEqual(sim.responses[-1][1], 200)
+        self.assertTrue(sim.script.gSharedPoseEnabled)
+        await query("shared", f"{OTHER},{packet}")
+        self.assertEqual(sim.responses[-1][1], 200)
+        self.assertEqual(sim.broadcasts[-1], (OTHER, SHARED_POSE_CHANNEL, packet))
+        await query("shared", f"{OTHER},arbitrary command")
+        self.assertEqual(sim.responses[-1][1], 400)
+        await sim.event("on_rez", 0)
+        self.assertFalse(sim.script.gSharedPoseEnabled)
+        self.assertFalse(any(args[0] == SHARED_POSE_CHANNEL for args in sim.listeners.values()))
+
+    async def test_shared_pose_relays_only_attached_foreign_owner_packets_while_enabled(self):
+        sim = Simulator("query.lsl")
+        await sim.start()
+        await sim.grant()
+        await sim.probe()
+        packet = f"FSP1:{ROOT}:0:1:QQ=="
+        sim.messages.clear()
+        await sim.event("listen", SHARED_POSE_CHANNEL, "", ROOT, packet)
+        self.assertEqual(sim.messages, [])
+        await sim.event("http_request", OTHER, "POST", f"query|{sim.script.gToken}|sharedenable|1")
+        await sim.event("listen", SHARED_POSE_CHANNEL, "", OTHER, packet)
+        self.assertEqual(sim.messages, [], "an avatar-origin packet is not an attachment packet")
+        sim.script.builtin_funcs["llGetObjectDetails"] = lambda *args: [0]
+        await sim.event("listen", SHARED_POSE_CHANNEL, "", ROOT, packet)
+        self.assertEqual(sim.messages, [])
+        sim.script.builtin_funcs["llGetObjectDetails"] = lambda *args: [31]
+        await sim.event("listen", SHARED_POSE_CHANNEL, "", ROOT, packet)
+        self.assertEqual(sim.messages, [f"<auroraSharedPose>{OTHER}|{ROOT}|{packet}</auroraSharedPose>"])
+        sim.messages.clear()
+        await sim.event("attach", NULL)
+        await sim.event("listen", SHARED_POSE_CHANNEL, "", ROOT, packet)
+        self.assertEqual(sim.messages, [])
+        self.assertFalse(sim.script.gSharedPoseEnabled)
 
     async def test_revoking_pairing_suppresses_the_final_motor_report(self):
         sim = Simulator("bridge.lsl")

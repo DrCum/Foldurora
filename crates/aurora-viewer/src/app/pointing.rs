@@ -50,6 +50,13 @@ impl App {
         }
         let now = Instant::now();
         let selected = self.build.pointing_target(&self.world, now);
+        self.update_selection_beam(
+            selected
+                .as_ref()
+                .and_then(|t| t.object)
+                .filter(|_| !self.settings.lookat.private_point_at),
+            now,
+        );
         let previous = self.world.point_at.own.target;
         if let Some(t) = selected {
             self.set_look_at(lookat::SELECT, t.object, t.offset);
@@ -75,5 +82,35 @@ impl App {
             own.sent(now);
             self.send(cmd);
         }
+    }
+    /// Native selection visuals share the existing selection input; changing
+    /// the local beam preference never emits an interaction or selects a prim.
+    fn update_selection_beam(&mut self, target: Option<uuid::Uuid>, now: Instant) {
+        if !self.in_world() || !self.host_input_allowed() {
+            return;
+        }
+        let identity = (
+            self.world.agent_id,
+            self.world.login.as_ref().map(|l| l.session_id).unwrap_or_default(),
+        );
+        let beams = &mut self.world.selection_beams;
+        beams.bind(identity);
+        if target == beams.target && (target.is_none() || now.duration_since(beams.sent) < std::time::Duration::from_millis(500)) {
+            return;
+        }
+        beams.target = target;
+        beams.sent = now;
+        let effect = beams.own;
+        let color = [64, 160, 255, 255];
+        let duration = if target.is_some() { 1.0 } else { 0.0 };
+        let target = target.unwrap_or_default();
+        beams.receive(effect, self.world.agent_id, target, [0.; 3], color, duration);
+        self.send(NetCommand::SelectionBeam {
+            effect,
+            target,
+            position: [0.; 3],
+            color,
+            duration,
+        });
     }
 }

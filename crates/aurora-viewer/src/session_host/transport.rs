@@ -26,6 +26,7 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
+mod native_actions;
 pub(crate) mod preview_control;
 #[cfg(any(windows, test))]
 use super::preview_projection::{
@@ -62,17 +63,21 @@ pub(crate) struct WorkerSummary {
 
 #[derive(Clone, Default)]
 pub(crate) struct HostSnapshot {
+    pub(super) mcp: super::mcp::UiState,
     pub slots: Vec<SlotSummary>,
     pub registry_error: Option<String>,
     pub attention_preferences: super::attention_prefs::PreferenceState,
     pub accounts: Vec<SavedAccount>,
     pub workers: Vec<WorkerSummary>,
+    /// Fresh positive worker permission/capability observations, never raw labels.
+    pub native_observations: Vec<aurora_session::native::Observation>,
     pub opening: Vec<AccountKey>,
     pub stopped: bool,
     pub error: Option<String>,
     /// No native adoption until a completed prepared frame can be proven.
     pub can_activate: bool,
     pub active: Option<WorkerId>,
+    pub control_busy: bool,
     pub pending: Option<WorkerId>,
     /// Published only after the exact current transaction's grant is accepted.
     pub active_viewport: Option<HostedViewport>,
@@ -97,6 +102,11 @@ impl std::fmt::Display for HostError {
 impl std::error::Error for HostError {}
 
 enum HostIntent {
+    Mcp(super::mcp::UiCommand),
+    McpExecute {
+        request_id: String,
+        viewport: Option<HostedViewport>,
+    },
     #[cfg(any(windows, test))]
     Preview(RequestKind, preview_projection::OperationSlot),
     Open(Option<AccountKey>, Option<SlotId>),
@@ -140,8 +150,9 @@ impl HostIntent {
             | Self::ReviewConversation(_, _)
             | Self::CancelReview(_)
             | Self::RenameSlot(_, _)
-            | Self::SaveAttentionPreferences(_) => false,
-            Self::Open(_, _) | Self::Activate(_, _) | Self::Viewport(_) | Self::Park | Self::Detach(_) => true,
+            | Self::SaveAttentionPreferences(_)
+            | Self::Mcp(_) => false,
+            Self::McpExecute { .. } | Self::Open(_, _) | Self::Activate(_, _) | Self::Viewport(_) | Self::Park | Self::Detach(_) => true,
         }
     }
 }
@@ -418,6 +429,14 @@ impl HostController {
 
     pub fn snapshot(&self) -> Arc<HostSnapshot> {
         self.snapshot.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+    }
+
+    pub(super) fn mcp(&self, command: super::mcp::UiCommand) -> Result<u64, HostError> {
+        self.send(HostIntent::Mcp(command))
+    }
+
+    pub(super) fn mcp_execute(&self, request_id: String, viewport: Option<HostedViewport>) -> Result<u64, HostError> {
+        self.send(HostIntent::McpExecute { request_id, viewport })
     }
 
     pub fn open_manual_login(&self, account: Option<AccountKey>, slot: Option<SlotId>) -> Result<u64, HostError> {
@@ -754,7 +773,7 @@ impl WorkerConfig {
     }
 }
 
-pub(super) fn current_installation() -> anyhow::Result<InstallationId> {
+pub(crate) fn current_installation() -> anyhow::Result<InstallationId> {
     let executable = std::env::current_exe()?.canonicalize()?;
     Ok(InstallationId::from_bytes(
         Sha256::digest(executable.as_os_str().as_encoded_bytes()).into(),
@@ -811,7 +830,7 @@ pub(super) fn read_json<T: DeserializeOwned>(path: &Path, limit: usize) -> io::R
     serde_json::from_slice(&read_bytes(path, limit)?).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "malformed session file"))
 }
 
-fn publish(path: &Path, bytes: &[u8]) -> io::Result<()> {
+pub(super) fn publish(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let parent = path.parent().ok_or_else(|| io::Error::other("missing session directory"))?;
     super::profile::private_dir(parent)?;
     let temporary = parent.join(format!(".{}.tmp", uuid::Uuid::new_v4()));
@@ -929,6 +948,9 @@ fn worker_loop(
             match &envelope.message {
                 Message::Command(Command::Grant { .. } | Command::Translate { .. }) => moving = true,
                 Message::Command(Command::Revoke { .. } | Command::Detach) => moving = false,
+                Message::Command(Command::Native(request)) if request.action == aurora_session::native::NativeAction::RestoreExit => {
+                    moving = false
+                }
                 _ => {}
             }
             responsive_until = Instant::now() + Duration::from_secs(1);
@@ -1016,7 +1038,9 @@ impl Outbox {
             self.heartbeat = Some(envelope);
             return Ok(());
         }
-        if matches!(command, Command::Revoke { .. } | Command::Detach) {
+        if matches!(command, Command::Revoke { .. } | Command::Detach)
+            || matches!(command, Command::Native(request) if request.action == aurora_session::native::NativeAction::RestoreExit)
+        {
             // Rollback must revoke even when an earlier Prepare/Grant may
             // already have arrived. The worker rejects old activation epochs.
             self.pending = None;
@@ -1091,6 +1115,8 @@ fn matches_acknowledgment(command: &Envelope, reply: &Envelope) -> bool {
         return event.activation() == command_message.activation();
     }
     match (command_message, event) {
+        (Command::Native(request), Event::NativeAccepted { request: accepted }) => request.id == *accepted,
+        (Command::Native(request), Event::Detached) if request.action == aurora_session::native::NativeAction::RestoreExit => true,
         (Command::Heartbeat { .. } | Command::SetViewport { .. }, Event::Status(_)) | (Command::Detach, Event::Detached) => true,
         (
             Command::Revoke { activation },
@@ -1124,12 +1150,15 @@ struct Child {
     process: std::process::Child,
     binding: Binding,
     status: Option<WorkerStatus>,
+    native: Option<(aurora_session::native::Observation, Instant)>,
+    mcp_open_id: Option<String>,
     received: u64,
     last_seen: Option<Instant>,
     outbox: Outbox,
     prepared: Option<(Binding, u64, Option<HostedViewport>)>,
     granted: Option<(Binding, u64)>,
     detached: bool,
+    restore_pending: bool,
     exited: bool,
     reservation: Option<crate::characters::HostLaunchPermit>,
     next_reservation: Instant,
@@ -1139,6 +1168,25 @@ struct Child {
 }
 
 impl Child {
+    fn poll_native(&mut self) {
+        let Ok(observation) = read_json::<aurora_session::native::Observation>(&self.directory.join("native.json"), 4096) else {
+            return;
+        };
+        if observation.validate()
+            && observation.binding == self.binding
+            && observation.binding.worker == self.config.identity
+            && observation.lease_epoch == self.config.lease_epoch
+            && self.native.as_ref().is_none_or(|(old, _)| observation.revision > old.revision)
+        {
+            self.native = Some((observation, Instant::now()));
+        }
+    }
+    fn fresh_native(&self) -> Option<&aurora_session::native::Observation> {
+        self.native
+            .as_ref()
+            .filter(|(observation, seen)| observation.binding == self.binding && seen.elapsed() <= REACHABLE)
+            .map(|(observation, _)| observation)
+    }
     fn accepts(&self, envelope: &Envelope) -> bool {
         self.config.accepts(envelope)
     }
@@ -1229,11 +1277,18 @@ impl OpenGate {
     }
 }
 
+struct PendingMcpOpen {
+    id: String,
+    expected_owner: Option<Binding>,
+    began: Instant,
+}
+
 struct PendingOpen {
     slot: SlotId,
     account: Option<AccountKey>,
     gate: OpenGate,
     reservation: Option<crate::characters::HostLaunchPermit>,
+    mcp_open: Option<PendingMcpOpen>,
 }
 
 #[derive(Clone, Copy)]
@@ -1299,9 +1354,17 @@ struct Broker {
     completed_request: u64,
     chat_listener: Option<super::chat_transport::Listener>,
     reviews: review::Transactions,
+    native_actions: Vec<native_actions::Operation>,
+    next_native_request: u64,
+    native_authority: Option<Arc<aurora_mcp::authority::Authority>>,
 }
 
 impl Broker {
+    fn restore_pending(&self) -> bool {
+        self.children
+            .iter()
+            .any(|child| child.restore_pending && !child.detached && !child.exited)
+    }
     fn accepted_viewport(&self, worker: WorkerId) -> Option<ActiveViewport> {
         let child = self.children.iter().find(|child| child.config.identity.worker == worker)?;
         let (binding, activation, viewport) = child.prepared?;
@@ -1474,7 +1537,13 @@ impl Broker {
                             self.pending = Some(worker);
                             child.prepared = Some((envelope.binding, *activation, Some(*viewport)));
                         }
-                        Message::Command(Command::Detach) => {
+                        Message::Command(
+                            Command::Detach
+                            | Command::Native(aurora_session::native::NativeRequest {
+                                action: aurora_session::native::NativeAction::RestoreExit,
+                                ..
+                            }),
+                        ) => {
                             #[cfg(any(windows, test))]
                             {
                                 child.preview.retire();
@@ -1482,6 +1551,7 @@ impl Broker {
                             }
                             self.reviews.interrupt(ReviewStatus::Unavailable);
                             child.chat.set_control(None, false);
+                            child.restore_pending = true;
                             child.granted = None;
                             if self.active_viewport.is_some_and(|active| active.worker == worker) {
                                 self.active_viewport = None;
@@ -1553,6 +1623,14 @@ impl Broker {
     }
 
     fn intent(&mut self, intent: HostIntent, ticket: u64, now: u64) -> anyhow::Result<()> {
+        if self.restore_pending()
+            && matches!(
+                intent,
+                HostIntent::Open(_, _) | HostIntent::Activate(_, _) | HostIntent::Viewport(_) | HostIntent::Park
+            )
+        {
+            anyhow::bail!(HostError::Busy);
+        }
         #[cfg(any(windows, test))]
         if intent.controls_presentation() || matches!(intent, HostIntent::ReviewConversation(_, _)) {
             self.preview_projection.external_intent();
@@ -1564,6 +1642,7 @@ impl Broker {
             self.reviews.interrupt(ReviewStatus::Cancelled);
         }
         match intent {
+            HostIntent::Mcp(_) | HostIntent::McpExecute { .. } => anyhow::bail!(HostError::Unsupported),
             #[cfg(any(windows, test))]
             HostIntent::Preview(kind, slot) => self.preview_projection.queue(ticket, kind, slot),
             HostIntent::Open(account, requested) => {
@@ -1581,6 +1660,7 @@ impl Broker {
                         account,
                         gate: OpenGate::Queued,
                         reservation: None,
+                        mcp_open: None,
                     });
                 }
             }
@@ -1735,13 +1815,23 @@ impl Broker {
         // Keep the process handles in this broker until exit has actually been
         // observed; a detached ordinary window is never a kill permission.
         for index in 0..self.children.len() {
+            self.children[index].poll_native();
+            for action in &mut self.native_actions {
+                action.observe(&self.children[index]);
+            }
             if !self.children[index].exited && self.children[index].poll_process()? {
+                let source = self.children[index].binding;
+                for action in &mut self.native_actions {
+                    if action.binding == source {
+                        action.exited = true;
+                    }
+                }
                 #[cfg(any(windows, test))]
                 self.preview_projection.exited(self.children[index].config.identity);
                 let effects = self.coordinator.remove(self.children[index].config.identity.worker);
                 self.effects(effects)?;
             }
-            if self.children[index].exited || self.children[index].detached {
+            if self.children[index].exited {
                 continue;
             }
             let incoming = self.children[index].incoming();
@@ -1758,18 +1848,51 @@ impl Broker {
                         .is_some_and(|pending| matches_acknowledgment(&pending.envelope, &envelope));
                 let effects = match observation {
                     Ok(effects) => effects,
-                    Err(_) if detach_ack => Vec::new(),
+                    Err(_)
+                        if detach_ack
+                            || (self.children[index].outbox.pending.as_ref().is_some_and(|pending| {
+                                matches!(pending.envelope.message, Message::Command(Command::Native(_)))
+                                    && matches_acknowledgment(&pending.envelope, &envelope)
+                            })) =>
+                    {
+                        Vec::new()
+                    }
                     Err(_) => continue,
                 };
                 let child = &mut self.children[index];
                 child.received = envelope.sequence;
                 child.last_seen = Some(Instant::now());
+                let rejected_native = child
+                    .outbox
+                    .pending
+                    .as_ref()
+                    .and_then(|pending| {
+                        if let Message::Command(Command::Native(request)) = pending.envelope.message {
+                            Some(request)
+                        } else {
+                            None
+                        }
+                    })
+                    .filter(|_| matches!(envelope.message, Message::Event(Event::Rejected { .. })));
                 let acknowledged = child.outbox.acknowledge(&envelope);
+                if acknowledged && let Some(request) = rejected_native {
+                    for action in &mut self.native_actions {
+                        action.rejected(child.binding, request);
+                    }
+                }
+                if acknowledged && let Message::Event(Event::NativeAccepted { request }) = envelope.message {
+                    for action in &mut self.native_actions {
+                        if action.binding == child.binding && action.request.id == request {
+                            action.acknowledged = true;
+                        }
+                    }
+                }
                 if acknowledged && let Message::Event(Event::Granted { activation }) = &envelope.message {
                     child.granted = Some((envelope.binding, *activation));
                 }
                 if matches!(envelope.message, Message::Event(Event::Detached)) {
                     child.detached = true;
+                    child.restore_pending = false;
                 }
                 if let Some(entry) = self
                     .coordinator
@@ -1790,6 +1913,13 @@ impl Broker {
                     }
                     child.binding = entry.binding;
                     child.status = Some(entry.status.clone());
+                    if entry.status.phase == Phase::Login
+                        && child.config.expected_account.is_none()
+                        && let Some(id) = child.mcp_open_id.take()
+                        && let Some(authority) = &self.native_authority
+                    {
+                        let _ = authority.observe_action_result(&id, aurora_mcp::authority::ActionResult::Completed);
+                    }
                 }
                 self.effects(effects)?;
             }
@@ -1850,6 +1980,9 @@ impl Broker {
     }
 
     fn reconcile(&mut self, accounts: &[(SavedAccount, crate::login_accounts::Account)], now: u64) -> anyhow::Result<()> {
+        if self.restore_pending() {
+            return Ok(());
+        }
         if self.viewport_dirty
             && !self.park_requested
             && self.opens.is_empty()
@@ -1923,6 +2056,14 @@ impl Broker {
 
     fn open_next(&mut self, accounts: &[(SavedAccount, crate::login_accounts::Account)], now: u64) -> anyhow::Result<()> {
         let Some(mut open) = self.opens.pop_front() else { return Ok(()) };
+        if let Some(capture) = &open.mcp_open
+            && !self.manual_open_authorized(capture, open.gate)
+        {
+            if let Some(authority) = &self.native_authority {
+                let _ = authority.observe_action_result(&capture.id, aurora_mcp::authority::ActionResult::RejectedNative);
+            }
+            anyhow::bail!("native manual open authorization changed");
+        }
         let account = open.account.and_then(|key| accounts.iter().find(|(saved, _)| saved.key == key));
         anyhow::ensure!(
             open.account.is_none() || account.is_some(),
@@ -1959,6 +2100,14 @@ impl Broker {
         // Recheck after the GPU park, immediately before process creation.
         // The child takes the lifetime lock and validates the controller stamp
         // before exposing profile paths to settings/cache initialization.
+        if let Some(capture) = &open.mcp_open
+            && !self.manual_open_authorized(capture, open.gate)
+        {
+            if let Some(authority) = &self.native_authority {
+                let _ = authority.observe_action_result(&capture.id, aurora_mcp::authority::ActionResult::RejectedNative);
+            }
+            anyhow::bail!("native manual open authorization changed before spawn");
+        }
         self.choose_slot(Some(open.slot))?;
         let mut config = new_config(
             self.installation,
@@ -1978,8 +2127,19 @@ impl Broker {
         config.slot = Some(open.slot);
         self.coordinator.register(config.identity.worker, config.lease_epoch, now)?;
         let worker = config.identity.worker;
-        match launch(config, account, open.reservation) {
-            Ok(child) => self.children.push(child),
+        let launched = if let Some(capture) = &open.mcp_open {
+            let authority = self.native_authority.clone().ok_or(HostError::Unavailable)?;
+            authority
+                .continue_native_action(&capture.id, || launch(config, account, open.reservation))
+                .unwrap_or_else(|| Err(anyhow::anyhow!("native restart authorization revoked before spawn")))
+        } else {
+            launch(config, account, open.reservation)
+        };
+        match launched {
+            Ok(mut child) => {
+                child.mcp_open_id = open.mcp_open.map(|capture| capture.id);
+                self.children.push(child);
+            }
             Err(error) => {
                 let effects = self.coordinator.remove(worker);
                 self.effects(effects)?;
@@ -2057,6 +2217,7 @@ impl Broker {
         opening.sort();
         opening.dedup();
         HostSnapshot {
+            mcp: super::mcp::UiState::default(),
             registry_error: self.registry_error.clone(),
             attention_preferences: self.registry.attention_preferences().clone(),
             slots: SlotId::all()
@@ -2070,11 +2231,18 @@ impl Broker {
                 .collect(),
             accounts: accounts.iter().map(|(saved, _)| saved.clone()).collect(),
             workers,
+            native_observations: self
+                .children
+                .iter()
+                .filter(|child| !child.detached && !child.exited)
+                .filter_map(|child| child.fresh_native().cloned())
+                .collect(),
             opening,
             stopped,
             error: self.error.clone(),
             can_activate,
             active: self.coordinator.active(),
+            control_busy: self.coordinator.busy() || !self.opens.is_empty() || self.park_requested || self.restore_pending(),
             pending: self.coordinator.busy().then_some(self.pending).flatten(),
             active_viewport,
             completed_request: self.completed_request,
@@ -2112,7 +2280,7 @@ fn host_loop(
         }
     }
     let registry = Registry::open(installation, host)?;
-    let mcp = super::mcp::Publication::new(installation, host);
+    let mut mcp = super::mcp::Publication::new(installation, host);
     let mut broker = Broker {
         #[cfg(any(windows, test))]
         preview_frontdoor,
@@ -2135,6 +2303,9 @@ fn host_loop(
         error: None,
         completed_request: 0,
         reviews: review::Transactions::default(),
+        native_actions: Vec::new(),
+        next_native_request: 0,
+        native_authority: Some(mcp.authority().clone()),
         chat_listener: match super::chat_transport::Listener::bind() {
             Ok(listener) => Some(listener),
             Err(_) => {
@@ -2161,6 +2332,8 @@ fn host_loop(
             broker.reviews.interrupt(ReviewStatus::Cancelled);
             closing = Some(Instant::now() + CLOSE_WAIT);
             broker.opens.clear();
+            let _ = mcp.authority().stop();
+            broker.cancel_native_preparations();
             let effects = broker.coordinator.detach_all();
             if let Err(failure) = broker.effects(effects) {
                 broker.error = Some(failure.to_string());
@@ -2170,6 +2343,18 @@ fn host_loop(
         for request in rx.try_iter().take(MAX_QUEUE) {
             if closing.is_some() {
                 break;
+            }
+            if let HostIntent::Mcp(command) = request.intent {
+                mcp.command(command);
+                broker.completed_request = request.ticket;
+                continue;
+            }
+            if let HostIntent::McpExecute { request_id, viewport } = request.intent {
+                mcp.dispatch(&request_id, |action| {
+                    dispatch_mcp_action(&mut broker, action, viewport, request.ticket, now)
+                });
+                broker.completed_request = request.ticket;
+                continue;
             }
             let controls_presentation = request.intent.controls_presentation();
             let registry_request = matches!(request.intent, HostIntent::RenameSlot(_, _));
@@ -2187,6 +2372,7 @@ fn host_loop(
         if let Err(failure) = broker.poll(now) {
             broker.fail_closed(&failure);
         }
+        broker.poll_native_actions(now);
         if closing.is_none()
             && let Err(failure) = broker.reconcile(&accounts, now)
         {
@@ -2196,15 +2382,20 @@ fn host_loop(
         #[cfg(any(windows, test))]
         broker.poll_previews(now);
         for child in &mut broker.children {
-            if !child.detached
+            if !child.exited
                 && let Err(failure) = child.flush()
             {
                 broker.error = Some(failure.to_string());
             }
         }
         let stopped = closing.is_some_and(|deadline| Instant::now() >= deadline || broker.children.iter().all(|child| child.detached));
-        let snapshot = Arc::new(broker.snapshot(&accounts, stopped));
+        let mut snapshot = broker.snapshot(&accounts, stopped);
         mcp.observe(&snapshot, closing.is_some());
+        mcp.actions(|action| broker.begin_native_action(action));
+        snapshot = broker.snapshot(&accounts, stopped);
+        mcp.observe(&snapshot, closing.is_some());
+        snapshot.mcp = mcp.ui();
+        let snapshot = Arc::new(snapshot);
         *shared.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = snapshot;
         if stopped {
             for child in broker.children.drain(..) {
@@ -2224,6 +2415,86 @@ fn host_loop(
         });
     }
     Ok(())
+}
+
+fn dispatch_mcp_action(
+    broker: &mut Broker,
+    action: &aurora_mcp::authority::ActionExecution,
+    viewport: Option<HostedViewport>,
+    ticket: u64,
+    now: u64,
+) -> aurora_mcp::authority::ActionResult {
+    use aurora_mcp::{authority::ActionResult, wire::HostAction};
+    let Some(source) = action.profiles.first() else {
+        return ActionResult::Unavailable;
+    };
+    if action.profiles.len() > 2 {
+        return ActionResult::RejectedNative;
+    }
+    if matches!(action.action, HostAction::Activate | HostAction::OpenLogin | HostAction::Restart) {
+        let current_owner = match broker.coordinator.active() {
+            None => None,
+            Some(worker) => match broker
+                .children
+                .iter()
+                .find(|child| child.config.identity.worker == worker && !child.detached && !child.exited)
+                .map(|child| child.binding)
+            {
+                Some(binding) if binding.session.is_some() => Some(binding),
+                _ => return ActionResult::RejectedNative,
+            },
+        };
+        if broker.coordinator.busy() || broker.restore_pending() || current_owner != action.expected_owner {
+            return ActionResult::RejectedNative;
+        }
+    }
+    let worker = source.binding.map(|binding| binding.worker.worker);
+    if source.binding.is_some_and(|binding| {
+        !broker.children.iter().any(|child| {
+            !child.detached && !child.exited && child.binding == binding && child.last_seen.is_some_and(|seen| seen.elapsed() <= REACHABLE)
+        })
+    }) {
+        return ActionResult::RejectedNative;
+    }
+    if matches!(action.action, HostAction::Logout | HostAction::Restart) {
+        return broker.begin_native_action(action);
+    }
+    if matches!(action.action, HostAction::Detach) {
+        return if worker
+            .and_then(|worker| broker.coordinator.restore_for_exit(worker).ok())
+            .is_some_and(|effects| broker.effects(effects).is_ok())
+        {
+            ActionResult::Submitted
+        } else {
+            ActionResult::RejectedNative
+        };
+    }
+    let intent = match (&action.action, worker) {
+        (HostAction::OpenLogin, None) => SlotId::try_from(source.profile.number() - 1)
+            .ok()
+            .map(|slot| HostIntent::Open(None, Some(slot))),
+        (HostAction::Detach, Some(worker)) => Some(HostIntent::Detach(worker)),
+        (HostAction::Activate, Some(worker)) => viewport.map(|viewport| HostIntent::Activate(worker, viewport)),
+        _ => None,
+    };
+    match intent.map(|intent| broker.intent(intent, ticket, now)) {
+        Some(Ok(())) => {
+            if action.action == HostAction::OpenLogin {
+                if let Some(open) = broker.opens.iter_mut().find(|open| open.slot.number() == source.profile.number()) {
+                    open.mcp_open = Some(PendingMcpOpen {
+                        id: action.request_id.clone(),
+                        expected_owner: action.expected_owner,
+                        began: Instant::now(),
+                    });
+                } else {
+                    return ActionResult::Uncertain;
+                }
+            }
+            ActionResult::Submitted
+        }
+        Some(Err(_)) => ActionResult::RejectedNative,
+        None => ActionResult::Unavailable,
+    }
 }
 
 fn new_config(
@@ -2290,12 +2561,15 @@ fn launch(
         process,
         binding,
         status: None,
+        native: None,
+        mcp_open_id: None,
         received: 0,
         last_seen: None,
         outbox: Outbox::default(),
         prepared: None,
         granted: None,
         detached: false,
+        restore_pending: false,
         exited: false,
         reservation,
         next_reservation: Instant::now(),
@@ -2472,6 +2746,9 @@ mod tests {
             completed_request: 0,
             chat_listener: None,
             reviews: review::Transactions::default(),
+            native_actions: Vec::new(),
+            next_native_request: 0,
+            native_authority: None,
         };
         let slot = SlotId::try_from(1).unwrap();
         broker.intent(HostIntent::Open(None, Some(slot)), 1, 0).unwrap();

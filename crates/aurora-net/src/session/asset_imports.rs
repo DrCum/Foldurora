@@ -9,8 +9,30 @@ use crate::inventory::{
     upload::{Error, Kind, Receipt, Request},
 };
 
+pub(super) struct AssistantCreate {
+    pub request: Uuid,
+    pub started: Instant,
+    pub parent: Uuid,
+    pub asset_type: i32,
+    pub asset: Option<Uuid>,
+    pub subtype: Option<u8>,
+    pub link: bool,
+}
+impl AssistantCreate {
+    fn matches(&self, item: &InvItem, owner: Uuid) -> bool {
+        !item.id.is_nil()
+            && item.parent == self.parent
+            && item.asset_type == self.asset_type
+            && item.owner == owner
+            && self.asset.is_none_or(|asset| item.asset_id == asset)
+            && self.subtype.is_none_or(|subtype| (item.flags & 0xff) == u32::from(subtype))
+    }
+}
 #[derive(Default)]
 pub(super) struct Imports {
+    pub(super) assistant_reads: Arc<Mutex<std::collections::HashSet<Uuid>>>,
+    pub(super) assistant_uploads: Arc<Mutex<HashMap<Uuid, super::assistant_upload::Pending>>>,
+    pub(super) assistant_upload_ids: std::collections::HashSet<Uuid>,
     creation_permissions: HashMap<u32, CreationPermissions>,
     creates: HashMap<u32, Pending>,
     /// New environment settings items waiting for their inventory callback.
@@ -679,6 +701,30 @@ impl Session<'_> {
     }
 
     pub(super) fn expire_asset_imports(&mut self) {
+        self.asset_imports.assistant_uploads.lock().retain(|_, pending| !pending.expired());
+        self.assistant_creates.retain(|_, pending| {
+            if pending.started.elapsed() < Duration::from_secs(60) {
+                return true;
+            }
+            if pending.link {
+                emit(
+                    self.sh,
+                    NetEvent::AssistantInventoryLinkCreated {
+                        request: pending.request,
+                        result: Err("native_link_outcome_unknown".into()),
+                    },
+                );
+            } else {
+                emit(
+                    self.sh,
+                    NetEvent::AssistantInventoryCreated {
+                        request: pending.request,
+                        result: Err("Native creation outcome is unknown; inspect inventory before retrying".into()),
+                    },
+                );
+            }
+            false
+        });
         self.asset_imports
             .creation_permissions
             .retain(|_, pending| pending.started.elapsed() < Duration::from_secs(60));
@@ -842,5 +888,144 @@ mod tests {
                 .wrapping_add(item.owner_mask * 3)
                 .wrapping_add(20 + 19 + 7 + 12)
         );
+    }
+}
+
+impl Session<'_> {
+    pub(super) fn create_assistant_inventory_item(
+        &mut self,
+        request: Uuid,
+        parent: Uuid,
+        kind: crate::inventory::operations::NewItem,
+        name: String,
+        description: String,
+        permissions: Option<crate::inventory::upload::Permissions>,
+    ) {
+        if self.assistant_creates.len() >= 128 || parent.is_nil() || name.len() > 255 || self.main.is_none() {
+            emit(
+                self.sh,
+                NetEvent::AssistantInventoryCreated {
+                    request,
+                    result: Err("Native creation unavailable".into()),
+                },
+            );
+            return;
+        }
+        if description.len() > 1024 || matches!(kind, crate::inventory::operations::NewItem::Wearable(_)) {
+            emit(
+                self.sh,
+                NetEvent::AssistantInventoryCreated {
+                    request,
+                    result: Err("Invalid native creation payload".into()),
+                },
+            );
+            return;
+        }
+        let (asset, inventory, subtype) = kind.types();
+        let callback = self.inventory_callback(false);
+        self.assistant_creates.insert(
+            callback,
+            AssistantCreate {
+                request,
+                started: Instant::now(),
+                parent,
+                asset_type: i32::from(asset),
+                asset: None,
+                link: false,
+                subtype: matches!(kind, crate::inventory::operations::NewItem::Settings(_)).then_some(subtype),
+            },
+        );
+        let mut message = CreateInventoryItem::default();
+        message.agent_data.agent_id = self.agent_id();
+        message.agent_data.session_id = self.session_id();
+        message.inventory_block.folder_id = parent;
+        message.inventory_block.callback_id = callback;
+        message.inventory_block.next_owner_mask = permissions.map_or(0x7fff_ffff, |p| p.next_owner);
+        message.inventory_block.type_ = asset;
+        message.inventory_block.inv_type = inventory;
+        message.inventory_block.wearable_type = subtype;
+        message.inventory_block.name = str_field(&name);
+        message.inventory_block.description = str_field(&description);
+        if let Some(rights) = permissions {
+            self.remember_creation_permissions(callback, parent, i32::from(asset), rights);
+        }
+        self.send_main(&message, true);
+    }
+    pub(super) fn assistant_inventory_created(&mut self, callback: u32, item: &InvItem) {
+        let Some(pending) = self.assistant_creates.remove(&callback) else {
+            return;
+        };
+        let request = pending.request;
+        let result = if pending.matches(item, self.agent_id()) {
+            Ok(item.clone())
+        } else {
+            Err("Native creation identity did not match".into())
+        };
+        if pending.link {
+            emit(
+                self.sh,
+                NetEvent::AssistantInventoryLinkCreated {
+                    request,
+                    result: result.map(|item| item.id),
+                },
+            );
+        } else {
+            emit(self.sh, NetEvent::AssistantInventoryCreated { request, result });
+        }
+    }
+}
+
+#[cfg(test)]
+mod assistant_creation_tests {
+    use super::*;
+    #[test]
+    fn native_create_callback_requires_exact_owner_parent_asset_and_subtype() {
+        let owner = Uuid::from_u128(11);
+        let parent = Uuid::from_u128(12);
+        let asset = Uuid::from_u128(13);
+        let pending = AssistantCreate {
+            request: Uuid::from_u128(14),
+            started: Instant::now(),
+            parent,
+            asset_type: 5,
+            asset: Some(asset),
+            subtype: Some(4),
+            link: false,
+        };
+        let item = InvItem {
+            id: Uuid::from_u128(15),
+            parent,
+            owner,
+            asset_id: asset,
+            asset_type: 5,
+            flags: 4,
+            ..Default::default()
+        };
+        assert!(pending.matches(&item, owner));
+        for changed in [
+            InvItem {
+                owner: Uuid::nil(),
+                ..item.clone()
+            },
+            InvItem {
+                parent: Uuid::nil(),
+                ..item.clone()
+            },
+            InvItem {
+                asset_id: Uuid::nil(),
+                ..item.clone()
+            },
+            InvItem {
+                asset_type: 10,
+                ..item.clone()
+            },
+            InvItem { flags: 5, ..item.clone() },
+            InvItem {
+                id: Uuid::nil(),
+                ..item.clone()
+            },
+        ] {
+            assert!(!pending.matches(&changed, owner));
+        }
     }
 }

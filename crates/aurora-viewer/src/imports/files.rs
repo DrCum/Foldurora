@@ -220,6 +220,17 @@ pub(super) fn load(
     local: bool,
 ) -> Result<Vec<Entry>, AssetError> {
     let data = read(path)?;
+    load_data(path, choice, options, sound_limit, prefs, local, data)
+}
+pub(super) fn load_data(
+    path: &Path,
+    choice: Choice,
+    options: import_texture::Options,
+    sound_limit: u32,
+    prefs: &Preferences,
+    local: bool,
+    data: Vec<u8>,
+) -> Result<Vec<Entry>, AssetError> {
     let extension = path
         .extension()
         .map(|e| e.to_string_lossy().to_ascii_lowercase())
@@ -304,28 +315,7 @@ pub(super) fn load(
             }
             Source::Mesh(Box::new(draft))
         }
-        "png" | "jpg" | "jpeg" | "bmp" | "tga" | "j2c" | "j2k" | "jp2" => Source::Texture(Arc::new(import_texture::decode(&data)?)),
-        "wav" => Source::Sound(Arc::new(import_sound::decode_wav(&data, sound::SOURCE_LIMIT)?)),
-        "anim" => {
-            let (animation, bytes) = aurora_assets::prepare_animation_upload(&data)?;
-            Source::Animation {
-                animation: Arc::new(animation),
-                bytes: Arc::new(bytes),
-                bvh: None,
-            }
-        }
-        "bvh" => {
-            let skeleton = aurora_assets::Skeleton::parse(include_bytes!("../../assets/character/avatar_skeleton.xml"))?;
-            let bvh = import_animation::parse_bvh(&data, &skeleton)?;
-            Source::Animation {
-                bytes: Arc::new(Vec::new()),
-                bvh: Some(BvhInfo {
-                    frames: bvh.frames,
-                    frame_time: bvh.frame_time,
-                }),
-                animation: Arc::new(bvh.animation),
-            }
-        }
+        "png" | "jpg" | "jpeg" | "bmp" | "tga" | "j2c" | "j2k" | "jp2" | "wav" | "anim" | "bvh" => decode_simple(&data, &extension)?,
         "gltf" | "glb" if choice != Choice::Mesh => {
             let root = path
                 .parent()
@@ -476,6 +466,36 @@ pub(super) fn load(
         entry.watch = Some(local::Watch::new(vec![path.to_owned()]));
     }
     Ok(vec![entry])
+}
+
+/// Decode ordinary single-asset bytes through the same codecs as native UI.
+/// Callers which freeze an approved plan supply already safely read bytes.
+pub(super) fn decode_simple(data: &[u8], extension: &str) -> Result<Source, AssetError> {
+    Ok(match extension {
+        "png" | "jpg" | "jpeg" | "bmp" | "tga" | "j2c" | "j2k" | "jp2" => Source::Texture(Arc::new(import_texture::decode(data)?)),
+        "wav" => Source::Sound(Arc::new(import_sound::decode_wav(data, sound::SOURCE_LIMIT)?)),
+        "anim" => {
+            let (animation, bytes) = aurora_assets::prepare_animation_upload(data)?;
+            Source::Animation {
+                animation: Arc::new(animation),
+                bytes: Arc::new(bytes),
+                bvh: None,
+            }
+        }
+        "bvh" => {
+            let skeleton = aurora_assets::Skeleton::parse(include_bytes!("../../assets/character/avatar_skeleton.xml"))?;
+            let bvh = import_animation::parse_bvh(data, &skeleton)?;
+            Source::Animation {
+                bytes: Arc::new(Vec::new()),
+                bvh: Some(BvhInfo {
+                    frames: bvh.frames,
+                    frame_time: bvh.frame_time,
+                }),
+                animation: Arc::new(bvh.animation),
+            }
+        }
+        _ => return Err(AssetError::Unsupported("single-asset upload type".into())),
+    })
 }
 
 /// Paid mixed-file imports use the type choices captured when Add files opens.

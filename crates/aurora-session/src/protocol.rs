@@ -212,6 +212,8 @@ pub enum RejectReason {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Command {
+    /// Requires a positive schema-2 native capability observation first.
+    Native(crate::native::NativeRequest),
     Heartbeat {
         workspace_foreground: bool,
     },
@@ -241,6 +243,7 @@ pub enum Command {
 impl Command {
     pub fn activation(&self) -> u64 {
         match self {
+            Self::Native(request) => request.id,
             Self::Revoke { activation }
             | Self::Prepare { activation, .. }
             | Self::Grant { activation, .. }
@@ -257,6 +260,9 @@ impl Command {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Event {
+    NativeAccepted {
+        request: u64,
+    },
     Status(WorkerStatus),
     Quiesced {
         activation: u64,
@@ -283,6 +289,7 @@ pub enum Event {
 impl Event {
     pub fn activation(&self) -> u64 {
         match self {
+            Self::NativeAccepted { request } => *request,
             Self::Quiesced { activation, .. }
             | Self::FrameReady { activation, .. }
             | Self::Granted { activation }
@@ -325,8 +332,13 @@ impl Envelope {
                 if self.reply_to != 0 {
                     return Err(Error::Sequence);
                 }
-                if command.session_bound() && (command.activation() == 0 || self.binding.session.is_none()) {
+                if command.session_bound()
+                    && ((!matches!(command, Command::Native(_)) && command.activation() == 0) || self.binding.session.is_none())
+                {
                     return Err(Error::Binding);
+                }
+                if matches!(command, Command::Native(request) if request.id == 0) {
+                    return Err(Error::Invalid);
                 }
                 if let Command::Prepare {
                     viewport: Some(viewport), ..
@@ -341,9 +353,14 @@ impl Envelope {
             }
             Message::Event(event) => {
                 if !matches!(event, Event::Status(_) | Event::Detached)
-                    && (self.reply_to == 0 || event.activation() == 0 || self.binding.session.is_none())
+                    && (self.reply_to == 0
+                        || (!matches!(event, Event::NativeAccepted { .. }) && event.activation() == 0)
+                        || self.binding.session.is_none())
                 {
                     return Err(Error::Binding);
+                }
+                if matches!(event, Event::NativeAccepted { request: 0 }) {
+                    return Err(Error::Invalid);
                 }
                 match event {
                     Event::Status(status) => {

@@ -213,6 +213,7 @@ pub struct Renderer {
     /// Desired window surface generation, carried by each frame packet.
     surface_epoch: u64,
     session_fences: Requests,
+    disposable_trim: Option<(SessionCompletion, bool, Option<bool>)>,
     viewport_capture: Option<Arc<crate::viewport_capture_gpu::Shared>>,
     viewport_capture_pending: Option<crate::viewport_capture_gpu::FrameCapture>,
     viewport_capture_watch: Option<crate::viewport_capture_gpu::FrameCapture>,
@@ -718,6 +719,7 @@ impl Renderer {
             frames: 0,
             surface_epoch: 1,
             session_fences: Requests::default(),
+            disposable_trim: None,
             viewport_capture,
             viewport_capture_pending: None,
             viewport_capture_watch: None,
@@ -1663,6 +1665,13 @@ impl Renderer {
         match done {
             Done::Frame(result) => self.apply(*result),
             Done::SessionFence(reply) => self.session_fences.receive(reply),
+            Done::DisposableTrim { ticket, applied } => {
+                if let Some((proof, _, answer)) = &mut self.disposable_trim
+                    && proof.ticket == ticket
+                {
+                    *answer = Some(applied);
+                }
+            }
             Done::ViewportCaptureMaintenance { probe, pending } => self.viewport_capture_retirement.receive(probe, pending),
             Done::Pick(_) => {}
         }
@@ -1699,6 +1708,63 @@ impl Renderer {
         self.session_fences_supported()?;
         self.session_fences.request(ticket)?;
         self.drive_session_fence()
+    }
+
+    /// The caller must keep its existing world-submission gate parked. A
+    /// render-thread-only proof check refuses intervening frames and replay.
+    pub fn request_disposable_trim(&mut self, proof: SessionCompletion) -> Result<(), SessionFenceError> {
+        self.session_fences_supported()?;
+        if proof.surface_epoch != self.surface_epoch || self.disposable_trim.is_some() {
+            return Err(SessionFenceError::Busy);
+        }
+        self.disposable_trim = Some((proof, false, None));
+        Ok(())
+    }
+
+    /// Retire only this caller's pending trim slot. An already handed render
+    /// job still verifies its one-use backend fence proof; its late receipt is
+    /// ignored, so cancellation cannot poison a later account's trim slot.
+    pub fn cancel_disposable_trim(&mut self, ticket: u64) -> bool {
+        if self.disposable_trim.is_some_and(|(proof, _, _)| proof.ticket == ticket) {
+            self.disposable_trim = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn poll_disposable_trim(&mut self, ticket: u64) -> Result<bool, SessionFenceError> {
+        self.session_fences_supported()?;
+        self.collect();
+        let Some((proof, handed, answer)) = self.disposable_trim else {
+            return Err(SessionFenceError::StaleTicket);
+        };
+        if proof.ticket != ticket {
+            return Err(SessionFenceError::StaleTicket);
+        }
+        if let Some(applied) = answer {
+            self.disposable_trim = None;
+            return if applied { Ok(true) } else { Err(SessionFenceError::StaleTicket) };
+        }
+        if !handed {
+            let result = match &self.host {
+                Host::Thread { owner, .. } => owner.try_submit(Job::DisposableTrim(proof)),
+                Host::Inline(_, _) => return Err(SessionFenceError::Unsupported),
+            };
+            match result {
+                Ok(Some(submitted)) => {
+                    if let Some((_, handed, _)) = &mut self.disposable_trim {
+                        *handed = true;
+                    }
+                    if let Some(done) = submitted.previous {
+                        self.apply_done(done);
+                    }
+                }
+                Ok(None) => {}
+                Err(_) => return Err(SessionFenceError::RendererFailed),
+            }
+        }
+        Ok(false)
     }
 
     /// Pure boundary query for the future native policy adapter. This API does

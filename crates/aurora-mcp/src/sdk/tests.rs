@@ -1,4 +1,20 @@
 use super::*;
+#[test]
+fn native_inline_images_accept_only_bounded_typed_jpeg_data() {
+    let valid = json!({"status":"ok","mime_type":"image/jpeg","width":64,"height":48,"bytes":7,"data_base64":"/9gBAgP/2Q=="});
+    assert!(NativeImage::parse(valid.clone()).is_ok());
+    for (key, value) in [
+        ("mime_type", json!("image/png")),
+        ("width", json!(257)),
+        ("bytes", json!(12289)),
+        ("data_base64", json!("private data")),
+        ("status", json!("pending")),
+    ] {
+        let mut invalid = valid.clone();
+        invalid[key] = value;
+        assert!(NativeImage::parse(invalid).is_err());
+    }
+}
 
 #[test]
 fn output_bound_is_enforced_during_serialization() {
@@ -16,8 +32,12 @@ fn only_closed_read_tool_arguments_are_accepted() {
         parse_read(&CallToolRequestParams::new("controller_list").with_arguments(json!({"approve":true}).as_object().unwrap().clone()))
             .is_err()
     );
-    assert_eq!(tools().len(), 4);
-    assert!(tools().iter().all(|t| t.annotations.as_ref().unwrap().read_only_hint == Some(true)));
+    assert_eq!(tools().len(), 173);
+    assert!(
+        tools()
+            .iter()
+            .any(|t| t.annotations.as_ref().unwrap().read_only_hint == Some(false))
+    );
 }
 
 #[test]
@@ -118,13 +138,16 @@ fn missing_descriptor_or_closed_transport_never_delivers_queued_placeholder() {
             let backend = Arc::new(Mutex::new(Backend {
                 discovery,
                 clients: BTreeMap::new(),
+                characters: None,
+                viewer_clients: BTreeMap::new(),
+                viewer_probe: 0,
             }));
             let state = Arc::new(Mutex::new(Admission {
                 closed,
                 ..Default::default()
             }));
             let (mut tx, rx) = tokio::io::duplex(MESSAGE_LIMIT);
-            tx.write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"structuredContent\":{\"status\":\"queued\"}}}\n")
+            tx.write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"structuredContent\":{\"status\":\"deferred_native\"}}}\n")
                 .await
                 .unwrap();
             drop(tx);
