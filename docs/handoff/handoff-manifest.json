@@ -1,0 +1,50 @@
+{
+  "repository": "DrCum/Foldurora",
+  "frozen_main": "ae2fd1016ec83304719fa131312e2ac69c8f37a6",
+  "viewport": {
+    "pr": 9,
+    "source": "c5076565a3777d27c436fe59d9713907533be0e8",
+    "base": "f504342231006423d392224f1225bc08e9e32fb5",
+    "Windows_run": 42283399557,
+    "acceptance": "pending",
+    "Linux_full_tests": {
+      "passed": 7597,
+      "failed": 1,
+      "ignored": 47,
+      "failure": "unchanged terrain GPU precision 0.59764713 != 0.5984283"
+    },
+    "Linux_normal_build": {
+      "source": "c5076565a3777d27c436fe59d9713907533be0e8",
+      "tree": "1cd494773098a76f8112d2db1468ec51e60acde3",
+      "version": "Aurora Viewer 0.9.3-beta.20261106.1+47.gc5076565a",
+      "sha256": "1431dee080a77f4918c3a4e8d0548dbd81c05255278fb681124b3fa2f12b4b5d",
+      "bytes": 660991336,
+      "profile": "default dev",
+      "platform": "Linux",
+      "build_exit": 0
+    },
+    "offline_visual": {
+      "runs": 4,
+      "inspected_pngs": 8,
+      "selected_runs_exit": 0,
+      "capture_commit": "317ae1b5d99da3e3d6211090fdcd21943589e23a",
+      "physical_input": "not tested"
+    },
+    "Windows_status": "in_progress_full_workspace_tests; final raw outcomes and package verification pending",
+    "macOS": "scope marked not needed; actual compiler/tests/demo skipped"
+  },
+  "preserved_remote_refs": {
+    "handoff/session-host-chat-20261106": "32b298392c7d40afd2d8cc96d0658041b69be985",
+    "handoff/session-preview-renderer-20261106": "a449faa78bd0b80f8a39b07b2cb25347a59eb167",
+    "handoff/session-preview-suspension-20261106": "213d8e498ea8b1e15e121f7186c50a799c9e2b0a"
+  },
+  "wip_patch": {
+    "base": "a449faa78bd0b80f8a39b07b2cb25347a59eb167",
+    "sha256": "6b23d11abf7c109da1e3c4a55118bac1a521bb8c1441db17db5902b14603f8bd",
+    "bytes": 119501,
+    "status": "unreviewed_uncompiled_disabled",
+    "gzip_sha256": "d11000431d89e5ad819ae7eb0495d025dacbf6ccbd2c29850b7e457079d10b2f",
+    "gzip_bytes": 29222
+  },
+  "documentation_PR": 10
+}
