@@ -727,6 +727,7 @@ dependencies = [
  "aurora-audio",
  "aurora-i18n",
  "aurora-llsd",
+ "aurora-mcp",
  "aurora-media",
  "aurora-net",
  "aurora-prim",
@@ -1165,6 +1166,7 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
+ "serde",
  "wasm-bindgen",
  "windows-link",
 ]
@@ -2999,6 +3001,8 @@ checksum = "cc4e190f5d26ca7051642629da2c52fc03bde85a03197c99408dcd291734c855"
 dependencies = [
  "equivalent",
  "hashbrown 0.17.1",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -6672,6 +6676,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "libc",
  "pin-project-lite",
  "tokio",
 ]

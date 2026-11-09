@@ -12,6 +12,7 @@ pub(crate) mod chat_transport;
 mod chat_ui;
 mod chat_window;
 mod diagnostics;
+mod mcp;
 // Ordinary Inventory chooser observes the same native activation-key fence.
 pub(crate) use chat_window::enter_release::EnterRelease;
 // Real host/window front; Root promotes its existing prerequisite modules only

@@ -440,8 +440,11 @@ See `docs/SESSION_HOST.md` for the checkpoint's explicit limitations.
 
 `aurora-mcp` supplies a separately authorized, disabled host MCP foundation:
 official SDK stdio, private current-user controller IPC, bounded read projections
-and source-bound approvals. Its viewer adapter is unregistered; host startup,
-native permission publication and approval UI remain lead integration work.
+and source-bound approvals. Its viewer adapter is compiled and owned by the
+authoritative broker after registry acquisition. Fresh broker publications feed
+a default-disabled authority; invalid observations and shutdown revoke it. No
+listener starts and no raw account/grid labels enter the projection. Explicit
+host enablement, native display authority and approval UI remain unfinished.
 Character Local Assistant authority is independent. See `docs/FOLDURORA_MCP.md`.
 
 `session_host/startup.rs` initializes and syncs a distinct controller diagnostic

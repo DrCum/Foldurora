@@ -103,6 +103,11 @@ the pack does not include.
 The crates used by Aurora Viewer (see `Cargo.lock`) are under licenses
 compatible with the GPL version 3 (mostly MIT and/or Apache-2.0).
 
+The additional host MCP dependencies and their license texts are retained in
+[NOTICE-MCP.txt](NOTICE-MCP.txt), included with the viewer and optional sidecar.
+The official Rust MCP SDK (`rmcp`) is Apache-2.0; the other additional crates use
+MIT or offer an MIT option. Host MCP remains separate from character assistants.
+
 ## HIDAPI
 
 The MIT-licensed `hidapi` Rust crate bundles native HIDAPI for SpaceMouse

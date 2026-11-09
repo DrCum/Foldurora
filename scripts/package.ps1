@@ -14,11 +14,20 @@ param(
     [Parameter(Mandatory)][string]$Exe,
     [Parameter(Mandatory)][string]$Out,
     # repository whose assets go with the exe (default: this script's)
-    [string]$Source = (Split-Path $PSScriptRoot -Parent)
+    [string]$Source = (Split-Path $PSScriptRoot -Parent),
+    # Explicit opt-in: never pick up a possibly stale neighboring sidecar.
+    [string]$McpExe
 )
 
 New-Item -ItemType Directory -Force -Path (Join-Path $Out 'assets/emoji') -ErrorAction Stop | Out-Null
 Copy-Item -LiteralPath $Exe -Destination $Out -ErrorAction Stop
+if ($McpExe) {
+    $taskMcpExePath = (Resolve-Path -LiteralPath $McpExe -ErrorAction Stop).Path
+    $taskMcpVersion = (& $taskMcpExePath --version | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or $taskMcpVersion -notmatch '^foldurora-mcp \d+\.\d+\.\d+([+-][0-9A-Za-z.+-]+)?$') { throw 'Invalid MCP sidecar version.' }
+    Copy-Item -LiteralPath $taskMcpExePath -Destination $Out -ErrorAction Stop
+    Copy-Item -LiteralPath (Join-Path $Source 'docs/FOLDURORA_MCP.md') -Destination $Out -ErrorAction Stop
+}
 # The emoji font is inside the exe; its licence ships, and the assets folder
 # stays: the updater of the published versions refuses a package without it.
 Copy-Item -LiteralPath (Join-Path $Source 'assets/emoji/LICENSE-OFL.txt') -Destination (Join-Path $Out 'assets/emoji') -ErrorAction Stop
@@ -35,7 +44,7 @@ Get-ChildItem -LiteralPath $dictionaries -Directory -ErrorAction Stop | ForEach-
         Copy-Item -LiteralPath $license -Destination (Join-Path $dictionariesOut "$($_.Name)-LICENSE.txt") -ErrorAction Stop
     }
 }
-$docs = 'LICENSE', 'NOTICE.md', 'README.md' | ForEach-Object { Join-Path $Source $_ }
+$docs = 'LICENSE', 'NOTICE.md', 'NOTICE-MCP.txt', 'README.md' | ForEach-Object { Join-Path $Source $_ }
 Copy-Item -LiteralPath $docs -Destination $Out -ErrorAction Stop
 # Linux (an executable without extension): the desktop entry and its icon,
 # named after the viewer's Wayland app_id / X11 WM_CLASS (cli.rs DESKTOP_ID)

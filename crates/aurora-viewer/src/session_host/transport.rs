@@ -2112,6 +2112,7 @@ fn host_loop(
         }
     }
     let registry = Registry::open(installation, host)?;
+    let mcp = super::mcp::Publication::new(installation, host);
     let mut broker = Broker {
         #[cfg(any(windows, test))]
         preview_frontdoor,
@@ -2202,7 +2203,9 @@ fn host_loop(
             }
         }
         let stopped = closing.is_some_and(|deadline| Instant::now() >= deadline || broker.children.iter().all(|child| child.detached));
-        *shared.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Arc::new(broker.snapshot(&accounts, stopped));
+        let snapshot = Arc::new(broker.snapshot(&accounts, stopped));
+        mcp.observe(&snapshot, closing.is_some());
+        *shared.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = snapshot;
         if stopped {
             for child in broker.children.drain(..) {
                 if let Err(error) = reap.send(child) {

@@ -1,16 +1,18 @@
 # Host MCP foundation
 
 This is a disabled-by-default foundation, separate from per-character Local
-Assistant connections. No production host startup, settings UI, approval UI or
-worker action route is connected. The synthetic smoke runs the actual sidecar,
+Assistant connections. The production broker owns the compiled metadata adapter,
+but no service listener, settings UI, approval UI or worker action route is
+enabled. The synthetic smoke runs the actual sidecar,
 protocol and private transport without a viewer, grid or user credentials.
 
 ## Baseline and reference mapping
 
 Starting Foldurora commit `f08c22e2b0875b7d9b22a1dfe8742c1884321ff5`, tree
-`1847d3371bb2eb90b3ba6c03acf74f54212274db`. The user's MCP prompt is the current
-scope; the absent optional lead documentation worktree is not a blocker. Older
-published handoffs remain historical evidence, including publication holds.
+`1847d3371bb2eb90b3ba6c03acf74f54212274db`. Foundation source
+`0cbc3cf1d6184fc10ac609bbbe850b2a352a35e3` is integrated on the frozen host-repair
+base `dd0860918dd52e2a70b6874a00e2a77ea1c18b3a`. Older published handoffs remain
+historical evidence, including publication holds.
 
 Folderstorm was inspected at
 [`abbe3cb0ca66ee2484f277219f6a27706fab7fc6`](https://github.com/DrCum/Folderstorm/tree/abbe3cb0ca66ee2484f277219f6a27706fab7fc6):
@@ -124,19 +126,22 @@ error response is promised.
 
 ## Precise lead integration
 
-`crates/aurora-viewer/src/session_host/mcp.rs` is an intentionally unregistered
-adapter, so this change does not alter viewer startup or native routing. Its
-production compilation is pending. Register it only during lead integration:
+`crates/aurora-viewer/src/session_host/mcp.rs` is registered and the viewer depends
+on `aurora-mcp`. The broker constructs `Publication` only after registry ownership,
+feeds it newly constructed snapshots, and revokes it on closing, invalid data or
+drop. Account/grid display permission is absent, so production always supplies
+an empty display whitelist. The authority stays disabled and no listener starts.
+This source integration is not a usable host MCP feature yet. Remaining work:
 
-1. Add the viewer's `aurora-mcp = { path = "../aurora-mcp" }` dependency and
-   `mod mcp;`. After successful host registry ownership, construct one `Authority`
-   from the existing installation and coordinator host IDs.
+1. Retain the broker-owned authority's existing installation and coordinator host
+   IDs; do not replace them with sidecar or GUI-derived identities. Integrate
+   service lifetime with that owner, preserving immediate fail-closed revocation.
 2. Load explicit host policy through the normal trusted settings owner. Keep
    default policy disabled; call `Server::start` only while explicitly enabled.
    Own that service and authority together; disabling must stop both and remove
    discovery. Persisting source-bound grants across logins is not implemented.
-3. Invoke `mcp::publish_fresh` from `transport.rs`'s authoritative live snapshot
-   publication path, not from polling `HostController::snapshot()`. Supply only
+3. Keep `mcp::publish_fresh` on the existing authoritative live snapshot
+   publication path, not polling `HostController::snapshot()`. Supply only
    current native privacy-permitted displays with exact `SlotId` and `Binding`.
    That native display decision is currently missing from `HostSnapshot`; do
    not infer it from raw worker labels or chat text.
@@ -149,16 +154,28 @@ production compilation is pending. Register it only during lead integration:
    authorization. Leave chat, switching, Monitor rendering and native actions
    unchanged.
 
-Likely conflicts are only module/dependency registration, live transport
-publication and host policy/approval lifetime hooks. No live action or character
-assistant integration is included.
+Host repair protocol v2 remains separate from the MCP private wire. No live
+action or character assistant integration is included. Windows packaging accepts
+an explicit `-McpExe <built sidecar>` argument and includes this document; it never
+automatically selects a neighboring executable. Shipping the binary does not
+enable the host service.
 
 ## Focused validation
 
-Normal integrated commands remain `cargo test --profile ci -p aurora-mcp --locked`
-and strict scoped Clippy. They currently stop offline because the unrelated
-pinned `wgpu` Git source is absent in this environment. It was not fetched,
-altered or bypassed in the production workspace.
+The original foundation author could not run normal workspace commands because
+its environment lacked the pinned wgpu Git source. That limitation does not
+describe the lead's combined checkout: its existing cache supports normal Cargo
+resolution, with no patch removal or package-version changes. Integration filled
+the lockfile's missing feature dependency edges and viewer path dependency.
+
+Combined source checks: `cargo test --profile ci --locked -p aurora-mcp
+-p aurora-session -p aurora-i18n` passed 148 tests, zero failed/ignored, including
+the 32 MCP cases. Scoped viewer/MCP all-target Clippy passed with the existing
+Linux `-A dead_code` allowance alongside `-D warnings`; formatting passed. The
+five new adapter tests also passed in an actual-source component harness with
+source-extracted host DTOs and opaque unused fields. The ordinary Clippy check
+compiles those tests against the full viewer's real types. The harness does not
+run the native broker or substitute for the full Windows suite.
 
 The focused helper copies the exact two small crates, original profiles/lints
 and lock into a temporary source workspace, omitting unrelated workspace members
@@ -181,6 +198,7 @@ and profile isolation, malformed/oversized input and EOF. Unit tests cover
 capacity, freshness, authority expiry, disconnects and transport ownership.
 
 Final commands/results and exact local commit/tree belong to the delivery
-handoff. Windows compilation/native checks, viewer adapter compilation and the
-lead's full integrated checkpoint remain unverified. Do not dispatch another
-Windows build or claim these focused checks establish full acceptance.
+handoff. Windows compilation, PowerShell package validation, native checks and
+the full integrated suite remain pending. Cloud disk headroom is insufficient
+for a full viewer test link; the separate terrain failure remains unresolved.
+Do not claim these focused checks establish full acceptance.
