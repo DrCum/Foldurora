@@ -58,15 +58,6 @@ impl CloseBook {
         if self
             .hidden
             .get(&conversation)
-            .is_some_and(|hidden| hidden.request.request > through)
-        {
-            return false;
-        }
-        let previous = self.opened_through.entry(conversation).or_default();
-        *previous = (*previous).max(through);
-        if self
-            .hidden
-            .get(&conversation)
             .is_some_and(|hidden| hidden.request.request <= through)
         {
             self.hidden.remove(&conversation);

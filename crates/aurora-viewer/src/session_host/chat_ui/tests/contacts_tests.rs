@@ -201,3 +201,27 @@ fn contact_search_ui_captures_explicit_query_and_friends_can_open_during_search(
     assert_eq!(open.request.selection.channel, ContactChannel::Friends);
     assert!(frames.ui.take_read_action().is_none() && frames.ui.take_close_action().is_none());
 }
+
+#[test]
+fn contacts_ui_retired_close_stays_retired_after_bounded_operation_history_eviction() {
+    let mut snapshot = contacts_snapshot();
+    let mut ui = ChatUi::new(source());
+    ui.sync(Some(&snapshot));
+    ui.pending_close = Some(CloseRequest {
+        key: ChatKey {
+            source: source(),
+            conversation: direct(),
+        },
+        request: 50,
+        policy_revision: 2,
+        stream: 22,
+    });
+    snapshot.closes.seen_through = 70;
+    assert!(snapshot.closes.operations.is_empty());
+    ui.sync(Some(&snapshot));
+    assert!(ui.pending_close.is_none());
+    assert!(
+        !ui.hidden.contains(&direct()),
+        "an evicted receipt cannot resurrect optimistic hiding after acknowledged Open"
+    );
+}
