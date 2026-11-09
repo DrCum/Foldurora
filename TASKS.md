@@ -1,3 +1,7 @@
+## Foldurora Windows regression correction (9 November 2026)
+
+- Preserve FAILED ec0 (9160/2/61). Correct native catalogue accounting for explicitly unsupported workspace writes; retain153 exact dispositions. Add genuine Runtime refusal and native malformed-Library projection regressions, named image transitions and explicit fixture RLVa opt-in. Production permission/archive/storage/capability code unchanged. Windows execution/audit/package remain required.
+
 ## Foldurora integration — upstream hover/control group (9 November 2026)
 
 - Reviewed PR #38 at `ef01cebfc1a756b16ee86a847fb470bf15c24091`: independent Inventory pictures/text, version33 migration, native Friends Only control and arrival walk/run resend. Retain all prior progress and Preferences regressions. Combined Windows validation pending; no native/grid acceptance claimed.

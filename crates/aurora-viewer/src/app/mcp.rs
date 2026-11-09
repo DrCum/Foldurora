@@ -595,9 +595,15 @@ mod catalogue_tests {
                 tool,
                 Tool::ViewerList | Tool::ViewerStatus | Tool::ViewerSelect | Tool::AssistantOperationStatus
             );
-            let denied = matches!(tool, Tool::ConfirmAction | Tool::InventoryPurge | Tool::InventoryEmptyTrash);
+            // These definitions are discoverable, but intentionally excluded
+            // from the native capability whitelist. Runtime refuses them before
+            // preparation; workspace writes await the final-effect/consent bridge.
+            let closed = matches!(
+                tool,
+                Tool::ConfirmAction | Tool::InventoryPurge | Tool::InventoryEmptyTrash | Tool::WorkspaceApply | Tool::WorkspacePrevious
+            );
             assert_eq!(
-                adapters.iter().filter(|v| **v).count() + usize::from(transport) + usize::from(denied),
+                adapters.iter().filter(|v| **v).count() + usize::from(transport) + usize::from(closed),
                 1,
                 "missing or ambiguous native disposition for {}",
                 definition.name
@@ -606,7 +612,7 @@ mod catalogue_tests {
                 counts[i] += usize::from(enabled);
             }
         }
-        assert_eq!(counts, [74, 36, 25, 6, 5]);
+        assert_eq!(counts, [74, 36, 25, 6, 3]);
         assert!(Tool::ConfirmAction.native_confirmation_only());
         assert!(Tool::InventoryPurge.permanently_denied());
         assert!(Tool::InventoryEmptyTrash.permanently_denied());
