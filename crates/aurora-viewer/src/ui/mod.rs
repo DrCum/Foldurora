@@ -140,6 +140,7 @@ pub mod widgets;
 
 #[cfg(test)]
 mod uri_restore_tests;
+pub(crate) mod workspace_background;
 pub(crate) mod workspaces;
 pub mod worldmap;
 

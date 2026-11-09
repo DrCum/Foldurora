@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+mod background;
+pub(crate) use background::Background;
 mod camera;
 pub(crate) use camera::CameraContext;
 mod graphics;
@@ -11,6 +13,7 @@ pub(crate) struct CaptureGroups {
     pub inventory: bool,
     pub graphics: bool,
     pub camera: bool,
+    pub background: bool,
 }
 
 pub(crate) const LIMIT: usize = 32;
@@ -98,6 +101,8 @@ pub(crate) struct Layout {
     pub graphics: Option<Graphics>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub camera: Option<CameraContext>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background: Option<Background>,
 }
 impl Layout {
     pub(crate) fn validate(&self) -> Result<(), &'static str> {
@@ -148,6 +153,9 @@ impl Layout {
         if target.inventory_folder.is_none() {
             baseline.inventory_folder = None;
         }
+        if target.background.is_none() {
+            baseline.background = None;
+        }
         if target.camera.is_none() {
             baseline.camera = None;
         }
@@ -164,6 +172,7 @@ impl Layout {
                 .inventory_folder
                 .zip(current.inventory_folder)
                 .is_none_or(|(saved, live)| saved == live)
+            && self.background.is_none_or(|saved| current.background == Some(saved))
             && self.graphics.as_ref().is_none_or(|saved| current.graphics.as_ref() == Some(saved))
             && self
                 .camera
@@ -175,6 +184,7 @@ impl Layout {
             inventory: self.inventory_folder.is_some(),
             graphics: self.graphics.is_some(),
             camera: self.camera.is_some(),
+            background: self.background.is_some(),
         }
     }
 }
@@ -209,6 +219,10 @@ pub(crate) struct Catalogue {
     pub capture_graphics: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub capture_camera: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub capture_background: bool,
+    #[serde(default, skip_serializing_if = "Background::is_black")]
+    pub background: Background,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -251,6 +265,8 @@ impl Catalogue {
             remember_folders: false,
             capture_graphics: false,
             capture_camera: false,
+            capture_background: false,
+            background: Background::Black {},
         }
     }
     pub(crate) fn validate(&self) -> Result<(), &'static str> {
@@ -328,6 +344,7 @@ mod tests {
             inventory_folder: None,
             graphics: None,
             camera: None,
+            background: None,
             geometry: [Some(Geometry {
                 point: 7,
                 offset: [-32768.0, 32768.0],

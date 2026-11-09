@@ -1,7 +1,7 @@
 //! Native named geometry manager. Drawing never mutates the catalogue or World.
 use crate::theme::Palette;
 use crate::workspace::controller::{Action, Command, Controller, Status, Ticket};
-use crate::workspace::model::Startup;
+use crate::workspace::model::{Background, Startup};
 use uuid::Uuid;
 pub(crate) const WINDOW: &str = "named_workspaces";
 pub(crate) struct WorkspaceUi {
@@ -14,6 +14,7 @@ pub(crate) struct WorkspaceUi {
     selection_observed: Option<Uuid>,
     selection_exhausted: bool,
     favorites_painted: Option<Ticket>,
+    background_edit: Option<[u8; 4]>,
 }
 impl Default for WorkspaceUi {
     fn default() -> Self {
@@ -27,6 +28,7 @@ impl Default for WorkspaceUi {
             selection_observed: None,
             selection_exhausted: false,
             favorites_painted: None,
+            background_edit: None,
         }
     }
 }
@@ -108,6 +110,37 @@ impl WorkspaceUi {
                         ));
                     }
                     if let Some(cat) = &c.catalogue {
+                        let mut background = cat.capture_background;
+                        if ui
+                            .add_enabled_ui(enabled && c.preview.is_none(), |ui| {
+                                super::widgets::checkbox(ui, p, &mut background, tr!("workspaces-capture-background"))
+                            })
+                            .inner
+                            .changed()
+                        {
+                            command = Some(Command::CaptureBackground(background));
+                        }
+                        ui.add_enabled_ui(enabled && c.preview.is_none(), |ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                let color = self.background_edit.get_or_insert_with(|| match c.background() {
+                                    Background::Solid { rgb: [r, g, b] } => [r, g, b, 255],
+                                    Background::Black {} => {
+                                        let mut rgba = p.raised.to_array();
+                                        rgba[3] = 255;
+                                        rgba
+                                    }
+                                });
+                                super::widgets::color_button(ui, p, "workspace_background_color", color, false);
+                                if ui.button(tr!("workspaces-background-solid")).clicked() {
+                                    command = Some(Command::Background(Background::Solid {
+                                        rgb: [color[0], color[1], color[2]],
+                                    }));
+                                }
+                                if ui.button(tr!("workspaces-background-black")).clicked() {
+                                    command = Some(Command::Background(Background::Black {}));
+                                }
+                            });
+                        });
                         let mut show = cat.show_favorites;
                         let mut folders = cat.remember_folders;
                         let mut graphics = cat.capture_graphics;
@@ -400,6 +433,7 @@ mod tests {
             inventory_folder: None,
             graphics: None,
             camera: None,
+            background: None,
             geometry: [None; 4],
             viewport: (&s.world_viewport).into(),
             bars: Bars {

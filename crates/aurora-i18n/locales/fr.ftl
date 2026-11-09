@@ -13629,3 +13629,6 @@ workspaces-folder-unavailable = Le dossier n’a pas été restauré. Ouvrez l�
 workspaces-capture-graphics = Mémoriser les réglages graphiques actuels
 workspaces-capture-camera = Mémoriser les réglages de caméra relatifs à l’avatar
 workspaces-camera-unavailable = La restauration de caméra nécessite une vue avatar sans restriction. Revenez à cette vue et réessayez.
+workspaces-capture-background = Mémoriser le fond de l’espace de travail
+workspaces-background-solid = Utiliser la couleur unie
+workspaces-background-black = Fond noir
