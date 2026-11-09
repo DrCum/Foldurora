@@ -162,3 +162,54 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[test]
+fn mcp_workspace_closed_disposition_returns_unsupported_without_preparation_or_native_approval() {
+    use aurora_mcp::{
+        assistant::{permissions::Configuration, runtime::ViewerRequest},
+        wire::error,
+    };
+    use aurora_session::{GridKey, InstallationId};
+    let source = Binding {
+        worker: WorkerIdentity {
+            installation: InstallationId::from_bytes([1; 32]).unwrap(),
+            host: HostId::from_bytes([2; 16]).unwrap(),
+            worker: WorkerId::from_bytes([3; 16]).unwrap(),
+        },
+        session: Some(SessionIdentity {
+            session: SessionId::from_bytes([4; 16]).unwrap(),
+            account: AccountKey::from_bytes([5; 32]).unwrap(),
+            grid: GridKey::from_bytes([6; 32]).unwrap(),
+            generation: 1,
+        }),
+    };
+    let endpoint = HostId::from_bytes([7; 16]).unwrap();
+    let runtime = Runtime::default();
+    runtime.observe(Some(source), true);
+    let mut config = Configuration::default();
+    config.permissions.set(Class::Read, Level::Allow).unwrap();
+    runtime.configure(config).unwrap();
+    // The same native workspace whitelist used by the App, not SDK discovery.
+    runtime.capabilities(DEFINITIONS.iter().map(|d| d.tool).filter(|t| supports(*t)));
+    runtime.enable(source, endpoint).unwrap();
+    let invoke = |tool| {
+        runtime.request(
+            1,
+            ViewerRequest::Invoke {
+                viewer_session: endpoint,
+                tool,
+                arguments: Default::default(),
+                request_id: None,
+            },
+        )
+    };
+    assert!(invoke(Tool::WorkspaceStatus)["request_id"].is_string(), "read adapter can prepare");
+    assert_eq!(runtime.preparations().len(), 1);
+    for tool in [Tool::WorkspaceApply, Tool::WorkspacePrevious] {
+        assert_eq!(invoke(tool), error("unsupported_capability"));
+        assert_eq!(runtime.preparations().len(), 1, "unsupported writes add no preparation");
+        assert!(runtime.ready().is_empty());
+        assert!(runtime.snapshot().approvals.is_empty(), "unsupported writes cannot request consent");
+    }
+}
