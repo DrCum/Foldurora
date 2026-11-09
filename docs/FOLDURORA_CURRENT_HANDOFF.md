@@ -109,8 +109,12 @@ the missing action was found and implemented in this slice.
 
 Active HUD WIP is based on bd6e, on the separate v2 branch above. Untracked
 `crates/aurora-viewer/src/workspace/model/huds.rs` contains a bounded private
-HudRef/HudSet DTO. Three exact-source model cases pass; it is NOT yet wired to
-Layout/mod.rs/UI/App, so no HUD feature/runtime/compiled-viewer claim.
+HudRef/HudSet DTO. Three exact-source model cases passed before the is_empty
+addition. Uncommitted model/Layout/Catalogue/Previous wiring and a readonly
+workspace/huds.rs projection now exist; the projection module is undeclared,
+App capture constructors and UI/review/restore remain unwired. WIP is NOT viewer-
+compiled and currently needs those new constructor fields before checking.
+No HUD feature/runtime/compiled-viewer claim; preserve all six modified/new files.
 Plan: `/workspace/scratch/workspace-hud-restore-v2-20261109/PLAN.md`. Reuse native
 additive appearance transactions (one pending transaction, serial bounded lane),
 own ordinary archive visibility, source/lock/capacity rechecks and one explicit
