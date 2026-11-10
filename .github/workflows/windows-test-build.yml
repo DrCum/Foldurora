@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   windows:
-    if: github.ref == 'refs/heads/feat/overnight-integration' || github.ref == 'refs/heads/feat/workspace-followup' || github.ref == 'refs/heads/fix/character-gpu-coexistence' || github.ref == 'refs/heads/feat/viewport-ui-integration' || github.ref == 'refs/heads/feat/session-host-integration' || github.ref == 'refs/heads/feat/session-host-chat-integration' || github.ref == 'refs/heads/fix/viewport-toolbars-integration' || github.ref == 'refs/heads/build/windows-integration-20261106' || github.ref == 'refs/heads/fix/host-move-and-dropdowns' || github.ref == 'refs/heads/feat/persistent-profiles-and-chat' || github.ref == 'refs/heads/fix/profile-popup-bounds' || github.ref == 'refs/heads/feat/compact-host-integration' || github.ref == 'refs/heads/feat/foldurora-photo-branding' || github.ref == 'refs/heads/feat/foldurora-upstream-integration' || github.ref == 'refs/heads/fix/camera-controls-integration' || github.ref == 'refs/heads/feat/shared-chat-integration' || github.ref == 'refs/heads/feat/native-read-integration' || github.ref == 'refs/heads/fix/shared-chat-enter-integration' || github.ref == 'refs/heads/feat/attention-integration' || github.ref == 'refs/heads/fix/attention-windows-clippy' || github.ref == 'refs/heads/feat/attention-review-integration' || github.ref == 'refs/heads/fix/attention-review-windows' || github.ref == 'refs/heads/feat/monitor-runtime-integration'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/build/inventory-windows-package-20261110'
     runs-on: windows-latest
     timeout-minutes: 90
     defaults:
@@ -26,6 +26,7 @@ jobs:
         shell: pwsh
     env:
       CARGO_TERM_COLOR: never
+      RUSTUP_TOOLCHAIN: 1.99.1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -33,152 +34,169 @@ jobs:
           fetch-depth: 0
           filter: blob:none
           persist-credentials: false
-      - name: Prepare logs
-        run: New-Item -ItemType Directory -Force .scratch/windows-test-build | Out-Null
-      - name: Rust stable
-        id: toolchain
+      - name: Prepare logs and verify source
         run: |
-          ./.github/drop-extra-targets.ps1
-          rustup update stable --no-self-update
+          New-Item -ItemType Directory -Force .scratch/windows-test-build | Out-Null
+          if ((git rev-parse HEAD).Trim() -ne '${{ github.sha }}') { throw 'Wrong source' }
+          if (git status --porcelain --untracked-files=no) { throw 'Dirty source' }
+          git merge-base --is-ancestor fa1581b607e95a1881feb57ae49996e31aacd3ba HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Missing reviewed Inventory integration' }
+          if (git diff --name-only fa1581b607e95a1881feb57ae49996e31aacd3ba HEAD -- crates Cargo.toml Cargo.lock) { throw 'Product source differs from Inventory checkpoint' }
+          if (Test-Path crates/aurora-viewer/src/session_host/frame_guard.rs) { throw 'Experimental host frame must be absent' }
+          if ((git rev-parse 'HEAD:Cargo.lock').Trim() -ne '1200bfcd612ad1dfcbe5bac6ef213cf904290c2a') { throw 'Wrong canonical lock blob' }
+          $lockText = [IO.File]::ReadAllText((Resolve-Path Cargo.lock).Path).Replace("`r`n", "`n")
+          $lockHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($lockText))).ToLowerInvariant()
+          if ($lockHash -ne 'e04f6814529802ba6469b9455294aabfcfbec989d0e271698b3723a04d682e32') { throw 'Checkout lock differs' }
+          @{ commit='${{ github.sha }}'; tree=(git rev-parse 'HEAD^{tree}').Trim(); cargo_lock_sha256=$lockHash; native_acceptance='pending' } | ConvertTo-Json | Set-Content .scratch/windows-test-build/source.json -Encoding utf8NoBOM
+      - name: Compatible Rust toolchain
+        run: |
+          rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy --no-self-update
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          rustup component add rustfmt clippy
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $compiler = (& rustc --version).Trim()
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          "compiler=$compiler" >> $env:GITHUB_OUTPUT
-      # The checks of scripts/check.ps1, with each outcome retained rather
-      # than stopping at the first failure. All use the default dev profile,
-      # so the checks, tests and viewer share one target folder and profile.
-      - name: PowerShell scripts (5.1 parser)
+          rustc --version
+          cargo --version
+      - uses: ./.github/actions/rust-cache
+        with:
+          name: tests
+      - name: PowerShell parser
         id: scripts
-        continue-on-error: true
         run: |
-          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/check-scripts.ps1 2>&1 |
-            Tee-Object -FilePath .scratch/windows-test-build/scripts.log
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/check-scripts.ps1 2>&1 | Tee-Object .scratch/windows-test-build/scripts.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Formatting
         id: format
-        continue-on-error: true
-        run: |
-          cargo fmt --all -- --check 2>&1 | Tee-Object -FilePath .scratch/windows-test-build/format.log
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Clippy (warnings are errors)
+        run: cargo fmt --all -- --check
+      - name: Strict workspace Clippy
         id: clippy
-        continue-on-error: true
         run: |
-          cargo clippy --workspace --all-targets --locked -- -D warnings 2>&1 |
-            Tee-Object -FilePath .scratch/windows-test-build/clippy.log
+          cargo clippy --workspace --all-targets --locked -- -D warnings 2>&1 | Tee-Object .scratch/windows-test-build/clippy.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Full workspace tests
-        id: tests
-        continue-on-error: true
-        run: |
-          cargo test --workspace --locked --no-fail-fast 2>&1 |
-            Tee-Object -FilePath .scratch/windows-test-build/tests.log
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Build the portable viewer
-        id: build
-        continue-on-error: true
-        run: |
-          cargo build --locked -p aurora-viewer --features xr-static-loader 2>&1 |
-            Tee-Object -FilePath .scratch/windows-test-build/build.log
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Package the exact commit
-        id: package
-        if: steps.build.outcome == 'success'
+      - name: List every compiled test
+        id: list
         env:
-          EXPECTED_COMMIT: ${{ github.sha }}
+          AURORA_RENDER_THREAD: '1'
+          AURORA_GPU_VALIDATION: '1'
+        run: |
+          cargo test --workspace --locked -- --list 2>&1 | Tee-Object .scratch/windows-test-build/list.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Unfiltered workspace tests
+        id: tests
+        env:
+          AURORA_RENDER_THREAD: '1'
+          AURORA_GPU_VALIDATION: '1'
+        run: |
+          cargo test --workspace --locked --no-fail-fast 2>&1 | Tee-Object .scratch/windows-test-build/tests.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Audit complete source-bound test coverage
+        id: audit
+        shell: python
+        run: |
+          import collections, json, pathlib, re, subprocess
+          root = pathlib.Path('.scratch/windows-test-build')
+          def rows(filename, listing):
+              binary = None
+              found = collections.defaultdict(list)
+              for line in (root / filename).read_text(encoding='utf-8-sig').splitlines():
+                  line = line.strip()
+                  match = re.search(r'Running .+\(([^)]+)\)$', line)
+                  if match:
+                      binary = 'bin:' + match[1].replace(chr(92), '/').rsplit('/', 1)[-1]
+                      continue
+                  match = re.fullmatch(r'Doc-tests\s+(\S+)', line)
+                  if match:
+                      binary = 'doc:' + match[1]
+                      continue
+                  match = re.fullmatch(r'(.+): test', line) if listing else re.fullmatch(r'test (.+) \.\.\. (ok|FAILED|ignored)(?:,.*)?', line)
+                  if match:
+                      if binary is None:
+                          raise SystemExit('Test row has no source binary: ' + line)
+                      name = re.sub(r' - should panic$', '', match[1])
+                      found[(binary, name)].append('listed' if listing else match[2])
+              return found
+          expected, actual = rows('list.log', True), rows('tests.log', False)
+          if not expected or set(expected) != set(actual):
+              raise SystemExit('Compiled-list/full-run test names differ')
+          if any(len(v) != 1 for v in expected.values()) or any(len(v) != 1 or v[0] not in ('ok', 'ignored') for v in actual.values()):
+              raise SystemExit('Duplicate, missing or failing test outcome')
+          required = [
+              'inventory_new_window_button_creates_instances_in_both_styles',
+              'inventory_many_windows_keep_independent_state_and_lifetimes',
+              'inventory_new_windows_cascade_without_moving_existing_views',
+              'inventory_closed_windows_keep_pending_documents_and_confirmations_separate',
+              'full_inventory_windows_drag_between_nonadjacent_instances',
+              'full_inventory_windows_share_clipboard_with_nonadjacent_focused_destinations',
+              'workspace_additional_role_coexists_with_fresh_full_windows_without_retargeting_or_closing_them',
+              'workspace_explicit_capture_reselects_first_open_full_owner_but_preserves_retained_closed_documents',
+          ]
+          for name in required:
+              matches = [v for (_, full), v in actual.items() if full.rsplit('::', 1)[-1] == name]
+              if matches != [['ok']]:
+                  raise SystemExit('Required Inventory case missing/nonpassing/duplicate: ' + name)
+          if any(name.endswith('the_main_window_toggles_one_additional_inventory_window') for _, name in expected):
+              raise SystemExit('Retired singleton behavior unexpectedly present')
+          totals = collections.Counter(v[0] for v in actual.values())
+          report = {'source': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+                    'compiled_names': len(expected), 'passed': totals['ok'], 'failed': 0, 'ignored': totals['ignored'],
+                    'inventory_required': required, 'inventory_passed_exactly_once': len(required),
+                    'scope': 'Every current Windows-compiled test matched exactly once in the unfiltered run; native/human/GPU acceptance pending.'}
+          (root / 'test-audit.json').write_text(json.dumps(report, indent=2) + '\n')
+          print(json.dumps(report, indent=2))
+      - name: Build viewer and sidecar
+        id: build
+        run: |
+          cargo build --locked -p aurora-viewer -p aurora-mcp --features aurora-viewer/xr-static-loader 2>&1 | Tee-Object .scratch/windows-test-build/build.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify versions and package
+        id: package
         run: |
           $actual = (git rev-parse HEAD).Trim()
-          if ($LASTEXITCODE -ne 0 -or $actual -ne $env:EXPECTED_COMMIT) {
-            throw 'The checkout no longer matches the requested commit.'
+          if ($actual -ne '${{ github.sha }}' -or (git status --porcelain --untracked-files=no)) { throw 'Source changed' }
+          $short = (git rev-parse --short=9 HEAD).Trim()
+          $version = (& ./target/debug/aurora-viewer.exe --version | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $version -notmatch ('\.g' + [Regex]::Escape($short) + '$')) { throw 'Viewer source stamp mismatch' }
+          $sidecar = (& ./target/debug/foldurora-mcp.exe --version | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $sidecar -notmatch '^foldurora-mcp \d+\.\d+\.\d+') { throw 'Sidecar version mismatch' }
+          & ./target/debug/foldurora-mcp.exe --help
+          if ($LASTEXITCODE -ne 0) { throw 'Sidecar help failed' }
+          $name = "Foldurora-inventory-$($actual.Substring(0,12))-windows-x64"
+          $out = Join-Path .scratch/windows-test-build $name
+          ./scripts/package.ps1 -Exe target/debug/aurora-viewer.exe -McpExe target/debug/foldurora-mcp.exe -Out $out
+          if ($LASTEXITCODE -ne 0) { throw 'Packaging failed' }
+          $hashes = @{}
+          foreach ($exe in 'aurora-viewer.exe', 'foldurora-mcp.exe') {
+            $built = (Get-FileHash -Algorithm SHA256 "target/debug/$exe").Hash.ToLowerInvariant()
+            $staged = (Get-FileHash -Algorithm SHA256 (Join-Path $out $exe)).Hash.ToLowerInvariant()
+            if ($built -ne $staged) { throw "Staged executable differs: $exe" }
+            $hashes[$exe] = $built
           }
-          $dirty = git status --porcelain --untracked-files=no
-          if ($LASTEXITCODE -ne 0 -or $dirty) { throw 'Tracked source changed during the build.' }
-          $name = "Foldurora-test-$($actual.Substring(0, 12))-windows-x64"
-          $out = Join-Path '.scratch/windows-test-build' $name
-          ./scripts/package.ps1 -Exe target/debug/aurora-viewer.exe -Out $out
-          if ($LASTEXITCODE -ne 0) { throw 'Packaging failed.' }
-          Copy-Item -LiteralPath docs/FOLDURORA.md -Destination (Join-Path $out 'MORNING-TEST-GUIDE.md') -ErrorAction Stop
-          "package_name=$name" >> $env:GITHUB_OUTPUT
-          "package_dir=$out" >> $env:GITHUB_OUTPUT
-      - name: Record results and build provenance
-        if: always()
-        env:
-          SOURCE_COMMIT: ${{ github.sha }}
-          SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}/tree/${{ github.sha }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          SCRIPTS_RESULT: ${{ steps.scripts.outcome }}
-          FORMAT_RESULT: ${{ steps.format.outcome }}
-          CLIPPY_RESULT: ${{ steps.clippy.outcome }}
-          TESTS_RESULT: ${{ steps.tests.outcome }}
-          BUILD_RESULT: ${{ steps.build.outcome }}
-          PACKAGE_RESULT: ${{ steps.package.outcome }}
-          PACKAGE_DIR: ${{ steps.package.outputs.package_dir }}
-          RUST_COMPILER: ${{ steps.toolchain.outputs.compiler }}
-        run: |
-          $checks = [ordered]@{
-            powershell_5_1 = $env:SCRIPTS_RESULT
-            formatting = $env:FORMAT_RESULT
-            clippy = $env:CLIPPY_RESULT
-            workspace_tests = $env:TESTS_RESULT
+          foreach ($file in 'aurora-install.json','FOLDURORA_MCP.md','NOTICE-MCP.txt','LICENSE','NOTICE.md') {
+            if (-not (Test-Path (Join-Path $out $file))) { throw "Missing package file: $file" }
           }
-          $manifest = [ordered]@{
-            schema = 1
-            commit = $env:SOURCE_COMMIT
-            source = $env:SOURCE_URL
-            workflow_run = $env:RUN_URL
-            built_at_utc = (Get-Date).ToUniversalTime().ToString('o')
-            target = 'x86_64-pc-windows-msvc'
-            compiler = $env:RUST_COMPILER
-            profile = 'dev'
-            features = @('xr-static-loader')
-            checks = $checks
-            all_checks_passed = @($checks.Values | Where-Object { $_ -ne 'success' }).Count -eq 0
-            build = $env:BUILD_RESULT
-            package = $env:PACKAGE_RESULT
-            human_validation = 'pending'
-            windows_gpu_and_multiple_monitors = 'pending'
-            grid_validation = 'pending'
-            performance_measurement = 'pending; development profile, without release LTO'
-          }
-          $json = $manifest | ConvertTo-Json -Depth 5
-          New-Item -ItemType Directory -Force .scratch/windows-test-build | Out-Null
-          $json | Set-Content .scratch/windows-test-build/build-manifest.json -Encoding utf8NoBOM
-          if ($env:PACKAGE_RESULT -eq 'success' -and $env:PACKAGE_DIR) {
-            $json | Set-Content (Join-Path $env:PACKAGE_DIR 'build-manifest.json') -Encoding utf8NoBOM
-          }
-          @(
-            '## Windows test build'
-            "Source: [$env:SOURCE_COMMIT]($env:SOURCE_URL)"
-            ''
-            '| Check | Outcome |'
-            '|---|---|'
-            "| PowerShell 5.1 parser | $env:SCRIPTS_RESULT |"
-            "| Formatting | $env:FORMAT_RESULT |"
-            "| Clippy | $env:CLIPPY_RESULT |"
-            "| Full workspace tests | $env:TESTS_RESULT |"
-            "| Windows build | $env:BUILD_RESULT |"
-            "| Package | $env:PACKAGE_RESULT |"
-            ''
-            'The package uses the development profile and includes its exact source commit and check results.'
-            'Human validation on Windows, multiple-monitor acceptance, grid tests and release-profile performance measurements are pending.'
-          ) | Add-Content $env:GITHUB_STEP_SUMMARY -Encoding utf8
-      - name: Archive the package
-        if: steps.package.outcome == 'success'
-        env:
-          PACKAGE_NAME: ${{ steps.package.outputs.package_name }}
-          PACKAGE_DIR: ${{ steps.package.outputs.package_dir }}
-        run: |
-          $zip = Join-Path '.scratch/windows-test-build' "$env:PACKAGE_NAME.zip"
-          Compress-Archive -LiteralPath $env:PACKAGE_DIR -DestinationPath $zip
-          $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  $env:PACKAGE_NAME.zip" | Set-Content "$zip.sha256" -Encoding utf8NoBOM
-      - name: Upload test package and diagnostics
+          $manifest = @{ commit=$actual; tree=(git rev-parse 'HEAD^{tree}').Trim(); profile='dev'; viewer=$version; sidecar=$sidecar; executable_sha256=$hashes; inventory_source='fa1581b607e95a1881feb57ae49996e31aacd3ba'; monitor_enabled=$true; xr_static_loader=$true; host_frame_repair_enabled=$false; human_acceptance='pending'; tests=(Get-Content .scratch/windows-test-build/test-audit.json -Raw | ConvertFrom-Json) }
+          $manifest | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out foldurora-build-info.json) -Encoding utf8NoBOM
+          $zip = Join-Path .scratch/windows-test-build "$name.zip"
+          Compress-Archive -LiteralPath $out -DestinationPath $zip
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $zip).Path)
+          try {
+            foreach ($exe in 'aurora-viewer.exe', 'foldurora-mcp.exe') {
+              $entries = @($archive.Entries | Where-Object { $_.FullName.EndsWith("/$exe") -or $_.FullName -eq $exe })
+              if ($entries.Count -ne 1) { throw "ZIP executable missing/duplicate: $exe" }
+              $stream = $entries[0].Open()
+              $sha = [Security.Cryptography.SHA256]::Create()
+              try { $hash = [Convert]::ToHexString($sha.ComputeHash($stream)).ToLowerInvariant() } finally { $sha.Dispose(); $stream.Dispose() }
+              if ($hash -ne $hashes[$exe]) { throw "ZIP executable differs: $exe" }
+            }
+          } finally { $archive.Dispose() }
+          $zipHash = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+          "$zipHash  $name.zip" | Set-Content "$zip.sha256" -Encoding utf8NoBOM
+          $manifest | ConvertTo-Json -Depth 8 | Set-Content .scratch/windows-test-build/build-manifest.json -Encoding utf8NoBOM
+          "package=$name.zip" >> $env:GITHUB_OUTPUT
+          "## Inventory-only Windows test package`n$version`nSHA-256: $zipHash`nNative/human acceptance pending; host styling repair is absent." >> $env:GITHUB_STEP_SUMMARY
+      - name: Upload test package or failure evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: Foldurora-windows-test-${{ github.sha }}
+          name: Foldurora-inventory-windows-${{ github.sha }}
           path: |
             .scratch/windows-test-build/*.zip
             .scratch/windows-test-build/*.sha256
@@ -187,21 +205,6 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
-      - name: Require green checks
-        if: always()
-        env:
-          SCRIPTS_RESULT: ${{ steps.scripts.outcome }}
-          FORMAT_RESULT: ${{ steps.format.outcome }}
-          CLIPPY_RESULT: ${{ steps.clippy.outcome }}
-          TESTS_RESULT: ${{ steps.tests.outcome }}
-          BUILD_RESULT: ${{ steps.build.outcome }}
-          PACKAGE_RESULT: ${{ steps.package.outcome }}
-        run: |
-          $results = @($env:SCRIPTS_RESULT, $env:FORMAT_RESULT, $env:CLIPPY_RESULT,
-            $env:TESTS_RESULT, $env:BUILD_RESULT, $env:PACKAGE_RESULT)
-          if (@($results | Where-Object { $_ -ne 'success' }).Count) {
-            throw 'One or more checks failed or did not run. Inspect the manifest and logs.'
-          }
 
   linux:
     # Real root/euid-owned ancestry is needed for native file-security tests;

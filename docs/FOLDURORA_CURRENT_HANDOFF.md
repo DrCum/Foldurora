@@ -1,27 +1,60 @@
-# Foldurora current handoff location
+# Foldurora current handoff — Inventory-only package
 
-The lead maintains the single current record in the existing documentation
-worktree, separately from frozen validation source:
+The user requested an Inventory-only package while the host repair remains
+unfinished. Source branch: `build/inventory-windows-package-20261110`.
+The product code is exactly the reviewed Inventory integration checkpoint
+`fa1581b607e95a1881feb57ae49996e31aacd3ba`, tree
+`03048e5a30434fedc6367a1686797ef53a7012d3`, plus package workflow/documentation.
+The frozen build commit and actual results are identified by the GitHub Actions
+run and packaged `foldurora-build-info.json`; do not substitute branch tip later.
 
-`/workspace/work/port-progress-docs/docs/FOLDURORA_CURRENT_HANDOFF.md`
+New full Inventory windows have fresh UUIDs on every main button/Ctrl+Shift+I
+activation in both looks, independent state, shared clipboard/mutation/permission
+paths and no fixed cap. Pending documents retain closed owners. Folder Jump and
+the named-workspace single additional-window role are reconciled without
+retargeting pending operations or serializing UI owner UUIDs. EN/FR/JA updated.
+Source review, Linux scoped check/qualified Clippy and 13 i18n tests passed for
+the Inventory implementation. New Windows full-suite and package gates remain
+pending until this actual workflow completes. Prior inventory-only tests belong
+to their older source; no native or optimized large-inventory acceptance inferred.
 
-Its branch is `docs/foldurora-progress-20261106`. It is currently local;
-publication remains restricted as recorded there. A standalone/local Windows
-builder should use the copy bundled with its pinned build request when this
-cloud path is unavailable.
+The existing Windows test-package workflow is reused for this branch through
+manual workflow_dispatch, with Rust1.99.1, strict checks, one unfiltered full run,
+an audit matching every current Windows-compiled test exactly once, and all eight
+new ordinary Inventory regressions required passing. The selected new-window
+behavior retires the old singleton-toggle case; it is not reported as passed.
+Ignored profiling/hardware cases stay explicit. All security/ownership/ACL/long
+path/creator/archive/RLVa checks remain. No fixture or safeguard is weakened.
+The historical private 1,413-case declaration subset is not imported into CI;
+the CI audit instead covers every test in this pin's compiled list, with source
+comparison preserving the baseline and its single authorized retirement.
 
-This source branch is `fix/host-usability-20261109`, based on frozen
-`f08c22e2b0875b7d9b22a1dfe8742c1884321ff5`. The combined repair covers hosted
-world margins, CPU painting, Monitor startup and versioned geometry/focus
-handling. See [the repair contract](SESSION_HOST.md#host-usability-repair--9-november-2026).
-Exact validation/package SHAs and outcomes belong to the current record and
-pinned request. f08's passing Windows automation did not establish host human
-acceptance; the new candidate needs Windows/native validation and separate
-publication approval. Earlier upstream integrations and feature checkpoints
-remain preserved, not repeated.
+The package retains Monitor support, XR-static loader, MCP sidecar, manifests
+and license/notices. Source stamps and built/staged/ZIP-entry hashes must match.
+Tests or required checks failing block packaging. This is a downloadable Actions
+test artifact, not a GitHub release, installation or merge. Keep raw local
+Builder evidence private; the workflow creates its own synthetic CI evidence.
+Windows/GPU reliability, native UI, real grid/RLVa, driver reset and XR human
+acceptance remain pending even if compilation/tests/package succeed.
 
-[The baseline wrap-up](FOLDURORA_WRAPUP_20261108.md) preserves the 670c026b /
-1842dbe5 distinctions, known failures and native/GPU limitations. Public upload
-of the denied 670c026b payload, including through another combined branch or
-route, still requires explicit user approval. No grid login, merge or release
-is authorized by this document.
+Human checks for this update: create several full windows in both looks;
+confirm independent search/selection/expansion/scroll/minimize/close; exercise
+clipboard/drag between nonadjacent windows; confirm Ctrl+Shift+I and @showinv;
+close/reopen owners with pending documents; inspect named-workspace restore.
+Extras remain temporary outside explicit workspace restoration. Large inventory
+Windows performance is still unmeasured; no cap is invented from old CI numbers.
+
+The experimental host-frame repair is excluded. DAB native preflight remains
+inconclusive; correction `6451f7aeeda035b76ef9d06c8911573aa68d15e0` and its
+review-first request stay preserved separately on
+`fix/native-frame-foreground-preflight-20261110`. Popup preparation58fe4041 stays
+on `feat/host-popup-surface-integration-20261110`. Neither is enabled by this ZIP.
+The ordinary host's existing styling/behavior is unchanged from Monitor520.
+
+Monitor520 (`520782f2998150a26c74c51e18eccc7c4994c737`) remains the prior verified
+package: Windows9,198/0/63 and1,413 required cases, separate GPU export1 pass,
+standalone Vulkan startup only. Hosted Monitor/movement/viewport/picking/mouselook
+and privacy/teleport automatic recovery remain unaccepted. Uncertain preview
+reservations may require worker exit. Keep radio/98b/a903 packages and all prior
+failed/inconclusive evidence distinct. No repeated old build, credentials, grid
+login, install, merge or release. The combined host/Inventory goal is unfinished.
