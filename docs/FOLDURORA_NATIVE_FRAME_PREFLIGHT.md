@@ -1,0 +1,68 @@
+# Rectangular host: native prerequisite
+
+This is an intermediate checkpoint in the combined Inventory-window and host
+styling group. **The production host repair is not implemented or enabled.**
+The ordinary viewer still uses its existing HRGN presentation. Do not describe
+this source, its example, or an Inventory-only package as a repaired host.
+
+The [reviewed plan](SESSION_HOST_NATIVE_FRAME_PLAN.md) requires a real native
+placement proof before production enablement. The example below is that first
+experiment. It does not run the viewer, log in, select profiles or use credentials.
+It creates a decorated host, an independent borderless worker in another process,
+a same-process owned popup, and a third synthetic foreground application. It
+changes only its own windows. It uses normal foreground requests, respecting OS
+refusal; no injected keys, thread attachment, cross-process parenting or topmost.
+
+```powershell
+cargo clippy --locked -p aurora-viewer --example host_native_frame -- -D warnings
+cargo build --locked -p aurora-viewer --example host_native_frame
+.\target\debug\examples\host_native_frame.exe
+```
+
+Use an available owned local Windows desktop with an innocuous background. Do
+not run alongside another desktop automation or while interacting with the proof.
+A locked/remote/inaccessible desktop or OS foreground refusal is inconclusive,
+not permission to force focus. Preserve the log and actual exit code privately.
+The parent has a 20-second native-loop deadline and checked child shutdown;
+emergency termination is confined to synthetic children it spawned and cannot
+produce a successful prerequisite result.
+
+The helper uses one persistent hidden native insertion anchor. Worker show and
+activation constrain only the worker's own WINDOWPOS to that anchor. Covers can
+hide without changing worker placement policy. The controller raises only its
+own rectangular host/masks for cover and lowers its host after the exact
+synthetic placement acknowledgement. The production source/lease/GPU grant
+remains independent and is deliberately absent from this experiment.
+
+The example checks exact child PID/registration and target geometry; duplicate
+worker-hook refusal; current-focus input-open positive/negative baselines;
+pending-target coverage; native hit targets and flat desktop pixels; ordinary
+host activation while the worker UI sleeps; movement/resize and minimize/restore
+with old-location black coverage; a separate foreground application's order;
+stale PID/registration refusal; and checked own-worker hidden detach/exit.
+Native cover calls must return within 200 ms. Pixel samples occur later, at
+least 150 ms apart, with completion checked before the worker can resume its
+1.8-second pause. **This is sampled opacity and call latency, not an instantaneous
+compositor/GPU fence or production responsiveness measurement.** All processes
+set and verify per-monitor-v2 DPI awareness before creating windows.
+
+The source is independently reviewed and statically checked using a small MSVC
+target harness. That is not Windows viewer compilation or native execution.
+A successful example is partial prerequisite evidence only. It does not prove
+normal frame pixels, snap/caption behavior, egui menus, tooltips, dismissal,
+pointer/wheel/keyboard/IME routing, native dialog/tool families, mixed DPI and
+negative origins, source lease expiry, failure injection, production recovery,
+real GPU ownership, privacy or hosted Monitor acceptance. Keep these gates open.
+
+After measured native results, the lead still must join bounded popup surfaces
+from one existing CPU egui paint/context, input/focus/platform-output routing,
+controller cover authority and exact worker placement/input checks; replace both
+legacy placement paths together; and fence incompatible presentation versions.
+No new protocol mode is advertised by this intermediate source. The normal
+Monitor/XR dependency and all account/creator/archive/RLVa/consent boundaries
+remain unchanged. Follow the full plan before enabling production.
+
+Keep one combined product-validation checkpoint for Inventory and host styling.
+This small native prerequisite is not a separate Inventory product build or a
+substitute for the eventual unfiltered suite, inherited requirement audit and
+verified combined package. No completed Monitor test/build is repeated here.
