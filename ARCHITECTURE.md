@@ -1060,6 +1060,14 @@ remain only while their auxiliary documents or confirmations need them.
 This follows Folderstorm `LLPanelMainInventory::newWindow` (reference commit
 `abbe3cb0ca66ee2484f277219f6a27706fab7fc6`); using that action for the primary
 button intentionally replaces the singleton `secondary_inventory` toggle.
+Workspace's existing single-additional-window schema binds to an actual runtime
+UUID. The first full instance is capturable; a new capture/restore boundary may
+select the earliest remaining open full instance if the original closed. Pure
+queries and delayed continuations never retarget. A pending restore retains its
+original UUID and rejects its removal/replacement before archive qualification,
+geometry/folder/expansion application. Other temporary windows and retained
+pending documents remain independent; workspace files contain no UI-owner IDs.
+
 
 `ui/inventory.rs::TabFilters` keeps each window's finder state per tab, including
 advanced searches and the temporary filters of Find links / Find similar.

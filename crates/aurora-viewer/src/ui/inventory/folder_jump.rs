@@ -425,7 +425,7 @@ impl Chooser {
 }
 
 pub(super) fn supported(state: &InventoryUi) -> bool {
-    state.scope.is_nil() && state.tab == 0 && (state.ui_id.is_nil() || state.ui_id == super::ADDITIONAL_WINDOW)
+    state.scope.is_nil() && state.tab == 0 && (state.ui_id.is_nil() || state.full_inventory)
 }
 
 pub(super) fn claim(ui: &egui::Ui, state: &InventoryUi) {

@@ -81,44 +81,69 @@ impl InventoryUi {
     }
 }
 
-/// Fixed native identity; never deserialize an arbitrary window/owner selector.
-pub(crate) fn additional_owner() -> Uuid {
-    super::ADDITIONAL_WINDOW
-}
-pub(crate) fn additional_name() -> String {
-    super::floater_id(super::ADDITIONAL_WINDOW)
-}
 impl InventoryUi {
+    // The first created full owner is the workspace role. Never choose an
+    // arbitrary surviving window when that original owner disappears.
     fn workspace_additional_unambiguous(&self) -> bool {
-        let mut windows = self.windows.iter().filter(|w| w.additional);
+        let Some(owner) = self.workspace_owner else { return true };
+        let mut windows = self.windows.iter().filter(|w| w.id == owner);
         match (windows.next(), windows.next()) {
             (None, None) => true,
-            (Some(w), None) => {
-                w.id == additional_owner() && w.root.is_nil() && (w.state.ui_id.is_nil() || w.state.ui_id == additional_owner())
-            }
+            (Some(w), None) => w.additional && w.root.is_nil() && w.state.ui_id == owner && w.state.full_inventory,
             _ => false,
         }
     }
-    pub(crate) fn workspace_additional_state(&self) -> Option<&InventoryUi> {
+    /// Called only at a new capture/restore boundary, never by a delayed
+    /// continuation. Prefer the original visible role, otherwise the earliest
+    /// genuine open full owner. Pending operations retain their original UUID.
+    pub(crate) fn workspace_select_open_owner(&mut self) -> bool {
         if !self.workspace_additional_unambiguous() {
-            return None;
+            return false;
         }
-        self.windows
+        if self
+            .workspace_additional_owner()
+            .is_some_and(|owner| self.windows.iter().any(|w| w.id == owner && w.open))
+        {
+            return true;
+        }
+        if let Some(owner) = self
+            .windows
             .iter()
-            .find(|w| w.additional && w.id == additional_owner())
-            .map(|w| w.state.as_ref())
+            .find(|w| w.additional && w.open && w.root.is_nil() && w.state.ui_id == w.id && w.state.full_inventory)
+            .map(|w| w.id)
+        {
+            // A duplicated UUID is not a selectable owner, even if only one
+            // copy otherwise appears well formed.
+            if self.windows.iter().filter(|w| w.id == owner).count() != 1 {
+                return false;
+            }
+            self.workspace_owner = Some(owner);
+        }
+        true
+    }
+
+    pub(crate) fn workspace_additional_owner(&self) -> Option<Uuid> {
+        self.workspace_additional_unambiguous()
+            .then_some(self.workspace_owner)
+            .flatten()
+            .filter(|owner| self.windows.iter().any(|w| w.id == *owner))
+    }
+    pub(crate) fn workspace_additional_name(&self) -> Option<String> {
+        self.workspace_additional_owner().map(super::floater_id)
+    }
+    pub(crate) fn workspace_additional_state(&self) -> Option<&InventoryUi> {
+        let owner = self.workspace_additional_owner()?;
+        self.windows.iter().find(|w| w.id == owner).map(|w| w.state.as_ref())
     }
     pub(crate) fn workspace_additional_state_mut(&mut self) -> Option<&mut InventoryUi> {
-        if !self.workspace_additional_unambiguous() {
-            return None;
-        }
-        self.windows
-            .iter_mut()
-            .find(|w| w.additional && w.id == additional_owner())
-            .map(|w| w.state.as_mut())
+        let owner = self.workspace_additional_owner()?;
+        self.windows.iter_mut().find(|w| w.id == owner).map(|w| w.state.as_mut())
     }
     pub(crate) fn workspace_additional_open(&self) -> Option<bool> {
-        self.workspace_additional_unambiguous().then(|| self.additional_open())
+        self.workspace_additional_unambiguous().then(|| {
+            self.workspace_additional_owner()
+                .is_some_and(|owner| self.windows.iter().any(|w| w.id == owner && w.open))
+        })
     }
     fn workspace_dependencies(&self) -> bool {
         self.rename.is_some()
@@ -146,33 +171,40 @@ impl InventoryUi {
         if !self.workspace_additional_unambiguous() || self.workspace_additional_state().is_some_and(Self::workspace_dependencies) {
             return false;
         }
-        let name = additional_name();
         if visible {
-            if !self.additional_open() {
+            if let Some(owner) = self.workspace_additional_owner() {
+                let Some(window) = self.windows.iter_mut().find(|w| w.id == owner) else {
+                    return false;
+                };
+                crate::ui::widgets::open_floater(ctx, &super::floater_id(owner), &mut window.open);
+            } else {
                 self.open_additional_window(ctx);
             }
+            let Some(name) = self.workspace_additional_name() else {
+                return false;
+            };
             if minimized {
-                // Native open may have queued Expand. A saved minimized state
-                // must win on the next paint without expand/minimize churn.
                 ctx.data_mut(|d| d.remove_temp::<bool>(egui::Id::unique(&name).with(crate::ui::widgets::EXPAND)));
                 crate::ui::widgets::minimize_floater(ctx, &name);
             } else if crate::ui::widgets::floater_minimized(ctx, &name) {
                 crate::ui::widgets::expand_floater(ctx, &name);
             }
-        } else {
-            self.close_additional_window();
+        } else if let Some(owner) = self.workspace_additional_owner()
+            && let Some(window) = self.windows.iter_mut().find(|w| w.id == owner)
+        {
+            window.open = false;
         }
         true
     }
     pub(crate) fn workspace_additional_expanded_refs(&self) -> Option<Vec<Uuid>> {
         let state = self.workspace_additional_state()?;
-        (state.ui_id == additional_owner() && state.workspace_plain_owner()).then(|| state.plain.workspace_open())
+        state.workspace_plain_owner().then(|| state.plain.workspace_open())
     }
     pub(crate) fn workspace_restore_additional_expanded(&mut self, wanted: &ExpandedFolders, current: &ExpandedFolders) -> bool {
         let Some(state) = self.workspace_additional_state_mut() else {
             return false;
         };
-        if state.ui_id != additional_owner() || !state.workspace_plain_owner() {
+        if !state.workspace_plain_owner() {
             return false;
         }
         state.workspace_apply_expanded(wanted, current);
@@ -316,11 +348,82 @@ mod tests {
         st.workspace_additional_state_mut().unwrap().preview = None;
         assert!(st.workspace_additional_visibility(&ctx, false, false));
         assert!(st.windows.iter().find(|w| !w.additional).unwrap().open);
-        st.windows.iter_mut().find(|w| w.additional).unwrap().id = id(900);
+        st.windows.iter_mut().find(|w| w.additional).unwrap().state.ui_id = id(900);
         assert!(st.workspace_additional_open().is_none());
         assert!(!st.workspace_additional_visibility(&ctx, true, false));
         assert_eq!(st.windows.len(), 2, "never create another owner as an ambiguity fallback");
     }
+    #[test]
+    fn workspace_additional_role_coexists_with_fresh_full_windows_without_retargeting_or_closing_them() {
+        let ctx = egui::Context::default();
+        let mut st = InventoryUi::default();
+        for _ in 0..4 {
+            st.open_additional_window(&ctx);
+        }
+        let original = st.windows[0].id;
+        let ordinary: Vec<_> = st.windows.iter().skip(1).map(|w| w.id).collect();
+        assert_eq!(st.workspace_additional_owner(), Some(original));
+        assert_eq!(st.workspace_additional_open(), Some(true), "capture sees the first ordinary extra");
+        st.workspace_additional_state_mut().unwrap().search = "workspace only".into();
+        let other = &mut st.windows[2];
+        other.state.search = "other".into();
+        other.state.selected = Some(id(901));
+        other.state.preview = Some(id(902));
+        let other_id = other.id;
+        crate::ui::widgets::minimize_floater(&ctx, &super::super::floater_id(other_id));
+        assert!(st.workspace_additional_visibility(&ctx, false, false));
+        for id in &ordinary {
+            assert!(st.windows.iter().find(|w| w.id == *id).unwrap().open);
+        }
+        assert!(st.workspace_additional_visibility(&ctx, true, true));
+        assert!(st.workspace_additional_visibility(&ctx, true, false));
+        assert_eq!(st.workspace_additional_owner(), Some(original));
+        let other = st.windows.iter().find(|w| w.id == other_id).unwrap();
+        assert_eq!(other.state.search, "other");
+        assert_eq!(other.state.selected, Some(id(901)));
+        assert_eq!(other.state.preview, Some(id(902)));
+        assert!(crate::ui::widgets::floater_minimized(&ctx, &super::super::floater_id(other_id)));
+        st.windows.retain(|w| w.id != original);
+        assert_eq!(st.workspace_additional_owner(), None, "never substitute a surviving full owner");
+        assert_eq!(st.workspace_additional_open(), Some(false));
+        assert!(st.workspace_additional_visibility(&ctx, true, false));
+        assert_ne!(st.workspace_additional_owner(), Some(original));
+        assert!(
+            !ordinary.contains(&st.workspace_additional_owner().unwrap()),
+            "new restore uses a fresh owner"
+        );
+        st.close_additional_windows();
+        assert!(st.windows.iter().all(|w| !w.open));
+    }
+
+    #[test]
+    fn workspace_explicit_capture_reselects_first_open_full_owner_but_preserves_retained_closed_documents() {
+        let ctx = egui::Context::default();
+        let mut st = InventoryUi::default();
+        for _ in 0..3 {
+            st.open_additional_window(&ctx);
+        }
+        let original = st.windows[0].id;
+        let next = st.windows[1].id;
+        st.windows[0].state.preview = Some(id(920));
+        st.windows[0].open = false;
+        assert_eq!(
+            st.workspace_additional_owner(),
+            Some(original),
+            "queries do not retarget a continuation"
+        );
+        assert!(st.workspace_select_open_owner());
+        assert_eq!(st.workspace_additional_owner(), Some(next));
+        assert_eq!(st.windows[0].state.preview, Some(id(920)));
+        assert!(!st.windows[0].open);
+        st.windows[1].state.ui_id = id(921);
+        assert!(
+            !st.workspace_select_open_owner(),
+            "a malformed bound owner cannot be replaced silently"
+        );
+        assert_eq!(st.windows.len(), 3);
+    }
+
     #[test]
     fn workspace_additional_expansion_requires_its_original_painted_owner_and_keeps_main_state() {
         let ctx = egui::Context::default();
@@ -328,11 +431,11 @@ mod tests {
         st.plain.open_all([id(1), id(99)]);
         assert!(st.workspace_additional_visibility(&ctx, true, false));
         assert!(
-            st.workspace_additional_expanded_refs().is_none(),
-            "no unpainted owner fallback to main"
+            st.workspace_additional_expanded_refs() == Some(Vec::new()),
+            "new explicit full owner starts empty without borrowing main state"
         );
         let state = st.workspace_additional_state_mut().unwrap();
-        state.ui_id = additional_owner();
+        // The runtime constructor already captured the exact full owner.
         state.plain.open_all([id(1), id(2)]);
         let wanted = ExpandedFolders::try_from(vec![id(1), id(3)]).unwrap();
         let current = ExpandedFolders::try_from(vec![id(1), id(2)]).unwrap();
@@ -346,9 +449,9 @@ mod tests {
         let ctx = egui::Context::default();
         let p = crate::theme::Theme::default().palette();
         let mut st = InventoryUi::default();
-        let name = additional_name();
         let paint = |st: &mut InventoryUi| {
-            let mut open = st.additional_open();
+            let name = st.workspace_additional_name().unwrap();
+            let mut open = st.workspace_additional_open().unwrap();
             let mut out = ctx.run_ui(
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 700.0))),
@@ -368,12 +471,18 @@ mod tests {
         assert!(st.workspace_additional_visibility(&ctx, true, true));
         paint(&mut st);
         paint(&mut st);
-        assert!(crate::ui::widgets::floater_minimized(&ctx, &name));
+        assert!(crate::ui::widgets::floater_minimized(
+            &ctx,
+            &st.workspace_additional_name().unwrap()
+        ));
         assert!(st.workspace_additional_visibility(&ctx, false, false));
         assert!(st.workspace_additional_visibility(&ctx, true, false));
         paint(&mut st);
         paint(&mut st);
-        assert!(st.additional_open());
-        assert!(!crate::ui::widgets::floater_minimized(&ctx, &name));
+        assert!(st.workspace_additional_open().unwrap());
+        assert!(!crate::ui::widgets::floater_minimized(
+            &ctx,
+            &st.workspace_additional_name().unwrap()
+        ));
     }
 }

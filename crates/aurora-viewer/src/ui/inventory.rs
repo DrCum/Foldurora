@@ -511,6 +511,9 @@ pub struct InventoryUi {
     /// The clipboard's folders were all loaded at this inventory generation.
     clipboard_loaded: Option<(u64, Vec<Uuid>)>,
     pub ui_id: Uuid,
+    full_inventory: bool,
+    // Runtime binding only; workspace files never choose a UI owner UUID.
+    workspace_owner: Option<Uuid>,
     pub demo_menu: Option<Uuid>,
     /// Aggregate loading status; each owner below completes independently.
     pub fetch_all: bool,
@@ -709,6 +712,13 @@ impl InventoryUi {
     /// too, instead of toggling Firestorm's singleton secondary_inventory.
     pub fn open_additional_window(&mut self, ctx: &egui::Context) {
         let id = Uuid::new_v4();
+        if self.workspace_owner.is_none_or(|owner| !self.windows.iter().any(|w| w.id == owner)) {
+            self.workspace_owner = Some(id);
+        }
+        self.open_full_window(ctx, id);
+    }
+
+    fn open_full_window(&mut self, ctx: &egui::Context, id: Uuid) {
         let mut open = false;
         super::widgets::open_floater(ctx, &floater_id(id), &mut open);
         self.windows.push(InventoryWindow {
@@ -717,6 +727,7 @@ impl InventoryUi {
             additional: true,
             state: Box::new(InventoryUi {
                 ui_id: id,
+                full_inventory: true,
                 ..Default::default()
             }),
             open,

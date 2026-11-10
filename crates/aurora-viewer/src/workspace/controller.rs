@@ -90,6 +90,7 @@ pub(crate) struct Placement {
     pub restore_absence: bool,
 }
 pub(crate) struct InventoryPending {
+    pub owner: Uuid,
     pub source: Source,
     pub binding: u64,
     pub rules: (u64, bool),
@@ -100,6 +101,9 @@ pub(crate) struct InventoryPending {
     pub deadline: std::time::Instant,
 }
 impl InventoryPending {
+    pub(crate) fn same_owner(&self, current: Option<Uuid>) -> bool {
+        current == Some(self.owner)
+    }
     pub(crate) fn current(
         &self,
         source: Option<&Source>,
@@ -996,6 +1000,7 @@ mod tests {
         };
         let now = Instant::now();
         let mut pending = InventoryPending {
+            owner: Uuid::new_v4(),
             source: source.clone(),
             binding: 1,
             rules: (5, true),
@@ -1011,6 +1016,12 @@ mod tests {
             fresh: true,
             deadline: now + Duration::from_secs(2),
         };
+        assert!(pending.same_owner(Some(pending.owner)));
+        assert!(!pending.same_owner(None));
+        assert!(
+            !pending.same_owner(Some(Uuid::new_v4())),
+            "a replacement full window cannot consume an old restore"
+        );
         assert!(pending.current(Some(&source), 1, (5, true), Some(metadata), now));
         assert!(!pending.current(None, 1, (5, true), Some(metadata), now));
         let mut other = source.clone();

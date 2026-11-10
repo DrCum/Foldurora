@@ -1,4 +1,4 @@
-//! Fixed native additional Inventory lifecycle. Effects occur only after a
+//! Runtime-bound native additional Inventory lifecycle. Effects occur only after a
 //! committed workspace; the saved schema never supplies arbitrary UI IDs.
 use super::{App, Renderer, Window, ui};
 use crate::workspace::{
@@ -22,29 +22,33 @@ impl App {
             && renderer.stalled_for().is_none()
     }
     pub(super) fn workspace_inventory_capture(&mut self, folders: bool) -> Result<InventoryWindow, Status> {
-        if !self.workspace_expanded_source() || self.world.rlva.has("showinv") {
+        if !self.workspace_expanded_source() || self.world.rlva.has("showinv") || !self.inventory_ui.workspace_select_open_owner() {
             return Err(Status::InventoryWindowUnavailable);
         }
         let visible = self
             .inventory_ui
             .workspace_additional_open()
             .ok_or(Status::InventoryWindowUnavailable)?;
-        let name = native::additional_name();
-        let minimized = visible && ui::widgets::floater_minimized(&self.egui_ctx, &name);
+        let owner = self.inventory_ui.workspace_additional_owner();
+        let name = self.inventory_ui.workspace_additional_name();
+        let minimized = visible
+            && name
+                .as_ref()
+                .is_some_and(|name| ui::widgets::floater_minimized(&self.egui_ctx, name));
         let mut snapshot = InventoryWindow {
             visible,
             minimized,
-            geometry: ui::layout::workspace_named_capture(&self.egui_ctx, &name),
+            geometry: name
+                .as_ref()
+                .and_then(|name| ui::layout::workspace_named_capture(&self.egui_ctx, name)),
             folder: None,
             expanded: None,
         };
         if !visible || minimized || !folders {
             return Ok(snapshot);
         }
-        if !self
-            .inventory_ui
-            .jump_owner_visible(&self.egui_ctx, self.panels.inventory, native::additional_owner())
-        {
+        let owner = owner.ok_or(Status::InventoryWindowUnavailable)?;
+        if !self.inventory_ui.jump_owner_visible(&self.egui_ctx, self.panels.inventory, owner) {
             return Err(Status::InventoryWindowUnavailable);
         }
         let folder = self
@@ -52,7 +56,7 @@ impl App {
             .workspace_additional_state()
             .and_then(|state| state.workspace_folder(&self.world.inventory));
         let refs = self.inventory_ui.workspace_additional_expanded_refs();
-        let (_, read) = super::folder_jump::archive_read(&mut self.inventory_ui, &self.world, native::additional_owner());
+        let (_, read) = super::folder_jump::archive_read(&mut self.inventory_ui, &self.world, owner);
         let read = read
             .filter(|r| r.status() == VisibilityStatus::Ready && r.revision().is_some())
             .ok_or(Status::InventoryWindowUnavailable)?;
@@ -70,28 +74,40 @@ impl App {
     }
     pub(super) fn workspace_inventory_restore(&mut self, wanted: InventoryWindow, renderer: &Renderer, window: &Window) {
         self.workspaces.inventory_pending = None;
-        let fresh = self.inventory_ui.workspace_additional_open() == Some(false);
         if wanted.validate().is_err()
             || !self.workspace_inventory_permit(renderer, window)
-            || !self
-                .inventory_ui
-                .workspace_additional_visibility(&self.egui_ctx, wanted.visible, wanted.minimized)
+            || !self.inventory_ui.workspace_select_open_owner()
         {
             self.workspaces.status = Status::InventoryWindowUnavailable;
             return;
         }
-        if let Some(geometry) = wanted.geometry {
-            ui::layout::workspace_named_apply(&self.egui_ctx, &native::additional_name(), geometry);
+        let previous_owner = self.inventory_ui.workspace_additional_owner();
+        if !self
+            .inventory_ui
+            .workspace_additional_visibility(&self.egui_ctx, wanted.visible, wanted.minimized)
+        {
+            self.workspaces.status = Status::InventoryWindowUnavailable;
+            return;
+        }
+        if let Some(geometry) = wanted.geometry
+            && let Some(name) = self.inventory_ui.workspace_additional_name()
+        {
+            ui::layout::workspace_named_apply(&self.egui_ctx, &name, geometry);
         }
         if !wanted.has_folders() {
             return;
         }
+        let Some(owner) = self.inventory_ui.workspace_additional_owner() else {
+            return;
+        };
+        let fresh = previous_owner != Some(owner);
         let Some(source) = self.workspaces.source.clone() else { return };
         let Some(metadata) = self.world.inventory_archive.as_ref().and_then(|a| a.metadata_revision(&self.world)) else {
             self.workspaces.status = Status::InventoryWindowUnavailable;
             return;
         };
         self.workspaces.inventory_pending = Some(InventoryPending {
+            owner,
             source,
             binding: self.workspaces.binding,
             rules: (self.world.rlva.revision, self.world.rlva.enabled()),
@@ -112,6 +128,7 @@ impl App {
                 .any(|e| !matches!(e, egui::Event::PointerMoved(_) | egui::Event::PointerGone))
         });
         if !self.workspace_inventory_permit(renderer, window)
+            || !pending.same_owner(self.inventory_ui.workspace_additional_owner())
             || !pending.current(
                 self.workspaces.source.as_ref(),
                 self.workspaces.binding,
@@ -127,7 +144,7 @@ impl App {
         pending.passes += 1;
         if !self
             .inventory_ui
-            .jump_owner_visible(&self.egui_ctx, self.panels.inventory, native::additional_owner())
+            .jump_owner_visible(&self.egui_ctx, self.panels.inventory, pending.owner)
         {
             self.workspaces.inventory_pending = Some(pending);
             self.egui_ctx.request_repaint();
@@ -137,7 +154,7 @@ impl App {
             self.workspaces.status = Status::InventoryWindowUnavailable;
             return;
         }
-        match self.workspace_inventory_context(&pending.wanted) {
+        match self.workspace_inventory_context(pending.owner, &pending.wanted) {
             Some(true) => {}
             Some(false) => self.workspaces.status = Status::InventoryWindowUnavailable,
             None => {
@@ -146,12 +163,15 @@ impl App {
             }
         }
     }
-    fn workspace_inventory_context(&mut self, wanted: &InventoryWindow) -> Option<bool> {
+    fn workspace_inventory_context(&mut self, owner: uuid::Uuid, wanted: &InventoryWindow) -> Option<bool> {
+        if self.inventory_ui.workspace_additional_owner() != Some(owner) {
+            return Some(false);
+        }
         // All borrowed policy/path qualification finishes before mutable UI
         // consumption, on this same App turn with no reentrant callback.
         let refs = self.inventory_ui.workspace_additional_expanded_refs();
         let current = {
-            let (_, read) = super::folder_jump::archive_read(&mut self.inventory_ui, &self.world, native::additional_owner());
+            let (_, read) = super::folder_jump::archive_read(&mut self.inventory_ui, &self.world, owner);
             let read = read.filter(|r| r.status() == VisibilityStatus::Ready && r.revision().is_some())?;
             if wanted
                 .folder

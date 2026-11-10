@@ -59,8 +59,13 @@ fn folder_jump_full_owner_gate_rejects_specialized_partial_favorites_and_unpaint
     main.scope = Uuid::nil();
     main.ui_id = super::super::listings::PANEL;
     assert!(!supported(&main));
-    main.ui_id = super::super::ADDITIONAL_WINDOW;
+    main.ui_id = Uuid::new_v4();
+    main.full_inventory = true;
     assert!(supported(&main));
+    main.ui_id = Uuid::new_v4();
+    assert!(supported(&main), "every genuine full owner can use Folder Jump");
+    main.full_inventory = false;
+    assert!(!supported(&main), "an arbitrary owner ID alone is insufficient");
     main.ui_id = Uuid::nil();
     crate::ui::widgets::hide_windows(&ctx, true, false);
     assert!(!main.jump_owner_visible(&ctx, true, Uuid::nil()));
