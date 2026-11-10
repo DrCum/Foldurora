@@ -1,6 +1,6 @@
 use aurora_session::PhysicalRect;
 use std::{
-    cell::Cell,
+    cell::{Cell, RefCell},
     io::{self, BufRead, Write},
     process::{Child, ChildStdin, Command, Stdio},
     rc::Rc,
@@ -11,7 +11,7 @@ use windows_sys::Win32::{
     Foundation::{HWND, LPARAM, LRESULT, WPARAM},
     Graphics::Gdi::*,
     System::{LibraryLoader::GetModuleHandleW, SystemInformation::GetTickCount64},
-    UI::WindowsAndMessaging::*,
+    UI::{Input::KeyboardAndMouse::IsWindowEnabled, WindowsAndMessaging::*},
 };
 
 #[path = "../../src/session_host/frame_guard.rs"]
@@ -23,6 +23,9 @@ const BLUE: u32 = 0x00da_7631;
 const GREEN: u32 = 0x0065_c246;
 const HOST_COLOR: u32 = 0x003d_312d;
 const TIMER: usize = 7;
+const FOCUS_WAIT_MS: u64 = 250;
+const FOCUS_PAUSE_CUTOFF_MS: u64 = 900;
+const TRACE_LIMIT: usize = 256;
 const CLASS: &[u16] = &[
     70, 111, 108, 100, 117, 114, 111, 114, 97, 70, 114, 97, 109, 101, 80, 114, 111, 111, 102, 0,
 ];
@@ -63,6 +66,113 @@ fn require(condition: bool, label: &str) -> io::Result<()> {
     }
     println!("PASS {label}");
     Ok(())
+}
+
+// Only native identity/order/focus metadata. No titles, text, profile data or
+// foreign-window mutation. Capture in bounded memory so diagnostic printing
+// cannot block the UI during the timed pause/cover checks.
+struct FocusObservation {
+    stage: &'static str,
+    tick: u64,
+    returned: Option<i32>,
+    foreground: u64,
+    pid: u32,
+    thread: u32,
+    caller_thread: u32,
+    host_thread: u32,
+    gui_available: bool,
+    active: u64,
+    focused: u64,
+    host_previous: u64,
+    host_next: u64,
+    host_last_popup: u64,
+    host_enabled: bool,
+}
+
+struct FocusTrace {
+    host: HWND,
+    enabled: Cell<bool>,
+    dropped: Cell<usize>,
+    observations: RefCell<Vec<FocusObservation>>,
+}
+
+impl FocusTrace {
+    fn new(host: HWND) -> Self {
+        Self {
+            host,
+            enabled: Cell::new(false),
+            dropped: Cell::new(0),
+            observations: RefCell::new(Vec::with_capacity(TRACE_LIMIT)),
+        }
+    }
+
+    fn record(&self, stage: &'static str, returned: Option<i32>) {
+        if !self.enabled.get() {
+            return;
+        }
+        let Ok(mut observations) = self.observations.try_borrow_mut() else {
+            self.dropped.set(self.dropped.get().saturating_add(1));
+            return;
+        };
+        if observations.len() == TRACE_LIMIT {
+            self.dropped.set(self.dropped.get().saturating_add(1));
+            return;
+        }
+        // SAFETY: read-only native metadata queries. GetGUIThreadInfo does not
+        // send a synchronous request to the deliberately paused worker.
+        unsafe {
+            let foreground = GetForegroundWindow();
+            let mut pid = 0;
+            let thread = GetWindowThreadProcessId(foreground, &mut pid);
+            let mut gui = GUITHREADINFO {
+                cbSize: std::mem::size_of::<GUITHREADINFO>() as u32,
+                ..Default::default()
+            };
+            let gui_available = thread != 0 && GetGUIThreadInfo(thread, &mut gui) != 0;
+            observations.push(FocusObservation {
+                stage,
+                tick: GetTickCount64(),
+                returned,
+                foreground: foreground as u64,
+                pid,
+                thread,
+                gui_available,
+                caller_thread: windows_sys::Win32::System::Threading::GetCurrentThreadId(),
+                host_thread: GetWindowThreadProcessId(self.host, std::ptr::null_mut()),
+                active: if gui_available { gui.hwndActive as u64 } else { 0 },
+                focused: if gui_available { gui.hwndFocus as u64 } else { 0 },
+                host_previous: GetWindow(self.host, GW_HWNDPREV) as u64,
+                host_next: GetWindow(self.host, GW_HWNDNEXT) as u64,
+                host_last_popup: GetLastActivePopup(self.host) as u64,
+                host_enabled: IsWindowEnabled(self.host) != 0,
+            });
+        }
+    }
+
+    fn dump(&self) {
+        self.enabled.set(false);
+        for row in self.observations.borrow().iter() {
+            println!(
+                "OBSERVED focus stage={} tick={} sfw_return={:?} foreground={} pid={} thread={} caller_thread={} host_thread={} gui_available={} active={} focused={} host_previous={} host_next={} host_last_popup={} host_enabled={}",
+                row.stage,
+                row.tick,
+                row.returned,
+                row.foreground,
+                row.pid,
+                row.thread,
+                row.caller_thread,
+                row.host_thread,
+                row.gui_available,
+                row.active,
+                row.focused,
+                row.host_previous,
+                row.host_next,
+                row.host_last_popup,
+                row.host_enabled
+            );
+        }
+        println!("OBSERVED focus_trace_dropped={}", self.dropped.get());
+    }
 }
 
 // No injected input. Native key/button observations only occur if a person
@@ -239,6 +349,27 @@ fn worker(host: WindowIdentity, marker: usize) -> io::Result<()> {
                     )?;
                     println!("focused");
                 } else if command == "pause" {
+                    // This explicit synthetic focus transaction already
+                    // observed this worker as foreground. Give the exact
+                    // controller PID ordinary Windows eligibility before the
+                    // pause. Never use ASFW_ANY, input injection or a policy
+                    // override. Eligibility is not proof activation succeeded.
+                    guard::verified(host)?;
+                    require(guard::marker(host)? == marker, "exact host registration before foreground handoff")?;
+                    require(
+                        unsafe { GetForegroundWindow() } == window,
+                        "actual foreground worker makes controller handoff",
+                    )?;
+                    // SAFETY: the configured exact controller was verified
+                    // above; this actual foreground process may grant it
+                    // ordinary activation eligibility for this explicit step.
+                    let allowed = unsafe { AllowSetForegroundWindow(host.pid) };
+                    let allowed_error = (allowed == 0).then(io::Error::last_os_error);
+                    println!(
+                        "OBSERVED controller_foreground_handoff pid={} returned={allowed} error={allowed_error:?}",
+                        host.pid
+                    );
+                    require(allowed != 0, "foreground worker permitted only its exact controller PID")?;
                     println!("paused {}", unsafe { GetTickCount64() });
                     io::stdout().flush()?;
                     // Bounded deliberate own-UI stall, never another process's
@@ -511,6 +642,8 @@ fn controller() -> io::Result<()> {
     let popup_id = own(popup);
     let authorized_until = Rc::new(Cell::new(None::<Instant>));
     let authority = authorized_until.clone();
+    let trace = Rc::new(FocusTrace::new(host));
+    let guard_trace = trace.clone();
     let guard = Guard::new(
         host as u64,
         Rc::new(move || authority.get().is_some_and(|until| Instant::now() < until)),
@@ -518,6 +651,7 @@ fn controller() -> io::Result<()> {
             guard::verified(popup_id)?;
             guard::show_above(popup, anchor, None)
         }),
+        Rc::new(move |stage| guard_trace.record(stage, None)),
     )?;
     let marker = guard::marker(own(host))?;
     unsafe {
@@ -540,6 +674,12 @@ fn controller() -> io::Result<()> {
     )?;
     let mut other = None::<ChildOwner>;
     let mut other_reader = None;
+    println!(
+        "OBSERVED owned_controller host={} popup={} pid={}",
+        host as u64,
+        popup as u64,
+        std::process::id()
+    );
     let result = (|| {
         let start = Instant::now();
         let mut worker_id = None;
@@ -550,6 +690,8 @@ fn controller() -> io::Result<()> {
         let mut mask_checked = false;
         let mut minimized_checked = false;
         let mut pause_tick = 0;
+        let mut focus_deadline = None;
+        let mut focus_return = 0;
         let mut old_area = expected;
         let mut outside_window = None;
         let mut message = MSG::default();
@@ -650,9 +792,66 @@ fn controller() -> io::Result<()> {
                         guard::input_open(own(host), marker, worker, expected, expected_client),
                         "same exact worker input reopens after synthetic authority returns",
                     )?;
-                    unsafe {
-                        SetForegroundWindow(host);
+                    // One request only. Keep pumping this controller's own
+                    // messages to observe completion, never retry/force focus.
+                    let requested = unsafe { GetTickCount64() };
+                    let deadline = requested
+                        .checked_add(FOCUS_WAIT_MS)
+                        .ok_or_else(|| fail("foreground deadline overflow"))?
+                        .min(
+                            pause_tick
+                                .checked_add(FOCUS_PAUSE_CUTOFF_MS)
+                                .ok_or_else(|| fail("pause deadline overflow"))?,
+                        );
+                    focus_deadline = Some(deadline);
+                    trace.enabled.set(true);
+                    trace.record("host-request-before", None);
+                    if requested < pause_tick || unsafe { GetTickCount64() } >= deadline {
+                        trace.record("host-request-expired", None);
+                        return Err(fail("INCONCLUSIVE: activation deadline expired before the single host request"));
                     }
+                    // SAFETY: request activation only for this event thread's
+                    // own host. The actual foreground worker handed back
+                    // eligibility; no input injection or queue attachment.
+                    focus_return = unsafe { SetForegroundWindow(host) };
+                    trace.record("host-request-after", Some(focus_return));
+                    phase = 11;
+                } else if line == "resumed" {
+                    require(
+                        mask_checked && guard.covered() && unsafe { GetTickCount64() }.saturating_sub(pause_tick) >= 1700,
+                        "cover remained independent of paused event loop",
+                    )?;
+                    require(
+                        minimized_checked && unsafe { IsIconic(host) } == 0,
+                        "minimize and restore both completed before worker resumed",
+                    )?;
+                    expected = target(host)?;
+                    fit(&mut child, &guard, expected)?;
+                    phase = 4;
+                } else if line == "invalid-refused" {
+                    phase = 6;
+                    due = Instant::now() + Duration::from_millis(200);
+                } else if line == "detached-hidden" {
+                    require(
+                        unsafe { IsWindowVisible(worker_id.unwrap().hwnd as HWND) } == 0,
+                        "worker hides itself before detach retirement",
+                    )?;
+                    println!(
+                        "NOT RUN egui surface/input routing; real GPU/session grants; grid; hosted recovery; visual native-frame acceptance"
+                    );
+                    return Ok(());
+                }
+            }
+            if phase == 11 {
+                let now = unsafe { GetTickCount64() };
+                if now < pause_tick || focus_deadline.is_none_or(|deadline| now >= deadline) {
+                    trace.record("host-foreground-timeout", Some(focus_return));
+                    return Err(fail(format!(
+                        "INCONCLUSIVE: host foreground was not confirmed before the live-pause deadline; SetForegroundWindow returned {focus_return}"
+                    )));
+                }
+                if focus_return != 0 && unsafe { GetForegroundWindow() } == host {
+                    trace.record("host-foreground-confirmed", Some(focus_return));
                     require(
                         unsafe { GetForegroundWindow() } == host,
                         "OS accepted explicit host foreground request (refusal is inconclusive)",
@@ -660,6 +859,10 @@ fn controller() -> io::Result<()> {
                     require(
                         guard.exposed(worker_id.unwrap(), expected),
                         "host activation keeps paused acknowledged worker above host",
+                    )?;
+                    require(
+                        focus_deadline.is_some_and(|deadline| unsafe { GetTickCount64() } < deadline),
+                        "host foreground and guarded exposure confirmed within the live-pause deadline",
                     )?;
                     old_area = expected;
                     let second_cover = Instant::now();
@@ -697,30 +900,6 @@ fn controller() -> io::Result<()> {
                         unsafe { IsIconic(host) } != 0 && guard.covered(),
                         "minimize retains the unowned guard while worker paused",
                     )?;
-                } else if line == "resumed" {
-                    require(
-                        mask_checked && guard.covered() && unsafe { GetTickCount64() }.saturating_sub(pause_tick) >= 1700,
-                        "cover remained independent of paused event loop",
-                    )?;
-                    require(
-                        minimized_checked && unsafe { IsIconic(host) } == 0,
-                        "minimize and restore both completed before worker resumed",
-                    )?;
-                    expected = target(host)?;
-                    fit(&mut child, &guard, expected)?;
-                    phase = 4;
-                } else if line == "invalid-refused" {
-                    phase = 6;
-                    due = Instant::now() + Duration::from_millis(200);
-                } else if line == "detached-hidden" {
-                    require(
-                        unsafe { IsWindowVisible(worker_id.unwrap().hwnd as HWND) } == 0,
-                        "worker hides itself before detach retirement",
-                    )?;
-                    println!(
-                        "NOT RUN egui surface/input routing; real GPU/session grants; grid; hosted recovery; visual native-frame acceptance"
-                    );
-                    return Ok(());
                 }
             }
             if Instant::now() >= due {
@@ -920,8 +1099,10 @@ fn controller() -> io::Result<()> {
             DestroyWindow(host);
         }
     }
+    trace.dump();
     drop(guard);
     result?;
+    require(trace.dropped.get() == 0, "bounded native focus trace retained all observations")?;
     cleanup?;
     println!("PASS synthetic placement/activation/cover sequence and checked child cleanup; production path remains disabled");
     Ok(())

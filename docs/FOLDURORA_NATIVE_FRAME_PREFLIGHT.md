@@ -46,13 +46,53 @@ least 150 ms apart, with completion checked before the worker can resume its
 compositor/GPU fence or production responsiveness measurement.** All processes
 set and verify per-monitor-v2 DPI awareness before creating windows.
 
-The source is independently reviewed and statically checked using a small MSVC
-target harness. That is not Windows viewer compilation or native execution.
+The original DAB prototype received independent source review. The foreground
+correction described below is statically checked with a small MSVC target
+harness; its independent diff review is still required before native execution.
+These are separate gates, not Windows viewer compilation or native acceptance.
 A successful example is partial prerequisite evidence only. It does not prove
 normal frame pixels, snap/caption behavior, egui menus, tooltips, dismissal,
 pointer/wheel/keyboard/IME routing, native dialog/tool families, mixed DPI and
 negative origins, source lease expiry, failure injection, production recovery,
 real GPU ownership, privacy or hosted Monitor acceptance. Keep these gates open.
+
+## DAB result and foreground correction
+
+[The immutable DAB result](https://github.com/DrCum/Foldurora/blob/91e1900b9fa08eee65bb5bcb99db9e08c006de3c/docs/FOLDURORA_HOST_FRAME_PREFLIGHT_DAB73B2B.md)
+is **INCONCLUSIVE**, not passed. Windows parser/C# compilation, format, strict
+example Clippy and example build passed. One native invocation exited 1 at the
+actual host-foreground check while the worker paused. Initial placement/popup,
+third-app order, worker focus and cover-only input refusal passed; the cover call
+was 3.720 ms. Later activation, minimize/restore, second pending target, stale
+PID/registration and detach were not reached. Both children exited normally.
+No product viewer version/package or full suite was produced/run.
+
+The proof had returned foreground eligibility from the third app only to the
+worker. It never handed eligibility back to the controller, and discarded
+SetForegroundWindow's BOOL. This is a source-backed setup gap, **not an identified
+cause of the measured failure**. See Microsoft's
+[foreground rules](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setforegroundwindow)
+and [AllowSetForegroundWindow](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-allowsetforegroundwindow).
+
+The correction checks actual foreground and exact host registration, then has
+that foreground worker permit its exact controller PID before pausing. This is
+ordinary process-specific activation eligibility, not a global policy/ACL change.
+The controller makes exactly one normal activation request and records its BOOL.
+It observes its own message loop for at most 250 ms, and requires both actual
+host foreground and guarded exposure before pause+900 ms, well inside the same
+1.8-second pause. An expired request is not issued. Refusal, late confirmation or
+timeout remains inconclusive; no focus retry or simulated input is introduced.
+The original coverage/input/geometry assertions and 200-ms cover bound remain.
+
+The target host belongs to the requesting controller thread. The general
+[cross-input-queue target explanation](https://devblogs.microsoft.com/oldnewthing/20161118-00/?p=94745)
+does not by itself explain DAB. A bounded in-memory trace observes request BOOL,
+foreground identity/thread, GUI active/focus query availability, own host order,
+activation/position callbacks and exposure entry/exit. It prints after the timed
+operations and cleanup, with no window text/profile content. Dropped records
+block final PASS. SetForegroundWindow's LastError is not a cause diagnostic.
+Raw observations stay private. A new Windows run is still needed; no correction
+pass or production-enable authority is inferred from the added observations.
 
 After measured native results, the lead still must join bounded popup surfaces
 from one existing CPU egui paint/context, input/focus/platform-output routing,

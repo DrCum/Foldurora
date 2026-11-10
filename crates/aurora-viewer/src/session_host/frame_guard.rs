@@ -486,6 +486,9 @@ struct State {
     may_expose: Cell<bool>,
     authority: Rc<dyn Fn() -> bool>,
     surfaces: Rc<dyn Fn(WindowIdentity) -> io::Result<()>>,
+    // Optional caller-owned observation sink. It must not mutate native state,
+    // wait, or reenter this guard. The offline proof uses bounded memory only.
+    trace: Rc<dyn Fn(&'static str)>,
 }
 
 impl Guard {
@@ -494,6 +497,7 @@ impl Guard {
         host: u64,
         authority: Rc<dyn Fn() -> bool>,
         surfaces: Rc<dyn Fn(WindowIdentity) -> io::Result<()>>,
+        trace: Rc<dyn Fn(&'static str)>,
     ) -> io::Result<Self> {
         let host = WindowIdentity {
             hwnd: host,
@@ -580,6 +584,7 @@ impl Guard {
                 may_expose: Cell::new(false),
                 authority,
                 surfaces,
+                trace,
             });
             let pointer = Rc::into_raw(state.clone()) as usize;
             if SetPropW(first, MARKER.as_ptr(), registration as _) == 0
@@ -678,6 +683,7 @@ impl State {
     }
 
     fn expose(&self, worker: WindowIdentity, expected: PhysicalRect) -> io::Result<()> {
+        (self.trace)("expose-entry");
         let host = self.verify_host()?;
         if self.failed.get()
             || !self.may_expose.get()
@@ -687,9 +693,11 @@ impl State {
             || !is_above(verified(worker_anchor(self.host, self.registration)?)?, verified(worker)?)?
             || unsafe { IsWindowVisible(host) == 0 || IsIconic(host) != 0 || IsWindowVisible(worker.hwnd as HWND) == 0 }
         {
+            (self.trace)("expose-refused");
             return Err(error("cover release has no current presentation authority"));
         }
         if self.exposing.replace(true) {
+            (self.trace)("expose-reentered");
             return Err(error("native exposure reentered"));
         }
         let generation = self.generation.get();
@@ -726,6 +734,7 @@ impl State {
             Ok(())
         })();
         self.exposing.set(false);
+        (self.trace)(if result.is_ok() { "expose-ok" } else { "expose-error" });
         result
     }
 
@@ -864,6 +873,11 @@ unsafe extern "system" fn host_proc(hwnd: HWND, message: u32, wparam: WPARAM, lp
         Rc::increment_strong_count(pointer);
     }
     let state = unsafe { Rc::from_raw(pointer) };
+    match message {
+        WM_ACTIVATE => (state.trace)("host-activate-before"),
+        WM_WINDOWPOSCHANGED => (state.trace)("host-position-before"),
+        _ => {}
+    }
     let geometry = message == WM_WINDOWPOSCHANGING
         && lparam != 0
         && unsafe {
@@ -898,6 +912,11 @@ unsafe extern "system" fn host_proc(hwnd: HWND, message: u32, wparam: WPARAM, lp
         && state.expose(worker, rect).is_err()
     {
         let _ = state.arm();
+    }
+    match message {
+        WM_ACTIVATE => (state.trace)("host-activate-after"),
+        WM_WINDOWPOSCHANGED => (state.trace)("host-position-after"),
+        _ => {}
     }
     if message == WM_NCDESTROY && state.attached.replace(false) {
         // SAFETY: retire the registration's one strong reference only after
